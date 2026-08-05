@@ -1,13 +1,22 @@
 name: Regenerate libarchive bindings
 
-# On-demand regeneration of the checked-in bindgen output in
-# crates/zmanager-libarchive-sys/bindings/. Trigger manually when the bundled
-# libarchive version is bumped; regenerates and auto-commits the file.
+# Regenerates the checked-in bindgen output in
+# crates/zmanager-libarchive-sys/bindings/ and auto-commits it.
+#
+# Runs automatically when the vendored libarchive source changes (or when
+# build.rs's bindgen config changes), and manually via workflow_dispatch
+# (target input lets you regenerate just one file). On push both targets are
+# regenerated; the auto-commit writes only to bindings/, which is outside the
+# trigger paths, so it cannot re-trigger this workflow.
 #
 # These files exist because static-musl build hosts (the Alpine packaging
 # container) and Windows release machines cannot run bindgen (no libclang):
 # see crates/zmanager-libarchive-sys/build.rs::generate_bindings.
 on:
+  push:
+    paths:
+      - "crates/zmanager-libarchive-sys/vendor/libarchive/**"
+      - "crates/zmanager-libarchive-sys/build.rs"
   workflow_dispatch:
     inputs:
       target:
@@ -26,7 +35,7 @@ jobs:
   linux-musl:
     name: linux-musl
     runs-on: ubuntu-latest
-    if: inputs.target == 'linux-musl' || inputs.target == 'both'
+    if: github.event_name == 'push' || inputs.target == 'linux-musl' || inputs.target == 'both'
 
     steps:
       - uses: actions/checkout@v6
@@ -62,7 +71,7 @@ jobs:
   windows-msvc:
     name: windows-msvc
     runs-on: windows-latest
-    if: inputs.target == 'windows-msvc' || inputs.target == 'both'
+    if: github.event_name == 'push' || inputs.target == 'windows-msvc' || inputs.target == 'both'
 
     steps:
       - uses: actions/checkout@v6

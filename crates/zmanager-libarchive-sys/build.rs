@@ -1,8 +1,6 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-const BUNDLED_SOURCE_PATHS: [&str; 2] =
-    ["vendor/libarchive/libarchive-3.8.9", "../../vendor/libarchive/libarchive-3.8.9"];
 const ENV_CMAKE_TOOLCHAIN_FILE: &str = "CMAKE_TOOLCHAIN_FILE";
 const ENV_VCPKG_DEFAULT_TRIPLET: &str = "VCPKG_DEFAULT_TRIPLET";
 const ENV_VCPKG_INSTALLATION_ROOT: &str = "VCPKG_INSTALLATION_ROOT";
@@ -85,18 +83,39 @@ fn build_bundled_libarchive() {
 }
 
 fn locate_bundled_libarchive_source(manifest_dir: &Path) -> PathBuf {
-    for path in BUNDLED_SOURCE_PATHS {
-        let source = manifest_dir.join(path);
-        println!("cargo:rerun-if-changed={path}");
-        if source.is_dir() {
-            return source;
-        }
+    // Discover the vendored source by version-agnostic glob: bumping the
+    // vendor directory (vendor/libarchive/libarchive-<version>) must not
+    // require touching this file.
+    for vendor_root in ["vendor/libarchive", "../../vendor/libarchive"] {
+        let Some(source) = find_single_libarchive_dir(&manifest_dir.join(vendor_root)) else {
+            continue;
+        };
+        println!("cargo:rerun-if-changed={}", source.display());
+        return source;
     }
 
     panic!(
-        "Could not find bundled libarchive source. Checked: {} and {}.",
-        BUNDLED_SOURCE_PATHS[0], BUNDLED_SOURCE_PATHS[1]
+        "Could not find bundled libarchive source: expected exactly one \
+         libarchive-* directory under vendor/libarchive (none or multiple found)"
     )
+}
+
+fn find_single_libarchive_dir(vendor_root: &Path) -> Option<PathBuf> {
+    let mut matches = Vec::new();
+    for entry in std::fs::read_dir(vendor_root).ok()? {
+        let entry = entry.ok()?;
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with("libarchive-"))
+        {
+            matches.push(entry.path());
+        }
+    }
+    (matches.len() == 1).then(|| matches.pop().unwrap())
 }
 
 fn configure_common_libarchive_options(config: &mut cmake::Config) {

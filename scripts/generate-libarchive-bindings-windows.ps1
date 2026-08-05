@@ -13,9 +13,17 @@ param()
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path $PSScriptRoot -Parent
-$inc = Join-Path $root "crates\zmanager-libarchive-sys\vendor\libarchive\libarchive-3.8.9\libarchive"
 $out = Join-Path $root "crates\zmanager-libarchive-sys\bindings\windows-msvc.rs"
 $tmp = Join-Path $env:TEMP "zm-bindgen-win"
+
+# Resolve the vendored source by version-agnostic glob: bumping the vendor
+# directory (libarchive-<version>) must not require touching this script.
+$vendorDir = Join-Path $root "crates\zmanager-libarchive-sys\vendor\libarchive"
+$sourceDirs = @(Get-ChildItem -Path $vendorDir -Directory -Filter "libarchive-*" -ErrorAction SilentlyContinue)
+if ($sourceDirs.Count -ne 1) {
+    throw "expected exactly one libarchive-* directory under $vendorDir (found $($sourceDirs.Count))"
+}
+$inc = Join-Path $sourceDirs[0].FullName "libarchive"
 
 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path (Join-Path $tmp "src") -Force | Out-Null

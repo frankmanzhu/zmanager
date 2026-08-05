@@ -13,9 +13,21 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INC="$ROOT/crates/zmanager-libarchive-sys/vendor/libarchive/libarchive-3.8.9/libarchive"
+VENDOR_DIR="$ROOT/crates/zmanager-libarchive-sys/vendor/libarchive"
 OUT="$ROOT/crates/zmanager-libarchive-sys/bindings/linux-musl.rs"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/zm-bindgen-linux.XXXXXX")"
+
+# Resolve the vendored source by version-agnostic glob: bumping the vendor
+# directory (libarchive-<version>) must not require touching this script.
+SOURCE_DIRS=()
+while IFS= read -r -d '' d; do
+  SOURCE_DIRS+=("$d")
+done < <(find "$VENDOR_DIR" -maxdepth 1 -type d -name "libarchive-*" -print0 2>/dev/null)
+if [[ ${#SOURCE_DIRS[@]} -ne 1 ]]; then
+  echo "error: expected exactly one libarchive-* directory under $VENDOR_DIR (found ${#SOURCE_DIRS[@]})" >&2
+  exit 1
+fi
+INC="${SOURCE_DIRS[0]}/libarchive"
 
 cleanup() {
   rm -rf "$TMP"
