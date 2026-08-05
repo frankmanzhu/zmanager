@@ -9,6 +9,7 @@ use std::thread;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 use zmanager_core::apple_archive_backend::{self, AppleArchiveError};
 use zmanager_core::archive_browser::{
     self, ArchiveBrowserError, BrowserEntryKind, BrowserExtractOptions, BrowserListOptions,
@@ -559,6 +560,35 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
     list_archive(request)
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn maybe_test_apple_archive(
+    format: ArchiveFormat,
+    path: &Path,
+    selected_paths: &[String],
+) -> Option<Result<TestArchiveReport, ZmanagerGuiError>> {
+    if !matches!(format, ArchiveFormat::AppleArchive) {
+        return None;
+    }
+    Some(
+        apple_archive_backend::test_apple_archive_filter(
+            path,
+            |entry_path| selected_path_matches(selected_paths, entry_path),
+            None,
+        )
+        .map_err(map_apple_archive_error)
+        .map(TestArchiveReport::from_apple_archive),
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+fn maybe_test_apple_archive(
+    _format: ArchiveFormat,
+    _path: &Path,
+    _selected_paths: &[String],
+) -> Option<Result<TestArchiveReport, ZmanagerGuiError>> {
+    None
+}
+
 pub fn test_archive(request: TestArchiveRequest) -> Result<TestArchiveResult, ZmanagerGuiError> {
     let archive_path = ensure_existing_file_path(request.archive_path, "archivePath")?;
     let password = password_ref(&request.password);
@@ -585,16 +615,8 @@ pub fn test_archive(request: TestArchiveRequest) -> Result<TestArchiveResult, Zm
             )
             .map_err(map_tzap_error)?,
         )
-    } else if matches!(format, ArchiveFormat::AppleArchive) {
-        let selected_paths = selected_paths.as_slice();
-        TestArchiveReport::from_apple_archive(
-            apple_archive_backend::test_apple_archive_filter(
-                path,
-                |entry_path| selected_path_matches(selected_paths, entry_path),
-                None,
-            )
-            .map_err(map_apple_archive_error)?,
-        )
+    } else if let Some(report) = maybe_test_apple_archive(format, path, &selected_paths) {
+        report?
     } else if let Some(raw_format) = raw_stream_backend::detect_raw_stream_format(path) {
         test_raw_stream(path, raw_format, &selected_paths)?
     } else {
@@ -1631,6 +1653,38 @@ fn run_extract_job(
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn maybe_run_apple_extract_job(
+    format: ArchiveFormat,
+    archive_path: &Path,
+    destination_root: &Path,
+    policy: &ExtractionPolicy,
+    token: &CancellationToken,
+    sink: &mut dyn jobs::JobEventSink,
+) -> Option<Result<JobTerminalSummary, ZmanagerGuiError>> {
+    if !matches!(format, ArchiveFormat::AppleArchive) {
+        return None;
+    }
+    Some(
+        jobs::run_apple_archive_extract_job_with_policy(archive_path, destination_root, policy.clone(), token, sink)
+            .map(ArchiveJobReport::from)
+            .map_err(map_apple_archive_error)
+            .map(JobTerminalSummary::from),
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+fn maybe_run_apple_extract_job(
+    _format: ArchiveFormat,
+    _archive_path: &Path,
+    _destination_root: &Path,
+    _policy: &ExtractionPolicy,
+    _token: &CancellationToken,
+    _sink: &mut dyn jobs::JobEventSink,
+) -> Option<Result<JobTerminalSummary, ZmanagerGuiError>> {
+    None
+}
+
 fn run_full_extract_job(
     input: ExtractJobInput,
     token: &CancellationToken,
@@ -1687,11 +1741,10 @@ fn run_full_extract_job(
         .map(ArchiveJobReport::from)
         .map_err(map_tzap_error)
         .map(JobTerminalSummary::from)
-    } else if matches!(input.format, ArchiveFormat::AppleArchive) {
-        jobs::run_apple_archive_extract_job_with_policy(archive_path, destination_root, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_apple_archive_error)
-            .map(JobTerminalSummary::from)
+    } else if let Some(result) =
+        maybe_run_apple_extract_job(input.format, archive_path, destination_root, &policy, token, sink)
+    {
+        result
     } else if let Some(raw_format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
         jobs::run_raw_stream_extract_job_with_policy(archive_path, raw_format, destination_root, policy, token, sink)
             .map(ArchiveJobReport::from)
@@ -1878,6 +1931,7 @@ impl From<tzap_backend::TzapExtractReport> for ArchiveJobReport {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl From<apple_archive_backend::AppleArchiveExtractReport> for ArchiveJobReport {
     fn from(report: apple_archive_backend::AppleArchiveExtractReport) -> Self {
         Self {
@@ -2046,6 +2100,7 @@ impl TestArchiveReport {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     fn from_apple_archive(report: apple_archive_backend::AppleArchiveTestReport) -> Self {
         Self {
             tested_entries: usize_to_u64(report.tested_entries),
@@ -2316,12 +2371,24 @@ fn mobile_extract_job_kind(path: &Path, format: ArchiveFormat) -> MobileJobKind 
         CoreJobKind::TarZstdExtract => MobileJobKind::TarZstdExtract,
         CoreJobKind::TzapCreate => MobileJobKind::TzapCreate,
         CoreJobKind::TzapExtract => MobileJobKind::TzapExtract,
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         CoreJobKind::AppleArchiveCreate => MobileJobKind::AppleArchiveCreate,
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         CoreJobKind::AppleArchiveExtract => MobileJobKind::AppleArchiveExtract,
         CoreJobKind::ArchiveExtract => MobileJobKind::ArchiveExtract,
         CoreJobKind::RawStreamExtract => MobileJobKind::RawStreamExtract,
         CoreJobKind::TarGzCreate => MobileJobKind::TarGzCreate,
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn maybe_apple_extract_job_kind(format: ArchiveFormat) -> Option<CoreJobKind> {
+    matches!(format, ArchiveFormat::AppleArchive).then_some(CoreJobKind::AppleArchiveExtract)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+fn maybe_apple_extract_job_kind(_format: ArchiveFormat) -> Option<CoreJobKind> {
+    None
 }
 
 fn core_extract_job_kind(path: &Path, format: ArchiveFormat) -> CoreJobKind {
@@ -2335,8 +2402,8 @@ fn core_extract_job_kind(path: &Path, format: ArchiveFormat) -> CoreJobKind {
         CoreJobKind::TarZstdExtract
     } else if matches!(format, ArchiveFormat::Tzap) {
         CoreJobKind::TzapExtract
-    } else if matches!(format, ArchiveFormat::AppleArchive) {
-        CoreJobKind::AppleArchiveExtract
+    } else if let Some(kind) = maybe_apple_extract_job_kind(format) {
+        kind
     } else if raw_stream_backend::detect_raw_stream_format(path).is_some() {
         CoreJobKind::RawStreamExtract
     } else {
@@ -2355,7 +2422,9 @@ fn mobile_job_kind_from_core(kind: CoreJobKind) -> MobileJobKind {
         CoreJobKind::TarZstdExtract => MobileJobKind::TarZstdExtract,
         CoreJobKind::TzapCreate => MobileJobKind::TzapCreate,
         CoreJobKind::TzapExtract => MobileJobKind::TzapExtract,
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         CoreJobKind::AppleArchiveCreate => MobileJobKind::AppleArchiveCreate,
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         CoreJobKind::AppleArchiveExtract => MobileJobKind::AppleArchiveExtract,
         CoreJobKind::ArchiveExtract => MobileJobKind::ArchiveExtract,
         CoreJobKind::RawStreamExtract => MobileJobKind::RawStreamExtract,
@@ -2928,6 +2997,7 @@ fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerGuiError {
         ArchiveBrowserError::TarZst(source) => map_tar_zst_error(source),
         ArchiveBrowserError::SevenZ(source) => map_7z_error(source),
         ArchiveBrowserError::Tzap(source) => map_tzap_error(source),
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveBrowserError::AppleArchive(source) => map_apple_archive_error(source),
         ArchiveBrowserError::Libarchive(source) => map_libarchive_error(source),
         ArchiveBrowserError::RawStream(source) => map_raw_stream_error(source),
@@ -3089,6 +3159,7 @@ fn map_tzap_error(error: TzapError) -> ZmanagerGuiError {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn map_apple_archive_error(error: AppleArchiveError) -> ZmanagerGuiError {
     match error {
         AppleArchiveError::Plan(source) => map_plan_error(source),
