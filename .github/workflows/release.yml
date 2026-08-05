@@ -82,7 +82,7 @@ jobs:
           echo /opt/zig >> "$GITHUB_PATH"
 
       - name: Install Rust toolchain
-        if: !contains(matrix.target, 'unknown-linux-musl')
+        if: ${{ !contains(matrix.target, 'unknown-linux-musl') }}
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable

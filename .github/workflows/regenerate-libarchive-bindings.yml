@@ -16,7 +16,6 @@ on:
   push:
     paths:
       - "crates/zmanager-libarchive-sys/vendor/libarchive/**"
-      - "crates/zmanager-libarchive-sys/build.rs"
   workflow_dispatch:
     inputs:
       target:
