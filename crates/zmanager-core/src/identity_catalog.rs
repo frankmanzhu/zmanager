@@ -16,6 +16,7 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub const PUBLIC_CATALOG_SCHEMA_VERSION: u64 = 1;
 pub const PUBLIC_CATALOG_FILE_SUFFIX: &str = ".identity-catalog.json";
@@ -381,6 +382,44 @@ impl FileTzapIdentityCatalogStore {
     }
 }
 
+/// A catalog lock older than this is assumed to have been abandoned by a
+/// crashed writer and is stolen instead of blocking all future saves.
+const LOCK_STALE_AFTER_SECONDS: u64 = 30;
+/// Maximum stale-lock steal attempts before reporting a concurrent write.
+const MAX_LOCK_STEAL_ATTEMPTS: u32 = 3;
+
+/// Acquires the exclusive catalog lock, returning the held file handle.
+///
+/// A lock left behind by a crashed writer (which never removed it) would
+/// otherwise fail every future save with [`TzapIdentityCatalogError::ConcurrentWrite`]
+/// forever. When the existing lock is older than [`LOCK_STALE_AFTER_SECONDS`]
+/// it is stolen and the acquisition retried; a lock that young is assumed to
+/// belong to a live writer, and the write is refused.
+fn acquire_catalog_lock(lock_path: &Path) -> Result<fs::File, TzapIdentityCatalogError> {
+    let mut steal_attempts = 0u32;
+    loop {
+        match fs::OpenOptions::new().write(true).create_new(true).open(lock_path) {
+            Ok(file) => return Ok(file),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                if steal_attempts >= MAX_LOCK_STEAL_ATTEMPTS || !lock_is_stale(lock_path) {
+                    return Err(TzapIdentityCatalogError::ConcurrentWrite);
+                }
+                let _ = fs::remove_file(lock_path);
+                steal_attempts += 1;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+fn lock_is_stale(lock_path: &Path) -> bool {
+    fs::metadata(lock_path).is_ok_and(|metadata| {
+        metadata.modified().is_ok_and(|modified| {
+            SystemTime::now().duration_since(modified).is_ok_and(|age| age.as_secs() >= LOCK_STALE_AFTER_SECONDS)
+        })
+    })
+}
+
 impl TzapIdentityCatalogStore for FileTzapIdentityCatalogStore {
     fn load_catalog(&self, account_key: &str) -> Result<Option<TzapIdentityCatalog>, TzapIdentityCatalogError> {
         let path = self.catalog_path(account_key)?;
@@ -403,13 +442,7 @@ impl TzapIdentityCatalogStore for FileTzapIdentityCatalogStore {
         catalog.validate()?;
         fs::create_dir_all(&self.root)?;
         let lock_path = path.with_extension("lock");
-        let _lock = fs::OpenOptions::new().write(true).create_new(true).open(&lock_path).map_err(|error| {
-            if error.kind() == io::ErrorKind::AlreadyExists {
-                TzapIdentityCatalogError::ConcurrentWrite
-            } else {
-                error.into()
-            }
-        })?;
+        let _lock = acquire_catalog_lock(&lock_path)?;
         // Check the revision while the lock is held so no writer can commit
         // between validation and the atomic replacement below.
         let actual = self.load_catalog(account_key)?.map(|value| value.revision);
@@ -908,6 +941,36 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
         }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn catalog_store_refuses_concurrent_writes_but_steals_stale_locks() {
+        let root = std::env::temp_dir().join(format!("tzap-catalog-lock-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let mut store = FileTzapIdentityCatalogStore::new(&root);
+        let mut catalog = TzapIdentityCatalog::empty();
+        catalog.revision = 1;
+        let lock_path = root.join(format!("default{PUBLIC_CATALOG_FILE_SUFFIX}")).with_extension("lock");
+
+        // A fresh lock belongs to a live writer: the save must be refused.
+        fs::write(&lock_path, b"").unwrap();
+        assert_eq!(
+            store.save_catalog("default", None, catalog.clone()),
+            Err(TzapIdentityCatalogError::ConcurrentWrite)
+        );
+
+        // A lock abandoned by a crashed writer must not block saves forever:
+        // once it is old enough it is stolen and the save succeeds.
+        let lock = fs::File::options().write(true).open(&lock_path).unwrap();
+        let age = std::time::Duration::from_secs(LOCK_STALE_AFTER_SECONDS + 60);
+        lock.set_modified(SystemTime::now() - age).unwrap();
+        drop(lock);
+        store
+            .save_catalog("default", None, catalog.clone())
+            .expect("a stale lock should be stolen instead of blocking the save");
+        assert!(!lock_path.exists(), "the stolen lock should have been removed");
+
         let _ = std::fs::remove_dir_all(root);
     }
 

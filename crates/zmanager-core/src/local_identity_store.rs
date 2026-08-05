@@ -425,21 +425,66 @@ impl TzapLocalIdentityStore for InMemoryTzapLocalIdentityStore {
     }
 }
 
-#[cfg(unix)]
+/// Writes `bytes` to `path` atomically: content goes to a temporary sibling
+/// file, is synced, and is renamed into place, so a crash at any point
+/// leaves either the previous file or the complete new file — never a
+/// truncated mix. This file holds private key material, so a non-atomic
+/// truncate-and-write would risk losing the identity on crash mid-write. On
+/// Unix the file is created with owner-only permissions (0o600).
 fn write_secret_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut temporary = path.to_path_buf();
+    temporary.set_extension(format!("tmp-{}", std::process::id()));
+    #[cfg(unix)]
     use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-
-    let mut file = fs::OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(path)?;
-    file.write_all(bytes)?;
-    let mut permissions = file.metadata()?.permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(path, permissions)?;
-    Ok(())
+    let mut options = fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let write_result = (|| {
+        let mut file = options.open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        #[cfg(unix)]
+        {
+            let mut permissions = file.metadata()?.permissions();
+            permissions.set_mode(0o600);
+            fs::set_permissions(&temporary, permissions)?;
+        }
+        drop(file);
+        replace_secret_file(&temporary, path)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    #[cfg(unix)]
+    if let Ok(directory) = fs::File::open(path.parent().unwrap_or_else(|| Path::new("."))) {
+        let _ = directory.sync_all();
+    }
+    write_result
 }
 
-#[cfg(not(unix))]
-fn write_secret_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    fs::write(path, bytes)
+#[cfg(not(windows))]
+fn replace_secret_file(temporary: &Path, path: &Path) -> io::Result<()> {
+    fs::rename(temporary, path)
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn replace_secret_file(temporary: &Path, path: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
+
+    let from: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // MoveFileExW with REPLACE_EXISTING is the Windows equivalent of an
+    // atomic rename-over-existing-file. WRITE_THROUGH ensures the rename is
+    // flushed before the call returns.
+    let result = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -680,7 +725,11 @@ fn contact_from_json(value: &Value) -> Result<TzapContactRecord, TzapLocalIdenti
             .ok_or(TzapLocalIdentityStoreError::InvalidField { field: "trust_anchor_type" })?,
     };
     let verification_state = match object.get("verification_state") {
-        Some(Value::Null) | None => trust::TzapVerificationState::CryptographicallyIntactOffline,
+        // Records written before verification-state tracking existed have no
+        // field at all; defaulting to CryptographicallyIntactOffline would
+        // claim evidence of offline verification that never happened, so
+        // treat the state as unknown instead.
+        Some(Value::Null) | None => trust::TzapVerificationState::NotRecorded,
         Some(_) => trust::TzapVerificationState::parse(&json_string(object, "verification_state")?)
             .ok_or(TzapLocalIdentityStoreError::InvalidField { field: "verification_state" })?,
     };
@@ -975,6 +1024,53 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn file_identity_store_writes_inventory_atomically() {
+        let temp_dir = TestIdentityStoreDir::new("atomic-inventory-write");
+        let mut store = FileTzapLocalIdentityStore::new(temp_dir.path());
+        let inventory = valid_inventory();
+
+        // Saving twice (an overwrite) leaves a complete, loadable file and no
+        // temporary sibling files behind.
+        store.save_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, inventory.clone()).unwrap();
+        store.save_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, inventory).unwrap();
+
+        assert_eq!(store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap(), valid_inventory());
+
+        let leftovers = fs::read_dir(temp_dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("tmp-"))
+            .collect::<Vec<_>>();
+        assert!(leftovers.is_empty(), "temporary sibling files should be cleaned up: {leftovers:?}");
+    }
+
+    #[test]
+    fn legacy_contacts_without_verification_state_are_not_claimed_verified() {
+        let base = json!({
+            "contact_id": "contact-1",
+            "display_name": "Legacy Contact",
+            "signing_certificate_sha256": "a".repeat(64),
+            "recipient_public_key_fingerprint": "b".repeat(64),
+            "trust_anchor_type": "official_tzap",
+            "missing_status_caveat": false,
+            "contact_card_payload": "payload",
+            "accepted_at_unix_seconds": 100,
+        });
+
+        // A legacy record with no verification_state field at all must not
+        // be treated as cryptographically verified offline.
+        let legacy = super::contact_from_json(&base).unwrap();
+        assert_eq!(legacy.verification_state, trust::TzapVerificationState::NotRecorded);
+
+        // An explicitly recorded state still parses as before.
+        let mut recorded = base.clone();
+        recorded["verification_state"] = json!("cryptographically_intact_offline");
+        let contact = super::contact_from_json(&recorded).unwrap();
+        assert_eq!(contact.verification_state, trust::TzapVerificationState::CryptographicallyIntactOffline);
     }
 
     #[test]

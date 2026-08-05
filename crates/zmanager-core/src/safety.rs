@@ -420,7 +420,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
                         }
                         .into());
                     }
-                    destination_path = next_available_destination_path(&destination_path);
+                    destination_path = rename_candidate_or_error(&entry, destination_path)?;
                 }
                 OverwritePolicy::Ask => {
                     if matches!(entry.kind, ExtractionEntryKind::Directory) && metadata.file_type().is_dir() {
@@ -444,7 +444,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
                             });
                         }
                         OverwriteDecision::Rename => {
-                            destination_path = next_available_destination_path(&destination_path);
+                            destination_path = rename_candidate_or_error(entry, destination_path)?;
                         }
                         OverwriteDecision::Quit => {
                             return Err(ExtractionSafetyError::OverwriteAborted {
@@ -546,11 +546,26 @@ impl<'a> ExtractionSafetyPlanner<'a> {
             reject_expansion_ratio(&entry.archive_path, uncompressed_size, entry.compressed_size, ratio_limit)?;
         }
 
+        self.reserve_expanded_bytes(&entry.archive_path, uncompressed_size)
+    }
+
+    /// Reserves `bytes` against the expanded-size limit for an entry that is
+    /// not planned as [`ExtractionEntryKind::File`].
+    ///
+    /// Backends use this for link-like entries that copy their full source
+    /// bytes at materialization — notably RAR `FileCopy` entries, which the
+    /// planner validates as hardlinks but must still consume expansion
+    /// budget, otherwise a solid archive of copies bypasses the size guard.
+    pub(crate) fn reserve_expanded_bytes(
+        &mut self,
+        archive_path: &str,
+        bytes: u64,
+    ) -> Result<(), ExtractionSafetyError> {
         if let Some(total_limit) = self.policy.limits.max_expanded_bytes {
-            let attempted = self.planned_expanded_bytes.saturating_add(uncompressed_size);
+            let attempted = self.planned_expanded_bytes.saturating_add(bytes);
             if attempted > total_limit {
                 return Err(ExtractionSafetyError::ExpandedSizeLimitExceeded {
-                    archive_path: entry.archive_path.clone(),
+                    archive_path: archive_path.to_owned(),
                     attempted_bytes: attempted,
                     limit_bytes: total_limit,
                 });
@@ -622,6 +637,8 @@ pub enum ExtractionSafetyError {
     UnsafeFileType { archive_path: String },
     /// Link target resolves outside the extraction root.
     LinkTargetEscapes { target: PathBuf },
+    /// All deterministic renamed destinations are already taken.
+    RenameDestinationExhausted { archive_path: String, destination_path: PathBuf },
     /// Planned expanded bytes exceed the configured extraction policy.
     ExpandedSizeLimitExceeded {
         /// Archive path that crossed the limit.
@@ -687,6 +704,11 @@ impl fmt::Display for ExtractionSafetyError {
             Self::LinkTargetEscapes { target } => {
                 write!(f, "link target escapes extraction root: {}", target.display())
             }
+            Self::RenameDestinationExhausted { archive_path, destination_path } => write!(
+                f,
+                "archive path {archive_path} has no available renamed destination for {}",
+                destination_path.display()
+            ),
             Self::ExpandedSizeLimitExceeded { archive_path, attempted_bytes, limit_bytes } => write!(
                 f,
                 "archive path {archive_path} would expand extraction to {attempted_bytes} bytes, exceeding the {limit_bytes} byte limit"
@@ -805,9 +827,20 @@ fn strip_archive_components(path: &str, count: usize) -> Option<String> {
     if components.is_empty() { None } else { Some(components.join("/")) }
 }
 
-fn next_available_destination_path(path: &Path) -> PathBuf {
+/// Maximum deterministic renamed destinations tried for one conflicting path.
+const MAX_RENAME_CANDIDATES: u64 = 10_000;
+
+/// Returns a deterministic non-conflicting sibling path for an existing
+/// destination, or `None` when every candidate in the budget is taken.
+/// Returning the original path would silently degrade a rename policy into
+/// an in-place overwrite, so callers must surface `None` as an error.
+fn next_available_destination_path(path: &Path) -> Option<PathBuf> {
+    next_available_destination_path_with_budget(path, MAX_RENAME_CANDIDATES)
+}
+
+fn next_available_destination_path_with_budget(path: &Path, candidate_budget: u64) -> Option<PathBuf> {
     if !path.exists() {
-        return path.to_path_buf();
+        return Some(path.to_path_buf());
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
@@ -818,7 +851,7 @@ fn next_available_destination_path(path: &Path) -> PathBuf {
         .unwrap_or("entry");
     let extension = path.extension().and_then(|extension| extension.to_str());
 
-    for index in 2..10_000 {
+    for index in 2..=(candidate_budget.saturating_add(1)) {
         let file_name = if let Some(extension) = extension {
             format!("{stem} {index}.{extension}")
         } else {
@@ -826,11 +859,23 @@ fn next_available_destination_path(path: &Path) -> PathBuf {
         };
         let candidate = parent.join(file_name);
         if !candidate.exists() {
-            return candidate;
+            return Some(candidate);
         }
     }
 
-    path.to_path_buf()
+    None
+}
+
+/// Resolves a renamed destination for a conflicting path, mapping an
+/// exhausted candidate space to an error instead of falling back to the
+/// original (existing) path, which would overwrite in place.
+fn rename_candidate_or_error(
+    entry: &ExtractionEntry,
+    destination_path: PathBuf,
+) -> Result<PathBuf, ExtractionSafetyError> {
+    next_available_destination_path(&destination_path).ok_or_else(|| {
+        ExtractionSafetyError::RenameDestinationExhausted { archive_path: entry.archive_path.clone(), destination_path }
+    })
 }
 
 /// Removes an existing destination path before an explicit overwrite write.
@@ -891,8 +936,8 @@ mod tests {
     use super::{
         ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionLimits, ExtractionPolicy,
         ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteConflict, OverwriteDecision, OverwritePolicy,
-        OverwriteResolver, UnsafeFilePolicy, deferred_link_dependency_order, normalize_archive_path,
-        prepare_destination_root,
+        OverwriteResolver, UnsafeFilePolicy, deferred_link_dependency_order,
+        next_available_destination_path_with_budget, normalize_archive_path, prepare_destination_root,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -931,6 +976,28 @@ mod tests {
         let error = normalize_archive_path("/tmp/file.txt").unwrap_err();
 
         assert!(matches!(error, ExtractionSafetyError::AbsolutePath { .. }));
+    }
+
+    #[test]
+    fn renamed_destination_reports_exhaustion_instead_of_overwriting() {
+        let temp = TestDir::new("rename-exhaustion");
+        fs::write(temp.path("file.txt"), b"original").unwrap();
+        for index in 2..=4 {
+            fs::write(temp.path(format!("file {index}.txt")), b"taken").unwrap();
+        }
+
+        // A non-conflicting path does not need renaming.
+        assert_eq!(next_available_destination_path_with_budget(&temp.path("free.txt"), 3), Some(temp.path("free.txt")));
+
+        // A free candidate inside the budget is selected deterministically.
+        assert_eq!(
+            next_available_destination_path_with_budget(&temp.path("file.txt"), 5),
+            Some(temp.path("file 5.txt"))
+        );
+
+        // An exhausted budget reports `None` instead of falling back to the
+        // original existing path, which would silently overwrite it.
+        assert_eq!(next_available_destination_path_with_budget(&temp.path("file.txt"), 3), None);
     }
 
     #[test]

@@ -141,6 +141,12 @@ pub enum TzapVerificationState {
     ValidNow,
     ValidAtTrustedTime,
     CryptographicallyIntactOffline,
+    /// No verification result is recorded for this certificate.
+    ///
+    /// Records written before verification-state tracking existed have no
+    /// state on disk; they must not be treated as cryptographically
+    /// verified (or as failed verification) — only as unknown.
+    NotRecorded,
     Invalid,
 }
 
@@ -151,6 +157,7 @@ impl TzapVerificationState {
             Self::ValidNow => "valid_now",
             Self::ValidAtTrustedTime => "valid_at_trusted_time",
             Self::CryptographicallyIntactOffline => "cryptographically_intact_offline",
+            Self::NotRecorded => "not_recorded",
             Self::Invalid => "invalid",
         }
     }
@@ -161,6 +168,7 @@ impl TzapVerificationState {
             "valid_now" => Some(Self::ValidNow),
             "valid_at_trusted_time" => Some(Self::ValidAtTrustedTime),
             "cryptographically_intact_offline" => Some(Self::CryptographicallyIntactOffline),
+            "not_recorded" => Some(Self::NotRecorded),
             "invalid" => Some(Self::Invalid),
             _ => None,
         }

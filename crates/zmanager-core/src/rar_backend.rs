@@ -361,21 +361,31 @@ fn plan_rar_entries(
         };
 
         match planner.validate_entry(&safety_entry)? {
-            ExtractionDecision::Write { destination_path, replace_existing, .. } => plan_writable_entry(
-                entry,
-                destination,
-                &target_policy,
-                WritableEntryPlan {
-                    destination_path,
-                    replace_existing,
-                    selections: &mut selections,
-                    metadata_map: &mut metadata_map,
-                    deferred_links: &mut deferred_links,
-                    deferred_dirs: &mut deferred_dirs,
-                    entry_progress: &mut entry_progress,
-                    report: &mut report,
-                },
-            )?,
+            ExtractionDecision::Write { destination_path, replace_existing, .. } => {
+                // FileCopy entries are planned as hardlink-like entries, so
+                // the planner does not account for them by itself, but
+                // materialization copies the full source file. Charge the
+                // copy against the expanded-size limit up front so the guard
+                // trips at planning time, not after the bytes exist.
+                if matches!(entry.kind, RarEntryKind::FileCopy) {
+                    planner.reserve_expanded_bytes(&entry.path, entry.unpacked_size)?;
+                }
+                plan_writable_entry(
+                    entry,
+                    destination,
+                    &target_policy,
+                    WritableEntryPlan {
+                        destination_path,
+                        replace_existing,
+                        selections: &mut selections,
+                        metadata_map: &mut metadata_map,
+                        deferred_links: &mut deferred_links,
+                        deferred_dirs: &mut deferred_dirs,
+                        entry_progress: &mut entry_progress,
+                        report: &mut report,
+                    },
+                )?;
+            }
             ExtractionDecision::Skip { reason, .. } => {
                 report.skipped_entries += 1;
                 report.warnings.push(format!("skipped {}: {reason}", entry.path));
@@ -832,5 +842,58 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn file_copy_entries_are_charged_against_expanded_size_limit() {
+        use super::*;
+
+        let destination = std::env::temp_dir().join(format!("zmanager-rar-filecopy-limit-{}", std::process::id()));
+        let mut policy = ExtractionPolicy::default();
+        policy.limits.max_expanded_bytes = Some(100);
+
+        let regular_file = |path: &str, size: u64| zmanager_unrar::RarEntry {
+            path: path.to_owned(),
+            unpacked_size: size,
+            dictionary_size: 0,
+            kind: RarEntryKind::File,
+            link_target: None,
+            encrypted: false,
+            solid: true,
+            file_attr: 0,
+            mtime: 0,
+        };
+        let file_copy = |path: &str, size: u64| zmanager_unrar::RarEntry {
+            path: path.to_owned(),
+            unpacked_size: size,
+            dictionary_size: 0,
+            kind: RarEntryKind::FileCopy,
+            link_target: Some("source.txt".to_owned()),
+            encrypted: false,
+            solid: true,
+            file_attr: 0,
+            mtime: 0,
+        };
+
+        // A copy within the limit plans cleanly.
+        plan_rar_entries(
+            vec![regular_file("source.txt", 60), file_copy("copy.txt", 40)],
+            &destination,
+            policy.clone(),
+            None,
+        )
+        .expect("a file copy within the limit should plan");
+
+        // The copy must be charged against the limit like a regular file:
+        // source (60) plus copy (60) exceeds the 100-byte limit.
+        let Err(error) = plan_rar_entries(
+            vec![regular_file("source.txt", 60), file_copy("copy.txt", 60)],
+            &destination,
+            policy,
+            None,
+        ) else {
+            panic!("file copies over the limit should be rejected at planning time");
+        };
+        assert!(matches!(error, RarBackendError::Safety(ExtractionSafetyError::ExpandedSizeLimitExceeded { .. })));
     }
 }

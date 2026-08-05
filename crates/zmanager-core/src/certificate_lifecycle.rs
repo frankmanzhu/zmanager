@@ -15,6 +15,7 @@ use crate::local_identity_store::{
     TzapLocalIdentityStoreError, TzapOrganizationDeviceRetirement,
 };
 use crate::p256_signature;
+use crate::trust;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use openssl::pkey::{PKey, Private};
 use serde_json::{Map, Value, json};
@@ -476,8 +477,14 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         session: &TzapSessionRecord,
         route: &TzapOrganizationDeviceRetirement,
     ) -> Result<OrganizationDeviceLookup, TzapCertificateLifecycleError> {
-        let path =
-            format!("{LOGIN_ORG_DEVICES_PATH_PREFIX}{}/devices?sign_device_id={}", route.org_id, route.sign_device_id);
+        // Both values are caller-controlled identifiers and must be encoded
+        // before interpolation; a raw value could smuggle query parameters or
+        // path segments into the request URL.
+        let path = format!(
+            "{LOGIN_ORG_DEVICES_PATH_PREFIX}{}/devices?sign_device_id={}",
+            trust::percent_encode_path_param(&route.org_id),
+            trust::percent_encode_path_param(&route.sign_device_id)
+        );
         let response = self.send_raw(
             TzapAuthHttpMethod::Get,
             &self.login_base_url,
@@ -723,8 +730,8 @@ fn trim_trailing_slash(value: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::{
-        RENEW_OPERATION, TzapCertificateLifecycleClient, TzapCertificateLifecycleError, TzapRenewalPolicy,
-        TzapRenewalRequest, TzapRetirementCompletion,
+        OrganizationDeviceLookup, RENEW_OPERATION, TzapCertificateLifecycleClient, TzapCertificateLifecycleError,
+        TzapRenewalPolicy, TzapRenewalRequest, TzapRetirementCompletion,
     };
     use crate::auth_client::{
         SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpRequest,
@@ -735,7 +742,7 @@ mod tests {
     use crate::local_identity_store::{
         DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord,
         TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState,
-        TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapSignDeviceRouting,
+        TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapOrganizationDeviceRetirement, TzapSignDeviceRouting,
     };
     use crate::trust::{self, TzapCertificatePublicMetadata};
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -961,6 +968,28 @@ mod tests {
             );
             assert!(!urls[0].contains("https://sign.tzap.org/v1/devices"));
         }
+    }
+
+    #[test]
+    fn organization_retirement_percent_encodes_route_identifiers() {
+        let fixture = LifecycleFixture::new();
+        let transport =
+            FakeLifecycleTransport::new(vec![TzapAuthHttpResponse { status_code: 200, body: b"{}".to_vec() }]);
+        let client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
+        let route = TzapOrganizationDeviceRetirement {
+            org_id: "org/../admin".to_owned(),
+            sign_device_id: "dev?admin=true&x=1".to_owned(),
+            login_organization_device_id: "login-org-device".to_owned(),
+        };
+
+        let lookup = client.lookup_organization_device(&fixture.login_session, &route).unwrap();
+        assert!(matches!(lookup, OrganizationDeviceLookup::Found(_)));
+
+        let url = transport.requests()[0].url.clone();
+        // The device id must not be able to smuggle query parameters into the
+        // request URL.
+        assert!(url.contains("sign_device_id=dev%3Fadmin%3Dtrue%26x%3D1"), "raw characters leaked into URL: {url}");
+        assert!(!url.contains("?admin=true"), "query injection succeeded: {url}");
     }
 
     struct LifecycleFixture {

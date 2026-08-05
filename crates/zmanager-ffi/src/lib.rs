@@ -982,8 +982,10 @@ pub fn clearSensitiveState() -> ClearSensitiveStateResult {
 }
 
 pub fn tzap_public_metadata_summary(archive_path: String) -> String {
-    let archive_path =
-        ensure_existing_file_path(archive_path, "archivePath").unwrap_or_else(|error| return_tzap_error(error));
+    let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
+        Ok(path) => path,
+        Err(envelope) => return envelope,
+    };
     zmanager_core::tzap_service::tzap_public_metadata_summary(&archive_path)
 }
 
@@ -998,8 +1000,10 @@ pub fn verify_tzap_x509(
     trusted_ca_certs: Vec<String>,
     trusted_system_roots: bool,
 ) -> String {
-    let archive_path =
-        ensure_existing_file_path(archive_path, "archivePath").unwrap_or_else(|error| return_tzap_error(error));
+    let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
+        Ok(path) => path,
+        Err(envelope) => return envelope,
+    };
     zmanager_core::tzap_service::verify_tzap_x509(
         &archive_path,
         password_ref(&password),
@@ -1023,8 +1027,10 @@ pub fn verify_tzap_x509_public_no_key(
     trusted_ca_certs: Vec<String>,
     trusted_system_roots: bool,
 ) -> String {
-    let archive_path =
-        ensure_existing_file_path(archive_path, "archivePath").unwrap_or_else(|error| return_tzap_error(error));
+    let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
+        Ok(path) => path,
+        Err(envelope) => return envelope,
+    };
     zmanager_core::tzap_service::verify_tzap_x509_public_no_key(&archive_path, &trusted_ca_certs, trusted_system_roots)
 }
 
@@ -1038,8 +1044,10 @@ pub fn verifyTzapX509PublicNoKey(
 }
 
 pub fn inspect_tzap_x509_signer(archive_path: String, password: Option<String>) -> String {
-    let archive_path =
-        ensure_existing_file_path(archive_path, "archivePath").unwrap_or_else(|error| return_tzap_error(error));
+    let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
+        Ok(path) => path,
+        Err(envelope) => return envelope,
+    };
     zmanager_core::tzap_service::inspect_tzap_x509_signer(&archive_path, password_ref(&password))
 }
 
@@ -1049,8 +1057,10 @@ pub fn inspectTzapX509Signer(archive_path: String, password: Option<String>) -> 
 }
 
 pub fn inspect_tzap_x509_public_no_key_signer(archive_path: String) -> String {
-    let archive_path =
-        ensure_existing_file_path(archive_path, "archivePath").unwrap_or_else(|error| return_tzap_error(error));
+    let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
+        Ok(path) => path,
+        Err(envelope) => return envelope,
+    };
     zmanager_core::tzap_service::inspect_tzap_x509_public_no_key_signer(&archive_path)
 }
 
@@ -1263,6 +1273,14 @@ fn return_tzap_error(error: ZmanagerGuiError) -> String {
     format!("{{\"ok\":false,\"message\":{}}}", serde_json::to_string(&message).unwrap_or_default())
 }
 
+/// Validates an existing archive path for the tzap service endpoints and
+/// returns it, or the JSON error envelope as `Err` on validation failure.
+/// The service endpoints are declared without `[Throws]`, so callers must
+/// return the envelope as the function value instead of continuing with it.
+fn existing_archive_path_or_tzap_error(value: String) -> Result<String, String> {
+    ensure_existing_file_path(value, "archivePath").map_err(return_tzap_error)
+}
+
 #[derive(Default)]
 struct MobileJobRegistry {
     inner: Mutex<MobileJobRegistryInner>,
@@ -1296,13 +1314,21 @@ impl jobs::JobEventSink for RegistryJobEventSink {
 }
 
 impl MobileJobRegistry {
+    /// Returns the registry state, recovering from a poisoned mutex. The
+    /// inner state is a plain job map whose records are individually
+    /// consistent, so recovering is safe; a panic while holding the lock
+    /// must not permanently disable the job registry.
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, MobileJobRegistryInner> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn create_job(
         &self,
         kind: MobileJobKind,
         token: CancellationToken,
         contains_sensitive_input: bool,
     ) -> StartJobResult {
-        let mut inner = self.inner.lock().expect("job registry mutex poisoned");
+        let mut inner = self.lock_inner();
         inner.next_job_index = inner.next_job_index.saturating_add(1);
         let job_id = format!("job-{}-{}", std::process::id(), inner.next_job_index);
         inner.jobs.insert(
@@ -1322,7 +1348,7 @@ impl MobileJobRegistry {
     }
 
     fn poll_events(&self, request: PollJobEventsRequest) -> Result<PollJobEventsResult, ZmanagerGuiError> {
-        let inner = self.inner.lock().expect("job registry mutex poisoned");
+        let inner = self.lock_inner();
         let record = inner.jobs.get(&request.job_id).ok_or_else(|| {
             bridge_error(
                 ERROR_NOT_FOUND,
@@ -1351,7 +1377,7 @@ impl MobileJobRegistry {
     }
 
     fn cancel_job(&self, request: CancelJobRequest) -> Result<CancelJobResult, ZmanagerGuiError> {
-        let inner = self.inner.lock().expect("job registry mutex poisoned");
+        let inner = self.lock_inner();
         let record = inner.jobs.get(&request.job_id).ok_or_else(|| {
             bridge_error(
                 ERROR_NOT_FOUND,
@@ -1371,7 +1397,7 @@ impl MobileJobRegistry {
     }
 
     fn clear_sensitive_state(&self) -> ClearSensitiveStateResult {
-        let mut inner = self.inner.lock().expect("job registry mutex poisoned");
+        let mut inner = self.lock_inner();
         let mut cleared_terminal_jobs = 0u64;
         let mut cancel_requested_jobs = 0u64;
         let mut retained_active_jobs = 0u64;
@@ -1397,7 +1423,7 @@ impl MobileJobRegistry {
     }
 
     fn emit_core_event(&self, job_id: &str, event: CoreJobEvent) {
-        let mut inner = self.inner.lock().expect("job registry mutex poisoned");
+        let mut inner = self.lock_inner();
         let Some(record) = inner.jobs.get_mut(job_id) else {
             return;
         };
@@ -1406,7 +1432,7 @@ impl MobileJobRegistry {
     }
 
     fn set_terminal_summary(&self, job_id: &str, summary: JobTerminalSummary) {
-        let mut inner = self.inner.lock().expect("job registry mutex poisoned");
+        let mut inner = self.lock_inner();
         let Some(record) = inner.jobs.get_mut(job_id) else {
             return;
         };
@@ -1417,7 +1443,7 @@ impl MobileJobRegistry {
     }
 
     fn finish_with_error(&self, job_id: &str, error: BridgeError) {
-        let mut inner = self.inner.lock().expect("job registry mutex poisoned");
+        let mut inner = self.lock_inner();
         let Some(record) = inner.jobs.get_mut(job_id) else {
             return;
         };
@@ -2230,7 +2256,8 @@ fn safety_error_destination_path(error: &ExtractionSafetyError) -> Option<PathBu
         | ExtractionSafetyError::DestinationExists { destination_path, .. }
         | ExtractionSafetyError::OverwritePromptUnavailable { destination_path, .. }
         | ExtractionSafetyError::OverwriteAborted { destination_path, .. }
-        | ExtractionSafetyError::DestinationProbe { destination_path, .. } => Some(destination_path.clone()),
+        | ExtractionSafetyError::DestinationProbe { destination_path, .. }
+        | ExtractionSafetyError::RenameDestinationExhausted { destination_path, .. } => Some(destination_path.clone()),
         ExtractionSafetyError::EmptyPath
         | ExtractionSafetyError::NulByte { .. }
         | ExtractionSafetyError::AbsolutePath { .. }
@@ -3997,6 +4024,36 @@ mod tests {
         let error = cancel_job(CancelJobRequest { job_id: "missing-job".to_string() }).unwrap_err();
 
         assert_bridge_error_code(error, ERROR_NOT_FOUND);
+    }
+
+    #[test]
+    fn tzap_service_endpoints_return_validation_error_instead_of_continuing() {
+        let temp = TestDir::new("tzap-service-validation");
+
+        // Regression: the validation failure used to be passed to the core
+        // service as the archive path, which then reported its own secondary
+        // error. The caller must see the validation message instead.
+        let result = tzap_public_metadata_summary(temp.path("missing.tzap").to_string_lossy().to_string());
+
+        assert!(result.contains("archivePath does not exist"), "expected the validation error envelope, got: {result}");
+        assert!(result.starts_with("{\"ok\":false"));
+    }
+
+    #[test]
+    fn job_registry_recovers_after_mutex_poisoning() {
+        let registry = MobileJobRegistry::default();
+
+        // Poison the registry's mutex by panicking while holding the lock.
+        let _ = std::panic::catch_unwind(|| {
+            let mut inner = registry.inner.lock().expect("test lock");
+            inner.next_job_index = inner.next_job_index.saturating_add(1);
+            panic!("intentional panic while holding the job registry lock");
+        });
+
+        // A poisoned mutex must not permanently disable the job registry.
+        let result = registry.create_job(MobileJobKind::ZipCreate, CancellationToken::new(), false);
+        assert!(result.job_id.starts_with("job-"));
+        assert_eq!(result.status, MobileJobStatus::Queued);
     }
 
     fn assert_bridge_error_code(error: ZmanagerGuiError, expected: &str) {

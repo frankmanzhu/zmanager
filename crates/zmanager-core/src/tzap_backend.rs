@@ -2073,6 +2073,10 @@ impl<'archive, 'resolver> FastTzapExtractionState<'archive, 'resolver> {
         replace_existing: bool,
         context: &mut JobContext<'_>,
     ) -> Result<(), TzapError> {
+        // A member whose reader is unsupported is a hard failure, never a
+        // skip: silently dropping it would hide archives whose data cannot
+        // be decoded. This must stay consistent with the core restore path
+        // in `TzapExtractionState::write_entry`, which propagates the error.
         match stream_regular_member_to_destination(
             self.opened,
             &entry.path,
@@ -2095,10 +2099,6 @@ impl<'archive, 'resolver> FastTzapExtractionState<'archive, 'resolver> {
             }
             Ok(None) => {
                 self.record_skip(&entry.path, format!("skipped missing entry {}", entry.path), context);
-                Ok(())
-            }
-            Err(TzapError::Format(FormatError::ReaderUnsupported(_))) => {
-                self.record_skip(&entry.path, format!("skipped unsupported entry {}", entry.path), context);
                 Ok(())
             }
             Err(error) => Err(error),
