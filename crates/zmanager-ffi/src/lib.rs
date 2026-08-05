@@ -1427,7 +1427,9 @@ impl MobileJobRegistry {
         let Some(record) = inner.jobs.get_mut(job_id) else {
             return;
         };
-        let event = mobile_event_from_core_event(event);
+        let Some(event) = mobile_event_from_core_event(event) else {
+            return;
+        };
         Self::append_event(record, event);
     }
 
@@ -2459,9 +2461,9 @@ fn mobile_job_kind_from_core(kind: CoreJobKind) -> MobileJobKind {
     }
 }
 
-fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
+fn mobile_event_from_core_event(event: CoreJobEvent) -> Option<MobileJobEvent> {
     match event {
-        CoreJobEvent::Started { kind, total_bytes } => MobileJobEvent {
+        CoreJobEvent::Started { kind, total_bytes } => Some(MobileJobEvent {
             sequence: 0,
             event_type: MobileJobEventKind::Started,
             job_kind: Some(mobile_job_kind_from_core(kind)),
@@ -2473,8 +2475,8 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
             total_entries: None,
             message: None,
             error: None,
-        },
-        CoreJobEvent::EntryStarted { path, bytes } => MobileJobEvent {
+        }),
+        CoreJobEvent::EntryStarted { path, bytes } => Some(MobileJobEvent {
             sequence: 0,
             event_type: MobileJobEventKind::EntryStarted,
             job_kind: None,
@@ -2486,8 +2488,8 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
             total_entries: None,
             message: None,
             error: None,
-        },
-        CoreJobEvent::BytesProcessed { path, bytes, total_bytes_processed, .. } => MobileJobEvent {
+        }),
+        CoreJobEvent::BytesProcessed { path, bytes, total_bytes_processed, .. } => Some(MobileJobEvent {
             sequence: 0,
             event_type: MobileJobEventKind::BytesProcessed,
             job_kind: None,
@@ -2499,8 +2501,8 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
             total_entries: None,
             message: None,
             error: None,
-        },
-        CoreJobEvent::EntryFinished { path, bytes } => MobileJobEvent {
+        }),
+        CoreJobEvent::EntryFinished { path, bytes } => Some(MobileJobEvent {
             sequence: 0,
             event_type: MobileJobEventKind::EntryFinished,
             job_kind: None,
@@ -2512,10 +2514,10 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
             total_entries: None,
             message: None,
             error: None,
-        },
+        }),
         CoreJobEvent::Warning { message } => {
             let error = bridge_warning(message.clone());
-            MobileJobEvent {
+            Some(MobileJobEvent {
                 sequence: 0,
                 event_type: MobileJobEventKind::Warning,
                 job_kind: None,
@@ -2527,9 +2529,9 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
                 total_entries: None,
                 message: Some(message),
                 error: Some(error),
-            }
+            })
         }
-        CoreJobEvent::Completed { entries, bytes } => MobileJobEvent {
+        CoreJobEvent::Completed { entries, bytes } => Some(MobileJobEvent {
             sequence: 0,
             event_type: MobileJobEventKind::Completed,
             job_kind: None,
@@ -2541,7 +2543,7 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
             total_entries: None,
             message: None,
             error: None,
-        },
+        }),
         CoreJobEvent::Failed { message } => {
             let error = BridgeError {
                 code: ERROR_OPERATION_FAILED.to_string(),
@@ -2550,7 +2552,7 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
                 severity: BridgeSeverity::Error,
                 retryable: false,
             };
-            MobileJobEvent {
+            Some(MobileJobEvent {
                 sequence: 0,
                 event_type: MobileJobEventKind::Failed,
                 job_kind: None,
@@ -2562,22 +2564,31 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> MobileJobEvent {
                 total_entries: None,
                 message: Some(message),
                 error: Some(error),
-            }
+            })
         }
-        CoreJobEvent::Cancelled { message } => cancelled_event(message),
-        CoreJobEvent::PhaseStarted { .. } | CoreJobEvent::PhaseBytesProcessed { .. } => MobileJobEvent {
+        CoreJobEvent::Cancelled { message } => Some(cancelled_event(message)),
+        // TZAP jobs emit phase lifecycle events. The mobile event model has
+        // no phase concept yet, so phase transitions are not surfaced (the
+        // real job Started event already set the running status) and phase
+        // byte progress is folded into the plain byte-progress stream with
+        // all totals preserved. Add dedicated phase event kinds when the
+        // mobile UI adopts them.
+        CoreJobEvent::PhaseStarted { .. } => None,
+        CoreJobEvent::PhaseBytesProcessed {
+            path, bytes, total_bytes_processed, ..
+        } => Some(MobileJobEvent {
             sequence: 0,
-            event_type: MobileJobEventKind::Started,
+            event_type: MobileJobEventKind::BytesProcessed,
             job_kind: None,
-            path: None,
-            bytes: None,
+            path,
+            bytes: Some(bytes),
             total_bytes: None,
-            total_bytes_processed: None,
+            total_bytes_processed: Some(total_bytes_processed),
             entries: None,
             total_entries: None,
             message: None,
             error: None,
-        },
+        }),
     }
 }
 
@@ -4037,6 +4048,63 @@ mod tests {
 
         assert!(result.contains("archivePath does not exist"), "expected the validation error envelope, got: {result}");
         assert!(result.starts_with("{\"ok\":false"));
+    }
+
+    #[test]
+    fn phase_progress_surfaces_as_bytes_without_spurious_started_events() {
+        use zmanager_core::jobs::JobPhase;
+
+        let registry = MobileJobRegistry::default();
+        let job = registry.create_job(MobileJobKind::TzapCreate, CancellationToken::new(), false);
+
+        registry.emit_core_event(
+            &job.job_id,
+            CoreJobEvent::Started { kind: CoreJobKind::TzapCreate, total_bytes: Some(100) },
+        );
+        registry.emit_core_event(
+            &job.job_id,
+            CoreJobEvent::PhaseStarted { phase: JobPhase::EmittingPayload, total_bytes: Some(50) },
+        );
+        registry.emit_core_event(
+            &job.job_id,
+            CoreJobEvent::PhaseBytesProcessed {
+                phase: JobPhase::EmittingPayload,
+                path: Some("payload.bin".to_string()),
+                recent_paths: Vec::new(),
+                recent_path_identities: Vec::new(),
+                bytes: 10,
+                total_bytes_processed: 10,
+                total_bytes: Some(50),
+                recent_paths_truncated: false,
+            },
+        );
+        registry.emit_core_event(
+            &job.job_id,
+            CoreJobEvent::PhaseBytesProcessed {
+                phase: JobPhase::EmittingPayload,
+                path: Some("payload.bin".to_string()),
+                recent_paths: Vec::new(),
+                recent_path_identities: Vec::new(),
+                bytes: 20,
+                total_bytes_processed: 30,
+                total_bytes: Some(50),
+                recent_paths_truncated: false,
+            },
+        );
+
+        let polled = registry.poll_events(PollJobEventsRequest { job_id: job.job_id, cursor: 0 }).unwrap();
+        let kinds = polled.events.iter().map(|event| event.event_type).collect::<Vec<_>>();
+        // Phase transitions must not emit spurious job-Started events; their
+        // byte progress surfaces as regular byte-progress events with the
+        // totals intact.
+        assert_eq!(
+            kinds,
+            vec![MobileJobEventKind::Started, MobileJobEventKind::BytesProcessed, MobileJobEventKind::BytesProcessed]
+        );
+        assert_eq!(polled.events[1].bytes, Some(10));
+        assert_eq!(polled.events[1].total_bytes_processed, Some(10));
+        assert_eq!(polled.events[2].bytes, Some(20));
+        assert_eq!(polled.events[2].total_bytes_processed, Some(30));
     }
 
     #[test]

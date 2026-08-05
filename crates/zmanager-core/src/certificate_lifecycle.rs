@@ -648,7 +648,13 @@ fn revocation_completion(
     }
     let value: Value = serde_json::from_slice(&response.body)?;
     let object = json_object(&value, "$")?;
-    Ok(if optional_string(object, "result")?.as_deref() == Some("revocation_pending_sync") {
+    let Some(result) = optional_string(object, "result")? else {
+        // A 2xx without a revocation result is not evidence of completion;
+        // treating it as such would mark a possibly-failed revocation as
+        // done (e.g. an error JSON the server returned with 200).
+        return Err(TzapCertificateLifecycleError::InvalidField { field: "result" });
+    };
+    Ok(if result == "revocation_pending_sync" {
         TzapRetirementCompletion::Incomplete
     } else {
         TzapRetirementCompletion::Complete
@@ -731,7 +737,7 @@ fn trim_trailing_slash(value: &str) -> &str {
 mod tests {
     use super::{
         OrganizationDeviceLookup, RENEW_OPERATION, TzapCertificateLifecycleClient, TzapCertificateLifecycleError,
-        TzapRenewalPolicy, TzapRenewalRequest, TzapRetirementCompletion,
+        TzapRenewalPolicy, TzapRenewalRequest, TzapRetirementCompletion, revocation_completion,
     };
     use crate::auth_client::{
         SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpRequest,
@@ -937,6 +943,38 @@ mod tests {
             client.retire_personal_devices(&store, &fixture.sign_session, DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
         assert_eq!(device_report.completion, TzapRetirementCompletion::Incomplete);
         assert_eq!(device_report.attempted_sign_device_ids, vec!["sign-device-old"]);
+    }
+
+    #[test]
+    fn revocation_completion_requires_a_result_field() {
+        // A 2xx with an unrelated body (e.g. an error JSON) must not count as
+        // completion.
+        let error = revocation_completion(&TzapAuthHttpResponse {
+            status_code: 200,
+            body: json!({"error": "internal_error"}).to_string().into_bytes(),
+        })
+        .unwrap_err();
+        assert!(matches!(error, TzapCertificateLifecycleError::InvalidField { field: "result" }));
+
+        // Non-JSON bodies are rejected too.
+        assert!(
+            revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: b"not json".to_vec() }).is_err()
+        );
+
+        // The pending marker stays incomplete and a known completion stays
+        // complete.
+        let pending = revocation_completion(&TzapAuthHttpResponse {
+            status_code: 202,
+            body: json!({"result": "revocation_pending_sync"}).to_string().into_bytes(),
+        })
+        .unwrap();
+        assert_eq!(pending, TzapRetirementCompletion::Incomplete);
+        let complete = revocation_completion(&TzapAuthHttpResponse {
+            status_code: 200,
+            body: json!({"result": "already_revoked"}).to_string().into_bytes(),
+        })
+        .unwrap();
+        assert_eq!(complete, TzapRetirementCompletion::Complete);
     }
 
     #[test]
