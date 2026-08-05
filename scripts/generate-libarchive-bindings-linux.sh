@@ -70,4 +70,30 @@ EOF
   cd "$TMP"
   cargo run --quiet
 )
+
+# Bindgen writes the file from scratch; prepend the explanatory header so it
+# survives regeneration. Keep this text in sync with the checked-in file.
+HEADER='// Pre-generated libarchive bindings for linux-musl targets.
+//
+// bindgen dlopens libclang while generating bindings, which a static-musl
+// build host (the Alpine packaging container) cannot do, so these bindings
+// are checked in and used by build.rs whenever CARGO_CFG_TARGET_ENV is musl.
+//
+// NOTE: the glibc-internal structs (struct stat, _IO_FILE) emitted by bindgen
+// are shaped by the host that ran it (x86_64 on CI, aarch64 otherwise).
+// Nothing in zmanager dereferences them, so the file stays valid on both
+// archs; if that ever changes, generate per-arch.
+//
+// Regenerate with scripts/generate-libarchive-bindings-linux.sh, or the
+// "Regenerate libarchive bindings" workflow (auto-runs on
+// vendor/libarchive/** or build.rs changes).
+'
+
+TMP_FILE="$(mktemp "${TMPDIR:-/tmp}/zm-bindgen-linux.XXXXXX")"
+{
+  printf '%s\n' "$HEADER"
+  cat "$OUT"
+} > "$TMP_FILE"
+mv "$TMP_FILE" "$OUT"
+
 echo "Generated $OUT"

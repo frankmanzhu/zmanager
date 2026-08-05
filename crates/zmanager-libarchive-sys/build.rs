@@ -107,11 +107,7 @@ fn find_single_libarchive_dir(vendor_root: &Path) -> Option<PathBuf> {
         if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             continue;
         }
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with("libarchive-"))
-        {
+        if entry.file_name().to_str().is_some_and(|name| name.starts_with("libarchive-")) {
             matches.push(entry.path());
         }
     }
@@ -160,6 +156,12 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("ENABLE_CNG", "ON");
         configure_windows_static_vcpkg_dependencies(config);
     } else if target.contains("linux") && target.contains("musl") {
+        // Codecs and crypto are enabled and linked statically (Alpine
+        // *-static packages), mirroring the Windows vcpkg static triplets.
+        // The packaging scripts must install zlib-static bzip2-static
+        // xz-static zstd-static lz4-static mbedtls-static (plus dev headers).
+        // mbedtls is used instead of OpenSSL because Alpine no longer ships
+        // static OpenSSL archives (openssl-static was dropped).
         config
             .define("ENABLE_ACL", "OFF")
             .define("ENABLE_XATTR", "OFF")
@@ -167,13 +169,13 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("ENABLE_LIBXML2", "OFF")
             .define("ENABLE_EXPAT", "OFF")
             .define("ENABLE_OPENSSL", "OFF")
-            .define("ENABLE_MBEDTLS", "OFF")
+            .define("ENABLE_MBEDTLS", "ON")
             .define("ENABLE_NETTLE", "OFF")
-            .define("ENABLE_ZLIB", "OFF")
-            .define("ENABLE_BZip2", "OFF")
-            .define("ENABLE_LZMA", "OFF")
-            .define("ENABLE_ZSTD", "OFF")
-            .define("ENABLE_LZ4", "OFF");
+            .define("ENABLE_ZLIB", "ON")
+            .define("ENABLE_BZip2", "ON")
+            .define("ENABLE_LZMA", "ON")
+            .define("ENABLE_ZSTD", "ON")
+            .define("ENABLE_LZ4", "ON");
     } else if target.contains("apple-darwin") {
         config
             .define("ENABLE_ACL", "ON")
@@ -317,7 +319,22 @@ fn link_bundled_archive_dependencies(target: &str) {
         println!("cargo:rustc-link-search=native={zstd_out_dir}/lib");
         println!("cargo:rustc-link-lib=static=zstd");
     } else if target.contains("linux") && target.contains("musl") {
+        // Static musl codec + mbedtls libraries, mirroring the Windows vcpkg
+        // names. mbedtls provides libarchive's crypto (AES/hash for encrypted
+        // archives) on musl, where static OpenSSL is unavailable.
+        println!("cargo:rustc-link-search=native=/usr/lib");
+        // +whole-archive: GNU ld's --as-needed can drop static archives that
+        // are placed before the rlibs referencing them; forcing whole-archive
+        // keeps every codec in the fully static musl binary.
         println!("cargo:rustc-link-lib=pthread");
+        println!("cargo:rustc-link-lib=static:+whole-archive=z");
+        println!("cargo:rustc-link-lib=static:+whole-archive=bz2");
+        println!("cargo:rustc-link-lib=static:+whole-archive=lzma");
+        println!("cargo:rustc-link-lib=static:+whole-archive=zstd");
+        println!("cargo:rustc-link-lib=static:+whole-archive=lz4");
+        println!("cargo:rustc-link-lib=static:+whole-archive=mbedtls");
+        println!("cargo:rustc-link-lib=static:+whole-archive=mbedx509");
+        println!("cargo:rustc-link-lib=static:+whole-archive=mbedcrypto");
     } else if target.contains("linux") {
         link_common_unix_libraries();
         println!("cargo:rustc-link-lib=pthread");

@@ -4348,7 +4348,20 @@ struct CapturedPortableFileMetadata {
 fn portable_file_metadata(path: &Path) -> Result<CapturedPortableFileMetadata, TzapError> {
     let metadata = fs::symlink_metadata(path).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
     let source_os = source_os_label().to_owned();
-    let created = metadata.created().ok().and_then(system_time_to_archive_timestamp);
+    let created = metadata.created().ok().and_then(system_time_to_archive_timestamp).or_else(|| {
+        // std cannot expose the birth time on musl targets (statx/STATX_BTIME
+        // is unsupported there), so fall back to ctime from the standard stat
+        // fields as an approximation of creation time.
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            Some(ArchiveTimestamp::new(metadata.ctime(), metadata.ctime_nsec() as u32))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    });
     let accessed = metadata.accessed().ok().and_then(system_time_to_archive_timestamp);
 
     #[cfg(target_os = "macos")]
@@ -6218,6 +6231,8 @@ mod tests {
         assert!(file_entry.modified.is_some(), "modified timestamp");
 
         // --- created ---
+        // Always present: the writer falls back to ctime when the platform
+        // cannot expose the birth time (musl).
         assert!(file_entry.created.is_some(), "created timestamp");
 
         // --- accessed ---

@@ -11,10 +11,18 @@ OUT_DIR=${2:-dist}
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE=${ZM_ALPINE_RUST_IMAGE:-rust:1-alpine3.22}
 
-if [[ "$TARGET" != "aarch64-unknown-linux-musl" ]]; then
-  echo "Alpine packaging is currently supported only for aarch64-unknown-linux-musl" >&2
-  exit 2
-fi
+case "$TARGET" in
+  aarch64-unknown-linux-musl)
+    PLATFORM=linux/arm64
+    ;;
+  x86_64-unknown-linux-musl)
+    PLATFORM=linux/amd64
+    ;;
+  *)
+    echo "Alpine packaging supports only aarch64- and x86_64-unknown-linux-musl" >&2
+    exit 2
+    ;;
+esac
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required for Alpine musl packaging" >&2
@@ -31,7 +39,7 @@ if [ ! -d "$TZAP_DIR" ]; then
 fi
 
 docker run --rm \
-  --platform linux/arm64 \
+  --platform "$PLATFORM" \
   -v "$ROOT:/workspace" \
   -v "$(cd "$TZAP_DIR" && pwd):/tzap" \
   -w /workspace \
@@ -55,12 +63,19 @@ docker run --rm \
       linux-headers \
       perl \
       pkgconf \
-      python3
+      python3 \
+      zlib-dev zlib-static \
+      bzip2-dev bzip2-static \
+      xz-dev xz-static \
+      zstd-dev zstd-static \
+      lz4-dev lz4-static \
+      mbedtls-dev mbedtls-static
 
-    export CC_aarch64_unknown_linux_musl=cc
-    export CXX_aarch64_unknown_linux_musl=c++
-    export AR_aarch64_unknown_linux_musl=ar
-    export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc
+    TARGET_ENV=${TARGET//-/_}
+    declare -x "CC_${TARGET_ENV}=cc"
+    declare -x "CXX_${TARGET_ENV}=c++"
+    declare -x "AR_${TARGET_ENV}=ar"
+    declare -x "CARGO_TARGET_${TARGET_ENV^^}_LINKER=cc"
 
     scripts/package-release.sh "$TARGET" "$OUT_DIR"
 

@@ -1849,6 +1849,55 @@ mod tests {
         assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), payload);
     }
 
+    /// Split ZIP round-trip through libarchive across the compression range.
+    ///
+    /// The original split-ZIP tests only used `Store`, which never invokes a
+    /// codec: a libarchive build compiled without zlib (the static-musl
+    /// release configuration) still passes them. Deflate cases exercise the
+    /// inflate path and fail on such builds — deliberately, so the codec gap
+    /// is visible instead of shipping silently.
+    #[test]
+    fn split_zip_compression_range_round_trips_through_libarchive() {
+        // Deflate levels below 1 are rejected by the zip crate.
+        let cases = [
+            ("store", ZipCompression::Store, None),
+            ("deflate-1", ZipCompression::Deflate, Some(1)),
+            ("deflate-3", ZipCompression::Deflate, Some(3)),
+            ("deflate-6", ZipCompression::Deflate, Some(6)),
+            ("deflate-9", ZipCompression::Deflate, Some(9)),
+        ];
+        for (name, compression, level) in cases {
+            let temp = TestDir::new(&format!("split_zip_{name}"));
+            let payload = deterministic_bytes(200_000);
+            temp.write_file("project/blob.bin", &payload);
+            let archive = temp.path("archive.zip");
+
+            let report = create_zip_from_path(
+                temp.path("project"),
+                &archive,
+                &ZipCreateOptions {
+                    compression,
+                    level,
+                    volume_size: Some(super::MIN_ZIP_VOLUME_SIZE_BYTES),
+                    ..ZipCreateOptions::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{name}: split create failed: {error}"));
+            assert!(report.volume_count > 1, "{name}: expected multiple volumes");
+
+            let extract_report = crate::libarchive_backend::extract_archive_with_password(
+                &archive,
+                temp.path("out"),
+                ExtractionPolicy::default(),
+                None,
+            )
+            .unwrap_or_else(|error| panic!("{name}: libarchive extract failed: {error}"));
+
+            assert_eq!(extract_report.written_bytes, payload.len() as u64, "{name}");
+            assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), payload, "{name}");
+        }
+    }
+
     #[test]
     fn passworded_split_zip_extracts_through_libarchive() {
         let temp = TestDir::new("passworded_split_zip_extracts_through_libarchive");

@@ -62,7 +62,27 @@ fn main() {
 Push-Location $tmp
 try {
     cargo run --quiet
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo run (bindgen) failed with exit code $LASTEXITCODE"
+    }
 } finally {
     Pop-Location
 }
+
+# Bindgen writes the file from scratch; prepend the explanatory header so it
+# survives regeneration. Keep this text in sync with the checked-in file.
+$header = @'
+// Pre-generated libarchive bindings for windows-msvc targets.
+//
+// These let Windows builds skip bindgen entirely (no libclang needed on the
+// build machine), mirroring bindings/linux-musl.rs for static-musl hosts.
+// build.rs uses them whenever CARGO_CFG_TARGET_ENV is msvc and the file
+// exists, falling back to bindgen otherwise.
+//
+// Regenerate with scripts/generate-libarchive-bindings-windows.ps1, or the
+// "Regenerate libarchive bindings" workflow (auto-runs on
+// vendor/libarchive/** or build.rs changes).
+'@
+[System.IO.File]::WriteAllText($out, $header + [Environment]::NewLine + [System.IO.File]::ReadAllText($out))
+
 Write-Host "Generated $out"
