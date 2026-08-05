@@ -72,11 +72,13 @@ docker run --rm \
       expat-dev expat-static \
       nettle-dev nettle-static
 
+    # The container runs /bin/sh (busybox ash) — use POSIX export, not bash-only declare
     TARGET_ENV=${TARGET//-/_}
-    declare -x "CC_${TARGET_ENV}=cc"
-    declare -x "CXX_${TARGET_ENV}=c++"
-    declare -x "AR_${TARGET_ENV}=ar"
-    declare -x "CARGO_TARGET_${TARGET_ENV^^}_LINKER=cc"
+    TARGET_ENV_UPPER=$(printf '%s' "$TARGET_ENV" | tr '[:lower:]' '[:upper:]')
+    export "CC_${TARGET_ENV}=cc"
+    export "CXX_${TARGET_ENV}=c++"
+    export "AR_${TARGET_ENV}=ar"
+    export "CARGO_TARGET_${TARGET_ENV_UPPER}_LINKER=cc"
 
     scripts/package-release.sh "$TARGET" "$OUT_DIR"
 
