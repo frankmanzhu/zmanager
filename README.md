@@ -94,7 +94,7 @@ ZManager treats extraction and creation differently:
 - **Create deliberately.** New archives should use practical, well-supported formats:
   ZIP for universal sharing, TZST (`.tar.zst`) for fast compression, TGZ (`.tar.gz`) for compatibility,
   TZAP for encrypted recoverable archives, 7z for high-compression encrypted archives, and Apple Archive (`.aar`/`.aea`) for Apple platforms.
-- **A modern RAR alternative.** The `.tzap` format is designed as a fast, secure, and resilient competitor to RAR, featuring state-of-the-art cryptographic signatures, multi-recipient encryption, and robust error recovery.
+- **TZAP: A modern Open Source RAR alternative.** The `.tzap` format is designed as a fast, secure, and resilient competitor to RAR, featuring state-of-the-art cryptographic signatures, multi-recipient encryption, and robust error recovery.
 - **Avoid legacy creation paths.** Old compression methods matter for reading
   existing files, but new archives should use safer and faster defaults.
 - **Use strong password protection.** Encrypted ZIP, TZAP, and 7z creation use
@@ -125,7 +125,7 @@ Passwords are not accepted as command arguments. Use the prompt or
 | 7z | `.7z`, including encrypted 7z archives |
 | RAR | `.rar`, `.cbr`, split `.partN.rar` volumes, RAR4/RAR5, passworded RAR data, encrypted RAR5 headers, Unicode paths, symlinks, hardlinks, and file-reference entries |
 | TAR and variants | `.tar`, `.ustar`, `.pax`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.lzma`, `.tzst`, `.tar.zst`, `.tar.lz`, `.tar.lzo`, `.tar.Z`, `.tar.lz4`, `.tar.lrz` |
-| TZAP | `.tzap`, passphrase-protected create/list/test/extract |
+| TZAP | `.tzap`, A modern Open Source RAR alternative. passphrase-protected create/list/test/extract |
 | Raw compressed files | `.zst`, `.gz`, `.bz2`, `.xz`, `.lzma`, `.lz`, `.br`, `.lz4`, `.lzo`, `.Z`, `.lrz` |
 | Packages and containers | `.deb`, `.rpm`, `.ar`, `.cpio`, `.cpgz`, `.spk`, `.iso`, `.xar`, `.cab` |
 | Apple Archive | `.aar`, `.aea` encrypted Apple Archives (macOS/iOS) |
