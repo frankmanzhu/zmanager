@@ -229,22 +229,6 @@ impl From<JobCancelled> for ZipBackendError {
     }
 }
 
-/// Creates a ZIP archive from a source path.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when planning, filesystem reads, or ZIP writing
-/// fails.
-pub fn create_zip_from_path(
-    source: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    options: &ZipCreateOptions,
-) -> Result<ZipCreateReport, ZipBackendError> {
-    let manifest = plan_archive(source, &PlanOptions::default())?;
-
-    create_zip_from_manifest(&manifest, destination, options)
-}
-
 /// Creates a seekable ZIP archive from a manifest.
 ///
 /// # Errors
@@ -918,29 +902,6 @@ pub fn list_zip(path: impl AsRef<Path>) -> Result<ZipListing, ZipBackendError> {
     Ok(ZipListing { entries })
 }
 
-/// Reads all ZIP entries to validate archive integrity.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read.
-pub fn test_zip(path: impl AsRef<Path>) -> Result<ZipTestReport, ZipBackendError> {
-    test_zip_with_password(path, None)
-}
-
-/// Reads all ZIP entries to validate archive integrity with an optional
-/// password.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read or a password is
-/// required/incorrect.
-pub fn test_zip_with_password(
-    path: impl AsRef<Path>,
-    password: Option<&str>,
-) -> Result<ZipTestReport, ZipBackendError> {
-    test_zip_with_password_filter(path, password, |_| true)
-}
-
 /// Reads selected ZIP entries to validate archive integrity with an optional
 /// password.
 ///
@@ -983,36 +944,6 @@ pub fn test_zip_with_password_filter(
     }
 
     Ok(ZipTestReport { tested_entries, skipped_entries, tested_bytes })
-}
-
-/// Extracts a ZIP archive through the shared extraction safety policy.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read, an entry is
-/// unsafe, or filesystem writes fail.
-pub fn extract_zip(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_with_password(archive_path, destination, policy, None)
-}
-
-/// Extracts a ZIP archive through the shared extraction safety policy with an
-/// optional password.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read, a password is
-/// required/incorrect, an entry is unsafe, or filesystem writes fail.
-pub fn extract_zip_with_password(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, None, None)
 }
 
 /// Copies selected regular ZIP file entries to a writer in archive order.
@@ -1059,22 +990,6 @@ pub fn copy_zip_files_to_writer<W: Write>(
     }
 
     Ok(report)
-}
-
-/// Extracts a ZIP archive through the shared extraction safety policy while
-/// emitting job events.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read, an entry is
-/// unsafe, filesystem writes fail, or cancellation is requested.
-pub fn extract_zip_with_context(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    context: &mut JobContext<'_>,
-) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_with_context_and_password(archive_path, destination, policy, None, context)
 }
 
 /// Extracts a ZIP archive with an optional password while emitting job events.
@@ -1604,9 +1519,12 @@ fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), ZipBacke
 #[cfg(test)]
 mod tests {
     use super::{
-        ZipBackendError, ZipCompression, ZipCreateOptions, ZipEntryKind, create_zip_from_path, extract_zip,
-        extract_zip_with_password, list_zip, needs_zip64, test_zip, test_zip_with_password,
+        ZipBackendError, ZipCompression, ZipCreateOptions, ZipCreateReport, ZipEntryKind, ZipExtractReport,
+        ZipTestReport, create_zip_from_manifest, extract_zip_with_context_and_password, list_zip, needs_zip64,
+        test_zip_with_password_filter,
     };
+    use crate::jobs::{CancellationToken, JobContext, JobEvent};
+    use crate::manifest::{PlanOptions, plan_archive};
     use crate::safety::{ExtractionPolicy, ExtractionSafetyError};
     use crate::secrets::SecretString;
     use std::fs::{self, File};
@@ -1616,6 +1534,46 @@ mod tests {
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
+    fn create_zip_fixture(
+        source: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+        options: &ZipCreateOptions,
+    ) -> Result<ZipCreateReport, ZipBackendError> {
+        let manifest = plan_archive(source, &PlanOptions::default())?;
+        create_zip_from_manifest(&manifest, destination, options)
+    }
+
+    fn extract_zip_fixture(
+        archive_path: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+        policy: ExtractionPolicy,
+    ) -> Result<ZipExtractReport, ZipBackendError> {
+        extract_zip_fixture_with_password(archive_path, destination, policy, None)
+    }
+
+    fn extract_zip_fixture_with_password(
+        archive_path: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+        policy: ExtractionPolicy,
+        password: Option<&str>,
+    ) -> Result<ZipExtractReport, ZipBackendError> {
+        let token = CancellationToken::new();
+        let mut sink = |_event: JobEvent| {};
+        let mut context = JobContext::new(&token, &mut sink);
+        extract_zip_with_context_and_password(archive_path, destination, policy, password, &mut context)
+    }
+
+    fn test_zip_fixture(path: impl AsRef<Path>) -> Result<ZipTestReport, ZipBackendError> {
+        test_zip_fixture_with_password(path, None)
+    }
+
+    fn test_zip_fixture_with_password(
+        path: impl AsRef<Path>,
+        password: Option<&str>,
+    ) -> Result<ZipTestReport, ZipBackendError> {
+        test_zip_with_password_filter(path, password, |_| true)
+    }
+
     #[test]
     fn creates_lists_tests_and_extracts_zip() {
         let temp = TestDir::new("creates_lists_tests_and_extracts_zip");
@@ -1623,10 +1581,10 @@ mod tests {
         temp.create_dir("project/empty");
         let archive = temp.path("archive.zip");
 
-        let create_report = create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        let create_report = create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
         let listing = list_zip(&archive).unwrap();
-        let test_report = test_zip(&archive).unwrap();
-        let extract_report = extract_zip(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+        let test_report = test_zip_fixture(&archive).unwrap();
+        let extract_report = extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
         assert_eq!(create_report.written_entries, 4);
         assert_eq!(
@@ -1661,14 +1619,14 @@ mod tests {
 
         let archive = temp.path("archive.zip");
 
-        create_zip_from_path(
+        create_zip_fixture(
             temp.path("project"),
             &archive,
             &ZipCreateOptions { preserve_metadata: true, ..ZipCreateOptions::default() },
         )
         .unwrap();
 
-        extract_zip(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+        extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
         let out_path = temp.path("out/project/script.sh");
 
@@ -1699,7 +1657,7 @@ mod tests {
         temp.write_file("project/file.txt", b"stored");
         let archive = temp.path("archive.zip");
 
-        create_zip_from_path(
+        create_zip_fixture(
             temp.path("project"),
             &archive,
             &ZipCreateOptions { compression: ZipCompression::Store, level: None, ..ZipCreateOptions::default() },
@@ -1738,8 +1696,8 @@ mod tests {
         temp.write_file("project/hello cafe.txt", b"unicode");
         let archive = temp.path("archive.zip");
 
-        create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
-        extract_zip(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+        create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
         assert_eq!(fs::read_to_string(temp.path("out/project/hello cafe.txt")).unwrap(), "unicode");
     }
@@ -1754,7 +1712,7 @@ mod tests {
         symlink("target.txt", temp.path("project/link.txt")).unwrap();
         let archive = temp.path("archive.zip");
 
-        let report = create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        let report = create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
 
         assert_eq!(report.warnings.len(), 0);
         assert!(
@@ -1772,7 +1730,7 @@ mod tests {
         temp.write_file("project/file.txt", b"secret");
         let archive = temp.path("archive.zip");
 
-        let report = create_zip_from_path(
+        let report = create_zip_fixture(
             temp.path("project"),
             &archive,
             &ZipCreateOptions {
@@ -1793,17 +1751,22 @@ mod tests {
                 .any(|entry| { entry.name == "project/file.txt" && entry.encrypted })
         );
 
-        assert!(matches!(test_zip(&archive), Err(ZipBackendError::PasswordRequired)));
+        assert!(matches!(test_zip_fixture(&archive), Err(ZipBackendError::PasswordRequired)));
         assert!(matches!(
-            test_zip_with_password(&archive, Some("wrong password")),
+            test_zip_fixture_with_password(&archive, Some("wrong password")),
             Err(ZipBackendError::InvalidPassword)
         ));
 
-        let test_report = test_zip_with_password(&archive, Some("correct horse")).unwrap();
+        let test_report = test_zip_fixture_with_password(&archive, Some("correct horse")).unwrap();
         assert_eq!(test_report.tested_bytes, 6);
 
-        extract_zip_with_password(&archive, temp.path("out"), ExtractionPolicy::default(), Some("correct horse"))
-            .unwrap();
+        extract_zip_fixture_with_password(
+            &archive,
+            temp.path("out"),
+            ExtractionPolicy::default(),
+            Some("correct horse"),
+        )
+        .unwrap();
         assert_eq!(fs::read_to_string(temp.path("out/project/file.txt")).unwrap(), "secret");
     }
 
@@ -1814,7 +1777,7 @@ mod tests {
         temp.write_file("project/blob.bin", &payload);
         let archive = temp.path("archive.zip");
 
-        let report = create_zip_from_path(
+        let report = create_zip_fixture(
             temp.path("project"),
             &archive,
             &ZipCreateOptions {
@@ -1872,7 +1835,7 @@ mod tests {
             temp.write_file("project/blob.bin", &payload);
             let archive = temp.path("archive.zip");
 
-            let report = create_zip_from_path(
+            let report = create_zip_fixture(
                 temp.path("project"),
                 &archive,
                 &ZipCreateOptions {
@@ -1905,7 +1868,7 @@ mod tests {
         temp.write_file("project/blob.bin", &payload);
         let archive = temp.path("secret.zip");
 
-        let report = create_zip_from_path(
+        let report = create_zip_fixture(
             temp.path("project"),
             &archive,
             &ZipCreateOptions {
@@ -1938,7 +1901,7 @@ mod tests {
         temp.write_file("archive.z01", b"stale");
         let archive = temp.path("archive.zip");
 
-        let error = create_zip_from_path(
+        let error = create_zip_fixture(
             temp.path("project"),
             &archive,
             &ZipCreateOptions {
@@ -1953,7 +1916,7 @@ mod tests {
         assert_eq!(fs::read(temp.path("archive.z01")).unwrap(), b"stale");
 
         temp.write_file("archive.z09", b"stale tail");
-        create_zip_from_path(
+        create_zip_fixture(
             temp.path("project"),
             &archive,
             &ZipCreateOptions {
@@ -1975,7 +1938,7 @@ mod tests {
         let archive = temp.path("archive.zip");
         write_raw_zip(&archive, &[("../escape.txt", b"escape".as_slice(), CompressionMethod::Stored)]);
 
-        let error = extract_zip(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap_err();
+        let error = extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap_err();
 
         assert!(matches!(error, ZipBackendError::Safety(ExtractionSafetyError::ParentTraversal { .. })));
     }
@@ -1992,7 +1955,7 @@ mod tests {
             ],
         );
 
-        let error = extract_zip(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap_err();
+        let error = extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap_err();
 
         assert!(matches!(error, ZipBackendError::Safety(ExtractionSafetyError::NameCollision { .. })));
     }

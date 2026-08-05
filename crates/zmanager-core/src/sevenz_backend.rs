@@ -1190,6 +1190,18 @@ fn entry_kind(entry: &ArchiveEntry) -> SevenZEntryKind {
     }
 }
 
+/// Maps a 7z entry to an extraction safety kind.
+///
+/// `sevenz_rust2` exposes no link-target metadata, so every non-directory
+/// entry — including hostile symlink entries a crafted archive may declare —
+/// extracts as a regular file. This is deliberately safer than materializing
+/// links we cannot validate: a symlink entry whose target we cannot parse
+/// can never make extraction write outside the destination. Revisit only if
+/// the library starts exposing link metadata.
+fn extraction_kind(entry: &ArchiveEntry) -> ExtractionEntryKind {
+    if entry.is_directory() { ExtractionEntryKind::Directory } else { ExtractionEntryKind::File }
+}
+
 fn sevenz_unix_mode(entry: &ArchiveEntry) -> Option<u32> {
     if entry.has_windows_attributes && (entry.windows_attributes() & SEVENZ_UNIX_ATTRIBUTES_FLAG) != 0 {
         Some((entry.windows_attributes() >> 16) & SEVENZ_MODE_MASK)
@@ -1257,7 +1269,7 @@ fn plan_extraction(
             continue;
         }
 
-        let kind = if entry.is_directory() { ExtractionEntryKind::Directory } else { ExtractionEntryKind::File };
+        let kind = extraction_kind(entry);
         let safety_entry = ExtractionEntry {
             archive_path: entry.name().to_owned(),
             kind,
@@ -1406,12 +1418,29 @@ fn callback_failed_error() -> sevenz_rust2::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{SevenZCreateOptions, SevenZEntryKind, SevenZError, create_7z_from_path, extract_7z, list_7z};
-    use crate::safety::{ExtractionPolicy, ExtractionSafetyError};
+    use super::{
+        SevenZCreateOptions, SevenZEntryKind, SevenZError, create_7z_from_path, extract_7z, extraction_kind, list_7z,
+    };
+    use crate::safety::{ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError};
     use crate::secrets::SecretString;
     use std::fs::{self, File};
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn extraction_kind_never_materializes_link_entries() {
+        use sevenz_rust2::ArchiveEntry;
+
+        // sevenz_rust2 exposes no link-target metadata, so even an entry a
+        // hostile archive declares as something link-like must plan as a
+        // regular file, never as a symlink or hardlink that could be
+        // materialized outside the destination.
+        let entry = ArchiveEntry { name: "payload.bin".to_owned(), ..ArchiveEntry::default() };
+        assert_eq!(extraction_kind(&entry), ExtractionEntryKind::File);
+
+        let directory = ArchiveEntry { is_directory: true, ..entry };
+        assert_eq!(extraction_kind(&directory), ExtractionEntryKind::Directory);
+    }
 
     #[test]
     fn application_of_metadata_propagates_io_errors() {

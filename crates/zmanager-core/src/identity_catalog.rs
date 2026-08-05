@@ -794,7 +794,7 @@ fn verify_private_matches_fingerprint(
     let public_der =
         key.public_key_to_der().map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
     let digest: [u8; 32] = Sha256::digest(public_der).into();
-    if crate::trust::format_spki_sha256(&digest) != expected_fingerprint {
+    if crate::trust::format_certificate_sha256(&digest) != expected_fingerprint {
         return Err(TzapIdentityCatalogError::InvalidCatalog { field: "private_key_public_key_match" });
     }
     Ok(())

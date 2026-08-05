@@ -8,7 +8,6 @@ use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use std::fmt;
 
-pub const SIGNUP_TZAP_BASE_URL: &str = "https://signup.tzap.org";
 pub const LOGIN_TZAP_BASE_URL: &str = "https://login.tzap.org";
 pub const SIGN_TZAP_BASE_URL: &str = "https://sign.tzap.org";
 pub const PROVIDER_DISCOVERY_PATH: &str = "/auth/providers";
@@ -17,8 +16,6 @@ pub const HOSTED_ACCOUNT_PATH: &str = "/account";
 pub const CURRENT_USER_PATH: &str = "/v1/me";
 pub const LOCAL_HOSTED_AUTH_BASE_URL: &str = "http://localhost:8787";
 pub const LOCAL_HOSTED_ACCOUNT_BASE_URL: &str = "http://localhost:8787";
-pub const DEV_HOSTED_AUTH_BASE_URL: &str = "https://login.dev.tzap.org";
-pub const DEV_HOSTED_ACCOUNT_BASE_URL: &str = "https://account.dev.tzap.org";
 pub const STAGING_HOSTED_AUTH_BASE_URL: &str = "https://staging.tzap.org";
 pub const STAGING_HOSTED_ACCOUNT_BASE_URL: &str = "https://staging.tzap.org";
 pub const PROD_HOSTED_AUTH_BASE_URL: &str = LOGIN_TZAP_BASE_URL;
@@ -175,54 +172,6 @@ impl TzapDisabledProviderReason {
             "policy_disabled" => Some(Self::PolicyDisabled),
             _ => None,
         }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TzapAuthProvider {
-    pub id: String,
-    pub display_name: String,
-    pub provider_type: TzapAuthProviderType,
-    pub enabled: bool,
-    pub authorization_url: Option<String>,
-    pub disabled_reason: Option<TzapDisabledProviderReason>,
-}
-
-impl TzapAuthProvider {
-    pub fn authorization_target(&self) -> Result<&str, TzapAuthError> {
-        if !self.enabled {
-            return Err(TzapAuthError::ProviderDisabled { provider_id: self.id.clone(), reason: self.disabled_reason });
-        }
-        self.authorization_url
-            .as_deref()
-            .ok_or_else(|| TzapAuthError::ProviderMissingAuthorizationUrl { provider_id: self.id.clone() })
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TzapProviderDiscovery {
-    pub providers: Vec<TzapAuthProvider>,
-}
-
-impl TzapProviderDiscovery {
-    pub fn from_json_bytes(bytes: &[u8]) -> Result<Self, TzapAuthError> {
-        let value: Value = serde_json::from_slice(bytes).map_err(TzapAuthError::InvalidJson)?;
-        Self::from_json_value(&value)
-    }
-
-    pub fn from_json_value(value: &Value) -> Result<Self, TzapAuthError> {
-        let object = object_at(value, "$")?;
-        let providers = required_field(object, "$", "providers")?
-            .as_array()
-            .ok_or(TzapAuthError::ExpectedArray { path: "providers" })?;
-        let providers = providers.iter().map(parse_provider).collect::<Result<Vec<_>, _>>()?;
-
-        Ok(Self { providers })
-    }
-
-    #[must_use]
-    pub fn provider(&self, provider_id: &str) -> Option<&TzapAuthProvider> {
-        self.providers.iter().find(|provider| provider.id == provider_id)
     }
 }
 
@@ -752,35 +701,6 @@ fn is_disallowed_provider_material_field(field: &str) -> bool {
     )
 }
 
-fn parse_provider(value: &Value) -> Result<TzapAuthProvider, TzapAuthError> {
-    let path = "providers[]";
-    let object = value.as_object().ok_or(TzapAuthError::ExpectedObject { path })?;
-
-    let id = required_string_field(object, path, "id")?;
-    let display_name = required_string_field(object, path, "display_name")?;
-    let provider_type_value = required_string_field(object, path, "provider_type")?;
-    let provider_type = TzapAuthProviderType::from_wire_value(&provider_type_value).ok_or_else(|| {
-        TzapAuthError::InvalidProviderType { provider_id: id.clone(), provider_type: provider_type_value }
-    })?;
-    let enabled = required_bool_field(object, path, "enabled")?;
-    let authorization_url = optional_string_field(object, path, "authorization_url")?;
-    let disabled_reason = optional_string_field(object, path, "disabled_reason")?
-        .map(|reason| {
-            TzapDisabledProviderReason::from_wire_value(&reason)
-                .ok_or_else(|| TzapAuthError::InvalidDisabledReason { provider_id: id.clone(), reason })
-        })
-        .transpose()?;
-
-    if enabled && authorization_url.is_none() {
-        return Err(TzapAuthError::EnabledProviderMissingAuthorizationUrl { provider_id: id });
-    }
-    if !enabled && authorization_url.is_some() {
-        return Err(TzapAuthError::DisabledProviderHasAuthorizationUrl { provider_id: id });
-    }
-
-    Ok(TzapAuthProvider { id, display_name, provider_type, enabled, authorization_url, disabled_reason })
-}
-
 fn object_at<'a>(value: &'a Value, path: &'static str) -> Result<&'a Map<String, Value>, TzapAuthError> {
     value.as_object().ok_or(TzapAuthError::ExpectedObject { path })
 }
@@ -826,15 +746,6 @@ fn optional_string_field(
         return Err(TzapAuthError::InvalidString { path, field });
     }
     Ok(Some(value.to_owned()))
-}
-
-fn required_bool_field(
-    object: &Map<String, Value>,
-    path: &'static str,
-    field: &'static str,
-) -> Result<bool, TzapAuthError> {
-    let value = required_field(object, path, field)?;
-    value.as_bool().ok_or(TzapAuthError::InvalidBoolean { path, field })
 }
 
 fn required_u64_field(
@@ -910,11 +821,11 @@ fn is_pkce_unreserved(byte: u8) -> bool {
 mod tests {
     use super::{
         AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, LOGIN_TZAP_BASE_URL, PKCE_METHOD_S256,
-        SESSION_AUDIENCE_SIGN_TZAP, SIGN_TZAP_BASE_URL, SIGNUP_TZAP_BASE_URL, TzapAuthError, TzapAuthHttpMethod,
-        TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapAuthProviderType, TzapBearerToken,
-        TzapHostedAuthCallback, TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig, TzapOAuthStateTracker,
-        TzapPendingAuthState, TzapPkcePair, TzapProviderDiscovery, TzapSessionRecord, TzapSessionStore,
-        complete_hosted_auth_handoff, fetch_current_user, pkce_s256_challenge, validate_pkce_verifier,
+        SESSION_AUDIENCE_SIGN_TZAP, SIGN_TZAP_BASE_URL, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest,
+        TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapHostedAuthCallback,
+        TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig, TzapOAuthStateTracker, TzapPendingAuthState,
+        TzapPkcePair, TzapSessionRecord, TzapSessionStore, complete_hosted_auth_handoff, fetch_current_user,
+        pkce_s256_challenge, validate_pkce_verifier,
     };
     use crate::trust;
     use serde_json::json;
@@ -1149,72 +1060,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_discovery_parses_enabled_and_disabled_providers() {
-        let discovery = TzapProviderDiscovery::from_json_value(&json!({
-            "providers": [
-                {
-                    "id": "google",
-                    "display_name": "Google",
-                    "provider_type": "google",
-                    "enabled": true,
-                    "authorization_url": "https://login.tzap.org/auth/google",
-                    "disabled_reason": null
-                },
-                {
-                    "id": "email",
-                    "display_name": "Email",
-                    "provider_type": "email_otp",
-                    "enabled": false,
-                    "disabled_reason": "not_configured"
-                }
-            ]
-        }))
-        .unwrap();
-
-        let google = discovery.provider("google").unwrap();
-        assert_eq!(google.provider_type, TzapAuthProviderType::Google);
-        assert_eq!(google.authorization_target().unwrap(), "https://login.tzap.org/auth/google");
-
-        let email = discovery.provider("email").unwrap();
-        assert!(matches!(
-            email.authorization_target(),
-            Err(TzapAuthError::ProviderDisabled { provider_id, .. })
-                if provider_id == "email"
-        ));
-    }
-
-    #[test]
-    fn provider_discovery_rejects_unsafe_disabled_redirects() {
-        assert!(matches!(
-            TzapProviderDiscovery::from_json_value(&json!({
-                "providers": [{
-                    "id": "github",
-                    "display_name": "GitHub",
-                    "provider_type": "github",
-                    "enabled": false,
-                    "authorization_url": "https://login.tzap.org/auth/github",
-                    "disabled_reason": "policy_disabled"
-                }]
-            })),
-            Err(TzapAuthError::DisabledProviderHasAuthorizationUrl { provider_id })
-                if provider_id == "github"
-        ));
-
-        assert!(matches!(
-            TzapProviderDiscovery::from_json_value(&json!({
-                "providers": [{
-                    "id": "github",
-                    "display_name": "GitHub",
-                    "provider_type": "github",
-                    "enabled": true
-                }]
-            })),
-            Err(TzapAuthError::EnabledProviderMissingAuthorizationUrl { provider_id })
-                if provider_id == "github"
-        ));
-    }
-
-    #[test]
     fn session_store_keeps_tokens_redacted_and_enforces_audience() {
         let token = TzapBearerToken::new("secret-token").unwrap();
         assert_eq!(format!("{token:?}"), "TzapBearerToken(<redacted>)");
@@ -1246,7 +1091,6 @@ mod tests {
 
     #[test]
     fn auth_base_urls_are_owned_constants() {
-        assert_eq!(SIGNUP_TZAP_BASE_URL, "https://signup.tzap.org");
         assert_eq!(LOGIN_TZAP_BASE_URL, "https://login.tzap.org");
         assert_eq!(SIGN_TZAP_BASE_URL, "https://sign.tzap.org");
     }

@@ -211,7 +211,6 @@ dictionary ExtractionPlanEntry {
 };
 
 dictionary PlanExtractResult {
-    string plan_id;
     string archive_path;
     string destination_root;
     ArchiveFormat format;
@@ -252,7 +251,6 @@ dictionary CreatePlanEntry {
 };
 
 dictionary PlanCreateResult {
-    string plan_id;
     sequence<string> source_paths;
     string destination_archive_path;
     CreateArchiveFormat format;
@@ -298,7 +296,6 @@ dictionary StartCreateRequest {
 enum MobileJobStatus {
     "Queued",
     "Running",
-    "Paused",
     "Completed",
     "Failed",
     "Cancelled"
@@ -327,8 +324,6 @@ enum MobileJobEventKind {
     "EntryStarted",
     "BytesProcessed",
     "EntryFinished",
-    "Paused",
-    "Resumed",
     "Warning",
     "Completed",
     "Failed",

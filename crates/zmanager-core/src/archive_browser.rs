@@ -1326,12 +1326,14 @@ mod tests {
         visit_entries_with_options,
     };
     use crate::jobs::{CancellationToken, JobContext};
-    use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
+    use crate::manifest::{
+        ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot, PlanOptions, plan_archive,
+    };
     use crate::secrets::SecretString;
     use crate::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
     use crate::tar_zst_backend::{TarZstdCreateOptions, create_tar_zst_from_path};
     use crate::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
-    use crate::zip_backend::{ZipCreateOptions, create_zip_from_path};
+    use crate::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
     use bzip2::Compression;
     use bzip2::write::BzEncoder;
     use std::fs::{self, File};
@@ -1342,13 +1344,18 @@ mod tests {
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
+    fn create_zip_fixture(source: impl AsRef<Path>, destination: impl AsRef<Path>) {
+        let manifest = plan_archive(source, &PlanOptions::default()).unwrap();
+        create_zip_from_manifest(&manifest, destination, &ZipCreateOptions::default()).unwrap();
+    }
+
     #[test]
     fn lists_and_extracts_single_zip_entry() {
         let temp = TestDir::new("browser_zip");
         temp.write_file("project/a.txt", b"a");
         temp.write_file("project/b.txt", b"b");
         let archive = temp.path("archive.zip");
-        create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        create_zip_fixture(temp.path("project"), &archive);
 
         let listing = list_entries(&archive).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.path == "project/b.txt"));
@@ -1365,7 +1372,7 @@ mod tests {
         temp.write_file("project/a.txt", b"a");
         temp.write_file("project/b.txt", b"b");
         let archive = temp.path("archive.zip");
-        create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        create_zip_fixture(temp.path("project"), &archive);
 
         let expected = list_entries(&archive).unwrap();
         let mut visited = Vec::new();
@@ -1385,7 +1392,7 @@ mod tests {
         temp.write_file("project/a.txt", b"a");
         temp.write_file("project/b.txt", b"b");
         let archive = temp.path("archive.zip");
-        create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        create_zip_fixture(temp.path("project"), &archive);
         let mut callbacks = 0;
 
         let error = visit_entries_with_options(&archive, BrowserListOptions::default(), |_| {
@@ -1573,7 +1580,7 @@ mod tests {
         let temp = TestDir::new("browser_preview");
         temp.write_file("project/file.txt", b"preview");
         let archive = temp.path("archive.zip");
-        create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        create_zip_fixture(temp.path("project"), &archive);
 
         let report = preview_entry(&archive, "project/file.txt").unwrap();
 

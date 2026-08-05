@@ -2249,7 +2249,6 @@ public object FfiConverterTypePlanCreateRequest: FfiConverterRustBuffer<PlanCrea
 
 
 data class PlanCreateResult (
-    var `planId`: kotlin.String, 
     var `sourcePaths`: List<kotlin.String>, 
     var `destinationArchivePath`: kotlin.String, 
     var `format`: CreateArchiveFormat, 
@@ -2279,7 +2278,6 @@ data class PlanCreateResult (
 public object FfiConverterTypePlanCreateResult: FfiConverterRustBuffer<PlanCreateResult> {
     override fun read(buf: ByteBuffer): PlanCreateResult {
         return PlanCreateResult(
-            FfiConverterString.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterTypeCreateArchiveFormat.read(buf),
@@ -2302,7 +2300,6 @@ public object FfiConverterTypePlanCreateResult: FfiConverterRustBuffer<PlanCreat
     }
 
     override fun allocationSize(value: PlanCreateResult) = (
-            FfiConverterString.allocationSize(value.`planId`) +
             FfiConverterSequenceString.allocationSize(value.`sourcePaths`) +
             FfiConverterString.allocationSize(value.`destinationArchivePath`) +
             FfiConverterTypeCreateArchiveFormat.allocationSize(value.`format`) +
@@ -2324,7 +2321,6 @@ public object FfiConverterTypePlanCreateResult: FfiConverterRustBuffer<PlanCreat
     )
 
     override fun write(value: PlanCreateResult, buf: ByteBuffer) {
-            FfiConverterString.write(value.`planId`, buf)
             FfiConverterSequenceString.write(value.`sourcePaths`, buf)
             FfiConverterString.write(value.`destinationArchivePath`, buf)
             FfiConverterTypeCreateArchiveFormat.write(value.`format`, buf)
@@ -2397,7 +2393,6 @@ public object FfiConverterTypePlanExtractRequest: FfiConverterRustBuffer<PlanExt
 
 
 data class PlanExtractResult (
-    var `planId`: kotlin.String, 
     var `archivePath`: kotlin.String, 
     var `destinationRoot`: kotlin.String, 
     var `format`: ArchiveFormat, 
@@ -2423,7 +2418,6 @@ public object FfiConverterTypePlanExtractResult: FfiConverterRustBuffer<PlanExtr
         return PlanExtractResult(
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
             FfiConverterTypeArchiveFormat.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceTypeExtractionPlanEntry.read(buf),
@@ -2438,7 +2432,6 @@ public object FfiConverterTypePlanExtractResult: FfiConverterRustBuffer<PlanExtr
     }
 
     override fun allocationSize(value: PlanExtractResult) = (
-            FfiConverterString.allocationSize(value.`planId`) +
             FfiConverterString.allocationSize(value.`archivePath`) +
             FfiConverterString.allocationSize(value.`destinationRoot`) +
             FfiConverterTypeArchiveFormat.allocationSize(value.`format`) +
@@ -2454,7 +2447,6 @@ public object FfiConverterTypePlanExtractResult: FfiConverterRustBuffer<PlanExtr
     )
 
     override fun write(value: PlanExtractResult, buf: ByteBuffer) {
-            FfiConverterString.write(value.`planId`, buf)
             FfiConverterString.write(value.`archivePath`, buf)
             FfiConverterString.write(value.`destinationRoot`, buf)
             FfiConverterTypeArchiveFormat.write(value.`format`, buf)
@@ -3052,8 +3044,6 @@ enum class MobileJobEventKind {
     ENTRY_STARTED,
     BYTES_PROCESSED,
     ENTRY_FINISHED,
-    PAUSED,
-    RESUMED,
     WARNING,
     COMPLETED,
     FAILED,
@@ -3131,7 +3121,6 @@ enum class MobileJobStatus {
     
     QUEUED,
     RUNNING,
-    PAUSED,
     COMPLETED,
     FAILED,
     CANCELLED;

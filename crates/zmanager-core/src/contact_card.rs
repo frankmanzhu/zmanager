@@ -66,12 +66,10 @@ pub enum TzapContactCardError {
     InvalidField { field: &'static str },
     MissingRecord { field: &'static str },
     CertificateNotActive,
-    UnsupportedAlgorithm,
     Canonicalization(String),
     Crypto(String),
     CertificateChain(String),
     AcceptanceRequired,
-    ContactRequiresFreshStatus { contact_id: String },
 }
 
 impl fmt::Display for TzapContactCardError {
@@ -83,7 +81,6 @@ impl fmt::Display for TzapContactCardError {
             Self::CertificateNotActive => {
                 write!(f, "contact-card signing certificate is not active")
             }
-            Self::UnsupportedAlgorithm => write!(f, "contact-card algorithm is unsupported"),
             Self::Canonicalization(reason) => {
                 write!(f, "contact-card canonicalization failed: {reason}")
             }
@@ -93,9 +90,6 @@ impl fmt::Display for TzapContactCardError {
             }
             Self::AcceptanceRequired => {
                 write!(f, "contact-card import requires explicit acceptance")
-            }
-            Self::ContactRequiresFreshStatus { contact_id } => {
-                write!(f, "contact {contact_id} requires a fresh status check before sharing")
             }
         }
     }
@@ -227,18 +221,6 @@ pub fn import_tzap_contact_card(
     inventory.contacts.push(contact.clone());
     store.save_inventory(account_key, inventory)?;
     Ok(contact)
-}
-
-pub fn accepted_contact_recipient_public_keys(
-    store: &impl TzapLocalIdentityStore,
-    account_key: &str,
-    contact_ids: &[String],
-    now_unix_seconds: u64,
-) -> Result<Vec<Vec<u8>>, TzapContactCardError> {
-    Ok(accepted_contact_recipients(store, account_key, contact_ids, now_unix_seconds)?
-        .into_iter()
-        .map(|recipient| recipient.recipient_public_key_der)
-        .collect())
 }
 
 pub fn accepted_contact_recipients(

@@ -1,6 +1,6 @@
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use crate::apple_archive_backend::{self, AppleArchiveCreateOptions, AppleArchiveCreateReport, AppleArchiveError};
-use crate::manifest::{PlanOptions, plan_archive, plan_archives};
+use crate::apple_archive_backend::{self, AppleArchiveError};
+use crate::manifest::{PlanOptions, plan_archives};
 use crate::safety::ExtractionPolicy;
 use crate::sevenz_backend::{SevenZCreateOptions, SevenZCreateReport};
 use crate::tar_gz_backend::{self, TarGzCreateOptions, TarGzError};
@@ -672,65 +672,6 @@ impl<'a> JobContext<'a> {
     }
 }
 
-/// Runs a ZIP create job and emits lifecycle/progress events.
-///
-/// Partial output state: cancellation can leave a partial destination archive.
-/// Atomic cleanup is deferred to hardening work.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when planning, ZIP creation, filesystem I/O, or
-/// cancellation fails.
-pub fn run_zip_create_job(
-    source: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    options: &ZipCreateOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<ZipCreateReport, ZipBackendError> {
-    let manifest = match plan_archive(source, &PlanOptions::default()) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            let error = ZipBackendError::Plan(error);
-            sink.emit(JobEvent::Started { kind: JobKind::ZipCreate, total_bytes: None });
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            return Err(error);
-        }
-    };
-    sink.emit(JobEvent::Started { kind: JobKind::ZipCreate, total_bytes: Some(manifest.total_bytes) });
-    let mut context = JobContext::new_with_progress_total(token, sink, Some(manifest.total_bytes));
-    let result = zip_backend::create_zip_from_manifest_with_context(&manifest, destination, options, &mut context);
-    context.flush_progress();
-    finish_zip_create_result(result, sink)
-}
-
-/// Runs a ZIP create job for multiple source roots and emits lifecycle/progress
-/// events.
-///
-/// Partial output state: cancellation can leave a partial destination archive.
-/// Atomic cleanup is deferred to hardening work.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when planning, ZIP creation, filesystem I/O, or
-/// cancellation fails.
-pub fn run_zip_create_job_from_sources(
-    sources: &[PathBuf],
-    destination: impl AsRef<Path>,
-    options: &ZipCreateOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<ZipCreateReport, ZipBackendError> {
-    run_zip_create_job_from_sources_with_plan_options(
-        sources,
-        destination,
-        options,
-        &PlanOptions::default(),
-        token,
-        sink,
-    )
-}
-
 /// Runs a ZIP create job for multiple source roots with explicit planning
 /// options and emits lifecycle/progress events.
 ///
@@ -790,33 +731,6 @@ pub fn run_zip_extract_job(
     )
 }
 
-/// Runs a ZIP extract job with an optional password and emits
-/// lifecycle/progress events.
-///
-/// Partial output state: cancellation can leave already-extracted files in the
-/// destination directory.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when ZIP reading, password validation,
-/// extraction safety, filesystem I/O, or cancellation fails.
-pub fn run_zip_extract_job_with_password(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    password: Option<&str>,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<zip_backend::ZipExtractReport, ZipBackendError> {
-    run_zip_extract_job_with_password_and_policy(
-        archive_path,
-        destination,
-        password,
-        ExtractionPolicy::default(),
-        token,
-        sink,
-    )
-}
-
 /// Runs a ZIP extract job with an optional password and explicit extraction
 /// policy while emitting lifecycle/progress events.
 ///
@@ -841,120 +755,6 @@ pub fn run_zip_extract_job_with_password_and_policy(
         zip_backend::extract_zip_with_context_and_password(archive_path, destination, policy, password, &mut context);
     context.flush_progress();
     finish_zip_extract_result(result, sink)
-}
-
-/// Runs a TAR.ZST create job and emits lifecycle/progress events.
-///
-/// Partial output state: cancellation can leave a partial destination archive.
-///
-/// # Errors
-///
-/// Returns [`TarZstdError`] when planning, TAR.ZST creation, filesystem I/O, or
-/// cancellation fails.
-pub fn run_tar_zst_create_job(
-    source: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    options: &TarZstdCreateOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_zst_backend::TarZstdCreateReport, TarZstdError> {
-    run_tar_zst_create_job_with_plan_options(source, destination, options, &PlanOptions::default(), token, sink)
-}
-
-/// Runs the clean source `.tar.zst` create profile and emits lifecycle/progress
-/// events.
-///
-/// Partial output state: cancellation can leave a partial destination archive.
-///
-/// # Errors
-///
-/// Returns [`TarZstdError`] when planning, TAR.ZST creation, filesystem I/O, or
-/// cancellation fails.
-pub fn run_clean_source_tar_zst_create_job(
-    source: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    options: &TarZstdCreateOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_zst_backend::TarZstdCreateReport, TarZstdError> {
-    run_tar_zst_create_job_with_plan_options(source, destination, options, &PlanOptions::clean_source(), token, sink)
-}
-
-/// Runs the clean source `.tar.zst` create profile for multiple source roots
-/// and emits lifecycle/progress events.
-///
-/// Partial output state: cancellation can leave a partial destination archive.
-///
-/// # Errors
-///
-/// Returns [`TarZstdError`] when planning, TAR.ZST creation, filesystem I/O, or
-/// cancellation fails.
-pub fn run_clean_source_tar_zst_create_job_from_sources(
-    sources: &[PathBuf],
-    destination: impl AsRef<Path>,
-    options: &TarZstdCreateOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_zst_backend::TarZstdCreateReport, TarZstdError> {
-    run_tar_zst_create_job_from_sources_with_plan_options(
-        sources,
-        destination,
-        options,
-        &PlanOptions::clean_source(),
-        token,
-        sink,
-    )
-}
-
-/// Runs a TAR.ZST create job for multiple source roots and emits
-/// lifecycle/progress events.
-///
-/// Partial output state: cancellation can leave a partial destination archive.
-///
-/// # Errors
-///
-/// Returns [`TarZstdError`] when planning, TAR.ZST creation, filesystem I/O, or
-/// cancellation fails.
-pub fn run_tar_zst_create_job_from_sources(
-    sources: &[PathBuf],
-    destination: impl AsRef<Path>,
-    options: &TarZstdCreateOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_zst_backend::TarZstdCreateReport, TarZstdError> {
-    run_tar_zst_create_job_from_sources_with_plan_options(
-        sources,
-        destination,
-        options,
-        &PlanOptions::default(),
-        token,
-        sink,
-    )
-}
-
-fn run_tar_zst_create_job_with_plan_options(
-    source: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    options: &TarZstdCreateOptions,
-    plan_options: &PlanOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_zst_backend::TarZstdCreateReport, TarZstdError> {
-    let manifest = match plan_archive(source, plan_options) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            let error = TarZstdError::Plan(error);
-            sink.emit(JobEvent::Started { kind: JobKind::TarZstdCreate, total_bytes: None });
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            return Err(error);
-        }
-    };
-    sink.emit(JobEvent::Started { kind: JobKind::TarZstdCreate, total_bytes: Some(manifest.total_bytes) });
-    let mut context = JobContext::new_with_progress_total(token, sink, Some(manifest.total_bytes));
-    let result =
-        tar_zst_backend::create_tar_zst_from_manifest_with_context(&manifest, destination, options, &mut context);
-    context.flush_progress();
-    finish_tar_zst_create_result(result, sink)
 }
 
 /// Runs a TAR.ZST create job for multiple source roots with explicit planning
@@ -1023,45 +823,6 @@ pub fn run_tar_gz_create_job_from_sources_with_plan_options(
         tar_gz_backend::create_tar_gz_from_manifest_with_context(&manifest, destination, options, &mut context);
     context.flush_progress();
     finish_tar_gz_create_result(result, sink)
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-/// Runs an `AppleArchive` create job for multiple source roots with explicit
-/// planning options and emits lifecycle/progress events.
-///
-/// Partial output state: cancellation can leave a partial destination archive.
-///
-/// # Errors
-///
-/// Returns [`AppleArchiveError`] when planning, `AppleArchive` creation,
-/// filesystem I/O, or cancellation fails.
-pub fn run_apple_archive_create_job_from_sources_with_plan_options(
-    sources: &[PathBuf],
-    destination: impl AsRef<Path>,
-    options: &AppleArchiveCreateOptions,
-    plan_options: &PlanOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<AppleArchiveCreateReport, AppleArchiveError> {
-    let manifest = match plan_archives(sources, plan_options) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            let error = AppleArchiveError::Plan(error);
-            sink.emit(JobEvent::Started { kind: JobKind::AppleArchiveCreate, total_bytes: None });
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            return Err(error);
-        }
-    };
-    sink.emit(JobEvent::Started { kind: JobKind::AppleArchiveCreate, total_bytes: Some(manifest.total_bytes) });
-    let mut context = JobContext::new_with_progress_total(token, sink, Some(manifest.total_bytes));
-    let result = apple_archive_backend::create_apple_archive_from_manifest_with_context(
-        &manifest,
-        destination,
-        options,
-        &mut context,
-    );
-    context.flush_progress();
-    finish_apple_archive_create_result(result, sink)
 }
 
 /// Runs a 7z create job for multiple source roots with explicit planning
@@ -1147,24 +908,6 @@ pub fn run_tzap_create_job_from_sources_with_plan_options(
     let result = tzap_backend::create_tzap_from_manifest_with_context(&manifest, destination, options, &mut context);
     context.flush_progress();
     finish_tzap_create_result(result, sink)
-}
-
-/// Runs a TAR.ZST extract job and emits lifecycle/progress events.
-///
-/// Partial output state: cancellation can leave already-extracted files in the
-/// destination directory.
-///
-/// # Errors
-///
-/// Returns [`TarZstdError`] when TAR.ZST reading, extraction safety,
-/// filesystem I/O, or cancellation fails.
-pub fn run_tar_zst_extract_job(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<TarZstdExtractReport, TarZstdError> {
-    run_tar_zst_extract_job_with_policy(archive_path, destination, ExtractionPolicy::default(), token, sink)
 }
 
 /// Runs a TAR.ZST extract job with an explicit extraction policy while emitting
@@ -1303,31 +1046,6 @@ pub fn run_rar_extract_job_with_password_and_policy(
     };
     context.flush_progress();
     finish_rar_extract_result(result, sink)
-}
-
-/// Runs a broad libarchive extract job and emits coarse lifecycle events.
-///
-/// Partial output state: cancellation is checked before extraction starts, but
-/// libarchive extraction itself is synchronous in this v1 adapter.
-///
-/// # Errors
-///
-/// Returns [`LibarchiveError`] when libarchive reading, extraction safety, or
-/// filesystem I/O fails.
-pub fn run_libarchive_extract_job(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<libarchive_backend::LibarchiveExtractReport, LibarchiveError> {
-    run_libarchive_extract_job_with_password_and_policy(
-        archive_path,
-        destination,
-        None,
-        ExtractionPolicy::default(),
-        token,
-        sink,
-    )
 }
 
 /// Runs a broad libarchive extract job with an optional password and explicit
@@ -1556,27 +1274,6 @@ fn finish_tzap_create_result(
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn finish_apple_archive_create_result(
-    result: Result<AppleArchiveCreateReport, AppleArchiveError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<AppleArchiveCreateReport, AppleArchiveError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(AppleArchiveError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(AppleArchiveError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
-
 fn finish_tzap_extract_result(
     result: Result<tzap_backend::TzapExtractReport, TzapError>,
     sink: &mut dyn JobEventSink,
@@ -1786,10 +1483,9 @@ mod tests {
     use super::{
         CancellationToken, JobEvent, JobOutcome, JobPhase, JobProgressState, PROGRESS_MIN_BYTE_STEP, ProgressCoalescer,
         run_7z_create_job_from_sources_with_plan_options, run_7z_extract_job_with_password_and_policy,
-        run_clean_source_tar_zst_create_job, run_clean_source_tar_zst_create_job_from_sources,
         run_libarchive_extract_job_with_password_and_policy, run_raw_stream_extract_job_with_policy,
-        run_tar_zst_create_job, run_tzap_create_job_from_sources_with_plan_options,
-        run_tzap_extract_job_with_password_and_policy, run_zip_create_job, run_zip_create_job_from_sources,
+        run_tar_zst_create_job_from_sources_with_plan_options, run_tzap_create_job_from_sources_with_plan_options,
+        run_tzap_extract_job_with_password_and_policy, run_zip_create_job_from_sources_with_plan_options,
         run_zip_extract_job,
     };
 
@@ -1848,6 +1544,7 @@ mod tests {
         assert_eq!(state.phase_processed_bytes, 0);
     }
     use crate::archive_browser::list_entries;
+    use crate::manifest::PlanOptions;
     use crate::raw_stream_backend::RawStreamFormat;
     use crate::safety::ExtractionPolicy;
     use crate::sevenz_backend::{SevenZCreateOptions, SevenZError};
@@ -1972,10 +1669,11 @@ mod tests {
         temp.write_file("project/file.txt", b"hello");
         let mut events = Vec::new();
 
-        run_zip_create_job(
-            temp.path("project"),
+        run_zip_create_job_from_sources_with_plan_options(
+            &[temp.path("project")],
             temp.path("archive.zip"),
             &ZipCreateOptions::default(),
+            &PlanOptions::default(),
             &CancellationToken::new(),
             &mut |event| events.push(event),
         )
@@ -2014,10 +1712,11 @@ mod tests {
     fn zip_extract_job_starts_without_progress_only_listing() {
         let temp = TestDir::new("zip_extract_without_progress_listing");
         temp.write_file("project/file.txt", b"hello");
-        run_zip_create_job(
-            temp.path("project"),
+        run_zip_create_job_from_sources_with_plan_options(
+            &[temp.path("project")],
             temp.path("archive.zip"),
             &ZipCreateOptions::default(),
+            &PlanOptions::default(),
             &CancellationToken::new(),
             &mut |_| {},
         )
@@ -2064,10 +1763,11 @@ mod tests {
     fn libarchive_extract_job_starts_without_progress_only_listing() {
         let temp = TestDir::new("libarchive_extract_without_progress_listing");
         temp.write_file("project/file.txt", b"hello");
-        run_zip_create_job(
-            temp.path("project"),
+        run_zip_create_job_from_sources_with_plan_options(
+            &[temp.path("project")],
             temp.path("archive.zip"),
             &ZipCreateOptions::default(),
+            &PlanOptions::default(),
             &CancellationToken::new(),
             &mut |_| {},
         )
@@ -2438,10 +2138,11 @@ mod tests {
         let token_for_sink = token.clone();
         let mut events = Vec::new();
 
-        let result = run_zip_create_job(
-            temp.path("project"),
+        let result = run_zip_create_job_from_sources_with_plan_options(
+            &[temp.path("project")],
             temp.path("archive.zip"),
             &ZipCreateOptions::default(),
+            &PlanOptions::default(),
             &token,
             &mut |event| {
                 if matches!(event, JobEvent::BytesProcessed { .. }) {
@@ -2464,10 +2165,11 @@ mod tests {
         let archive = temp.path("selection.zip");
         let mut events = Vec::new();
 
-        let report = run_zip_create_job_from_sources(
+        let report = run_zip_create_job_from_sources_with_plan_options(
             &[temp.path("a.txt"), temp.path("folder")],
             &archive,
             &ZipCreateOptions::default(),
+            &PlanOptions::default(),
             &CancellationToken::new(),
             &mut |event| events.push(event),
         )
@@ -2491,10 +2193,11 @@ mod tests {
         temp.write_file("project/file.txt", b"hello");
         let mut events = Vec::new();
 
-        run_tar_zst_create_job(
-            temp.path("project"),
+        run_tar_zst_create_job_from_sources_with_plan_options(
+            &[temp.path("project")],
             temp.path("archive.tar.zst"),
             &TarZstdCreateOptions { level: 1, threads: Some(1), preserve_metadata: true, replace_existing: false },
+            &PlanOptions::default(),
             &CancellationToken::new(),
             &mut |event| events.push(event),
         )
@@ -2512,10 +2215,11 @@ mod tests {
         temp.write_file("project/node_modules/pkg/index.js", b"drop");
         let mut events = Vec::new();
 
-        let report = run_clean_source_tar_zst_create_job(
-            temp.path("project"),
+        let report = run_tar_zst_create_job_from_sources_with_plan_options(
+            &[temp.path("project")],
             temp.path("project.clean.tar.zst"),
             &TarZstdCreateOptions { level: 1, threads: Some(1), preserve_metadata: true, replace_existing: false },
+            &PlanOptions::clean_source(),
             &CancellationToken::new(),
             &mut |event| events.push(event),
         )
@@ -2541,10 +2245,11 @@ mod tests {
         temp.write_file("folder/node_modules/pkg/index.js", b"drop");
         let archive = temp.path("selection.clean.tar.zst");
 
-        let report = run_clean_source_tar_zst_create_job_from_sources(
+        let report = run_tar_zst_create_job_from_sources_with_plan_options(
             &[temp.path("a.txt"), temp.path("folder")],
             &archive,
             &TarZstdCreateOptions { level: 1, threads: Some(1), preserve_metadata: true, replace_existing: false },
+            &PlanOptions::clean_source(),
             &CancellationToken::new(),
             &mut |_| {},
         )

@@ -315,7 +315,7 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
             "crl_url": trust::status_crl_pem_path(&harness.chain.platform_sha256).unwrap(),
             "issuer_certificate_sha256": harness.chain.platform_sha256,
             "crl_number": "01",
-            "crl_sha256": trust::format_crl_sha256(&[0x33; 32]),
+            "crl_sha256": trust::format_certificate_sha256(&[0x33; 32]),
             "this_update_unix_seconds": FIXED_NOW.cast_signed() - 60,
             "next_update_unix_seconds": FIXED_NOW.cast_signed() + 60
         }]

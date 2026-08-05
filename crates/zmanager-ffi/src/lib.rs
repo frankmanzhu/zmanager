@@ -250,7 +250,6 @@ pub struct ExtractionPlanEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanExtractResult {
-    pub plan_id: String,
     pub archive_path: String,
     pub destination_root: String,
     pub format: ArchiveFormat,
@@ -295,7 +294,6 @@ pub struct CreatePlanEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanCreateResult {
-    pub plan_id: String,
     pub source_paths: Vec<String>,
     pub destination_archive_path: String,
     pub format: CreateArchiveFormat,
@@ -343,7 +341,6 @@ pub struct StartCreateRequest {
 pub enum MobileJobStatus {
     Queued,
     Running,
-    Paused,
     Completed,
     Failed,
     Cancelled,
@@ -380,8 +377,6 @@ pub enum MobileJobEventKind {
     EntryStarted,
     BytesProcessed,
     EntryFinished,
-    Paused,
-    Resumed,
     Warning,
     Completed,
     Failed,
@@ -727,7 +722,6 @@ pub fn plan_extract(request: PlanExtractRequest) -> Result<PlanExtractResult, Zm
         usize_to_u64(entries.iter().filter(|entry| matches!(entry.status, ExtractionPlanEntryStatus::Block)).count());
 
     Ok(PlanExtractResult {
-        plan_id: new_plan_id("extract"),
         archive_path,
         destination_root,
         format,
@@ -780,7 +774,6 @@ pub fn plan_create(request: PlanCreateRequest) -> Result<PlanCreateResult, Zmana
     let encrypted = password_ref(&request.password).is_some();
 
     Ok(PlanCreateResult {
-        plan_id: new_plan_id("create"),
         source_paths,
         destination_archive_path,
         format: request.format,
@@ -1507,9 +1500,7 @@ impl MobileJobRegistry {
             }
             MobileJobEventKind::Failed => record.status = MobileJobStatus::Failed,
             MobileJobEventKind::Cancelled => record.status = MobileJobStatus::Cancelled,
-            MobileJobEventKind::Paused => record.status = MobileJobStatus::Paused,
-            MobileJobEventKind::Resumed
-            | MobileJobEventKind::EntryStarted
+            MobileJobEventKind::EntryStarted
             | MobileJobEventKind::BytesProcessed
             | MobileJobEventKind::EntryFinished
             | MobileJobEventKind::Warning => {}
@@ -2574,9 +2565,7 @@ fn mobile_event_from_core_event(event: CoreJobEvent) -> Option<MobileJobEvent> {
         // all totals preserved. Add dedicated phase event kinds when the
         // mobile UI adopts them.
         CoreJobEvent::PhaseStarted { .. } => None,
-        CoreJobEvent::PhaseBytesProcessed {
-            path, bytes, total_bytes_processed, ..
-        } => Some(MobileJobEvent {
+        CoreJobEvent::PhaseBytesProcessed { path, bytes, total_bytes_processed, .. } => Some(MobileJobEvent {
             sequence: 0,
             event_type: MobileJobEventKind::BytesProcessed,
             job_kind: None,
@@ -3393,11 +3382,6 @@ fn usize_to_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-fn new_plan_id(prefix: &str) -> String {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-    format!("{prefix}-{}-{now}", std::process::id())
-}
-
 fn is_retryable_io_error(kind: io::ErrorKind) -> bool {
     matches!(
         kind,
@@ -3410,7 +3394,8 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
-    use zmanager_core::zip_backend::{ZipCreateOptions, create_zip_from_path};
+    use zmanager_core::manifest::{PlanOptions, plan_archive};
+    use zmanager_core::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
 
     static JOB_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -3517,7 +3502,9 @@ mod tests {
         temp.create_dir("project");
         temp.write_file("project/readme.txt", b"hello mobile bridge\n");
         let archive = temp.path("archive.zip");
-        create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default())
+        let manifest =
+            plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
+        create_zip_from_manifest(&manifest, &archive, &ZipCreateOptions::default())
             .expect("fixture zip should be created through zmanager-core");
 
         let result =
@@ -4175,7 +4162,9 @@ mod tests {
         temp.create_dir("project");
         temp.write_file("project/readme.txt", b"hello mobile bridge\n");
         let archive = temp.path("archive.zip");
-        create_zip_from_path(temp.path("project"), &archive, &ZipCreateOptions::default())
+        let manifest =
+            plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
+        create_zip_from_manifest(&manifest, &archive, &ZipCreateOptions::default())
             .expect("fixture zip should be created through zmanager-core");
         TestArchiveFixture { temp, archive }
     }

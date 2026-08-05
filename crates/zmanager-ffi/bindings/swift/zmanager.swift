@@ -2190,7 +2190,6 @@ public func FfiConverterTypePlanCreateRequest_lower(_ value: PlanCreateRequest) 
 
 
 public struct PlanCreateResult {
-    public var planId: String
     public var sourcePaths: [String]
     public var destinationArchivePath: String
     public var format: CreateArchiveFormat
@@ -2212,8 +2211,7 @@ public struct PlanCreateResult {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(planId: String, sourcePaths: [String], destinationArchivePath: String, format: CreateArchiveFormat, formatLabel: String, entries: [CreatePlanEntry], totalEntries: UInt64, totalBytes: UInt64, excludedEntries: UInt64, excludedBytes: UInt64, outputExists: Bool, replaceExisting: Bool, encrypted: Bool, preserveMetadata: Bool, cleanSource: Bool, verifyAfterCreate: Bool, verifySupported: Bool, canStart: Bool, warnings: [BridgeError]) {
-        self.planId = planId
+    public init(sourcePaths: [String], destinationArchivePath: String, format: CreateArchiveFormat, formatLabel: String, entries: [CreatePlanEntry], totalEntries: UInt64, totalBytes: UInt64, excludedEntries: UInt64, excludedBytes: UInt64, outputExists: Bool, replaceExisting: Bool, encrypted: Bool, preserveMetadata: Bool, cleanSource: Bool, verifyAfterCreate: Bool, verifySupported: Bool, canStart: Bool, warnings: [BridgeError]) {
         self.sourcePaths = sourcePaths
         self.destinationArchivePath = destinationArchivePath
         self.format = format
@@ -2242,9 +2240,6 @@ extension PlanCreateResult: Sendable {}
 
 extension PlanCreateResult: Equatable, Hashable {
     public static func ==(lhs: PlanCreateResult, rhs: PlanCreateResult) -> Bool {
-        if lhs.planId != rhs.planId {
-            return false
-        }
         if lhs.sourcePaths != rhs.sourcePaths {
             return false
         }
@@ -2303,7 +2298,6 @@ extension PlanCreateResult: Equatable, Hashable {
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(planId)
         hasher.combine(sourcePaths)
         hasher.combine(destinationArchivePath)
         hasher.combine(format)
@@ -2334,7 +2328,6 @@ public struct FfiConverterTypePlanCreateResult: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PlanCreateResult {
         return
             try PlanCreateResult(
-                planId: FfiConverterString.read(from: &buf), 
                 sourcePaths: FfiConverterSequenceString.read(from: &buf), 
                 destinationArchivePath: FfiConverterString.read(from: &buf), 
                 format: FfiConverterTypeCreateArchiveFormat.read(from: &buf), 
@@ -2357,7 +2350,6 @@ public struct FfiConverterTypePlanCreateResult: FfiConverterRustBuffer {
     }
 
     public static func write(_ value: PlanCreateResult, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.planId, into: &buf)
         FfiConverterSequenceString.write(value.sourcePaths, into: &buf)
         FfiConverterString.write(value.destinationArchivePath, into: &buf)
         FfiConverterTypeCreateArchiveFormat.write(value.format, into: &buf)
@@ -2498,7 +2490,6 @@ public func FfiConverterTypePlanExtractRequest_lower(_ value: PlanExtractRequest
 
 
 public struct PlanExtractResult {
-    public var planId: String
     public var archivePath: String
     public var destinationRoot: String
     public var format: ArchiveFormat
@@ -2514,8 +2505,7 @@ public struct PlanExtractResult {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(planId: String, archivePath: String, destinationRoot: String, format: ArchiveFormat, formatLabel: String, entries: [ExtractionPlanEntry], totalEntries: UInt64, writableEntries: UInt64, skippedEntries: UInt64, blockedEntries: UInt64, estimatedBytes: UInt64?, canStart: Bool, warnings: [BridgeError]) {
-        self.planId = planId
+    public init(archivePath: String, destinationRoot: String, format: ArchiveFormat, formatLabel: String, entries: [ExtractionPlanEntry], totalEntries: UInt64, writableEntries: UInt64, skippedEntries: UInt64, blockedEntries: UInt64, estimatedBytes: UInt64?, canStart: Bool, warnings: [BridgeError]) {
         self.archivePath = archivePath
         self.destinationRoot = destinationRoot
         self.format = format
@@ -2538,9 +2528,6 @@ extension PlanExtractResult: Sendable {}
 
 extension PlanExtractResult: Equatable, Hashable {
     public static func ==(lhs: PlanExtractResult, rhs: PlanExtractResult) -> Bool {
-        if lhs.planId != rhs.planId {
-            return false
-        }
         if lhs.archivePath != rhs.archivePath {
             return false
         }
@@ -2581,7 +2568,6 @@ extension PlanExtractResult: Equatable, Hashable {
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(planId)
         hasher.combine(archivePath)
         hasher.combine(destinationRoot)
         hasher.combine(format)
@@ -2606,7 +2592,6 @@ public struct FfiConverterTypePlanExtractResult: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PlanExtractResult {
         return
             try PlanExtractResult(
-                planId: FfiConverterString.read(from: &buf), 
                 archivePath: FfiConverterString.read(from: &buf), 
                 destinationRoot: FfiConverterString.read(from: &buf), 
                 format: FfiConverterTypeArchiveFormat.read(from: &buf), 
@@ -2623,7 +2608,6 @@ public struct FfiConverterTypePlanExtractResult: FfiConverterRustBuffer {
     }
 
     public static func write(_ value: PlanExtractResult, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.planId, into: &buf)
         FfiConverterString.write(value.archivePath, into: &buf)
         FfiConverterString.write(value.destinationRoot, into: &buf)
         FfiConverterTypeArchiveFormat.write(value.format, into: &buf)
@@ -4036,8 +4020,6 @@ public enum MobileJobEventKind {
     case entryStarted
     case bytesProcessed
     case entryFinished
-    case paused
-    case resumed
     case warning
     case completed
     case failed
@@ -4067,17 +4049,13 @@ public struct FfiConverterTypeMobileJobEventKind: FfiConverterRustBuffer {
         
         case 4: return .entryFinished
         
-        case 5: return .paused
+        case 5: return .warning
         
-        case 6: return .resumed
+        case 6: return .completed
         
-        case 7: return .warning
+        case 7: return .failed
         
-        case 8: return .completed
-        
-        case 9: return .failed
-        
-        case 10: return .cancelled
+        case 8: return .cancelled
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -4103,28 +4081,20 @@ public struct FfiConverterTypeMobileJobEventKind: FfiConverterRustBuffer {
             writeInt(&buf, Int32(4))
         
         
-        case .paused:
+        case .warning:
             writeInt(&buf, Int32(5))
         
         
-        case .resumed:
+        case .completed:
             writeInt(&buf, Int32(6))
         
         
-        case .warning:
+        case .failed:
             writeInt(&buf, Int32(7))
         
         
-        case .completed:
-            writeInt(&buf, Int32(8))
-        
-        
-        case .failed:
-            writeInt(&buf, Int32(9))
-        
-        
         case .cancelled:
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(8))
         
         }
     }
@@ -4321,7 +4291,6 @@ public enum MobileJobStatus {
     
     case queued
     case running
-    case paused
     case completed
     case failed
     case cancelled
@@ -4346,13 +4315,11 @@ public struct FfiConverterTypeMobileJobStatus: FfiConverterRustBuffer {
         
         case 2: return .running
         
-        case 3: return .paused
+        case 3: return .completed
         
-        case 4: return .completed
+        case 4: return .failed
         
-        case 5: return .failed
-        
-        case 6: return .cancelled
+        case 5: return .cancelled
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -4370,20 +4337,16 @@ public struct FfiConverterTypeMobileJobStatus: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
         
         
-        case .paused:
+        case .completed:
             writeInt(&buf, Int32(3))
         
         
-        case .completed:
+        case .failed:
             writeInt(&buf, Int32(4))
         
         
-        case .failed:
-            writeInt(&buf, Int32(5))
-        
-        
         case .cancelled:
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(5))
         
         }
     }

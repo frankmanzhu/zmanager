@@ -34,7 +34,6 @@ pub const TZAP_OID_DOCUMENT_SIGNING_EKU: &str = "2.25.20165350538039247213280808
 pub const TZAP_OID_CA_POLICY: &str = "2.25.216801977638581014157980575261877559132";
 pub const TZAP_OID_LEAF_POLICY: &str = "2.25.194500518885741369143906285659225836299";
 pub const TZAP_OID_METADATA_EXTENSION: &str = "2.25.25754549376475580214508793807157112225";
-pub const TZAP_OID_STATUS_PROOF_EXTENSION: &str = "2.25.25951712805955241282365074948746758705";
 
 const OID_ECDSA_WITH_SHA256: &str = "1.2.840.10045.4.3.2";
 const OID_ANY_EXTENDED_KEY_USAGE: &str = "2.5.29.37.0";
@@ -1261,27 +1260,12 @@ pub fn format_certificate_sha256(digest: &[u8; 32]) -> String {
 }
 
 #[must_use]
-pub fn format_root_sha256(digest: &[u8; 32]) -> String {
-    format_sha256_identifier(digest)
-}
-
-#[must_use]
 pub fn format_issuer_sha256(digest: &[u8; 32]) -> String {
     format_sha256_identifier(digest)
 }
 
 #[must_use]
-pub fn format_crl_sha256(digest: &[u8; 32]) -> String {
-    format_sha256_identifier(digest)
-}
-
-#[must_use]
 pub fn format_csr_sha256(digest: &[u8; 32]) -> String {
-    format_sha256_identifier(digest)
-}
-
-#[must_use]
-pub fn format_spki_sha256(digest: &[u8; 32]) -> String {
     format_sha256_identifier(digest)
 }
 
@@ -1324,10 +1308,6 @@ pub fn parse_sha256_identifier(value: &str) -> Result<[u8; 32], TrustIdentifierE
 }
 
 pub fn parse_certificate_sha256(value: &str) -> Result<[u8; 32], TrustIdentifierError> {
-    parse_sha256_identifier(value)
-}
-
-pub fn parse_root_sha256(value: &str) -> Result<[u8; 32], TrustIdentifierError> {
     parse_sha256_identifier(value)
 }
 
@@ -1431,29 +1411,6 @@ pub fn percent_encode_path_param(value: &str) -> String {
     encoded
 }
 
-pub fn percent_decode_path_param(value: &str) -> Result<String, TrustIdentifierError> {
-    let bytes = value.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        if bytes[index] != b'%' {
-            out.push(bytes[index]);
-            index += 1;
-            continue;
-        }
-        if index + 2 >= bytes.len() {
-            return Err(TrustIdentifierError::PercentEncoding);
-        }
-        let hi = hex_value(bytes[index + 1]).ok_or(TrustIdentifierError::PercentEncoding)?;
-        let lo = hex_value(bytes[index + 2]).ok_or(TrustIdentifierError::PercentEncoding)?;
-        out.push((hi << 4) | lo);
-        index += 3;
-    }
-
-    String::from_utf8(out).map_err(|_| TrustIdentifierError::InvalidCharacter)
-}
-
 fn validate_and_percent_encode(identifier: &str) -> Result<String, TrustIdentifierError> {
     parse_sha256_identifier(identifier)?;
     Ok(percent_encode_path_param(identifier))
@@ -1520,14 +1477,13 @@ mod tests {
         TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TzapCertificateProfileError,
         TzapCertificateProfileOptions, TzapCertificateStatus, TzapIdentityAssurance, TzapOfficialRootPinKind,
         TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState, canonical_serial_hex, format_certificate_sha256,
-        format_crl_sha256, format_csr_sha256, format_issuer_sha256, format_root_sha256, format_spki_sha256,
-        is_valid_base64url_no_padding, is_valid_issuer_key_identifier, is_valid_public_device_id,
-        is_valid_public_org_id, is_valid_public_signer_id, is_valid_serial_hex, is_valid_sha256_identifier,
-        parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256, parse_root_sha256,
-        parse_serial_hex, parse_sha256_identifier, parse_spki_sha256, percent_decode_path_param,
-        percent_encode_path_param, status_certificate_by_fingerprint_path, status_certificate_by_issuer_path,
-        trust_intermediate_pem_path, trust_root_pem_path, validate_base64url_no_padding,
-        validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
+        format_csr_sha256, format_issuer_sha256, is_valid_base64url_no_padding, is_valid_issuer_key_identifier,
+        is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id, is_valid_serial_hex,
+        is_valid_sha256_identifier, parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256,
+        parse_serial_hex, parse_sha256_identifier, parse_spki_sha256, percent_encode_path_param,
+        status_certificate_by_fingerprint_path, status_certificate_by_issuer_path, trust_intermediate_pem_path,
+        trust_root_pem_path, validate_base64url_no_padding, validate_custom_tzap_certificate_chain_der,
+        validate_official_tzap_certificate_chain_der,
     };
     use openssl::asn1::{Asn1Object, Asn1OctetString, Asn1Time};
     use openssl::bn::BigNum;
@@ -1552,17 +1508,13 @@ mod tests {
     #[test]
     fn canonical_sha256_formatters_match() {
         assert_eq!(format_certificate_sha256(&SHA256_BYTES), SHA256_IDENT);
-        assert_eq!(format_root_sha256(&SHA256_BYTES), SHA256_IDENT);
         assert_eq!(format_issuer_sha256(&SHA256_BYTES), SHA256_IDENT);
         assert_eq!(format_csr_sha256(&SHA256_BYTES), SHA256_IDENT);
-        assert_eq!(format_crl_sha256(&SHA256_BYTES), SHA256_IDENT);
-        assert_eq!(format_spki_sha256(&SHA256_BYTES), SHA256_IDENT);
     }
 
     #[test]
     fn canonical_sha256_parsers_match() {
         assert_eq!(parse_certificate_sha256(SHA256_IDENT).unwrap(), SHA256_BYTES);
-        assert_eq!(parse_root_sha256(SHA256_IDENT).unwrap(), SHA256_BYTES);
         assert_eq!(parse_issuer_sha256(SHA256_IDENT).unwrap(), SHA256_BYTES);
         assert_eq!(parse_crl_sha256(SHA256_IDENT).unwrap(), SHA256_BYTES);
         assert_eq!(parse_csr_sha256(SHA256_IDENT).unwrap(), SHA256_BYTES);
@@ -1623,11 +1575,9 @@ mod tests {
     }
 
     #[test]
-    fn percent_encode_decodes_sha256_path_parameter() {
+    fn percent_encodes_sha256_path_parameter() {
         let encoded = percent_encode_path_param(SHA256_IDENT);
         assert_eq!(encoded, "sha256%3A0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f");
-        assert_eq!(percent_decode_path_param(&encoded).unwrap(), SHA256_IDENT);
-        assert!(percent_decode_path_param("%2").is_err());
     }
 
     #[test]
@@ -2122,7 +2072,7 @@ mod tests {
         chain_der.push(platform.to_der().unwrap());
         chain_der.push(root_der);
 
-        CertificateFixture { chain_der, root_pin: format_root_sha256(&root_digest) }
+        CertificateFixture { chain_der, root_pin: format_certificate_sha256(&root_digest) }
     }
 
     fn root_certificate(key: &PKeyRef<Private>, config: ChainConfig) -> X509 {

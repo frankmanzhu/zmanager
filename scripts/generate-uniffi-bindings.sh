@@ -25,6 +25,10 @@ if [[ -z "$REGEN_KOTLIN_DIR" || -z "$REGEN_SWIFT_DIR" ]]; then
 fi
 
 mkdir -p "$REGEN_KOTLIN_DIR" "$REGEN_SWIFT_DIR"
+# Resolve to absolute paths: uniffi-bindgen applies --out-dir relative to the
+# current directory, and the generation below runs from inside the crate.
+REGEN_KOTLIN_DIR="$(cd "$REGEN_KOTLIN_DIR" && pwd)"
+REGEN_SWIFT_DIR="$(cd "$REGEN_SWIFT_DIR" && pwd)"
 
 (
   cd "$CRATE_DIR"

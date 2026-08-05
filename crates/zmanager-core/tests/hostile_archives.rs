@@ -6,11 +6,23 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sevenz_rust2::{ArchiveEntry, ArchiveWriter};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
+use zmanager_core::jobs::{CancellationToken, JobContext, JobEvent};
 use zmanager_core::libarchive_backend::extract_archive;
 use zmanager_core::safety::{ExtractionLimits, ExtractionPolicy, ExtractionSafetyError};
 use zmanager_core::sevenz_backend::extract_7z;
 use zmanager_core::tar_zst_backend::extract_tar_zst;
-use zmanager_core::zip_backend::{ZipBackendError, extract_zip, list_zip};
+use zmanager_core::zip_backend::{ZipBackendError, ZipExtractReport, extract_zip_with_context_and_password, list_zip};
+
+fn extract_zip_default(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+) -> Result<ZipExtractReport, ZipBackendError> {
+    let token = CancellationToken::new();
+    let mut sink = |_event: JobEvent| {};
+    let mut context = JobContext::new(&token, &mut sink);
+    extract_zip_with_context_and_password(archive_path, destination, policy, None, &mut context)
+}
 
 #[test]
 fn zip_hostile_fixtures_are_rejected() {
@@ -24,7 +36,7 @@ fn zip_hostile_fixtures_are_rejected() {
     ];
 
     for (name, archive) in cases {
-        let error = extract_zip(&archive, temp.path(format!("out-{name}")), ExtractionPolicy::default());
+        let error = extract_zip_default(&archive, temp.path(format!("out-{name}")), ExtractionPolicy::default());
         assert!(error.is_err(), "{name} should be rejected");
     }
 
@@ -102,7 +114,7 @@ fn truncated_and_corrupt_archives_fail_closed() {
     fs::write(temp.path("corrupt.7z"), b"not a 7z archive").unwrap();
     fs::write(temp.path("corrupt.tar"), b"not a tar archive").unwrap();
 
-    assert!(extract_zip(&truncated_zip, temp.path("zip-out"), ExtractionPolicy::default()).is_err());
+    assert!(extract_zip_default(&truncated_zip, temp.path("zip-out"), ExtractionPolicy::default()).is_err());
     assert!(
         extract_tar_zst(temp.path("corrupt.tar.zst"), temp.path("tar-zst-out"), ExtractionPolicy::default()).is_err()
     );
@@ -153,7 +165,7 @@ fn zip_extraction_rejects_entries_above_expansion_ratio_limit() {
         ..ExtractionPolicy::default()
     };
 
-    let error = extract_zip(&archive, temp.path("out"), policy).unwrap_err();
+    let error = extract_zip_default(&archive, temp.path("out"), policy).unwrap_err();
 
     assert!(matches!(error, ZipBackendError::Safety(ExtractionSafetyError::ExpansionRatioLimitExceeded { .. })));
     assert!(!temp.path("out/bomb.bin").exists());

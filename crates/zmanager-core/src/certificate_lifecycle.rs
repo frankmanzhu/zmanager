@@ -957,9 +957,7 @@ mod tests {
         assert!(matches!(error, TzapCertificateLifecycleError::InvalidField { field: "result" }));
 
         // Non-JSON bodies are rejected too.
-        assert!(
-            revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: b"not json".to_vec() }).is_err()
-        );
+        assert!(revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: b"not json".to_vec() }).is_err());
 
         // The pending marker stays incomplete and a known completion stays
         // complete.

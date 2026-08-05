@@ -312,16 +312,7 @@ fn session_from_json(value: &Value) -> Result<crate::auth_client::TzapSessionRec
     })
 }
 
-fn stable_tzap_error_json(operation: &str, message: &str) -> String {
-    json!({
-        "ok": false,
-        "operation": operation,
-        "error": message,
-    })
-    .to_string()
-}
-
-fn run_fake_tzap_service<F>(request_json: &str, operation: &'static str, action: F) -> String
+fn run_fake_tzap_service<F>(request_json: &str, action: F) -> String
 where
     F: FnOnce(
         &mut FileTzapLocalIdentityStore,
@@ -344,7 +335,11 @@ where
         action(&mut identity_store, &session, &options, &request)
     }) {
         Ok(value) => value.to_string(),
-        Err(message) => stable_tzap_error_json(operation, &message),
+        // Single error envelope for every tzap service endpoint; consumers
+        // parse `ok`/`message` only. The legacy `operation`/`error` shape
+        // was dropped when the fake endpoints were unified with the
+        // JSON-request endpoints.
+        Err(message) => ffi_error_json(&message),
     }
 }
 
@@ -980,7 +975,7 @@ pub fn tzap_certificate_inventory_json(request_json: &str) -> String {
 }
 
 pub fn tzap_cert_enroll_json(request_json: &str) -> String {
-    run_fake_tzap_service(request_json, OP_CERT_ENROLL, |store, session, options, _| {
+    run_fake_tzap_service(request_json, |store, session, options, _| {
         crate::local_fake_tzap::enroll_local_fake_certificate(store, session, options)
             .map(|certificate| {
                 json!({
@@ -994,7 +989,7 @@ pub fn tzap_cert_enroll_json(request_json: &str) -> String {
 }
 
 pub fn tzap_cert_renew_json(request_json: &str) -> String {
-    run_fake_tzap_service(request_json, OP_CERT_RENEW, |store, session, options, request| {
+    run_fake_tzap_service(request_json, |store, session, options, request| {
         let certificate_id = required_request_string(request, "certificate_id")?;
         crate::local_fake_tzap::renew_local_fake_certificate(store, session, options, &certificate_id)
             .map(|certificate| {
@@ -1009,7 +1004,7 @@ pub fn tzap_cert_renew_json(request_json: &str) -> String {
 }
 
 pub fn tzap_cert_revoke_json(request_json: &str) -> String {
-    run_fake_tzap_service(request_json, OP_CERT_REVOKE, |store, session, options, request| {
+    run_fake_tzap_service(request_json, |store, session, options, request| {
         let certificate_id = required_request_string(request, "certificate_id")?;
         crate::local_fake_tzap::revoke_local_fake_certificate(store, session, options, &certificate_id)
             .map(|completion| {
@@ -1024,7 +1019,7 @@ pub fn tzap_cert_revoke_json(request_json: &str) -> String {
 }
 
 pub fn tzap_device_retire_json(request_json: &str) -> String {
-    run_fake_tzap_service(request_json, OP_DEVICE_RETIRE, |store, session, options, _| {
+    run_fake_tzap_service(request_json, |store, session, options, _| {
         crate::local_fake_tzap::retire_local_fake_device(store, session, options)
             .map(|report| {
                 json!({

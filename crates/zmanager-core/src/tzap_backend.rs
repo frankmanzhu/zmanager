@@ -1113,6 +1113,13 @@ fn build_recipient_wrap_record_from_certificate_der(
     )))
 }
 
+/// Wraps a raw recipient SPKI in a throwaway self-signed certificate so the
+/// keywrap plugin's cert-only API can consume it.
+///
+/// The recipient identity recorded in the archive is therefore this synthetic
+/// certificate, not the recipient's real one. See the design note
+/// `adr/2026-08-06-synthetic-recipient-certificate.md` in the private
+/// implementation-docs repo; revisit when the plugin accepts raw SPKI.
 fn synthetic_recipient_certificate_der(public_key_spki_der: &[u8]) -> Result<Vec<u8>, TzapError> {
     let public_key = PKey::<Public>::public_key_from_der(public_key_spki_der)
         .map_err(|source| TzapError::KeyWrap(format!("recipient public key is invalid: {source}")))?;
@@ -3612,6 +3619,12 @@ fn open_tzap_archive_with_key_options(
         return Err(TzapError::Format(FormatError::KeyMaterialMismatch));
     }
     let master_key = match (&kdf_params, password) {
+        // Deliberate contract: an explicitly empty password ("") is
+        // equivalent to no password and opens raw archives with the
+        // placeholder master key, so an empty string can never be confused
+        // with a real passphrase that happens to derive to the same key.
+        // Callers that want confidentiality must reject empty input before
+        // reaching this point.
         (KdfParams::None, _) | (KdfParams::Raw, None | Some("")) => placeholder_master_key()?,
         (KdfParams::Argon2id { .. }, Some(password)) => MasterKey::derive_from_passphrase(&kdf_params, password)?,
         (KdfParams::Argon2id { .. }, None) => return Err(TzapError::PasswordRequired),

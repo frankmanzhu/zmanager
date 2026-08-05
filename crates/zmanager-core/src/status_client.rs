@@ -73,40 +73,9 @@ impl<'a, T: TzapAuthHttpTransport> TzapStatusClient<'a, T> {
         Self { sign_base_url: sign_base_url.into(), transport }
     }
 
-    pub fn trust_roots(&self) -> Result<Value, TzapStatusClientError> {
-        self.get_json(trust::TRUST_ROOTS_PATH)
-    }
-
-    pub fn trust_root_pem(&self, root_sha256: &str) -> Result<Vec<u8>, TzapStatusClientError> {
-        let path = trust::trust_root_pem_path(root_sha256)
-            .map_err(|_| TzapStatusClientError::InvalidField { field: "root_sha256" })?;
-        self.get_bytes(&path)
-    }
-
-    pub fn trust_intermediates(&self) -> Result<Value, TzapStatusClientError> {
-        self.get_json(trust::TRUST_INTERMEDIATES_PATH)
-    }
-
-    pub fn trust_intermediate_pem(&self, issuer_sha256: &str) -> Result<Vec<u8>, TzapStatusClientError> {
-        let path = trust::trust_intermediate_pem_path(issuer_sha256)
-            .map_err(|_| TzapStatusClientError::InvalidField { field: "issuer_sha256" })?;
-        self.get_bytes(&path)
-    }
-
     pub fn status_by_fingerprint(&self, certificate_sha256: &str) -> Result<TzapStatusResponse, TzapStatusClientError> {
         let path = trust::status_certificate_by_fingerprint_path(certificate_sha256)
             .map_err(|_| TzapStatusClientError::InvalidField { field: "certificate_sha256" })?;
-        let bytes = self.get_bytes(&path)?;
-        TzapStatusResponse::from_json_bytes(&bytes)
-    }
-
-    pub fn status_by_issuer_serial(
-        &self,
-        issuer_sha256: &str,
-        serial_number: &str,
-    ) -> Result<TzapStatusResponse, TzapStatusClientError> {
-        let path = trust::status_certificate_by_issuer_path(issuer_sha256, serial_number)
-            .map_err(|_| TzapStatusClientError::InvalidField { field: "issuer_serial" })?;
         let bytes = self.get_bytes(&path)?;
         TzapStatusResponse::from_json_bytes(&bytes)
     }
@@ -132,11 +101,6 @@ impl<'a, T: TzapAuthHttpTransport> TzapStatusClient<'a, T> {
         let path = trust::status_crl_pem_path(issuer_sha256)
             .map_err(|_| TzapStatusClientError::InvalidField { field: "issuer_sha256" })?;
         crl_download_to_der(&self.get_bytes(&path)?)
-    }
-
-    fn get_json(&self, path: &str) -> Result<Value, TzapStatusClientError> {
-        let bytes = self.get_bytes(path)?;
-        Ok(serde_json::from_slice(&bytes)?)
     }
 
     fn get_bytes(&self, path: &str) -> Result<Vec<u8>, TzapStatusClientError> {
@@ -908,7 +872,7 @@ mod tests {
                 "crl_url": trust::status_crl_pem_path(&issuer_sha256).unwrap(),
                 "issuer_certificate_sha256": issuer_sha256,
                 "crl_number": "01",
-                "crl_sha256": trust::format_crl_sha256(&[0x10; 32]),
+                "crl_sha256": trust::format_certificate_sha256(&[0x10; 32]),
                 "this_update_unix_seconds": 900,
                 "next_update_unix_seconds": 1_200
             }]
@@ -922,7 +886,7 @@ mod tests {
                 "crl_url": trust::status_crl_pem_path(&issuer_sha256).unwrap(),
                 "issuer_certificate_sha256": issuer_sha256,
                 "crl_number": "01",
-                "crl_sha256": trust::format_crl_sha256(&[0x10; 32]),
+                "crl_sha256": trust::format_certificate_sha256(&[0x10; 32]),
                 "this_update": "1970-01-01T00:15:00Z",
                 "next_update": "1970-01-01T00:20:00Z"
             }]

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -151,3 +152,60 @@ jobs:
           -Triplet "${{ matrix.triplet }}"
           -VcArch "${{ matrix.vcarch }}"
           -VsComponent "${{ matrix.component }}"
+
+  benchmark:
+    # Manual run of the 100k-entry planning benchmark (plan_benchmark.rs):
+    # reports the BASELINE timing line and fails if planning regresses
+    # beyond the 120s upper bound. Run from the Actions tab (Run workflow).
+    name: plan benchmark (manual)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Clone tzap
+        run: |
+          TZAP_REV=$(cat tzap-rev.txt 2>/dev/null || echo "main")
+          git clone https://github.com/tzap-org/tzap.git ../tzap
+          git -C ../tzap checkout "$TZAP_REV" || git -C ../tzap checkout main
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            brotli \
+            bzip2 \
+            cmake \
+            gcab \
+            genisoimage \
+            gzip \
+            libacl1-dev \
+            libarchive-dev \
+            libarchive-tools \
+            libbz2-dev \
+            liblz4-dev \
+            liblzma-dev \
+            libssl-dev \
+            libxml2-dev \
+            libzstd-dev \
+            dpkg-dev \
+            lrzip \
+            lz4 \
+            lzip \
+            lzop \
+            ncompress \
+            python3 \
+            rpm \
+            unzip \
+            xz-utils \
+            zlib1g-dev \
+            zip \
+            zstd
+          sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run plan benchmark
+        run: cargo test -p zmanager-core --release --lib plan_benchmark -- --ignored --nocapture

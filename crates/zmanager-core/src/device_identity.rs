@@ -149,7 +149,7 @@ fn build_device_csr(private_key: &PKey<Private>, options: &TzapDeviceCsrOptions)
 
 fn spki_fingerprint(spki_der: &[u8]) -> String {
     let digest: [u8; 32] = Sha256::digest(spki_der).into();
-    trust::format_spki_sha256(&digest)
+    trust::format_certificate_sha256(&digest)
 }
 
 fn csr_fingerprint(csr_der: &[u8]) -> String {
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn recipient_key_distinctness_rejects_reused_signing_fingerprint() {
-        let fingerprint = trust::format_spki_sha256(&[0x42; 32]);
+        let fingerprint = trust::format_certificate_sha256(&[0x42; 32]);
 
         assert!(matches!(
             ensure_recipient_key_is_distinct_from_signing_key(&fingerprint, &fingerprint),
