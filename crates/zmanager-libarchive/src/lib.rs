@@ -282,7 +282,9 @@ impl ReadArchive {
         let mut pointers = wide_paths.iter().map(Vec::as_ptr).collect::<Vec<_>>();
         pointers.push(ptr::null());
 
-        self.check_status(unsafe { sys::archive_read_open_filenames_w(self.as_ptr(), pointers.as_mut_ptr(), BLOCK_SIZE) })?;
+        self.check_status(unsafe {
+            sys::archive_read_open_filenames_w(self.as_ptr(), pointers.as_mut_ptr(), BLOCK_SIZE)
+        })?;
         Ok(())
     }
 

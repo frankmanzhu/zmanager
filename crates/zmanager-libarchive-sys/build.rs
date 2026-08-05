@@ -456,11 +456,8 @@ fn generate_bindings() {
     // allowlists (see bindings/linux-musl.rs header for the exact command).
     if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("musl") {
         let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-        std::fs::copy(
-            manifest_dir.join("bindings/linux-musl.rs"),
-            out_path.join("bindings.rs"),
-        )
-        .expect("Unable to copy checked-in musl bindings");
+        std::fs::copy(manifest_dir.join("bindings/linux-musl.rs"), out_path.join("bindings.rs"))
+            .expect("Unable to copy checked-in musl bindings");
         return;
     }
     let wrapper_path = out_path.join("wrapper.h");
