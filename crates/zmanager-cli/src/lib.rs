@@ -1,4 +1,4 @@
-mod app;
+mod cli;
 mod output;
 
-pub use app::run_from_env;
+pub use cli::app::run_from_env;
