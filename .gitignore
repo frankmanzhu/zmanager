@@ -38,4 +38,7 @@ __pycache__/
 # Vendored dependencies
 /vendor/
 
+# Private implementation docs (own repo: frankmanzhu/zmanager-implementation-docs)
+/implementation-docs/
+
 # Cargo.lock is intentionally tracked for this CLI workspace.
