@@ -69,7 +69,8 @@ docker run --rm \
       xz-dev xz-static \
       zstd-dev zstd-static \
       lz4-dev lz4-static \
-      mbedtls-dev mbedtls-static
+      expat-dev expat-static \
+      nettle-dev nettle-static
 
     TARGET_ENV=${TARGET//-/_}
     declare -x "CC_${TARGET_ENV}=cc"

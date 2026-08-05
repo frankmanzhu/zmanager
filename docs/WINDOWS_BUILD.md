@@ -8,8 +8,8 @@ binding path.
 
 | Platform | Rust target | vcpkg triplet | Runner |
 | --- | --- | --- | --- |
-| Windows x64 | `x86_64-pc-windows-msvc` | `x64-windows-static-md` | `windows-2025` |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | `arm64-windows-static-md` | `windows-11-arm` |
+| Windows x64 | `x86_64-pc-windows-msvc` | `x64-windows-static` | `windows-2025` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | `arm64-windows-static` | `windows-11-arm` |
 
 ## Required Tools
 
@@ -25,15 +25,15 @@ dependencies used by that build:
 
 ```powershell
 C:\vcpkg\vcpkg.exe install `
-  zlib:x64-windows-static-md `
-  bzip2:x64-windows-static-md `
-  liblzma:x64-windows-static-md `
-  zstd:x64-windows-static-md `
-  lz4:x64-windows-static-md `
-  openssl:x64-windows-static-md
+  zlib:x64-windows-static `
+  bzip2:x64-windows-static `
+  liblzma:x64-windows-static `
+  zstd:x64-windows-static `
+  lz4:x64-windows-static `
+  openssl:x64-windows-static
 ```
 
-Use `arm64-windows-static-md` instead of `x64-windows-static-md` for native ARM64.
+Use `arm64-windows-static` instead of `x64-windows-static` for native ARM64.
 
 ## Local Validation
 
@@ -44,7 +44,7 @@ Windows x64:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\ci-windows.ps1 `
   -Target "x86_64-pc-windows-msvc" `
-  -Triplet "x64-windows-static-md" `
+  -Triplet "x64-windows-static" `
   -VcArch "x64" `
   -VsComponent "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
 ```
@@ -54,7 +54,7 @@ Windows ARM64:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\ci-windows.ps1 `
   -Target "aarch64-pc-windows-msvc" `
-  -Triplet "arm64-windows-static-md" `
+  -Triplet "arm64-windows-static" `
   -VcArch "arm64" `
   -VsComponent "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
 ```
@@ -69,7 +69,8 @@ narrow set of owned FFI declarations. The safe Rust wrapper in
 `zmanager-core` uses.
 
 Windows builds intentionally use XmlLite and Windows CNG where possible, and use
-vcpkg static-library triplets with the dynamic MSVC runtime. That keeps the
+vcpkg static-library triplets with the static MSVC runtime (`-C
+target-feature=+crt-static` and `MSVC_USE_STATIC_CRT=ON`). That keeps the
 libarchive dependency boundary smaller than the former MinGW path, avoids
 libxml2/iconv runtime requirements on Windows, and statically links the
 third-party compression and crypto libraries.

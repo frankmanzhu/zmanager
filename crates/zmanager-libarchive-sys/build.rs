@@ -159,18 +159,19 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
         // Codecs and crypto are enabled and linked statically (Alpine
         // *-static packages), mirroring the Windows vcpkg static triplets.
         // The packaging scripts must install zlib-static bzip2-static
-        // xz-static zstd-static lz4-static mbedtls-static (plus dev headers).
-        // mbedtls is used instead of OpenSSL because Alpine no longer ships
-        // static OpenSSL archives (openssl-static was dropped).
+        // xz-static zstd-static lz4-static expat-static nettle-static
+        // (plus dev headers). nettle replaces OpenSSL (Alpine no longer ships
+        // static OpenSSL archives) and satisfies libarchive's AES + MD5/SHA1
+        // requirements; expat provides the XML parser the XAR reader needs.
         config
             .define("ENABLE_ACL", "OFF")
             .define("ENABLE_XATTR", "OFF")
             .define("ENABLE_ICONV", "OFF")
             .define("ENABLE_LIBXML2", "OFF")
-            .define("ENABLE_EXPAT", "OFF")
+            .define("ENABLE_EXPAT", "ON")
             .define("ENABLE_OPENSSL", "OFF")
-            .define("ENABLE_MBEDTLS", "ON")
-            .define("ENABLE_NETTLE", "OFF")
+            .define("ENABLE_MBEDTLS", "OFF")
+            .define("ENABLE_NETTLE", "ON")
             .define("ENABLE_ZLIB", "ON")
             .define("ENABLE_BZip2", "ON")
             .define("ENABLE_LZMA", "ON")
@@ -332,9 +333,9 @@ fn link_bundled_archive_dependencies(target: &str) {
         println!("cargo:rustc-link-lib=static:+whole-archive=lzma");
         println!("cargo:rustc-link-lib=static:+whole-archive=zstd");
         println!("cargo:rustc-link-lib=static:+whole-archive=lz4");
-        println!("cargo:rustc-link-lib=static:+whole-archive=mbedtls");
-        println!("cargo:rustc-link-lib=static:+whole-archive=mbedx509");
-        println!("cargo:rustc-link-lib=static:+whole-archive=mbedcrypto");
+        println!("cargo:rustc-link-lib=static:+whole-archive=nettle");
+        println!("cargo:rustc-link-lib=static:+whole-archive=hogweed");
+        println!("cargo:rustc-link-lib=static:+whole-archive=expat");
     } else if target.contains("linux") {
         link_common_unix_libraries();
         println!("cargo:rustc-link-lib=pthread");
