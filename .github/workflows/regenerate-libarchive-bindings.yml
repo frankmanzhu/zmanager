@@ -1,0 +1,99 @@
+name: Regenerate libarchive bindings
+
+# On-demand regeneration of the checked-in bindgen output in
+# crates/zmanager-libarchive-sys/bindings/. Trigger manually when the bundled
+# libarchive version is bumped; regenerates and auto-commits the file.
+#
+# These files exist because static-musl build hosts (the Alpine packaging
+# container) and Windows release machines cannot run bindgen (no libclang):
+# see crates/zmanager-libarchive-sys/build.rs::generate_bindings.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which bindings to regenerate"
+        type: choice
+        options:
+          - both
+          - linux-musl
+          - windows-msvc
+        default: both
+
+permissions:
+  contents: write
+
+jobs:
+  linux-musl:
+    name: linux-musl
+    runs-on: ubuntu-latest
+    if: inputs.target == 'linux-musl' || inputs.target == 'both'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install clang and libclang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Regenerate linux-musl bindings
+        run: bash scripts/generate-libarchive-bindings-linux.sh
+
+      - name: Commit regenerated bindings
+        env:
+          TARGET: linux-musl
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "crates/zmanager-libarchive-sys/bindings/$TARGET.rs"
+          if git diff --cached --quiet; then
+            echo "No changes — $TARGET bindings are up to date"
+            exit 0
+          fi
+          git commit -m "chore: regenerate libarchive bindings for $TARGET"
+          git pull --rebase
+          git push
+
+  windows-msvc:
+    name: windows-msvc
+    runs-on: windows-latest
+    if: inputs.target == 'windows-msvc' || inputs.target == 'both'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Ensure libclang is available
+        shell: pwsh
+        run: |
+          if (Test-Path "C:\Program Files\LLVM\bin\libclang.dll") {
+            Write-Host "Using preinstalled LLVM"
+            "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          } else {
+            choco install llvm --no-progress -y
+            "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+
+      - name: Regenerate windows-msvc bindings
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/generate-libarchive-bindings-windows.ps1
+
+      - name: Commit regenerated bindings
+        shell: bash
+        env:
+          TARGET: windows-msvc
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "crates/zmanager-libarchive-sys/bindings/$TARGET.rs"
+          if git diff --cached --quiet; then
+            echo "No changes — $TARGET bindings are up to date"
+            exit 0
+          fi
+          git commit -m "chore: regenerate libarchive bindings for $TARGET"
+          git pull --rebase
+          git push

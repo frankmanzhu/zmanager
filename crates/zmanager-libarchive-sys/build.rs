@@ -460,6 +460,19 @@ fn generate_bindings() {
             .expect("Unable to copy checked-in musl bindings");
         return;
     }
+    // Use the checked-in Windows bindings when available (regenerate with
+    // scripts/generate-libarchive-bindings-windows.ps1). Unlike musl this is
+    // a graceful fallback: the file may not exist yet, and dev machines
+    // (which have libclang, e.g. via VS C++ Clang tools) can still bindgen.
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+        let checked_in = manifest_dir.join("bindings/windows-msvc.rs");
+        if checked_in.exists() {
+            std::fs::copy(&checked_in, out_path.join("bindings.rs"))
+                .expect("Unable to copy checked-in Windows bindings");
+            return;
+        }
+    }
     let wrapper_path = out_path.join("wrapper.h");
     std::fs::write(&wrapper_path, "#include <archive.h>\n#include <archive_entry.h>\n").unwrap();
 

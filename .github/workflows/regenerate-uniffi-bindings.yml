@@ -1,0 +1,54 @@
+name: Regenerate UniFFI bindings
+
+# Regenerates the checked-in Kotlin and Swift UniFFI bindings in
+# crates/zmanager-ffi/bindings/ from the UDL and auto-commits them.
+#
+# Triggers:
+#   - workflow_call: called by release.yml so bindings are kept fresh at each
+#     release (zmanager-mobile consumes these files as the source of truth)
+#   - workflow_dispatch: manual regeneration
+#
+# Bindings always track the main branch (the UDL there is canonical). The
+# workflow only triggers on workflow_call / workflow_dispatch — never on push —
+# so the auto-commit cannot re-trigger it.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    name: Regenerate UniFFI bindings
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Generate UniFFI bindings
+        run: |
+          REGEN_KOTLIN_DIR="$GITHUB_WORKSPACE/crates/zmanager-ffi/bindings/kotlin" \
+          REGEN_SWIFT_DIR="$GITHUB_WORKSPACE/crates/zmanager-ffi/bindings/swift" \
+            bash scripts/generate-uniffi-bindings.sh
+
+      - name: Commit and push regenerated bindings
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B main
+          git add crates/zmanager-ffi/bindings
+          if git diff --cached --quiet; then
+            echo "No changes — UniFFI bindings are up to date"
+            exit 0
+          fi
+          git commit -m "chore: regenerate UniFFI bindings"
+          git pull --rebase origin main
+          git push origin main
