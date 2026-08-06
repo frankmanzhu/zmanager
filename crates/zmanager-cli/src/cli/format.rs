@@ -28,16 +28,17 @@ pub(crate) const TZAP_FORMAT_ALIASES: &[&str] = &[FORMAT_TZAP];
 pub(crate) const APPLE_ARCHIVE_FORMAT_ALIASES: &[&str] = &[FORMAT_APPLE_ARCHIVE, "apple-archive"];
 pub(crate) const TGZ_FORMAT_ALIASES: &[&str] = &[FORMAT_TGZ, "tar.gz", "gz"];
 
-pub(crate) const ZIP_CREATE_EXTENSIONS: &[&str] = &[".zip"];
-pub(crate) const ZIP_FAMILY_EXTENSIONS: &[&str] = &[".zip", ".zipx", ".jar", ".war", ".ipa", ".apk", ".appx", ".xpi"];
-pub(crate) const TAR_ZST_EXTENSIONS: &[&str] = &[".tar.zst", ".tzst"];
-const TZAP_EXTENSIONS: &[&str] = &[".tzap"];
+// Extension lists are canonical in `zmanager_core::archive_format` (CR-114);
+// this crate re-exports them for display and option validation.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-pub(crate) const APPLE_ARCHIVE_EXTENSIONS: &[&str] = &[".aar", ".aea"];
-pub(crate) const TGZ_EXTENSIONS: &[&str] = &[".tgz", ".tar.gz"];
-pub(crate) const SEVEN_Z_EXTENSIONS: &[&str] = &[".7z"];
-pub(crate) const RAR_EXTENSIONS: &[&str] = &[".rar", ".cbr"];
-pub(crate) const DEB_EXTENSIONS: &[&str] = &[".deb"];
+pub(crate) use zmanager_core::archive_format::APPLE_ARCHIVE_EXTENSIONS;
+pub(crate) use zmanager_core::archive_format::{
+    DEB_EXTENSIONS, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS, TGZ_EXTENSIONS, TZAP_EXTENSIONS,
+    ZIP_FAMILY_EXTENSIONS,
+};
+
+pub(crate) const ZIP_CREATE_EXTENSIONS: &[&str] = &[".zip"];
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 const LIBARCHIVE_FALLBACK_EXTENSIONS: &[&str] = &["fallback"];
 
 #[derive(Clone, Copy)]
@@ -67,8 +68,12 @@ pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
     FormatDescriptor { name: FORMAT_RAW_STREAM, extensions: zmanager_core::raw_stream_backend::RAW_STREAM_SUFFIXES },
     FormatDescriptor { name: FORMAT_LIBARCHIVE, extensions: LIBARCHIVE_FALLBACK_EXTENSIONS },
 ];
+// Path-based format detection delegates to the core detector (CR-114); the
+// extension predicates no longer live here so consumers cannot drift.
+use zmanager_core::archive_format::{ArchiveFormatKind, detect_archive_format};
+
 pub(crate) fn is_zip_family_archive(path: &str) -> bool {
-    path_has_known_extension(path, ZIP_FAMILY_EXTENSIONS)
+    matches!(detect_archive_format(path), ArchiveFormatKind::Zip | ArchiveFormatKind::SplitZip)
 }
 
 pub(crate) fn is_split_zip_archive_path(path: &str) -> bool {
@@ -76,29 +81,28 @@ pub(crate) fn is_split_zip_archive_path(path: &str) -> bool {
 }
 
 pub(crate) fn is_7z_archive(path: &str) -> bool {
-    path_has_known_extension(path, SEVEN_Z_EXTENSIONS)
-        || zmanager_core::sevenz_backend::is_7z_volume_path(Path::new(path))
+    matches!(detect_archive_format(path), ArchiveFormatKind::SevenZ)
 }
 
 pub(crate) fn is_rar_archive(path: &str) -> bool {
-    path_has_known_extension(path, RAR_EXTENSIONS)
+    matches!(detect_archive_format(path), ArchiveFormatKind::Rar)
 }
 
 pub(crate) fn is_tar_zst_archive(path: &str) -> bool {
-    path_has_known_extension(path, TAR_ZST_EXTENSIONS)
+    matches!(detect_archive_format(path), ArchiveFormatKind::TarZst)
 }
 
 pub(crate) fn is_tgz_archive(path: &str) -> bool {
-    path_has_known_extension(path, TGZ_EXTENSIONS)
+    matches!(detect_archive_format(path), ArchiveFormatKind::TarGz)
 }
 
 pub(crate) fn is_tzap_archive(path: &str) -> bool {
-    path_has_known_extension(path, TZAP_EXTENSIONS) || is_tzap_volume_archive(path)
+    matches!(detect_archive_format(path), ArchiveFormatKind::Tzap)
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn is_apple_archive(path: &str) -> bool {
-    path_has_known_extension(path, APPLE_ARCHIVE_EXTENSIONS)
+    matches!(detect_archive_format(path), ArchiveFormatKind::AppleArchive)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
@@ -106,18 +110,8 @@ pub(crate) fn is_apple_archive(_path: &str) -> bool {
     false
 }
 
-fn is_tzap_volume_archive(path: &str) -> bool {
-    let Some((base_path, volume_index)) = path.rsplit_once('.') else {
-        return false;
-    };
-
-    volume_index.len() >= 3
-        && volume_index.chars().all(|character| character.is_ascii_digit())
-        && path_has_known_extension(base_path, TZAP_EXTENSIONS)
-}
-
 pub(crate) fn is_deb_archive(path: &str) -> bool {
-    path_has_known_extension(path, DEB_EXTENSIONS)
+    matches!(detect_archive_format(path), ArchiveFormatKind::Deb)
 }
 
 pub(crate) fn path_has_known_extension(path: &str, extensions: &[&str]) -> bool {

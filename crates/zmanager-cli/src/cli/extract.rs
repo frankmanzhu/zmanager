@@ -6,8 +6,8 @@ use crate::cli::app::{
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
     BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_LIBARCHIVE, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP,
-    FORMAT_ZIP, is_7z_archive, is_apple_archive, is_deb_archive, is_rar_archive, is_split_zip_archive_path,
-    is_tar_zst_archive, is_tzap_archive, is_zip_family_archive,
+    FORMAT_ZIP, is_7z_archive, is_apple_archive, is_deb_archive, is_split_zip_archive_path, is_tar_zst_archive,
+    is_tzap_archive, is_zip_family_archive,
 };
 use crate::cli::open::entry_selected;
 use crate::cli::options::{
@@ -183,38 +183,36 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         return run_raw_stream_extract(&request.archive, format, &destination, policy, global);
     }
     let destination = request.destination.unwrap_or_else(|| default_extract_destination(&request.archive));
-    if is_zip_family_archive(&request.archive) && !is_split_zip_archive_path(&request.archive) {
-        let password = match read_optional_password_stdin(request.password_stdin, global) {
-            Ok(password) => password,
-            Err(code) => return code,
-        };
-        run_zip_extract_with_policy(request.archive, destination, password.as_deref(), policy, global)
-    } else if is_7z_archive(&request.archive) {
-        let password = match read_optional_password_stdin(request.password_stdin, global) {
-            Ok(password) => password,
-            Err(code) => return code,
-        };
-        run_7z_extract_with_policy(request.archive, destination, password.as_deref(), policy, global)
-    } else if is_rar_archive(&request.archive) && request.password_stdin {
-        let password = match read_optional_password_stdin(request.password_stdin, global) {
-            Ok(password) => password,
-            Err(code) => return code,
-        };
-        run_rar_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
-    } else if is_tar_zst_archive(&request.archive) {
-        run_tar_zst_extract_with_policy(request.archive, destination, policy, global)
-    } else if is_apple_archive(&request.archive) {
-        let password = match read_optional_password_stdin(request.password_stdin, global) {
-            Ok(password) => password,
-            Err(code) => return code,
-        };
-        run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
-    } else if is_tzap_archive(&request.archive) {
-        let password = match read_optional_password_stdin(request.password_stdin, global) {
-            Ok(password) => password,
-            Err(code) => return code,
-        };
-        run_tzap_extract_with_policy(
+    use zmanager_core::archive_format::{ArchiveFormatKind, detect_archive_format};
+    let password = match read_optional_password_stdin(request.password_stdin, global) {
+        Ok(password) => password,
+        Err(code) => return code,
+    };
+    match detect_archive_format(&request.archive) {
+        // Raw streams are handled before the policy match above.
+        ArchiveFormatKind::RawStream => unreachable!("raw streams handled before format dispatch"),
+        ArchiveFormatKind::Zip => {
+            run_zip_extract_with_policy(request.archive, destination, password.as_deref(), policy, global)
+        }
+        // Split ZIP volume sets are read through libarchive, matching the
+        // pre-CR-114 fallthrough behavior.
+        ArchiveFormatKind::SplitZip => {
+            run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
+        }
+        ArchiveFormatKind::SevenZ => {
+            run_7z_extract_with_policy(request.archive, destination, password.as_deref(), policy, global)
+        }
+        // RAR needs a password; without --password-stdin it falls through to
+        // the libarchive backend, which can read unencrypted RAR.
+        ArchiveFormatKind::Rar if request.password_stdin => {
+            run_rar_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
+        }
+        ArchiveFormatKind::TarZst => run_tar_zst_extract_with_policy(request.archive, destination, policy, global),
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        ArchiveFormatKind::AppleArchive => {
+            run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
+        }
+        ArchiveFormatKind::Tzap => run_tzap_extract_with_policy(
             request.archive,
             destination,
             policy,
@@ -226,13 +224,10 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
                 allow_absolute_symlinks: false,
             },
             global,
-        )
-    } else {
-        let password = match read_optional_password_stdin(request.password_stdin, global) {
-            Ok(password) => password,
-            Err(code) => return code,
-        };
-        run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
+        ),
+        ArchiveFormatKind::TarGz | ArchiveFormatKind::Deb | ArchiveFormatKind::Unknown | ArchiveFormatKind::Rar => {
+            run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
+        }
     }
 }
 fn run_deb_nested_extract(

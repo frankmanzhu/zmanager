@@ -69,11 +69,7 @@ pub(crate) fn required_string<E: JsonFieldError>(
 }
 
 pub(crate) fn required_string_value<E: JsonFieldError>(value: &Value, field: &'static str) -> Result<String, E> {
-    value
-        .as_str()
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| E::invalid_field(field))
+    value.as_str().filter(|value| !value.is_empty()).map(ToOwned::to_owned).ok_or_else(|| E::invalid_field(field))
 }
 
 pub(crate) fn required_array<'a, E: JsonFieldError>(

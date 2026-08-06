@@ -11,7 +11,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-
 /// Number of volumes needed for `archive_size` bytes at `volume_size` each.
 #[must_use]
 /// Collects sibling paths in `directory` whose names `matcher` recognizes,
@@ -103,4 +102,3 @@ pub(crate) fn remove_file_destination_for_replace(path: &Path) -> io::Result<()>
         Err(source) => Err(source),
     }
 }
-

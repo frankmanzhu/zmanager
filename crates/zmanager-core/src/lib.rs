@@ -12,38 +12,40 @@
 #[macro_export]
 macro_rules! backend_error_from_impls {
     ($error:ty) => {
-        impl From<crate::manifest::PlanError> for $error {
-            fn from(source: crate::manifest::PlanError) -> Self {
+        impl From<$crate::manifest::PlanError> for $error {
+            fn from(source: $crate::manifest::PlanError) -> Self {
                 Self::Plan(source)
             }
         }
-        impl From<crate::safety::ExtractionSafetyError> for $error {
-            fn from(source: crate::safety::ExtractionSafetyError) -> Self {
+        impl From<$crate::safety::ExtractionSafetyError> for $error {
+            fn from(source: $crate::safety::ExtractionSafetyError) -> Self {
                 Self::Safety(source)
             }
         }
-        impl From<crate::jobs::JobCancelled> for $error {
-            fn from(_source: crate::jobs::JobCancelled) -> Self {
+        impl From<$crate::jobs::JobCancelled> for $error {
+            fn from(_source: $crate::jobs::JobCancelled) -> Self {
                 Self::Cancelled
             }
         }
     };
 }
 
+pub mod archive_format;
 mod archive_split;
 mod atomic_file;
 mod extract_materialize;
+mod gitignore;
 mod http_client;
 mod json_util;
-mod strings;
-mod wire_profile;
 mod multi_volume;
 mod sevenz_volume;
+mod strings;
 mod tar_metadata;
 mod temp_names;
 #[cfg(test)]
 mod test_support;
 mod tzap;
+mod wire_profile;
 mod zip_split;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -62,8 +64,8 @@ pub mod identity_catalog;
 pub mod jcs;
 pub mod jobs;
 pub mod libarchive_backend;
-pub mod local_tzap_service;
 pub mod local_identity_store;
+pub mod local_tzap_service;
 pub mod manifest;
 pub mod p256_signature;
 pub mod rar_backend;

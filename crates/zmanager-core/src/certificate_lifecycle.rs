@@ -4,12 +4,12 @@ use crate::auth_client::{
     SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpResponse,
     TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord,
 };
+use crate::device_identity::csr_fingerprint;
 use crate::enrollment_client::{
     ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator,
     TzapEnrollmentError, TzapEnrollmentRequest, canonicalize_local_staging_server_json_bytes, csr_der_to_pem,
     parse_challenge_response, parse_enrollment_response, requested_validity_days, sign_p256_challenge,
 };
-use crate::device_identity::csr_fingerprint;
 use crate::http_client::{require_success, send_json_request};
 use crate::jcs;
 use crate::json_util::{json_object, optional_string};
@@ -812,10 +812,7 @@ mod tests {
                 }
                 "root" => {
                     let root_der = cert.intermediate_chain_der.last().unwrap();
-                    inventory
-                        .emergency_blocklist
-                        .blocked_root_sha256
-                        .push(crate::trust::sha256_identifier(root_der));
+                    inventory.emergency_blocklist.blocked_root_sha256.push(crate::trust::sha256_identifier(root_der));
                 }
                 _ => unreachable!(),
             }

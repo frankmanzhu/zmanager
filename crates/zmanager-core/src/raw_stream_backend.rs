@@ -202,7 +202,8 @@ pub fn detect_raw_stream_format(path: impl AsRef<Path>) -> Option<RawStreamForma
 #[must_use]
 pub fn output_name_for_raw_stream(path: impl AsRef<Path>, format: RawStreamFormat) -> Option<String> {
     let name = path.as_ref().file_name().and_then(|name| name.to_str())?;
-    let stem = format.suffixes().iter().find_map(|suffix| crate::strings::strip_suffix_ignore_ascii_case(name, suffix))?;
+    let stem =
+        format.suffixes().iter().find_map(|suffix| crate::strings::strip_suffix_ignore_ascii_case(name, suffix))?;
 
     (!stem.is_empty()).then(|| stem.to_owned())
 }
@@ -810,7 +811,10 @@ impl From<TempDirAllocError> for RawStreamError {
 
 #[cfg(test)]
 mod tests {
-    use super::{RawStreamFormat, detect_raw_stream_format, estimate_raw_stream_uncompressed_size, extract_raw_stream, output_name_for_raw_stream};
+    use super::{
+        RawStreamFormat, detect_raw_stream_format, estimate_raw_stream_uncompressed_size, extract_raw_stream,
+        output_name_for_raw_stream,
+    };
     use crate::safety::{ExtractionLimits, ExtractionPolicy};
     use crate::temp_names::TemporaryDirectory;
     use crate::test_support::TestDir;

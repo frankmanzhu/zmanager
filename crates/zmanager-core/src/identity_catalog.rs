@@ -963,11 +963,7 @@ impl FileTzapSecretMaterialStore {
     }
 
     fn secret_path(&self, purpose: TzapSecretPurpose, reference: &TzapSecretRef) -> PathBuf {
-        self.root
-            .join("secrets")
-            .join(&self.account_key)
-            .join(purpose.as_str())
-            .join(reference.as_str())
+        self.root.join("secrets").join(&self.account_key).join(purpose.as_str()).join(reference.as_str())
     }
 }
 
@@ -1145,15 +1141,13 @@ pub(crate) fn load_inventory_from_catalog(
                         .transpose()
                         .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "assurance_level" })?
                         .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "assurance_level" })?,
-                    policy_oid: identity.policy_oid.clone().unwrap_or_else(|| {
-                        crate::trust::TZAP_OID_LEAF_POLICY.to_owned()
-                    }),
+                    policy_oid: identity
+                        .policy_oid
+                        .clone()
+                        .unwrap_or_else(|| crate::trust::TZAP_OID_LEAF_POLICY.to_owned()),
                 },
                 sign_device_id: identity.sign_device_id.clone().unwrap_or_default(),
-                sign_device_routing: identity
-                    .sign_device_routing
-                    .clone()
-                    .unwrap_or(TzapSignDeviceRouting::Personal),
+                sign_device_routing: identity.sign_device_routing.clone().unwrap_or(TzapSignDeviceRouting::Personal),
                 signing_key_id: key_id,
                 state: TzapLocalCertificateState::from_wire_value(&identity.lifecycle)
                     .unwrap_or(TzapLocalCertificateState::Active),

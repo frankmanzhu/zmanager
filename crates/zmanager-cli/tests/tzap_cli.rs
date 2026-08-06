@@ -282,7 +282,6 @@ fn verify_json_reports_invalid_without_claiming_official_validity() {
     assert!(!stdout.contains("official_tzap"));
 }
 
-
 fn request_is_complete(request: &[u8]) -> bool {
     let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n").map(|position| position + 4)
     else {

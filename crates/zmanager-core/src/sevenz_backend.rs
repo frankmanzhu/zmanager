@@ -1110,13 +1110,8 @@ mod tests {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
         let temp = TestDir::new("preserves_metadata_sevenz");
-
-        temp.write_file("project/script.sh", b"echo hello");
-
-        let path = temp.path("project/script.sh");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let (path, _fixture_mtime) = crate::test_support::script_fixture_with_metadata(&temp);
         fs::set_permissions(temp.path("project"), fs::Permissions::from_mode(0o1750)).unwrap();
-
         let mtime = filetime::FileTime::from_unix_time(1_500_000_000, 234_567_800);
         filetime::set_file_mtime(&path, mtime).unwrap();
 

@@ -154,10 +154,14 @@ fn validate_certificate_references(
     leaf: &X509Certificate<'_>,
     issuer: &X509Certificate<'_>,
 ) -> Result<(), TzapOfflineVerificationError> {
-    if crate::trust::sha256_identifier(&envelope.leaf_certificate_der) != envelope.signed_payload.leaf_certificate_sha256 {
+    if crate::trust::sha256_identifier(&envelope.leaf_certificate_der)
+        != envelope.signed_payload.leaf_certificate_sha256
+    {
         return Err(TzapOfflineVerificationError::CertificateReference("leaf_certificate_sha256"));
     }
-    if crate::trust::sha256_identifier(&envelope.intermediate_chain_der[0]) != envelope.signed_payload.issuer_certificate_sha256 {
+    if crate::trust::sha256_identifier(&envelope.intermediate_chain_der[0])
+        != envelope.signed_payload.issuer_certificate_sha256
+    {
         return Err(TzapOfflineVerificationError::CertificateReference("issuer_certificate_sha256"));
     }
     if trust::canonical_serial_hex(leaf.raw_serial())
@@ -253,7 +257,6 @@ fn verify_chain_trust(
     Err(TzapOfflineVerificationError::Untrusted(reason))
 }
 
-
 // See `crate::trust::sha256_identifier` (CR-124).
 fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
     certificate.iter_extensions().find_map(|extension| {
@@ -277,7 +280,6 @@ fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> 
 
 #[cfg(test)]
 mod tests {
-    use crate::test_support::x509_factory::*;
     use super::{
         TzapOfflineVerificationOptions, verify_tzap_document_envelope_offline,
         verify_tzap_document_envelope_offline_json,
@@ -285,6 +287,7 @@ mod tests {
     use crate::document_envelope::validate_tzap_document_envelope_value;
     use crate::jcs;
     use crate::p256_signature::sign_p256_sha256_p1363;
+    use crate::test_support::x509_factory::*;
     use crate::trust::{self, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState};
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use serde_json::{Value, json};
@@ -448,7 +451,6 @@ mod tests {
             }
         })
     }
-
 
     fn pin_set(root_sha256: &str) -> TzapRootPinSet {
         let pin: &'static str = Box::leak(root_sha256.to_owned().into_boxed_str());

@@ -291,7 +291,9 @@ fn append_symlink<W: io::Write>(
     if preserve_metadata && let Some(mode) = entry.permissions.unix_mode {
         header.set_mode(mode & 0o7777);
     }
-    if preserve_metadata && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds) {
+    if preserve_metadata
+        && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds)
+    {
         header.set_mtime(modified);
     }
     if !preserve_metadata {

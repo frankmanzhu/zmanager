@@ -400,8 +400,7 @@ fn base_certificate_builder(
     now_unix_seconds: u64,
 ) -> Result<openssl::x509::X509Builder, TzapLocalServiceError> {
     let mut name = X509NameBuilder::new().map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
-    name.append_entry_by_text("CN", common_name)
-        .map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
+    name.append_entry_by_text("CN", common_name).map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
     let name = name.build();
     let mut builder = X509::builder().map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
     builder.set_version(2).map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
@@ -446,9 +445,7 @@ fn append_subject_key_identifier(
 ) -> Result<(), TzapLocalServiceError> {
     let extension = {
         let context = builder.x509v3_context(issuer, None);
-        SubjectKeyIdentifier::new()
-            .build(&context)
-            .map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?
+        SubjectKeyIdentifier::new().build(&context).map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?
     };
     builder.append_extension(extension).map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))
 }
@@ -474,8 +471,8 @@ fn append_der_extension(
     contents: &[u8],
 ) -> Result<(), TzapLocalServiceError> {
     let oid = Asn1Object::from_str(oid).map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
-    let contents = Asn1OctetString::new_from_bytes(contents)
-        .map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
+    let contents =
+        Asn1OctetString::new_from_bytes(contents).map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
     builder
         .append_extension(
             X509Extension::new_from_der(&oid, critical, &contents)
@@ -558,8 +555,8 @@ fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> 
 }
 
 fn parse_certificate<'a>(der: &'a [u8], label: &'static str) -> Result<X509Certificate<'a>, TzapLocalServiceError> {
-    let (remaining, certificate) = X509Certificate::from_der(der)
-        .map_err(|error| TzapLocalServiceError::Crypto(format!("{label}: {error}")))?;
+    let (remaining, certificate) =
+        X509Certificate::from_der(der).map_err(|error| TzapLocalServiceError::Crypto(format!("{label}: {error}")))?;
     if remaining.is_empty() {
         Ok(certificate)
     } else {

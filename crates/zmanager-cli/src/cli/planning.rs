@@ -1,8 +1,8 @@
-use zmanager_core::safety::archive_pattern_matches;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use zmanager_core::safety::archive_pattern_matches;
 pub(crate) fn append_files_from(
     sources: &mut Vec<PathBuf>,
     files_from: &[String],
@@ -90,7 +90,8 @@ pub(crate) fn apply_manifest_filters(
 
     manifest.entries.retain(|entry| {
         let path = &entry.archive_path;
-        let explicitly_included = !includes.is_empty() && includes.iter().any(|pattern| archive_pattern_matches(pattern, path));
+        let explicitly_included =
+            !includes.is_empty() && includes.iter().any(|pattern| archive_pattern_matches(pattern, path));
         let matches_include = includes.is_empty() || explicitly_included;
         let matches_exclude = exclude_patterns.iter().any(|pattern| archive_pattern_matches(pattern, path));
         let hidden_excluded = exclude_hidden && archive_path_has_hidden_component(path) && !explicitly_included;
@@ -145,5 +146,3 @@ pub(crate) fn apply_junk_paths(manifest: &mut zmanager_core::manifest::ArchiveMa
         .sum();
     Ok(())
 }
-
-

@@ -641,10 +641,9 @@ fn parse_denial(value: &Value) -> Result<TzapEnrollmentDenial, TzapEnrollmentErr
     })
 }
 
-pub(crate) 
-
-fn decode_base64url(value: String) -> Result<Vec<u8>, TzapEnrollmentError> {
-    crate::trust::decode_base64url_no_padding(&value).map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })
+pub(crate) fn decode_base64url(value: String) -> Result<Vec<u8>, TzapEnrollmentError> {
+    crate::trust::decode_base64url_no_padding(&value)
+        .map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })
 }
 
 pub(crate) fn requested_validity_days(requested_validity_seconds: u64) -> Result<u64, TzapEnrollmentError> {
@@ -1102,7 +1101,8 @@ mod tests {
     }
 
     fn challenge_response(fixture: &EnrollmentFixture, override_values: ChallengeOverride) -> TzapAuthHttpResponse {
-        let csr_sha256 = override_values.csr_sha256.unwrap_or_else(|| crate::device_identity::csr_fingerprint(&fixture.csr_der));
+        let csr_sha256 =
+            override_values.csr_sha256.unwrap_or_else(|| crate::device_identity::csr_fingerprint(&fixture.csr_der));
         let session_id = override_values.session_id.unwrap_or_else(|| fixture.session.login_session_id.clone());
         let payload = json!({
             "canonicalization": ENROLLMENT_CHALLENGE_CANONICALIZATION,

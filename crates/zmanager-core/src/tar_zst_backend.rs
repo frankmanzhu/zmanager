@@ -26,7 +26,12 @@ pub struct TarZstdCreateOptions {
 
 impl Default for TarZstdCreateOptions {
     fn default() -> Self {
-        Self { level: 3, threads: crate::tar_metadata::available_parallelism_at_least_two(), preserve_metadata: true, replace_existing: false }
+        Self {
+            level: 3,
+            threads: crate::tar_metadata::available_parallelism_at_least_two(),
+            preserve_metadata: true,
+            replace_existing: false,
+        }
     }
 }
 
@@ -754,7 +759,9 @@ fn append_symlink<W: io::Write>(
     if preserve_metadata && let Some(mode) = entry.permissions.unix_mode {
         header.set_mode(mode & crate::extract_materialize::MODE_MASK);
     }
-    if preserve_metadata && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds) {
+    if preserve_metadata
+        && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds)
+    {
         header.set_mtime(modified);
     }
     if !preserve_metadata {
@@ -856,11 +863,7 @@ mod tests {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
         let temp = TestDir::new("preserves_metadata_tar_zst");
-
-        temp.write_file("project/script.sh", b"echo hello");
-
-        let path = temp.path("project/script.sh");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let (path, _fixture_mtime) = crate::test_support::script_fixture_with_metadata(&temp);
         fs::set_permissions(temp.path("project"), fs::Permissions::from_mode(0o1750)).unwrap();
 
         // Add a symlink to test symlink metadata
@@ -1187,6 +1190,5 @@ mod tests {
         let encoded = format!("{value:06o}\0 ");
         write_bytes(destination, encoded.as_bytes());
     }
-}crate::backend_error_from_impls!(TarZstdError);
-
-
+}
+crate::backend_error_from_impls!(TarZstdError);

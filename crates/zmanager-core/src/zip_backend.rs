@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use zip::write::{FileOptions, SimpleFileOptions};
 use zip::{AesMode, CompressionMethod, ZipArchive, ZipReadOptions, ZipWriter};
 
-
 /// ZIP compression methods exposed in v1.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub enum ZipCompression {
@@ -1034,21 +1033,7 @@ mod tests {
 
     fn preserves_metadata_during_creation_and_extraction() {
         let temp = TestDir::new("preserves_metadata_zip");
-
-        temp.write_file("project/script.sh", b"echo hello");
-
-        let path = temp.path("project/script.sh");
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-
-        let mtime = filetime::FileTime::from_unix_time(1_500_000_000, 0);
-
-        filetime::set_file_mtime(&path, mtime).unwrap();
+        let (_path, mtime) = crate::test_support::script_fixture_with_metadata(&temp);
 
         let archive = temp.path("archive.zip");
 

@@ -342,12 +342,10 @@ fn find_top_level_member(root: &Path, prefix: &str) -> Option<PathBuf> {
 }
 
 fn is_tar_zst_archive(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            crate::strings::ends_with_ignore_ascii_case(name, ".tar.zst")
-                || crate::strings::ends_with_ignore_ascii_case(name, ".tzst")
-        })
+    path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+        crate::strings::ends_with_ignore_ascii_case(name, ".tar.zst")
+            || crate::strings::ends_with_ignore_ascii_case(name, ".tzst")
+    })
 }
 
 impl From<TempDirAllocError> for DebError {

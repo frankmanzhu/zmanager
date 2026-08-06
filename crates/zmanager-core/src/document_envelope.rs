@@ -339,7 +339,8 @@ fn decode_required_base64url(
 }
 
 fn decode_base64url(encoded: &str, field: &'static str) -> Result<Vec<u8>, TzapDocumentEnvelopeError> {
-    crate::trust::decode_base64url_no_padding(encoded).map_err(|_| TzapDocumentEnvelopeError::InvalidBase64Url { field })
+    crate::trust::decode_base64url_no_padding(encoded)
+        .map_err(|_| TzapDocumentEnvelopeError::InvalidBase64Url { field })
 }
 
 fn required_canonical_sha256(

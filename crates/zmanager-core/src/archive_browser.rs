@@ -1220,38 +1220,20 @@ fn system_time_string(time: SystemTime) -> Option<String> {
     time.duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_secs().to_string())
 }
 
+// Path detection delegates to the canonical core detector (CR-114).
 fn is_zip_family_archive(path: &Path) -> bool {
-    path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
-        matches!(
-            extension.to_ascii_lowercase().as_str(),
-            "zip" | "zipx" | "jar" | "war" | "ipa" | "apk" | "appx" | "xpi"
-        )
-    })
+    matches!(
+        crate::archive_format::detect_archive_format(path),
+        crate::archive_format::ArchiveFormatKind::Zip | crate::archive_format::ArchiveFormatKind::SplitZip
+    )
 }
 
 fn is_tar_zst_archive(path: &Path) -> bool {
-    if path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("tzst"))
-    {
-        return true;
-    }
-
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("zst"))
-        && path
-            .file_stem()
-            .and_then(|stem| Path::new(stem).extension())
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("tar"))
+    matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::TarZst)
 }
 
 fn is_7z_archive(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("7z"))
+    matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::SevenZ)
 }
 
 #[cfg(test)]

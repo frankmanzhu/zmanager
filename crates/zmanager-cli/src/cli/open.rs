@@ -11,7 +11,6 @@ use crate::cli::options::{
     take_value, validate_recipient_key_open_option,
 };
 use crate::cli::planning::{append_files_from, append_stdin_paths, apply_manifest_filters, plan_sources};
-use zmanager_core::safety::archive_pattern_matches;
 use crate::cli::usage::{
     LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json,
     print_entries_tree, print_error_line, print_help_stdout, print_manifest, print_success_line, print_warning_stderr,
@@ -22,6 +21,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use zmanager_core::safety::archive_pattern_matches;
 pub(crate) fn list_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) {
         print_help_stdout(LIST_HELP, &global);
@@ -718,7 +718,6 @@ fn print_tzap_x509_diagnostics_text(
         print_success_line(global, format_args!("{prefix}: {diagnostic}"));
     }
 }
-
 
 fn run_raw_stream_test(
     archive: &str,

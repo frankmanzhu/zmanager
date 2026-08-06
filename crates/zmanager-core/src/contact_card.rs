@@ -417,7 +417,6 @@ fn contact_chain_der(leaf_der: &[u8], intermediate_chain_der: &[Vec<u8>]) -> Vec
     chain
 }
 
-
 // Thin typed wrappers over the shared json_util helpers; the extraction
 // logic lives in json_util.
 fn json_object<'a>(value: &'a Value, field: &'static str) -> Result<&'a Map<String, Value>, TzapContactCardError> {
@@ -476,7 +475,6 @@ fn decode_base64url(value: String, field: &'static str) -> Result<Vec<u8>, TzapC
 
 #[cfg(test)]
 mod tests {
-    use crate::test_support::x509_factory::*;
     use super::{
         TzapContactCardError, TzapContactCardExportRequest, TzapContactCardImportOptions, export_tzap_contact_card,
         import_tzap_contact_card, verify_tzap_contact_card,
@@ -489,6 +487,7 @@ mod tests {
         TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore,
         TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
     };
+    use crate::test_support::x509_factory::*;
     use crate::trust::{self, TzapCertificateProfileOptions, TzapCertificatePublicMetadata, TzapRootPinSet};
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use openssl::pkey::{PKey, Private};
@@ -681,7 +680,6 @@ mod tests {
             root_der,
         }
     }
-
 
     fn public_metadata() -> TzapCertificatePublicMetadata {
         TzapCertificatePublicMetadata {
