@@ -553,7 +553,13 @@ fn verify_opened_x509_root_auth(
     let mut x509_error = None;
     let verification = opened
         .verify_root_auth_with(|footer, archive_root| {
-            match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots) {
+            match verify_root_auth_footer(
+                footer,
+                archive_root,
+                &trusted_roots_der,
+                trust.trusted_system_roots,
+                trust.include_official_tzap_root,
+            ) {
                 Ok(value) => {
                     report = Some(value);
                     Ok(true)
@@ -750,7 +756,13 @@ pub fn verify_tzap_x509_public_no_key(
         if footer.authenticator_id != X509_AUTHENTICATOR_ID {
             return Err(FormatError::ReaderUnsupported("X.509 trust can only verify X.509 RootAuth"));
         }
-        match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots) {
+        match verify_root_auth_footer(
+            footer,
+            archive_root,
+            &trusted_roots_der,
+            trust.trusted_system_roots,
+            trust.include_official_tzap_root,
+        ) {
             Ok(value) => {
                 report = Some(value);
                 Ok(true)
