@@ -75,14 +75,6 @@ pub enum TzapKeySource {
     NoPassword,
 }
 
-impl TzapKeySource {
-    /// Returns whether this key source uses secret user input.
-    #[must_use]
-    pub fn uses_secret(&self) -> bool {
-        matches!(self, Self::Passphrase(_))
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TzapCreateReport {
     /// Number of regular file entries written.

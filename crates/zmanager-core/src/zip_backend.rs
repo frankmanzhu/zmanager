@@ -1090,11 +1090,6 @@ mod tests {
             assert_eq!(metadata.permissions().mode() & 0o777, 0o755);
         }
 
-        #[cfg(not(unix))]
-        {
-            // Windows fallback doesn't map full unix mode, but let's check readonly if we had set it
-        }
-
         // ZIP only has 2-second resolution (MS-DOS time), so we check with a delta
         let mtime_extracted = filetime::FileTime::from_last_modification_time(&metadata);
         let diff = (mtime_extracted.unix_seconds() - mtime.unix_seconds()).abs();

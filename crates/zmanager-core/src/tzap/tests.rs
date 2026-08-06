@@ -6,7 +6,7 @@ use super::{
     TzapX509TrustOptions, copy_tzap_file_to_writer_with_optional_password,
     copy_tzap_files_to_writer_with_optional_password, create_tzap_from_manifest_with_context,
     extract_tzap_file_to_destination, extract_tzap_with_optional_password_and_restore_options,
-    extract_tzap_with_recipient_key, extract_tzap_with_recipient_key_bytes_and_restore_options,
+    extract_tzap_with_recipient_key, extract_tzap_with_recipient_key_and_restore_options,
     list_tzap_index_with_optional_password, list_tzap_with_optional_password, list_tzap_with_password,
     list_tzap_with_recipient_key, summarize_tzap_public_metadata, test_tzap_with_password_filter_and_x509_trust,
     test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
@@ -853,11 +853,11 @@ fn create_tzap_with_recipient_certificate_opens_with_private_key() {
     assert_eq!(fs::read(out.join("payload.txt")).unwrap(), b"sealed payload");
 
     let out_from_secure_store = temp.path("out-from-secure-store");
-    let extract_report = extract_tzap_with_recipient_key_bytes_and_restore_options(
+    let extract_report = extract_tzap_with_recipient_key_and_restore_options(
         &archive,
         &out_from_secure_store,
         ExtractionPolicy::default(),
-        &recipient_key.private_key_to_pem_pkcs8().unwrap(),
+        &recipient_key_path,
         TzapRestoreOptions::default(),
     )
     .unwrap();

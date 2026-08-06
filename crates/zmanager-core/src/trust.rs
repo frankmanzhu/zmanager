@@ -23,10 +23,6 @@ pub const TZAP_LEAF_KEY_ALGORITHM: &str = "ECDSA-P256";
 pub const TZAP_LEAF_CERTIFICATE_SIGNATURE_ALGORITHM: &str = "ECDSA-P256-SHA256";
 
 /// MVP algorithm allowlists.
-pub const TZAP_MVP_DOCUMENT_SIGNATURE_ALGORITHMS: &[&str] = &[TZAP_DOCUMENT_SIGNATURE_ALGORITHM];
-pub const TZAP_MVP_LEAF_KEY_ALGORITHMS: &[&str] = &[TZAP_LEAF_KEY_ALGORITHM];
-pub const TZAP_MVP_CERTIFICATE_SIGNATURE_ALGORITHMS: &[&str] = &[TZAP_LEAF_CERTIFICATE_SIGNATURE_ALGORITHM];
-pub const TZAP_MVP_PAYLOAD_DIGEST_ALGORITHMS: &[&str] = &[TZAP_PAYLOAD_DIGEST_ALGORITHM];
 pub const TZAP_CRL_SCOPE_ALL_CERTIFICATES_ISSUED_BY_CA: &str = "all_certificates_issued_by_ca";
 
 /// MVP OIDs (numeric UUID-derived arcs).
@@ -61,11 +57,6 @@ pub const PUBLIC_DEVICE_ID_PREFIX: &str = "pdev_";
 /// Public identifier suffix length bounds (excluding prefix).
 pub const PUBLIC_IDENTIFIER_SUFFIX_MIN_LENGTH: usize = 16;
 pub const PUBLIC_IDENTIFIER_SUFFIX_MAX_LENGTH: usize = 64;
-
-/// Regex source strings for documentation and downstream validation reuse.
-pub const PUBLIC_SIGNER_ID_REGEX: &str = r"^psign_[A-Za-z0-9_-]{16,64}$";
-pub const PUBLIC_ORG_ID_REGEX: &str = r"^porg_[A-Za-z0-9_-]{16,64}$";
-pub const PUBLIC_DEVICE_ID_REGEX: &str = r"^pdev_[A-Za-z0-9_-]{16,64}$";
 
 /// Canonical status values.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -244,14 +235,7 @@ impl std::str::FromStr for TzapIdentityAssurance {
 }
 
 /// Canonical endpoint paths.
-pub const TRUST_ROOTS_PATH: &str = "/v1/trust/roots";
-pub const TRUST_ROOT_PEM_PATH: &str = "/v1/trust/roots/{root_certificate_sha256}/pem";
-pub const TRUST_INTERMEDIATES_PATH: &str = "/v1/trust/intermediates";
-pub const TRUST_INTERMEDIATE_PEM_PATH: &str = "/v1/trust/intermediates/{issuer_certificate_sha256}/pem";
-
 pub const STATUS_BY_FINGERPRINT_PATH: &str = "/v1/status/certificates/by-fingerprint/{certificate_sha256}";
-pub const STATUS_BY_ISSUER_SERIAL_PATH: &str =
-    "/v1/status/certificates/by-issuer/{issuer_certificate_sha256}/{serial_number}";
 pub const STATUS_CRL_MANIFEST_PATH: &str = "/v1/status/crls";
 pub const STATUS_CRL_PEM_PATH: &str = "/v1/status/crls/{issuer_certificate_sha256}/pem";
 pub const STATUS_BULK_PATH: &str = "/v1/status/bulk";
@@ -1378,26 +1362,9 @@ fn validate_and_percent_encode(identifier: &str) -> Result<String, TrustIdentifi
     Ok(percent_encode_path_param(identifier))
 }
 
-pub fn trust_root_pem_path(root_sha256: &str) -> Result<String, TrustIdentifierError> {
-    validate_and_percent_encode(root_sha256)
-        .map(|encoded| TRUST_ROOT_PEM_PATH.replace("{root_certificate_sha256}", &encoded))
-}
-
-pub fn trust_intermediate_pem_path(issuer_sha256: &str) -> Result<String, TrustIdentifierError> {
-    validate_and_percent_encode(issuer_sha256)
-        .map(|encoded| TRUST_INTERMEDIATE_PEM_PATH.replace("{issuer_certificate_sha256}", &encoded))
-}
-
 pub fn status_certificate_by_fingerprint_path(certificate_sha256: &str) -> Result<String, TrustIdentifierError> {
     validate_and_percent_encode(certificate_sha256)
         .map(|encoded| STATUS_BY_FINGERPRINT_PATH.replace("{certificate_sha256}", &encoded))
-}
-
-pub fn status_certificate_by_issuer_path(issuer_sha256: &str, serial: &str) -> Result<String, TrustIdentifierError> {
-    parse_serial_hex(serial)?;
-    validate_and_percent_encode(issuer_sha256).map(|encoded| {
-        STATUS_BY_ISSUER_SERIAL_PATH.replace("{issuer_certificate_sha256}", &encoded).replace("{serial_number}", serial)
-    })
 }
 
 pub fn status_crl_pem_path(issuer_sha256: &str) -> Result<String, TrustIdentifierError> {
@@ -1434,8 +1401,7 @@ fn is_valid_public_identifier(value: &str, prefix: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        OFFICIAL_TZAP_ROOT_PINS, TZAP_MVP_CERTIFICATE_SIGNATURE_ALGORITHMS, TZAP_MVP_DOCUMENT_SIGNATURE_ALGORITHMS,
-        TZAP_MVP_LEAF_KEY_ALGORITHMS, TZAP_MVP_PAYLOAD_DIGEST_ALGORITHMS, TZAP_OID_CA_POLICY,
+        OFFICIAL_TZAP_ROOT_PINS, TZAP_OID_CA_POLICY,
         TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TzapCertificateProfileError,
         TzapCertificateProfileOptions, TzapCertificateStatus, TzapIdentityAssurance, TzapOfficialRootPinKind,
         TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState, canonical_serial_hex, format_certificate_sha256,
@@ -1443,8 +1409,8 @@ mod tests {
         is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id, is_valid_serial_hex,
         is_valid_sha256_identifier, parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256,
         parse_serial_hex, parse_sha256_identifier, parse_spki_sha256, percent_encode_path_param,
-        status_certificate_by_fingerprint_path, status_certificate_by_issuer_path, trust_intermediate_pem_path,
-        trust_root_pem_path, validate_base64url_no_padding, validate_custom_tzap_certificate_chain_der,
+        status_certificate_by_fingerprint_path, validate_base64url_no_padding,
+        validate_custom_tzap_certificate_chain_der,
         validate_official_tzap_certificate_chain_der,
     };
     use openssl::asn1::{Asn1Object, Asn1OctetString, Asn1Time};
@@ -1543,26 +1509,11 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_path_builders_validate_and_encode_fingerprint() {
-        let root = trust_root_pem_path(SHA256_IDENT).unwrap();
-        assert_eq!(
-            root,
-            "/v1/trust/roots/sha256%3A0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f/pem"
-        );
-
-        let intermediate = trust_intermediate_pem_path(SHA256_IDENT).unwrap();
-        assert_eq!(
-            intermediate,
-            "/v1/trust/intermediates/sha256%3A0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f/pem"
-        );
-
+    fn fingerprint_path_builder_validates_and_percent_encodes() {
         let fingerprint = status_certificate_by_fingerprint_path(SHA256_IDENT).unwrap();
-        assert!(fingerprint.contains("sha256%3A"));
-
-        let by_issuer = status_certificate_by_issuer_path(SHA256_IDENT, "01ABCDEF").unwrap();
         assert_eq!(
-            by_issuer,
-            "/v1/status/certificates/by-issuer/sha256%3A0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f/01ABCDEF"
+            fingerprint,
+            "/v1/status/certificates/by-fingerprint/sha256%3A0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f"
         );
     }
 
@@ -1611,14 +1562,6 @@ mod tests {
             ]
         );
         assert!(OFFICIAL_TZAP_ROOT_PINS.planned_successors.is_empty());
-    }
-
-    #[test]
-    fn mvp_algorithm_allowlists_are_named() {
-        assert_eq!(TZAP_MVP_DOCUMENT_SIGNATURE_ALGORITHMS, &["ECDSA-P256-SHA256"]);
-        assert_eq!(TZAP_MVP_LEAF_KEY_ALGORITHMS, &["ECDSA-P256"]);
-        assert_eq!(TZAP_MVP_CERTIFICATE_SIGNATURE_ALGORITHMS, &["ECDSA-P256-SHA256"]);
-        assert_eq!(TZAP_MVP_PAYLOAD_DIGEST_ALGORITHMS, &["SHA-256"]);
     }
 
     #[test]

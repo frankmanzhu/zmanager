@@ -243,58 +243,6 @@ pub fn extract_tzap_with_recipient_key_and_restore_options(
     )
 }
 
-/// Extracts recipient-wrapped `.tzap` entries using private key bytes supplied
-/// by an injected secure-store resolver. The bytes remain operation-scoped and
-/// are never written to a temporary key file.
-pub fn extract_tzap_with_recipient_key_bytes_and_restore_options(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    recipient_private_key: &[u8],
-    restore_options: TzapRestoreOptions,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_inner(
-        archive,
-        destination,
-        ExtractTzapOptions {
-            policy,
-            password: None,
-            recipient_private_key: None,
-            recipient_private_key_secret: None,
-            recipient_private_key_bytes: Some(recipient_private_key),
-            restore_options,
-        },
-        None,
-        None,
-    )
-}
-
-/// Extracts recipient-wrapped `.tzap` entries using secret material resolved
-/// from an injected secure store. The caller retains ownership of the
-/// zeroizing secret for the complete operation.
-pub fn extract_tzap_with_recipient_key_secret_and_restore_options(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    recipient_private_key: &SecretBytes,
-    restore_options: TzapRestoreOptions,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_inner(
-        archive,
-        destination,
-        ExtractTzapOptions {
-            policy,
-            password: None,
-            recipient_private_key: None,
-            recipient_private_key_secret: Some(recipient_private_key),
-            recipient_private_key_bytes: None,
-            restore_options,
-        },
-        None,
-        None,
-    )
-}
-
 /// Context-aware variant used by desktop jobs so recipient-key extraction
 /// participates in cancellation and progress reporting.
 pub fn extract_tzap_with_recipient_key_secret_and_context(
@@ -488,29 +436,6 @@ pub fn extract_tzap_with_overwrite_resolver_and_optional_password_and_restore_op
         },
         Some(overwrite_resolver),
         None,
-    )
-}
-
-/// Extracts recipient-wrapped `.tzap` entries with a private key and overwrite resolver.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// or filesystem writes fail.
-pub fn extract_tzap_with_overwrite_resolver_and_recipient_key(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    recipient_private_key: impl AsRef<Path>,
-    overwrite_resolver: &mut dyn OverwriteResolver,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_with_overwrite_resolver_and_recipient_key_and_restore_options(
-        archive,
-        destination,
-        policy,
-        recipient_private_key,
-        TzapRestoreOptions::default(),
-        overwrite_resolver,
     )
 }
 
@@ -732,30 +657,6 @@ pub fn extract_tzap_file_to_destination_with_optional_password_and_restore_optio
 ) -> Result<Option<TzapFileExtractReport>, TzapError> {
     let opened = open_tzap_archive(archive, password)?;
     extract_tzap_file_from_opened_archive(&opened, entry_path, destination_path, replace_existing, restore_options)
-}
-
-/// Extracts one regular recipient-wrapped `.tzap` member to an exact destination path.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, the member cannot be
-/// extracted by tzap-core, or the destination cannot be committed.
-pub fn extract_tzap_file_to_destination_with_recipient_key(
-    archive: impl AsRef<Path>,
-    recipient_private_key: impl AsRef<Path>,
-    entry_path: &str,
-    destination_path: &Path,
-    replace_existing: bool,
-) -> Result<Option<u64>, TzapError> {
-    let opened = open_tzap_archive_with_recipient_key(archive, recipient_private_key)?;
-    extract_tzap_file_from_opened_archive(
-        &opened,
-        entry_path,
-        destination_path,
-        replace_existing,
-        TzapRestoreOptions::default(),
-    )
-    .map(|report| report.map(|report| report.written_bytes))
 }
 
 fn extract_tzap_file_from_opened_archive(
@@ -1075,11 +976,14 @@ fn extract_opened_tzap_with_core_restore(
         return Ok(report);
     }
 
+    // Batch restore runs single-threaded; the jobs parameter is the plugin's
+    // parallelism (minimum 1).
+    const EXTRACT_SELECTED_JOBS: usize = 1;
     let restored = opened.extract_selected_files_to(
         &selected,
         destination_root,
         restore_options.core_options(replace_existing),
-        1,
+        EXTRACT_SELECTED_JOBS,
     )?;
     let sizes = entries.iter().map(|entry| (entry.path.as_str(), entry.file_data_size)).collect::<BTreeMap<_, _>>();
     for (path, diagnostics) in restored {

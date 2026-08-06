@@ -209,7 +209,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         previous_signing_key: &TzapDeviceSigningKeyRecord,
         csr_der: &[u8],
     ) -> Result<TzapEnrolledCertificateRecord, TzapCertificateLifecycleError> {
-        let previous = Self::precheck_renewal(store, request)?;
+        Self::precheck_renewal(store, request)?;
         session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
         let challenge = self.request_renewal_challenge(session, request, new_signing_key, csr_der)?;
         validate_renewal_challenge(
@@ -243,15 +243,6 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         let mut inventory = store.load_inventory(&request.account_key)?;
         inventory.enrolled_certificates.push(new_record.clone());
         store.save_inventory(&request.account_key, inventory)?;
-        let mut inventory = store.load_inventory(&request.account_key)?;
-        if !inventory
-            .enrolled_certificates
-            .iter()
-            .any(|record| record.certificate_sha256 == previous.certificate_sha256)
-        {
-            inventory.enrolled_certificates.push(previous);
-            store.save_inventory(&request.account_key, inventory)?;
-        }
         Ok(new_record)
     }
 

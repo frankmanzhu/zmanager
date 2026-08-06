@@ -569,7 +569,7 @@ fn cert_list_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
                     if index > 0 {
                         print!(",");
                     }
-                    print_certificate_json(cert);
+                    print!("{}", certificate_summary_value(cert));
                 }
                 println!("]}}");
             } else if inventory.enrolled_certificates.is_empty() {
@@ -2450,10 +2450,6 @@ fn print_session_summary(session: &zmanager_core::auth_client::TzapSessionRecord
         let status = if expired { "expired" } else { "active" };
         println!("{status} session for {} ({})", session.audience, session.identity_assurance.as_str());
     }
-}
-
-fn print_certificate_json(cert: &zmanager_core::local_identity_store::TzapEnrolledCertificateRecord) {
-    print!("{}", certificate_summary_value(cert));
 }
 
 fn print_verification_result(

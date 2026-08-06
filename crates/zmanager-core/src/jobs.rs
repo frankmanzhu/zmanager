@@ -3,7 +3,6 @@ use crate::apple_archive_backend::{self, AppleArchiveError};
 use crate::manifest::{PlanOptions, plan_archives};
 use crate::safety::ExtractionPolicy;
 use crate::sevenz_backend::{SevenZCreateOptions, SevenZCreateReport};
-use crate::tar_gz_backend::{self, TarGzCreateOptions, TarGzError};
 use crate::tar_zst_backend::{self, TarZstdCreateOptions, TarZstdError, TarZstdExtractReport};
 use crate::tzap_backend::{self, TzapCreateOptions, TzapCreateReport, TzapError};
 use crate::zip_backend::{self, ZipBackendError, ZipCreateOptions, ZipCreateReport};
@@ -547,9 +546,9 @@ impl<'a> JobContext<'a> {
     pub fn entry_started(&mut self, path: impl Into<String>, bytes: Option<u64>) {
         let path = path.into();
         self.emit(JobEvent::EntryStarted { path: path.clone(), bytes });
-        if let Some(batch) = self.progress.record_activity(Some(&path), 0, 0) {
-            self.emit_bytes_processed_batch(batch);
-        }
+        // Entry accounting and recent-path tracking happen in `entry_finished`;
+        // a `record_activity(0, 0)` here would be a no-op by the coalescer's
+        // early return on zero bytes and entries.
     }
 
     /// Emits an entry-finished event carrying the processed byte count and
@@ -601,12 +600,6 @@ impl<'a> JobContext<'a> {
         self.flush_progress();
         self.phase_bytes_processed.insert(phase, 0);
         self.emit(JobEvent::PhaseStarted { phase, total_bytes });
-    }
-
-    /// Emits phase-scoped byte progress and updates its cumulative counter.
-    pub fn phase_bytes_processed(&mut self, phase: JobPhase, path: Option<&str>, bytes: u64, total_bytes: Option<u64>) {
-        let recent_paths = path.into_iter().map(ToOwned::to_owned).collect();
-        self.phase_bytes_processed_with_recent_paths(phase, path, recent_paths, bytes, total_bytes, false);
     }
 
     /// Emits phase-scoped byte progress with a capped recent-path activity list.
@@ -719,22 +712,6 @@ pub fn run_zip_create_job_from_sources_with_plan_options(
 ///
 /// Returns [`ZipBackendError`] when ZIP reading, extraction safety,
 /// filesystem I/O, or cancellation fails.
-pub fn run_zip_extract_job(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<zip_backend::ZipExtractReport, ZipBackendError> {
-    run_zip_extract_job_with_password_and_policy(
-        archive_path,
-        destination,
-        None,
-        ExtractionPolicy::default(),
-        token,
-        sink,
-    )
-}
-
 /// Runs a ZIP extract job with an optional password and explicit extraction
 /// policy while emitting lifecycle/progress events.
 ///
@@ -804,31 +781,6 @@ pub fn run_tar_zst_create_job_from_sources_with_plan_options(
 ///
 /// Returns [`TarGzError`] when planning, TAR.GZ creation, filesystem I/O, or
 /// cancellation fails.
-pub fn run_tar_gz_create_job_from_sources_with_plan_options(
-    sources: &[PathBuf],
-    destination: impl AsRef<Path>,
-    options: &TarGzCreateOptions,
-    plan_options: &PlanOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_gz_backend::TarGzCreateReport, TarGzError> {
-    let manifest = match plan_archives(sources, plan_options) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            let error = TarGzError::Plan(error);
-            sink.emit(JobEvent::Started { kind: JobKind::TarGzCreate, total_bytes: None });
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            return Err(error);
-        }
-    };
-    sink.emit(JobEvent::Started { kind: JobKind::TarGzCreate, total_bytes: Some(manifest.total_bytes) });
-    let mut context = JobContext::new_with_progress_total(token, sink, Some(manifest.total_bytes));
-    let result =
-        tar_gz_backend::create_tar_gz_from_manifest_with_context(&manifest, destination, options, &mut context);
-    context.flush_progress();
-    finish_tar_gz_create_result(result, sink)
-}
-
 /// Runs a 7z create job for multiple source roots with explicit planning
 /// options and emits lifecycle events.
 ///
@@ -1253,35 +1205,6 @@ pub fn run_tzap_extract_job_with_password_and_policy_and_restore_options(
     finish_tzap_extract_result(result, sink)
 }
 
-/// Runs a recipient-key TZAP extract while retaining the secret in its
-/// zeroizing container and emitting the normal job lifecycle/progress events.
-pub fn run_tzap_extract_job_with_recipient_key_and_policy(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    recipient_private_key: &crate::secrets::SecretBytes,
-    policy: ExtractionPolicy,
-    restore_options: tzap_backend::TzapRestoreOptions,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<tzap_backend::TzapExtractReport, TzapError> {
-    sink.emit(JobEvent::Started { kind: JobKind::TzapExtract, total_bytes: None });
-    if token.is_cancelled() {
-        sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-        return Err(TzapError::Cancelled);
-    }
-    let mut context = JobContext::new(token, sink);
-    let result = tzap_backend::extract_tzap_with_recipient_key_secret_and_context(
-        archive_path,
-        destination,
-        policy,
-        recipient_private_key,
-        restore_options,
-        &mut context,
-    );
-    context.flush_progress();
-    finish_tzap_extract_result(result, sink)
-}
-
 finish_result!(finish_zip_create_result, ZipCreateReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);
 
 finish_result!(finish_tzap_create_result, TzapCreateReport, TzapError, emit_warnings: false, cancelled: TzapError::Cancelled);
@@ -1294,26 +1217,6 @@ finish_result!(finish_apple_archive_extract_result, apple_archive_backend::Apple
 finish_result!(finish_zip_extract_result, zip_backend::ZipExtractReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);
 
 finish_result!(finish_tar_zst_create_result, tar_zst_backend::TarZstdCreateReport, TarZstdError, emit_warnings: false, cancelled: TarZstdError::Cancelled);
-
-fn finish_tar_gz_create_result(
-    result: Result<tar_gz_backend::TarGzCreateReport, TarGzError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_gz_backend::TarGzCreateReport, TarGzError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(TarGzError::Cancelled(cancelled)) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(TarGzError::Cancelled(cancelled))
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
 
 finish_result!(finish_tar_zst_extract_result, TarZstdExtractReport, TarZstdError, emit_warnings: false, cancelled: TarZstdError::Cancelled);
 
@@ -1333,7 +1236,7 @@ mod tests {
         run_libarchive_extract_job_with_password_and_policy, run_raw_stream_extract_job_with_policy,
         run_tar_zst_create_job_from_sources_with_plan_options, run_tzap_create_job_from_sources_with_plan_options,
         run_tzap_extract_job_with_password_and_policy, run_zip_create_job_from_sources_with_plan_options,
-        run_zip_extract_job,
+        run_zip_extract_job_with_password_and_policy,
     };
     use crate::test_support::TestDir;
 
@@ -1545,10 +1448,14 @@ mod tests {
         let temp = TestDir::new("zip_extract_job_emits_failure_event");
         let mut events = Vec::new();
 
-        let result =
-            run_zip_extract_job(temp.path("missing.zip"), temp.path("out"), &CancellationToken::new(), &mut |event| {
-                events.push(event)
-            });
+        let result = run_zip_extract_job_with_password_and_policy(
+            temp.path("missing.zip"),
+            temp.path("out"),
+            None,
+            ExtractionPolicy::default(),
+            &CancellationToken::new(),
+            &mut |event| events.push(event),
+        );
 
         assert!(result.is_err());
         assert!(matches!(events.first(), Some(JobEvent::Started { .. })));
@@ -1570,9 +1477,14 @@ mod tests {
         .unwrap();
         let mut events = Vec::new();
 
-        run_zip_extract_job(temp.path("archive.zip"), temp.path("out"), &CancellationToken::new(), &mut |event| {
-            events.push(event)
-        })
+        run_zip_extract_job_with_password_and_policy(
+            temp.path("archive.zip"),
+            temp.path("out"),
+            None,
+            ExtractionPolicy::default(),
+            &CancellationToken::new(),
+            &mut |event| events.push(event),
+        )
         .unwrap();
 
         assert_extract_started_with_unknown_total(&events, super::JobKind::ZipExtract);

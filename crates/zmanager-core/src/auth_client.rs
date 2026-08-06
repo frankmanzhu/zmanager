@@ -295,10 +295,10 @@ pub fn complete_hosted_auth_handoff(
     callback: &TzapHostedAuthCallback,
     now_unix_seconds: u64,
 ) -> Result<TzapSessionRecord, TzapAuthError> {
-    let pending = tracker.consume_handoff(callback, now_unix_seconds, AUTH_HANDOFF_LIFETIME_SECONDS)?;
+    tracker.consume_handoff(callback, now_unix_seconds, AUTH_HANDOFF_LIFETIME_SECONDS)?;
     let relay = TzapAuthRelayCompletion::from_json_bytes(&callback.relay_body)?;
     let session = relay.into_session();
-    session.require_audience(&pending_expected_audience(&pending))?;
+    session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
     session_store.save_session(account_key, session.clone())?;
     Ok(session)
 }
@@ -616,10 +616,6 @@ pub fn validate_oauth_state(state: &str) -> Result<(), TzapAuthError> {
 
 fn validate_non_empty_config(field: &'static str, value: &str) -> Result<(), TzapAuthError> {
     if value.is_empty() { Err(TzapAuthError::InvalidConfig { field }) } else { Ok(()) }
-}
-
-fn pending_expected_audience(_pending: &TzapPendingAuthState) -> String {
-    SESSION_AUDIENCE_SIGN_TZAP.to_owned()
 }
 
 fn parse_session_record(value: &Value) -> Result<TzapSessionRecord, TzapAuthError> {

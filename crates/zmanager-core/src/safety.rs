@@ -862,7 +862,9 @@ fn next_available_destination_path_with_budget(path: &Path, candidate_budget: u6
         .unwrap_or("entry");
     let extension = path.extension().and_then(|extension| extension.to_str());
 
-    for index in 2..=(candidate_budget.saturating_add(1)) {
+    // Candidate names start at "stem 2" (the base name occupies index 1), so a
+    // budget of N yields the N candidates numbered 2..=N+1.
+    for index in 2..=candidate_budget.saturating_add(1) {
         let file_name = if let Some(extension) = extension {
             format!("{stem} {index}.{extension}")
         } else {
