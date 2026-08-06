@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use zip::write::{FileOptions, SimpleFileOptions};
 use zip::{AesMode, CompressionMethod, ZipArchive, ZipReadOptions, ZipWriter};
 
-#[cfg(unix)]
 const ZIP_MODE_MASK: u32 = 0o0777;
 
 /// ZIP compression methods exposed in v1.

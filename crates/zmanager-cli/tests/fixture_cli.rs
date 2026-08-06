@@ -306,6 +306,35 @@ fn zm_create_accepts_multiple_explicit_sources() {
 }
 
 #[test]
+fn zm_create_no_hidden_excludes_nested_hidden_entries() {
+    let temp = TestDir::new("zm_no_hidden");
+    fs::create_dir_all(temp.path("project/src/.hidden")).unwrap();
+    fs::write(temp.path("project/src/lib.rs"), "pub fn f() {}\n").unwrap();
+    fs::write(temp.path("project/src/.hidden/secret.txt"), "secret").unwrap();
+    fs::write(temp.path("project/.config"), "hidden config").unwrap();
+    fs::write(temp.path("project/README.md"), "readme").unwrap();
+    let archive = temp.path("nohidden.zip");
+
+    let output = Command::new(zm_path())
+        .arg("create")
+        .arg(&archive)
+        .arg("--no-hidden")
+        .arg(temp.path("project"))
+        .output()
+        .unwrap();
+    assert_success("zm create --no-hidden", &output);
+
+    let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
+    assert_success("zm list --name-only", &list);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(stdout.contains("lib.rs"), "{stdout}");
+    assert!(stdout.contains("README.md"), "{stdout}");
+    assert!(!stdout.contains(".config"), "{stdout}");
+    assert!(!stdout.contains(".hidden"), "{stdout}");
+    assert!(!stdout.contains("secret.txt"), "{stdout}");
+}
+
+#[test]
 fn zm_create_accepts_long_create_file_form() {
     let temp = TestDir::new("zm_long_create_file");
     fs::write(temp.path("file.txt"), "content").unwrap();

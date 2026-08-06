@@ -153,7 +153,7 @@ pub(crate) fn parse_create_request(
                 index += 1;
             }
             "--no-hidden" => {
-                request.exclude.push(".*".to_owned());
+                request.no_hidden = true;
                 index += 1;
             }
             "-j" | "--junk-paths" => {
@@ -258,9 +258,13 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
 
     let manifest = match plan_sources(&request.sources, request.clean, request.no_ignore, follow_symlinks) {
         Ok(mut manifest) => {
-            if let Err(error) =
-                apply_manifest_filters(&mut manifest, &request.include, &request.exclude, &request.exclude_from)
-            {
+            if let Err(error) = apply_manifest_filters(
+                &mut manifest,
+                &request.include,
+                &request.exclude,
+                &request.exclude_from,
+                request.no_hidden,
+            ) {
                 print_error_line(global, format_args!("create failed: {error}"));
                 return ExitCode::FAILURE;
             }

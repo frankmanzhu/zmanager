@@ -1,4 +1,3 @@
-use crate::cli::open::entry_selected;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -73,6 +72,7 @@ pub(crate) fn apply_manifest_filters(
     includes: &[String],
     excludes: &[String],
     exclude_from: &[PathBuf],
+    exclude_hidden: bool,
 ) -> Result<(), String> {
     let mut exclude_patterns = excludes.to_vec();
     for file in exclude_from {
@@ -87,7 +87,14 @@ pub(crate) fn apply_manifest_filters(
         );
     }
 
-    manifest.entries.retain(|entry| entry_selected(&entry.archive_path, includes, &exclude_patterns));
+    manifest.entries.retain(|entry| {
+        let path = &entry.archive_path;
+        let explicitly_included = !includes.is_empty() && includes.iter().any(|pattern| archive_pattern_matches(pattern, path));
+        let matches_include = includes.is_empty() || explicitly_included;
+        let matches_exclude = exclude_patterns.iter().any(|pattern| archive_pattern_matches(pattern, path));
+        let hidden_excluded = exclude_hidden && archive_path_has_hidden_component(path) && !explicitly_included;
+        matches_include && !matches_exclude && !hidden_excluded
+    });
     manifest.total_bytes = manifest
         .entries
         .iter()
@@ -95,6 +102,14 @@ pub(crate) fn apply_manifest_filters(
         .map(|entry| entry.size)
         .sum();
     Ok(())
+}
+
+/// Returns whether any archive path component after the root has a hidden
+/// (dot-prefixed) name. The root component is the explicitly named source
+/// directory, so a hidden source root (for example `zm create .hidden-dir`)
+/// is not itself excluded.
+pub(crate) fn archive_path_has_hidden_component(path: &str) -> bool {
+    path.split('/').skip(1).any(|component| component.starts_with('.'))
 }
 
 pub(crate) fn apply_junk_paths(manifest: &mut zmanager_core::manifest::ArchiveManifest) -> Result<(), String> {

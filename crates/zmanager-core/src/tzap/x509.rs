@@ -40,8 +40,11 @@ const X509_ROOT_AUTH_MAGIC: &[u8; 4] = b"TZXC";
 const X509_ROOT_AUTH_VERSION: u16 = 1;
 const X509_ROOT_AUTH_OPENSSL_SHA256_SCHEME: u16 = 1;
 const X509_ROOT_AUTH_FIXED_AUTHENTICATOR_LEN: usize = 60;
-const OFFICIAL_TZAP_ROOT_CERT_SHA256: &str = "sha256:d80d318f6cd6096dc791e314ec6f41434caa47feb75e85ad6f87d5bf72bbd53d";
+// The official root literals live in `trust::` (pinned there too), so the
+// pin set and the embedded certificates cannot drift.
+const OFFICIAL_TZAP_ROOT_CERT_SHA256: &str = crate::trust::TZAP_PRODUCTION_ROOT_SHA256;
 const OFFICIAL_TZAP_ROOT_CERT_PEM: &[u8] = include_bytes!("../trust/tzap-production-root-ca-2026.pem");
+const OFFICIAL_TZAP_STAGING_ROOT_PEM: &[u8] = include_bytes!("../trust/tzap-staging-root-ca-2026.pem");
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TzapX509SigningOptions {
@@ -242,6 +245,14 @@ pub(crate) fn load_x509_trusted_roots(trust: &TzapX509TrustOptions) -> Result<Ve
         certificates.push(certificate_der_from_pem_or_der(OFFICIAL_TZAP_ROOT_CERT_PEM).map_err(|source| {
             TzapError::X509RootAuth(format!(
                 "failed to parse embedded TZAP root certificate {OFFICIAL_TZAP_ROOT_CERT_SHA256}: {source}"
+            ))
+        })?);
+        // Staging is trusted by default alongside production (see
+        // `trust::OFFICIAL_TZAP_ROOT_PINS`).
+        certificates.push(certificate_der_from_pem_or_der(OFFICIAL_TZAP_STAGING_ROOT_PEM).map_err(|source| {
+            TzapError::X509RootAuth(format!(
+                "failed to parse embedded TZAP staging root certificate {}: {source}",
+                crate::trust::TZAP_STAGING_ROOT_SHA256
             ))
         })?);
     }
@@ -1025,15 +1036,24 @@ mod tests {
 
         let roots = load_x509_trusted_roots(&trust).unwrap();
 
-        assert_eq!(roots.len(), 1);
+        assert_eq!(roots.len(), 2);
         assert_eq!(
             crate::trust::certificate_sha256_identifier_for_der(&roots[0]),
-            "sha256:d80d318f6cd6096dc791e314ec6f41434caa47feb75e85ad6f87d5bf72bbd53d"
+            crate::trust::TZAP_PRODUCTION_ROOT_SHA256
+        );
+        assert_eq!(
+            crate::trust::certificate_sha256_identifier_for_der(&roots[1]),
+            crate::trust::TZAP_STAGING_ROOT_SHA256
         );
         let root = X509::from_der(&roots[0]).unwrap();
         assert_eq!(
             crate::x509_format::x509_name_to_string(root.subject_name()),
             "CN=TZAP Production Root CA 2026, O=TZAP, C=AU"
+        );
+        let staging = X509::from_der(&roots[1]).unwrap();
+        assert_eq!(
+            crate::x509_format::x509_name_to_string(staging.subject_name()),
+            "CN=TZAP Staging Root CA 2026, O=TZAP, C=AU"
         );
     }
 }

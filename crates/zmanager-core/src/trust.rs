@@ -267,11 +267,18 @@ impl TzapRootPinSet {
     }
 }
 
+/// SHA-256 identifiers of the TZAP roots trusted by default in chain
+/// verification. Both are official: production serves live traffic and
+/// staging serves the staging environment; chains rooted at either verify.
+/// The PEMs live in `crates/zmanager-core/src/trust/` and are pinned here so
+/// the pin set and the embedded certificates cannot drift.
+pub const TZAP_PRODUCTION_ROOT_SHA256: &str =
+    "sha256:d80d318f6cd6096dc791e314ec6f41434caa47feb75e85ad6f87d5bf72bbd53d";
+pub const TZAP_STAGING_ROOT_SHA256: &str =
+    "sha256:4847bd67cf76f0d399565deac2583d4d4de51d2751b77cd6f7672a508bcc1341";
+
 pub const OFFICIAL_TZAP_ROOT_PINS: TzapRootPinSet = TzapRootPinSet {
-    current: &[
-        "sha256:d80d318f6cd6096dc791e314ec6f41434caa47feb75e85ad6f87d5bf72bbd53d",
-        "sha256:f57f5a7778d1c3fdb555c43c6c7d16cdb7f4f8160a4a70d6964b3a7b5016e4a1",
-    ],
+    current: &[TZAP_PRODUCTION_ROOT_SHA256, TZAP_STAGING_ROOT_SHA256],
     planned_successors: &[],
 };
 
@@ -1556,10 +1563,7 @@ mod tests {
 
         assert_eq!(
             OFFICIAL_TZAP_ROOT_PINS.current,
-            &[
-                "sha256:d80d318f6cd6096dc791e314ec6f41434caa47feb75e85ad6f87d5bf72bbd53d",
-                "sha256:f57f5a7778d1c3fdb555c43c6c7d16cdb7f4f8160a4a70d6964b3a7b5016e4a1",
-            ]
+            &[super::TZAP_PRODUCTION_ROOT_SHA256, super::TZAP_STAGING_ROOT_SHA256]
         );
         assert!(OFFICIAL_TZAP_ROOT_PINS.planned_successors.is_empty());
     }

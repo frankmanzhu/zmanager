@@ -754,7 +754,10 @@ fn build_catalog_from_legacy(
                 public_device_id: None,
                 assurance_level: None,
                 sign_device_id: None,
-                signing_key_ref: signing_refs.get(&key.key_id).expect("signing ref inserted above").clone(),
+                signing_key_ref: signing_refs
+                    .get(&key.key_id)
+                    .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.signing_refs" })?
+                    .clone(),
                 lifecycle: "pending".to_owned(),
             });
         }
@@ -763,18 +766,23 @@ fn build_catalog_from_legacy(
     let recipient_keys = inventory
         .recipient_encryption_keys
         .iter()
-        .map(|key| TzapPublicRecipientKeyRecord {
-            id: key.key_id.clone(),
-            local_label: key.label.clone(),
-            algorithm: key.algorithm.clone(),
-            public_key_der: key.public_key_der.clone(),
-            fingerprint: key.public_key_fingerprint.clone(),
-            private_key_ref: recipient_refs.get(&key.key_id).expect("recipient ref inserted above").clone(),
-            lifecycle: "active".to_owned(),
-            created_at_unix_seconds: key.created_at_unix_seconds,
-            retired_at_unix_seconds: None,
+        .map(|key| {
+            Ok::<_, TzapIdentityCatalogError>(TzapPublicRecipientKeyRecord {
+                id: key.key_id.clone(),
+                local_label: key.label.clone(),
+                algorithm: key.algorithm.clone(),
+                public_key_der: key.public_key_der.clone(),
+                fingerprint: key.public_key_fingerprint.clone(),
+                private_key_ref: recipient_refs
+                    .get(&key.key_id)
+                    .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.recipient_refs" })?
+                    .clone(),
+                lifecycle: "active".to_owned(),
+                created_at_unix_seconds: key.created_at_unix_seconds,
+                retired_at_unix_seconds: None,
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let mut catalog = TzapIdentityCatalog::empty();
     catalog.revision = 1;
     catalog.signing_identities = signing_identities;
@@ -841,14 +849,18 @@ fn commit_migration(
     for record in &inventory.device_signing_keys {
         secret_store.put_at(
             TzapSecretPurpose::SigningKey,
-            signing_refs.get(&record.key_id).expect("reference generated"),
+            signing_refs
+                .get(&record.key_id)
+                .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.signing_refs" })?,
             record.private_key_der.clone(),
         )?;
     }
     for record in &inventory.recipient_encryption_keys {
         secret_store.put_at(
             TzapSecretPurpose::RecipientKey,
-            recipient_refs.get(&record.key_id).expect("reference generated"),
+            recipient_refs
+                .get(&record.key_id)
+                .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.recipient_refs" })?,
             record.private_key_der.clone(),
         )?;
     }

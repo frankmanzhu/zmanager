@@ -2,6 +2,7 @@ use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
     ExtractionSafetyPlanner, OverwriteResolver,
 };
+use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Write};
@@ -10,8 +11,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::UNIX_EPOCH;
 
-const TEMP_OUTPUT_PREFIX: &str = ".zmanager";
-const TEMP_OUTPUT_SUFFIX: &str = ".tmp";
 const RAW_STREAM_TEMP_EXTENSION: &str = "tmp.Z";
 
 type ProgressCallback<'a> = Option<&'a mut dyn FnMut(u64)>;
@@ -803,46 +802,9 @@ fn is_compressed_archive_container(name: &str) -> bool {
     .any(|suffix| ends_with_ignore_ascii_case(name, suffix))
 }
 
-struct TemporaryDirectory {
-    path: PathBuf,
-}
-
-impl TemporaryDirectory {
-    fn new(label: &str) -> Result<Self, RawStreamError> {
-        let parent = std::env::temp_dir();
-        // The unique pid+nanos component comes from the shared helper; the
-        // attempt counter below is a retry loop on top of it for the
-        // (theoretical) same-process-same-nanosecond collision.
-        let unique = crate::temp_names::unique_temp_name(label);
-
-        for attempt in 0..100 {
-            let path = parent.join(format!("{TEMP_OUTPUT_PREFIX}-{unique}-{attempt}{TEMP_OUTPUT_SUFFIX}"));
-            match fs::create_dir(&path) {
-                Ok(()) => return Ok(Self { path }),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(source) => {
-                    return Err(RawStreamError::Io { path, source });
-                }
-            }
-        }
-
-        Err(RawStreamError::Io {
-            path: parent,
-            source: io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("could not allocate temporary directory for {label}"),
-            ),
-        })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TemporaryDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+impl From<TempDirAllocError> for RawStreamError {
+    fn from(error: TempDirAllocError) -> Self {
+        Self::Io { path: error.path, source: error.source }
     }
 }
 
@@ -864,11 +826,9 @@ fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        RawStreamFormat, TemporaryDirectory, detect_raw_stream_format, estimate_raw_stream_uncompressed_size,
-        extract_raw_stream, output_name_for_raw_stream,
-    };
+    use super::{RawStreamFormat, detect_raw_stream_format, estimate_raw_stream_uncompressed_size, extract_raw_stream, output_name_for_raw_stream};
     use crate::safety::{ExtractionLimits, ExtractionPolicy};
+    use crate::temp_names::TemporaryDirectory;
     use crate::test_support::TestDir;
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -954,17 +914,5 @@ mod tests {
             .expect("expected gzip uncompressed size hint");
 
         assert_eq!(estimated, payload.len() as u64);
-    }
-
-    #[test]
-    fn temporary_directories_do_not_reuse_existing_paths() {
-        let first = TemporaryDirectory::new("raw-stream-test").unwrap();
-        let first_path = first.path().to_path_buf();
-
-        let second = TemporaryDirectory::new("raw-stream-test").unwrap();
-
-        assert_ne!(second.path(), first_path);
-        assert!(first_path.is_dir());
-        assert!(second.path().is_dir());
     }
 }

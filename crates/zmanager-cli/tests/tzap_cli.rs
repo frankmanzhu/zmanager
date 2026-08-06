@@ -111,7 +111,7 @@ fn auth_callback_fails_when_session_cannot_be_persisted() {
 }
 
 #[test]
-fn cert_enroll_uses_local_fake_service_and_updates_inventory() {
+fn cert_enroll_uses_local_service_and_updates_inventory() {
     let temp = TestDir::new("zm_tzap_cert");
     let state_dir = temp.path("state");
     sign_in_with_fake_relay(&temp, &state_dir);

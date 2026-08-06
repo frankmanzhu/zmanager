@@ -4,11 +4,11 @@ use crate::safety::{
     ExtractionSafetyPlanner, OverwriteResolver,
 };
 use crate::tar_zst_backend::{self, TarZstdError};
+use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
 use std::fmt;
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEB_TEMP_PREFIX: &str = "zmanager-deb";
 const DEBIAN_BINARY_MEMBER: &str = "debian-binary";
@@ -133,7 +133,7 @@ fn extract_deb_nested_inner(
     let destination_root = crate::safety::prepare_destination_root(destination)
         .map_err(|source| DebError::Io { path: destination.to_path_buf(), source })?;
 
-    let temp = TempDir::new(DEB_TEMP_PREFIX)?;
+    let temp = TemporaryDirectory::new(DEB_TEMP_PREFIX)?;
     libarchive_backend::extract_archive(archive_path, temp.path(), ExtractionPolicy::default())?;
 
     let debian_binary = temp.path().join(DEBIAN_BINARY_MEMBER);
@@ -355,26 +355,8 @@ fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
     value.len() >= suffix.len() && value[value.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
 }
 
-#[derive(Debug)]
-struct TempDir {
-    path: PathBuf,
-}
-
-impl TempDir {
-    fn new(label: &str) -> Result<Self, DebError> {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
-        let path = std::env::temp_dir().join(format!("{label}-{}-{now}", std::process::id()));
-        fs::create_dir_all(&path).map_err(|source| DebError::Io { path: path.clone(), source })?;
-        Ok(Self { path })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+impl From<TempDirAllocError> for DebError {
+    fn from(error: TempDirAllocError) -> Self {
+        Self::Io { path: error.path, source: error.source }
     }
 }

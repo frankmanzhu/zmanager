@@ -132,6 +132,89 @@ impl Drop for TemporaryFile {
     }
 }
 
+/// Writes secret bytes to `path` atomically: content goes to a temporary
+/// sibling file, is synced, and is renamed into place, so a crash at any
+/// point leaves either the previous file or the complete new file — never a
+/// truncated mix. On Unix the file is created with owner-only permissions
+/// (0o600).
+///
+/// The temporary file is allocated with `create_new` plus a retry loop, so
+/// two concurrent writers can never clobber each other's temporary file.
+pub(crate) fn write_atomic_secret_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write as _;
+
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("secret");
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
+
+    #[cfg(unix)]
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+
+    for attempt in 0..MAX_TEMP_ATTEMPTS {
+        let temporary = parent.join(format!("{file_name}.tmp-{}-{now}-{attempt}", std::process::id()));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let write_result: io::Result<()> = (|| {
+            let mut file = options.open(&temporary)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            #[cfg(unix)]
+            {
+                let mut permissions = file.metadata()?.permissions();
+                permissions.set_mode(0o600);
+                fs::set_permissions(&temporary, permissions)?;
+            }
+            drop(file);
+            replace_file_over_existing(&temporary, path)?;
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary);
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                // `create_new` raced with another writer of the same unique
+                // name; try the next candidate name.
+                continue;
+            }
+            return Err(error);
+        }
+        #[cfg(unix)]
+        if let Ok(directory) = fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!("could not allocate temporary secret file for {}", path.display()),
+    ))
+}
+
+#[cfg(not(windows))]
+fn replace_file_over_existing(temporary: &Path, path: &Path) -> io::Result<()> {
+    fs::rename(temporary, path)
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn replace_file_over_existing(temporary: &Path, path: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
+
+    let from: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // MoveFileExW with REPLACE_EXISTING is the Windows equivalent of an
+    // atomic rename-over-existing-file. WRITE_THROUGH ensures the rename is
+    // flushed before the call returns.
+    let result = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 fn remove_file_destination_for_replace(path: &Path) -> io::Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,

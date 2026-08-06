@@ -896,7 +896,7 @@ fn run_plan_request(request: &PlanRequest, global: &GlobalOptions) -> ExitCode {
     match plan_sources(&request.sources, request.clean, request.no_ignore, false) {
         Ok(mut manifest) => {
             if let Err(error) =
-                apply_manifest_filters(&mut manifest, &request.include, &request.exclude, &request.exclude_from)
+                apply_manifest_filters(&mut manifest, &request.include, &request.exclude, &request.exclude_from, false)
             {
                 print_error_line(global, format_args!("plan failed: {error}"));
                 return ExitCode::FAILURE;

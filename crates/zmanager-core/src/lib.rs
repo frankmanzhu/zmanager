@@ -34,7 +34,7 @@ pub mod identity_catalog;
 pub mod jcs;
 pub mod jobs;
 pub mod libarchive_backend;
-pub mod local_fake_tzap;
+pub mod local_tzap_service;
 pub mod local_identity_store;
 pub mod manifest;
 pub mod p256_signature;

@@ -1,3 +1,10 @@
+//! `.tar.gz` / `.tgz` archive creation.
+//!
+//! This backend is create-only by design: `.tar.gz` extraction is handled by
+//! [`crate::libarchive_backend`] (which also serves `.tar`, `.tgz`, and the
+//! other tar variants), so there is no `extract_*` entry point here. Tests
+//! exercise extraction through the libarchive backend.
+
 use crate::jobs::{JobCancelled, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use flate2::Compression;
@@ -44,6 +51,8 @@ pub struct TarGzCreateReport {
 pub enum TarGzError {
     /// Archive planning failed.
     Plan(PlanError),
+    /// Gzip compression level is outside the supported 0-9 range.
+    InvalidLevel { level: i32 },
     /// Filesystem or stream I/O failed.
     Io { path: PathBuf, source: io::Error },
     /// The job was cancelled.
@@ -54,6 +63,7 @@ impl fmt::Display for TarGzError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Plan(err) => write!(f, "planning failed: {err}"),
+            Self::InvalidLevel { level } => write!(f, "invalid gzip compression level {level}: expected 0-9"),
             Self::Io { path, source } => {
                 write!(f, "I/O failed for {}: {source}", path.display())
             }
@@ -68,6 +78,7 @@ impl std::error::Error for TarGzError {
             Self::Plan(err) => Some(err),
             Self::Io { source, .. } => Some(source),
             Self::Cancelled(err) => Some(err),
+            Self::InvalidLevel { .. } => None,
         }
     }
 }
@@ -134,6 +145,12 @@ fn create_tar_gz_from_manifest_inner(
     mut context: Option<&mut JobContext<'_>>,
 ) -> Result<TarGzCreateReport, TarGzError> {
     let destination = destination.as_ref();
+    // flate2's level is a u32 with an internal 0-9 contract; a negative i32
+    // bit-cast would silently produce a huge level, so reject out-of-range
+    // values up front (the CLI validates at parse time too).
+    if !(0..=9).contains(&options.level) {
+        return Err(TarGzError::InvalidLevel { level: options.level });
+    }
     let mut output = crate::atomic_file::AtomicOutputFile::create(destination)
         .map_err(|source| TarGzError::Io { path: destination.to_path_buf(), source })?;
     let file = output.file_mut().map_err(|source| TarGzError::Io { path: destination.to_path_buf(), source })?;

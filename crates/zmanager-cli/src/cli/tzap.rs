@@ -131,6 +131,7 @@ pub(crate) fn auth_command(args: &[String], global: GlobalOptions) -> ExitCode {
 fn auth_login_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     let mut context = TzapCliContext::default();
     let mut endpoints = AuthEndpointOptions::default();
+    let mut print_url = false;
     let mut index = 0usize;
     while index < args.len() {
         match parse_global_option(args, &mut index, &mut global) {
@@ -144,7 +145,10 @@ fn auth_login_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
             Err(code) => return code,
         }
         match args[index].as_str() {
-            "--print-url" => index += 1,
+            "--print-url" => {
+                print_url = true;
+                index += 1;
+            }
             "--environment" => {
                 if let Err(code) = parse_environment_option(args, &mut index, &mut endpoints.environment, &global) {
                     return code;
@@ -224,10 +228,35 @@ fn auth_login_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
             json_escape(&pending.state),
             pending.created_at_unix_seconds.saturating_add(zmanager_core::auth_client::AUTH_HANDOFF_LIFETIME_SECONDS)
         );
-    } else {
+    } else if print_url {
         println!("{url}");
+    } else {
+        match open_browser(&url) {
+            Ok(()) => println!("opened the login page in your browser (use --print-url to print the URL instead)"),
+            Err(error) => {
+                // Never strand the user: fall back to printing the URL.
+                println!("{url}");
+                eprintln!("note: could not open a browser ({error})");
+            }
+        }
     }
     ExitCode::SUCCESS
+}
+
+/// Hands a URL to the platform's default browser.
+fn open_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).status().map(|_| ())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd").args(["/c", "start", "", url]).status().map(|_| ())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("xdg-open").arg(url).status().map(|_| ())
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -504,8 +533,8 @@ fn cert_enroll_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     if options.service_base_url.is_some() {
         return run_hosted_cert_enroll(&options, &global);
     }
-    run_fake_cert_operation("cert_enroll", &options.context, &global, |store, session, options| {
-        zmanager_core::local_fake_tzap::enroll_local_fake_certificate(store, session, options).map(|certificate| {
+    run_local_cert_operation("cert_enroll", &options.context, &global, |store, session, options| {
+        zmanager_core::local_tzap_service::enroll_local_certificate(store, session, options).map(|certificate| {
             json!({
                 "ok": true,
                 "operation": "cert_enroll",
@@ -524,8 +553,8 @@ fn cert_renew_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
         return run_hosted_cert_renew(&options, &global);
     }
     let certificate_id = options.certificate_id.as_deref().unwrap_or_default();
-    run_fake_cert_operation("cert_renew", &options.context, &global, |store, session, fake_options| {
-        zmanager_core::local_fake_tzap::renew_local_fake_certificate(store, session, fake_options, certificate_id).map(
+    run_local_cert_operation("cert_renew", &options.context, &global, |store, session, local_options| {
+        zmanager_core::local_tzap_service::renew_local_certificate(store, session, local_options, certificate_id).map(
             |certificate| {
                 json!({
                     "ok": true,
@@ -542,8 +571,8 @@ fn cert_revoke_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
-    run_fake_cert_operation("cert_revoke", &context, &global, |store, session, options| {
-        zmanager_core::local_fake_tzap::revoke_local_fake_certificate(store, session, options, &certificate_id).map(
+    run_local_cert_operation("cert_revoke", &context, &global, |store, session, options| {
+        zmanager_core::local_tzap_service::revoke_local_certificate(store, session, options, &certificate_id).map(
             |completion| {
                 json!({
                     "ok": true,
@@ -604,8 +633,8 @@ fn device_retire_command(args: &[String], mut global: GlobalOptions) -> ExitCode
         Ok(context) => context,
         Err(code) => return code,
     };
-    run_fake_cert_operation("device_retire", &context, &global, |store, session, options| {
-        zmanager_core::local_fake_tzap::retire_local_fake_device(store, session, options).map(|report| {
+    run_local_cert_operation("device_retire", &context, &global, |store, session, options| {
+        zmanager_core::local_tzap_service::retire_local_device(store, session, options).map(|report| {
             json!({
                 "ok": true,
                 "operation": "device_retire",
@@ -1992,13 +2021,13 @@ impl CliTrustedEnrollmentCertificateValidator {
     }
 }
 
-fn run_fake_cert_operation<F>(operation: &str, context: &TzapCliContext, global: &GlobalOptions, action: F) -> ExitCode
+fn run_local_cert_operation<F>(operation: &str, context: &TzapCliContext, global: &GlobalOptions, action: F) -> ExitCode
 where
     F: FnOnce(
         &mut zmanager_core::local_identity_store::FileTzapLocalIdentityStore,
         &zmanager_core::auth_client::TzapSessionRecord,
-        &zmanager_core::local_fake_tzap::TzapLocalFakeServiceOptions,
-    ) -> Result<serde_json::Value, zmanager_core::local_fake_tzap::TzapLocalFakeServiceError>,
+        &zmanager_core::local_tzap_service::TzapLocalServiceOptions,
+    ) -> Result<serde_json::Value, zmanager_core::local_tzap_service::TzapLocalServiceError>,
 {
     let session_store = FileTzapSessionStore::new(&context.state_dir);
     let Some(session) = session_store.load_session(&context.account_key) else {
@@ -2006,7 +2035,7 @@ where
         return ExitCode::FAILURE;
     };
     let mut identity_store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    let options = zmanager_core::local_fake_tzap::TzapLocalFakeServiceOptions {
+    let options = zmanager_core::local_tzap_service::TzapLocalServiceOptions {
         account_key: context.account_key.clone(),
         now_unix_seconds: current_unix_seconds(),
     };
@@ -2358,17 +2387,44 @@ fn rfc3339_utc_to_unix_seconds(value: &str) -> Result<u64, String> {
     let year = parse_i64_part(date_parts.next(), "year")?;
     let month = parse_i64_part(date_parts.next(), "month")?;
     let day = parse_i64_part(date_parts.next(), "day")?;
+    if date_parts.next().is_some() {
+        return Err("expires_at has too many date components".to_owned());
+    }
+    if !(1..=12).contains(&month) {
+        return Err(format!("expires_at month {month} is out of range"));
+    }
+    let month_length = days_in_month(year, month);
+    if !(1..=month_length).contains(&day) {
+        return Err(format!("expires_at day {day} is out of range"));
+    }
     let time = time.split_once('.').map_or(time, |(whole, _)| whole);
     let mut time_parts = time.split(':');
     let hour = parse_i64_part(time_parts.next(), "hour")?;
     let minute = parse_i64_part(time_parts.next(), "minute")?;
     let second = parse_i64_part(time_parts.next(), "second")?;
+    if time_parts.next().is_some() {
+        return Err("expires_at has too many time components".to_owned());
+    }
+    if !(0..=23).contains(&hour) {
+        return Err(format!("expires_at hour {hour} is out of range"));
+    }
+    if !(0..=59).contains(&minute) {
+        return Err(format!("expires_at minute {minute} is out of range"));
+    }
+    if !(0..=59).contains(&second) {
+        return Err(format!("expires_at second {second} is out of range"));
+    }
     let days = days_from_civil(year, month, day);
     let seconds = days
         .checked_mul(86_400)
         .and_then(|value| value.checked_add(hour * 3_600 + minute * 60 + second))
         .ok_or_else(|| "expires_at is out of range".to_owned())?;
     u64::try_from(seconds).map_err(|_| "expires_at is before the Unix epoch".to_owned())
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    let leap_february = i64::from(month == 2 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0));
+    [31, 28 + leap_february, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month as usize - 1]
 }
 
 fn parse_i64_part(value: Option<&str>, field: &str) -> Result<i64, String> {
@@ -2490,4 +2546,39 @@ fn print_contact_json_line(contact: &zmanager_core::local_identity_store::TzapCo
     print!("{{\"contact\":");
     print_contact_json(contact);
     println!("}}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rfc3339_utc_to_unix_seconds;
+
+    #[test]
+    fn rfc3339_parses_valid_utc_timestamps() {
+        assert_eq!(rfc3339_utc_to_unix_seconds("1970-01-01T00:00:00Z").unwrap(), 0);
+        assert_eq!(rfc3339_utc_to_unix_seconds("1970-01-01T00:00:00.123Z").unwrap(), 0);
+        assert_eq!(rfc3339_utc_to_unix_seconds("2024-02-29T12:34:56Z").unwrap(), 1_709_210_096);
+    }
+
+    #[test]
+    fn rfc3339_rejects_invalid_calendar_values() {
+        for value in [
+            "2026-13-01T00:00:00Z",
+            "2026-00-01T00:00:00Z",
+            "2026-02-30T00:00:00Z",
+            "2025-02-29T00:00:00Z",
+            "2026-04-31T00:00:00Z",
+            "2026-06-01T24:00:00Z",
+            "2026-06-01T00:60:00Z",
+            "2026-06-01T00:00:60Z",
+        ] {
+            assert!(rfc3339_utc_to_unix_seconds(value).is_err(), "expected rejection for {value}");
+        }
+    }
+
+    #[test]
+    fn rfc3339_rejects_malformed_timestamps() {
+        for value in ["2026-06-01T00:00:00", "2026-06-01", "not-a-timestamp", "2026-06-01T00:00:00+02:00"] {
+            assert!(rfc3339_utc_to_unix_seconds(value).is_err(), "expected rejection for {value}");
+        }
+    }
 }
