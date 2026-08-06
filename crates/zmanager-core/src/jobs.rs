@@ -861,25 +861,63 @@ pub fn run_7z_create_job_from_sources_with_plan_options(
     finish_7z_create_result(result, sink)
 }
 
-fn finish_7z_create_result(
-    result: Result<SevenZCreateReport, SevenZError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<SevenZCreateReport, SevenZError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
+/// Emits the terminal lifecycle events for one backend result and returns it.
+///
+/// `emit_warnings:` re-emits the report's warnings before completion for
+/// extract backends. `cancelled:` names the error type's `Cancelled` variant,
+/// adding the dedicated cancelled arm. (Error types whose `Cancelled` variant
+/// carries a payload — `TarGzError` — keep a hand-written helper.)
+macro_rules! finish_result {
+    ($name:ident, $report:ty, $error:path, emit_warnings: $emit_warnings:expr, cancelled: $cancelled:path) => {
+        fn $name(result: Result<$report, $error>, sink: &mut dyn JobEventSink) -> Result<$report, $error> {
+            match result {
+                Ok(report) => {
+                    if $emit_warnings {
+                        for warning in &report.warnings {
+                            sink.emit(JobEvent::Warning { message: warning.clone() });
+                        }
+                    }
+                    sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
+                    Ok(report)
+                }
+                Err($cancelled) => {
+                    sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
+                    Err($cancelled)
+                }
+                Err(error) => {
+                    sink.emit(JobEvent::Failed { message: error.to_string() });
+                    Err(error)
+                }
+            }
         }
-        Err(SevenZError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(SevenZError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
+    };
 }
+
+/// Same as [`finish_result!`] for error types without a `Cancelled` variant
+/// (RAR and raw-stream backends).
+macro_rules! finish_result_no_cancelled {
+    ($name:ident, $report:ty, $error:path, emit_warnings: $emit_warnings:expr) => {
+        fn $name(result: Result<$report, $error>, sink: &mut dyn JobEventSink) -> Result<$report, $error> {
+            match result {
+                Ok(report) => {
+                    if $emit_warnings {
+                        for warning in &report.warnings {
+                            sink.emit(JobEvent::Warning { message: warning.clone() });
+                        }
+                    }
+                    sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
+                    Ok(report)
+                }
+                Err(error) => {
+                    sink.emit(JobEvent::Failed { message: error.to_string() });
+                    Err(error)
+                }
+            }
+        }
+    };
+}
+
+finish_result!(finish_7z_create_result, SevenZCreateReport, SevenZError, emit_warnings: false, cancelled: SevenZError::Cancelled);
 
 /// Runs a TZAP create job for multiple source roots with explicit planning
 /// options and emits lifecycle/progress events.
@@ -1244,129 +1282,18 @@ pub fn run_tzap_extract_job_with_recipient_key_and_policy(
     finish_tzap_extract_result(result, sink)
 }
 
-fn finish_zip_create_result(
-    result: Result<ZipCreateReport, ZipBackendError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<ZipCreateReport, ZipBackendError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(ZipBackendError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(ZipBackendError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_zip_create_result, ZipCreateReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);
 
-fn finish_tzap_create_result(
-    result: Result<TzapCreateReport, TzapError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<TzapCreateReport, TzapError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(TzapError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(TzapError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_tzap_create_result, TzapCreateReport, TzapError, emit_warnings: false, cancelled: TzapError::Cancelled);
 
-fn finish_tzap_extract_result(
-    result: Result<tzap_backend::TzapExtractReport, TzapError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<tzap_backend::TzapExtractReport, TzapError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(TzapError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(TzapError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_tzap_extract_result, tzap_backend::TzapExtractReport, TzapError, emit_warnings: false, cancelled: TzapError::Cancelled);
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-fn finish_apple_archive_extract_result(
-    result: Result<apple_archive_backend::AppleArchiveExtractReport, AppleArchiveError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<apple_archive_backend::AppleArchiveExtractReport, AppleArchiveError> {
-    match result {
-        Ok(report) => {
-            for warning in &report.warnings {
-                sink.emit(JobEvent::Warning { message: warning.clone() });
-            }
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(AppleArchiveError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(AppleArchiveError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_apple_archive_extract_result, apple_archive_backend::AppleArchiveExtractReport, AppleArchiveError, emit_warnings: true, cancelled: AppleArchiveError::Cancelled);
 
-fn finish_zip_extract_result(
-    result: Result<zip_backend::ZipExtractReport, ZipBackendError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<zip_backend::ZipExtractReport, ZipBackendError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(ZipBackendError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(ZipBackendError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_zip_extract_result, zip_backend::ZipExtractReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);
 
-fn finish_tar_zst_create_result(
-    result: Result<tar_zst_backend::TarZstdCreateReport, TarZstdError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<tar_zst_backend::TarZstdCreateReport, TarZstdError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(TarZstdError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(TarZstdError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_tar_zst_create_result, tar_zst_backend::TarZstdCreateReport, TarZstdError, emit_warnings: false, cancelled: TarZstdError::Cancelled);
 
 fn finish_tar_gz_create_result(
     result: Result<tar_gz_backend::TarGzCreateReport, TarGzError>,
@@ -1388,105 +1315,15 @@ fn finish_tar_gz_create_result(
     }
 }
 
-fn finish_tar_zst_extract_result(
-    result: Result<TarZstdExtractReport, TarZstdError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<TarZstdExtractReport, TarZstdError> {
-    match result {
-        Ok(report) => {
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(TarZstdError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(TarZstdError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_tar_zst_extract_result, TarZstdExtractReport, TarZstdError, emit_warnings: false, cancelled: TarZstdError::Cancelled);
 
-fn finish_7z_extract_result(
-    result: Result<sevenz_backend::SevenZExtractReport, SevenZError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<sevenz_backend::SevenZExtractReport, SevenZError> {
-    match result {
-        Ok(report) => {
-            for warning in &report.warnings {
-                sink.emit(JobEvent::Warning { message: warning.clone() });
-            }
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(SevenZError::Cancelled) => {
-            sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-            Err(SevenZError::Cancelled)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result!(finish_7z_extract_result, sevenz_backend::SevenZExtractReport, SevenZError, emit_warnings: true, cancelled: SevenZError::Cancelled);
 
-fn finish_rar_extract_result(
-    result: Result<rar_backend::RarExtractReport, RarBackendError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<rar_backend::RarExtractReport, RarBackendError> {
-    match result {
-        Ok(report) => {
-            for warning in &report.warnings {
-                sink.emit(JobEvent::Warning { message: warning.clone() });
-            }
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result_no_cancelled!(finish_rar_extract_result, rar_backend::RarExtractReport, RarBackendError, emit_warnings: true);
 
-fn finish_libarchive_extract_result(
-    result: Result<libarchive_backend::LibarchiveExtractReport, LibarchiveError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<libarchive_backend::LibarchiveExtractReport, LibarchiveError> {
-    match result {
-        Ok(report) => {
-            for warning in &report.warnings {
-                sink.emit(JobEvent::Warning { message: warning.clone() });
-            }
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result_no_cancelled!(finish_libarchive_extract_result, libarchive_backend::LibarchiveExtractReport, LibarchiveError, emit_warnings: true);
 
-fn finish_raw_stream_extract_result(
-    result: Result<raw_stream_backend::RawStreamExtractReport, RawStreamError>,
-    sink: &mut dyn JobEventSink,
-) -> Result<raw_stream_backend::RawStreamExtractReport, RawStreamError> {
-    match result {
-        Ok(report) => {
-            for warning in &report.warnings {
-                sink.emit(JobEvent::Warning { message: warning.clone() });
-            }
-            sink.emit(JobEvent::Completed { entries: report.written_entries, bytes: report.written_bytes });
-            Ok(report)
-        }
-        Err(error) => {
-            sink.emit(JobEvent::Failed { message: error.to_string() });
-            Err(error)
-        }
-    }
-}
+finish_result_no_cancelled!(finish_raw_stream_extract_result, raw_stream_backend::RawStreamExtractReport, RawStreamError, emit_warnings: true);
 
 #[cfg(test)]
 mod tests {
