@@ -137,7 +137,6 @@ fn required_request_path_array(request: &Value, field: &'static str) -> Result<V
     if paths.is_empty() { Err(format!("missing or invalid field: {field}")) } else { Ok(paths) }
 }
 
-
 fn run_local_tzap_service<F>(request_json: &str, action: F) -> String
 where
     F: FnOnce(

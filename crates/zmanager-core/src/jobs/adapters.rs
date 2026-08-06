@@ -1,3 +1,4 @@
+use super::{CancellationToken, JobContext, JobEvent, JobEventSink, JobKind};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::apple_archive_backend::{self, AppleArchiveError};
 use crate::manifest::{PlanOptions, plan_archives};
@@ -16,7 +17,6 @@ use crate::{
     sevenz_backend,
     sevenz_backend::SevenZError,
 };
-use super::{CancellationToken, JobContext, JobEvent, JobEventSink, JobKind};
 use std::path::{Path, PathBuf};
 
 /// Runs a ZIP create job for multiple source roots with explicit planning
@@ -526,13 +526,21 @@ pub fn run_tzap_extract_job_with_password_and_policy_and_restore_options(
     sink.emit(JobEvent::Started { kind: JobKind::TzapExtract, total_bytes: None });
 
     let mut context = JobContext::new(token, sink);
-    let result = tzap_backend::extract_tzap_with_optional_password_and_context_fast_with_restore_options(
+    let key = match password {
+        Some(password) => tzap_backend::TzapExtractKeySource::Password(password),
+        None => tzap_backend::TzapExtractKeySource::None,
+    };
+    let result = tzap_backend::extract_tzap(
+        tzap_backend::TzapExtractRequest {
+            key,
+            policy,
+            restore_options,
+            overwrite_resolver: None,
+            context: Some(&mut context),
+            fast: true,
+        },
         archive_path,
         destination,
-        policy,
-        password,
-        restore_options,
-        &mut context,
     );
     context.flush_progress();
     finish_tzap_extract_result(result, sink)
@@ -573,4 +581,3 @@ finish_result_no_cancelled!(finish_rar_extract_result, rar_backend::RarExtractRe
 finish_result_no_cancelled!(finish_libarchive_extract_result, libarchive_backend::LibarchiveExtractReport, LibarchiveError, emit_warnings: true);
 
 finish_result_no_cancelled!(finish_raw_stream_extract_result, raw_stream_backend::RawStreamExtractReport, RawStreamError, emit_warnings: true);
-

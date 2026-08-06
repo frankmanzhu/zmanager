@@ -883,15 +883,18 @@ fn extract_tzap_entry(
             })
         }
         ExtractionEntryKind::File => {
-            let Some(report) =
-                crate::tzap_backend::extract_tzap_file_to_destination_with_optional_password_and_restore_options(
-                    archive_path,
-                    password,
-                    entry_path,
-                    &write_plan.destination_path,
-                    write_plan.replace_existing,
-                    restore_options,
-                )?
+            let key = match password {
+                Some(password) => crate::tzap_backend::TzapExtractKeySource::Password(password),
+                None => crate::tzap_backend::TzapExtractKeySource::None,
+            };
+            let Some(report) = crate::tzap_backend::extract_tzap_file_to_destination(
+                archive_path,
+                key,
+                entry_path,
+                &write_plan.destination_path,
+                write_plan.replace_existing,
+                restore_options,
+            )?
             else {
                 return Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() });
             };

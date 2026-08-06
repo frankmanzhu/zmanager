@@ -362,15 +362,13 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             ArchiveFormatKind::TarZst => copy_tar_zst_archive_to_stdout(request, global),
             ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
-            ArchiveFormatKind::AppleArchive => {
-                extract_apple_archive_stdout(
-                    &request.archive,
-                    &request.include,
-                    &request.exclude,
-                    password.as_deref(),
-                    global,
-                )
-            }
+            ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(
+                &request.archive,
+                &request.include,
+                &request.exclude,
+                password.as_deref(),
+                global,
+            ),
             // Split ZIP volume sets, tgz, .deb, RAR, and unrecognized formats
             // are read through libarchive, matching the pre-CR-114
             // fallthrough behavior.
@@ -467,25 +465,29 @@ fn copy_tzap_archive_to_stdout(request: &ExtractRequest, password: Option<&str>,
         global,
         None,
         |password, _selected, stdout| {
-            if let Some(recipient_key) = request.recipient_key.as_deref() {
-                zmanager_core::tzap_backend::copy_tzap_files_to_writer_with_recipient_key(
-                    &request.archive,
-                    recipient_key,
-                    |name| entry_selected(name, &request.include, &request.exclude),
-                    stdout,
-                )
-            } else {
-                zmanager_core::tzap_backend::copy_tzap_files_to_writer_with_optional_password(
-                    &request.archive,
-                    password,
-                    |name| entry_selected(name, &request.include, &request.exclude),
-                    stdout,
-                )
-            }
+            zmanager_core::tzap_backend::copy_tzap_files_to_writer(
+                &request.archive,
+                tzap_extract_key(request.recipient_key.as_deref(), password),
+                |name| entry_selected(name, &request.include, &request.exclude),
+                stdout,
+            )
             .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
             .map_err(|error| StdoutCopyError::Message(error.to_string()))
         },
     )
+}
+
+fn tzap_extract_key<'a>(
+    recipient_key: Option<&'a Path>,
+    password: Option<&'a str>,
+) -> zmanager_core::tzap_backend::TzapExtractKeySource<'a> {
+    match recipient_key {
+        Some(recipient_key) => zmanager_core::tzap_backend::TzapExtractKeySource::RecipientKeyPath(recipient_key),
+        None => match password {
+            Some(password) => zmanager_core::tzap_backend::TzapExtractKeySource::Password(password),
+            None => zmanager_core::tzap_backend::TzapExtractKeySource::None,
+        },
+    }
 }
 
 fn print_extract_stdout_ok(global: &GlobalOptions, label: &str, entries_label: &str, skipped: usize, bytes: u64) {
@@ -528,21 +530,19 @@ fn copy_archive_to_stdout(
             print_extract_stdout_ok(global, label, &format!("{entries} entries"), skipped, bytes);
             ExitCode::SUCCESS
         }
-        Err(StdoutCopyError::PasswordRequired(_)) if password.is_none() => {
-            retry_password_required(
-                global,
-                "extract to stdout failed: ",
-                password_prompt,
-                |message| print_error_line(global, format_args!("{message}")),
-                |prompted| match copy(Some(prompted.expose_secret()), &mut &selected, &mut stdout) {
-                    Ok(_) => ExitCode::SUCCESS,
-                    Err(StdoutCopyError::PasswordRequired(message) | StdoutCopyError::Message(message)) => {
-                        print_error_line(global, format_args!("extract to stdout failed: {message}"));
-                        ExitCode::FAILURE
-                    }
-                },
-            )
-        }
+        Err(StdoutCopyError::PasswordRequired(_)) if password.is_none() => retry_password_required(
+            global,
+            "extract to stdout failed: ",
+            password_prompt,
+            |message| print_error_line(global, format_args!("{message}")),
+            |prompted| match copy(Some(prompted.expose_secret()), &mut &selected, &mut stdout) {
+                Ok(_) => ExitCode::SUCCESS,
+                Err(StdoutCopyError::PasswordRequired(message) | StdoutCopyError::Message(message)) => {
+                    print_error_line(global, format_args!("extract to stdout failed: {message}"));
+                    ExitCode::FAILURE
+                }
+            },
+        ),
         Err(StdoutCopyError::PasswordRequired(message) | StdoutCopyError::Message(message)) => {
             print_error_line(global, format_args!("extract to stdout failed: {message}"));
             ExitCode::FAILURE
@@ -775,29 +775,27 @@ fn run_extract_with_policy(
             print_extract_summary(&archive_path, &destination_path, &outcome, global);
             ExitCode::SUCCESS
         }
-        Err(CliExtractError::PasswordRequired(_)) if password.is_none() => {
-            retry_password_required(
-                global,
-                spec.error_prefix,
-                spec.password_prompt,
-                |message| {
-                    if spec.progress {
-                        progress.emit(JobEvent::Failed { message: message.to_owned() });
-                    }
-                    eprintln!("{message}");
-                },
-                |password| {
-                    run_extract_with_policy(
-                        &archive_path,
-                        &destination_path,
-                        policy,
-                        Some(password.expose_secret()),
-                        global,
-                        spec,
-                    )
-                },
-            )
-        }
+        Err(CliExtractError::PasswordRequired(_)) if password.is_none() => retry_password_required(
+            global,
+            spec.error_prefix,
+            spec.password_prompt,
+            |message| {
+                if spec.progress {
+                    progress.emit(JobEvent::Failed { message: message.to_owned() });
+                }
+                eprintln!("{message}");
+            },
+            |password| {
+                run_extract_with_policy(
+                    &archive_path,
+                    &destination_path,
+                    policy,
+                    Some(password.expose_secret()),
+                    global,
+                    spec,
+                )
+            },
+        ),
         Err(CliExtractError::PasswordRequired(message) | CliExtractError::Message(message)) => {
             if spec.progress {
                 progress.emit(JobEvent::Failed { message: message.clone() });
@@ -984,51 +982,41 @@ fn run_tzap_extract_with_policy(
             password_prompt: None,
             progress: true,
             ask: &|archive_path, destination_path, policy, password, resolver| {
-                if let Some(recipient_key) = recipient_key {
-                zmanager_core::tzap_backend::extract_tzap_with_overwrite_resolver_and_recipient_key_and_restore_options(
+                let key = tzap_extract_key(recipient_key, password);
+                zmanager_core::tzap_backend::extract_tzap(
+                    zmanager_core::tzap_backend::TzapExtractRequest {
+                        key,
+                        policy,
+                        restore_options,
+                        overwrite_resolver: Some(resolver),
+                        context: None,
+                        fast: false,
+                    },
                     archive_path,
                     destination_path,
-                    policy,
-                    recipient_key,
-                    restore_options,
-                    resolver,
                 )
-            } else {
-                zmanager_core::tzap_backend::extract_tzap_with_overwrite_resolver_and_optional_password_and_restore_options(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    password,
-                    restore_options,
-                    resolver,
-                )
-            }
-            .map(|report| CliExtractReport {
-                written_entries: report.written_entries,
-                skipped_entries: report.skipped_entries,
-                written_bytes: report.written_bytes,
-                warnings: report.warnings,
-            })
-            .map_err(|error| CliExtractError::Message(error.to_string()))
+                .map(|report| CliExtractReport {
+                    written_entries: report.written_entries,
+                    skipped_entries: report.skipped_entries,
+                    written_bytes: report.written_bytes,
+                    warnings: report.warnings,
+                })
+                .map_err(|error| CliExtractError::Message(error.to_string()))
             },
             plain: &|archive_path, destination_path, policy, password, _context| {
-                if let Some(recipient_key) = recipient_key {
-                    zmanager_core::tzap_backend::extract_tzap_with_recipient_key_and_restore_options(
-                        archive_path,
-                        destination_path,
+                let key = tzap_extract_key(recipient_key, password);
+                zmanager_core::tzap_backend::extract_tzap(
+                    zmanager_core::tzap_backend::TzapExtractRequest {
+                        key,
                         policy,
-                        recipient_key,
                         restore_options,
-                    )
-                } else {
-                    zmanager_core::tzap_backend::extract_tzap_with_optional_password_and_restore_options(
-                        archive_path,
-                        destination_path,
-                        policy,
-                        password,
-                        restore_options,
-                    )
-                }
+                        overwrite_resolver: None,
+                        context: None,
+                        fast: false,
+                    },
+                    archive_path,
+                    destination_path,
+                )
                 .map(CliExtractReport::from)
                 .map_err(|error| CliExtractError::Message(error.to_string()))
             },

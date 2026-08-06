@@ -80,6 +80,35 @@ impl AtomicOutputFile {
         Ok(())
     }
 
+    /// Commits by renaming over the destination without first removing it:
+    /// POSIX `rename` replaces atomically, and Windows uses
+    /// `MoveFileExW REPLACE_EXISTING`. Unlike [`Self::commit_with_replace`]
+    /// there is no window where the final path is absent, so a crash at any
+    /// point leaves either the old or the new file — never neither. Used by
+    /// writers whose final file must never disappear (identity catalog).
+    pub(crate) fn commit_with_atomic_replace(mut self) -> io::Result<()> {
+        drop(self.file.take());
+        #[cfg(unix)]
+        fs::rename(&self.temp_path, &self.final_path)?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{
+                MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            };
+
+            let from: Vec<u16> = self.temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+            let to: Vec<u16> = self.final_path.as_os_str().encode_wide().chain(Some(0)).collect();
+            let result =
+                unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+            if result == 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        self.committed = true;
+        Ok(())
+    }
+
     fn commit_inner(&mut self, replace_existing: bool) -> io::Result<()> {
         drop(self.file.take());
         if replace_existing {

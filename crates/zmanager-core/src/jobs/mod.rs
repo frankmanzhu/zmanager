@@ -27,9 +27,9 @@ pub use progress::{
     JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT,
     PROGRESS_RECENT_PATH_LIMIT,
 };
-pub(crate) use progress::{ProgressBatch, ProgressCoalescer};
 #[cfg(test)]
 pub(crate) use progress::{PROGRESS_ENTRY_STEP, PROGRESS_INTERVAL, PROGRESS_MIN_BYTE_STEP};
+pub(crate) use progress::{ProgressBatch, ProgressCoalescer};
 
 use self::progress::path_identity;
 use std::collections::BTreeMap;
@@ -356,4 +356,3 @@ impl<'a> JobContext<'a> {
         self.token.clone()
     }
 }
-

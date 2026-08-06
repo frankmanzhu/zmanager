@@ -465,25 +465,6 @@ impl TzapLocalIdentityStore for InMemoryTzapLocalIdentityStore {
     }
 }
 
-#[cfg(not(windows))]
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn replace_secret_file(temporary: &Path, path: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
-
-    let from: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
-    let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // MoveFileExW with REPLACE_EXISTING is the Windows equivalent of an
-    // atomic rename-over-existing-file. WRITE_THROUGH ensures the rename is
-    // flushed before the call returns.
-    let result = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
-    if result == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
 #[derive(Debug)]
 pub enum TzapLocalIdentityStoreError {
     InvalidField {

@@ -293,4 +293,3 @@ fn truncate_utf8(value: &str, limit: usize) -> String {
 pub(crate) fn path_identity(path: &str) -> ProgressPathIdentity {
     Sha256::digest(path.as_bytes()).into()
 }
-

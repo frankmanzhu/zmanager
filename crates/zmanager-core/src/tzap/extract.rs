@@ -9,11 +9,10 @@ use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyPlanner,
     OverwritePolicy, OverwriteResolver,
 };
-use crate::secrets::SecretBytes;
 use crate::tzap::metadata::{metadata_diagnostic_labels, write_hardlink, write_symlink};
 const TZAP_TEMP_EXTRACT_PREFIX: &str = ".zmanager-tzap-extract";
 const TZAP_TEMP_EXTRACT_ATTEMPTS: u32 = 100;
-use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_recipient_key};
+use crate::tzap::open::open_tzap_archive_with_key_options;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -127,224 +126,97 @@ fn process_is_elevated() -> bool {
     false
 }
 
-/// Extracts `.tzap` entries with a passphrase.
+/// Key material for opening a `.tzap` archive.
 ///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// or filesystem writes fail.
-pub fn extract_tzap_with_password(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: &str,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_with_optional_password(archive, destination, policy, Some(password))
+/// A key source is exclusive: password-protected archives take a passphrase,
+/// recipient-wrapped archives take a private key, and unprotected archives
+/// take none (legacy no-secret raw-key archives open with tzap's all-zero
+/// key). Previously this matrix was exposed as ~20 `extract_tzap_with_*`
+/// wrappers (CR-142).
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum TzapExtractKeySource<'a> {
+    /// No key material: opens unencrypted archives (and legacy no-secret
+    /// raw-key archives with tzap's all-zero key).
+    None,
+    /// Passphrase-protected archives.
+    Password(&'a str),
+    /// Recipient-wrapped archives, keyed from a private-key file path.
+    RecipientKeyPath(&'a Path),
+    /// Recipient-wrapped archives, keyed from in-memory private-key bytes
+    /// (for example a loaded secret-store value).
+    RecipientKeyBytes(&'a [u8]),
 }
 
-/// Extracts `.tzap` entries with an optional passphrase.
+/// One `.tzap` extraction request (CR-142).
 ///
-/// When `password` is [`None`], unencrypted archives are opened without a key,
-/// and legacy no-secret raw-key archives are opened with tzap's all-zero key.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// or filesystem writes fail.
-pub fn extract_tzap_with_optional_password(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_with_optional_password_and_restore_options(
-        archive,
-        destination,
-        policy,
-        password,
-        TzapRestoreOptions::default(),
-    )
+/// Replaces the previous `extract_tzap_with_*` wrapper matrix: key source,
+/// safety policy, metadata restoration, overwrite resolution, and progress
+/// context are explicit fields.
+pub struct TzapExtractRequest<'a, 'context> {
+    /// Key material used to open the archive.
+    pub key: TzapExtractKeySource<'a>,
+    /// Extraction safety policy.
+    pub policy: ExtractionPolicy,
+    /// Metadata restoration options.
+    pub restore_options: TzapRestoreOptions,
+    /// Overwrite resolver for `OverwritePolicy::Ask` conflicts. The fast
+    /// extraction path does not support a resolver; passing one with
+    /// `fast: true` is a programming error (asserted in debug builds).
+    pub overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
+    /// Job context for cancellation and progress reporting.
+    pub context: Option<&'a mut JobContext<'context>>,
+    /// Forces the fast single-pass state-machine extraction path instead of
+    /// the restore-based path with automatic path selection.
+    pub fast: bool,
 }
 
-/// Extracts `.tzap` entries with an optional passphrase and explicit metadata restoration.
+/// Extracts a `.tzap` archive to a destination directory.
 ///
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
 /// requested metadata cannot be restored, or filesystem writes fail.
-pub fn extract_tzap_with_optional_password_and_restore_options(
+pub fn extract_tzap(
+    request: TzapExtractRequest<'_, '_>,
     archive: impl AsRef<Path>,
     destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    restore_options: TzapRestoreOptions,
 ) -> Result<TzapExtractReport, TzapError> {
+    let TzapExtractRequest { key, policy, restore_options, overwrite_resolver, context, fast } = request;
+    if fast {
+        debug_assert!(overwrite_resolver.is_none(), "fast extraction does not support an overwrite resolver");
+        return extract_tzap_fast_inner(archive, destination, policy, key, restore_options, context);
+    }
+    let (password, recipient_private_key, key_bytes) = key_components(key);
     extract_tzap_inner(
         archive,
         destination,
         ExtractTzapOptions {
             policy,
             password,
-            recipient_private_key: None,
-            recipient_private_key_secret: None,
-            recipient_private_key_bytes: None,
+            recipient_private_key,
+            recipient_private_key_bytes: key_bytes,
             restore_options,
         },
-        None,
-        None,
-    )
-}
-
-/// Extracts recipient-wrapped `.tzap` entries with a private key.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// or filesystem writes fail.
-pub fn extract_tzap_with_recipient_key(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    recipient_private_key: impl AsRef<Path>,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_with_recipient_key_and_restore_options(
-        archive,
-        destination,
-        policy,
-        recipient_private_key,
-        TzapRestoreOptions::default(),
-    )
-}
-
-/// Extracts recipient-wrapped `.tzap` entries with explicit metadata restoration.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// requested metadata cannot be restored, or filesystem writes fail.
-pub fn extract_tzap_with_recipient_key_and_restore_options(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    recipient_private_key: impl AsRef<Path>,
-    restore_options: TzapRestoreOptions,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_inner(
-        archive,
-        destination,
-        ExtractTzapOptions {
-            policy,
-            password: None,
-            recipient_private_key: Some(recipient_private_key.as_ref()),
-            recipient_private_key_secret: None,
-            recipient_private_key_bytes: None,
-            restore_options,
-        },
-        None,
-        None,
-    )
-}
-
-/// Context-aware variant used by desktop jobs so recipient-key extraction
-/// participates in cancellation and progress reporting.
-pub fn extract_tzap_with_recipient_key_secret_and_context(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    recipient_private_key: &SecretBytes,
-    restore_options: TzapRestoreOptions,
-    context: &mut JobContext<'_>,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_inner(
-        archive,
-        destination,
-        ExtractTzapOptions {
-            policy,
-            password: None,
-            recipient_private_key: None,
-            recipient_private_key_secret: Some(recipient_private_key),
-            recipient_private_key_bytes: None,
-            restore_options,
-        },
-        None,
-        Some(context),
-    )
-}
-
-/// Extracts `.tzap` entries with a passphrase, emitting job events.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// or filesystem writes fail.
-pub fn extract_tzap_with_optional_password_and_context(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    context: &mut JobContext<'_>,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_inner(
-        archive,
-        destination,
-        ExtractTzapOptions {
-            policy,
-            password,
-            recipient_private_key: None,
-            recipient_private_key_secret: None,
-            recipient_private_key_bytes: None,
-            restore_options: TzapRestoreOptions::default(),
-        },
-        None,
-        Some(context),
-    )
-}
-
-/// Extracts `.tzap` entries with authenticated v45 metadata and optional
-/// extraction context.
-///
-/// Regular-file payloads remain streamed, while portable mode and modification
-/// time metadata are restored after the payload is authenticated. Unsupported
-/// special entries are skipped with warnings.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// portable metadata cannot be restored, or filesystem writes fail.
-pub fn extract_tzap_with_optional_password_and_context_fast(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    context: &mut JobContext<'_>,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_with_optional_password_and_context_fast_with_restore_options(
-        archive,
-        destination,
-        policy,
-        password,
-        TzapRestoreOptions::default(),
+        overwrite_resolver,
         context,
     )
 }
 
-/// Extracts `.tzap` entries with explicit authenticated metadata restoration options.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// the requested restoration level is unsupported without degraded restoration,
-/// metadata cannot be restored, or filesystem writes fail.
-pub fn extract_tzap_with_optional_password_and_context_fast_with_restore_options(
+/// Fast extraction with authenticated v45 metadata: regular-file payloads
+/// remain streamed, while portable mode and modification time metadata are
+/// restored after the payload is authenticated; unsupported special entries
+/// are skipped with warnings.
+fn extract_tzap_fast_inner(
     archive: impl AsRef<Path>,
     destination: impl AsRef<Path>,
     policy: ExtractionPolicy,
-    password: Option<&str>,
+    key: TzapExtractKeySource<'_>,
     restore_options: TzapRestoreOptions,
-    context: &mut JobContext<'_>,
+    context: Option<&mut JobContext<'_>>,
 ) -> Result<TzapExtractReport, TzapError> {
     let destination = destination.as_ref();
-    let opened = open_tzap_archive(archive, password)?;
+    let (password, recipient_private_key, key_bytes) = key_components(key);
+    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
     let entries = opened.list_files()?;
     opened.plan_metadata_restore(restore_options.core_options(false))?;
     if matches!(restore_options.policy, TzapRestorePolicy::SameOs | TzapRestorePolicy::System)
@@ -361,115 +233,18 @@ pub fn extract_tzap_with_optional_password_and_context_fast_with_restore_options
     // The fast path shares the single `TzapExtractionState` machine with the
     // restore-based path; `Some(context)` drives job event emission.
     let mut state = TzapExtractionState::new(&opened, planner, restore_options);
-    state.extract_entries(&entries, Some(context))?;
+    state.extract_entries(&entries, context)?;
     state.finish()
 }
 
-/// Extracts `.tzap` entries with a passphrase and overwrite resolver.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// or filesystem writes fail.
-pub fn extract_tzap_with_overwrite_resolver_and_password(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: &str,
-    overwrite_resolver: &mut dyn OverwriteResolver,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_with_overwrite_resolver_and_optional_password(
-        archive,
-        destination,
-        policy,
-        Some(password),
-        overwrite_resolver,
-    )
-}
-
-/// Extracts `.tzap` entries with an optional passphrase and overwrite resolver.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// or filesystem writes fail.
-pub fn extract_tzap_with_overwrite_resolver_and_optional_password(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    overwrite_resolver: &mut dyn OverwriteResolver,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_with_overwrite_resolver_and_optional_password_and_restore_options(
-        archive,
-        destination,
-        policy,
-        password,
-        TzapRestoreOptions::default(),
-        overwrite_resolver,
-    )
-}
-
-/// Extracts `.tzap` entries with an optional passphrase, overwrite resolver,
-/// and explicit metadata restoration.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// requested metadata cannot be restored, or filesystem writes fail.
-pub fn extract_tzap_with_overwrite_resolver_and_optional_password_and_restore_options(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    restore_options: TzapRestoreOptions,
-    overwrite_resolver: &mut dyn OverwriteResolver,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_inner(
-        archive,
-        destination,
-        ExtractTzapOptions {
-            policy,
-            password,
-            recipient_private_key: None,
-            recipient_private_key_secret: None,
-            recipient_private_key_bytes: None,
-            restore_options,
-        },
-        Some(overwrite_resolver),
-        None,
-    )
-}
-
-/// Extracts recipient-wrapped `.tzap` entries with an overwrite resolver and
-/// explicit metadata restoration.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, an entry is unsafe,
-/// requested metadata cannot be restored, or filesystem writes fail.
-pub fn extract_tzap_with_overwrite_resolver_and_recipient_key_and_restore_options(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    recipient_private_key: impl AsRef<Path>,
-    restore_options: TzapRestoreOptions,
-    overwrite_resolver: &mut dyn OverwriteResolver,
-) -> Result<TzapExtractReport, TzapError> {
-    extract_tzap_inner(
-        archive,
-        destination,
-        ExtractTzapOptions {
-            policy,
-            password: None,
-            recipient_private_key: Some(recipient_private_key.as_ref()),
-            recipient_private_key_secret: None,
-            recipient_private_key_bytes: None,
-            restore_options,
-        },
-        Some(overwrite_resolver),
-        None,
-    )
+/// Resolves a key source into the archive-opening primitives.
+fn key_components(key: TzapExtractKeySource<'_>) -> (Option<&str>, Option<&Path>, Option<&[u8]>) {
+    match key {
+        TzapExtractKeySource::None => (None, None, None),
+        TzapExtractKeySource::Password(password) => (Some(password), None, None),
+        TzapExtractKeySource::RecipientKeyPath(path) => (None, Some(path), None),
+        TzapExtractKeySource::RecipientKeyBytes(bytes) => (None, None, Some(bytes)),
+    }
 }
 
 /// Copies selected regular `.tzap` members to a writer.
@@ -480,62 +255,39 @@ pub fn extract_tzap_with_overwrite_resolver_and_recipient_key_and_restore_option
 /// cannot be extracted.
 pub fn copy_tzap_files_to_writer(
     archive: impl AsRef<Path>,
-    password: &str,
+    key: TzapExtractKeySource<'_>,
     selector: impl Fn(&str) -> bool,
     writer: &mut dyn io::Write,
 ) -> Result<TzapExtractReport, TzapError> {
-    copy_tzap_files_to_writer_with_optional_password(archive, Some(password), selector, writer)
-}
-
-/// Copies selected regular `.tzap` members to a writer with an optional passphrase.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened or selected members
-/// cannot be extracted.
-pub fn copy_tzap_files_to_writer_with_optional_password(
-    archive: impl AsRef<Path>,
-    password: Option<&str>,
-    selector: impl Fn(&str) -> bool,
-    writer: &mut dyn io::Write,
-) -> Result<TzapExtractReport, TzapError> {
-    let opened = open_tzap_archive(archive, password)?;
+    let (password, recipient_private_key, key_bytes) = key_components(key);
+    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
     copy_opened_tzap_files_to_writer(&opened, selector, writer)
 }
 
-/// Copies one exact regular `.tzap` member to a writer with an optional
-/// passphrase without first enumerating every index entry.
+/// Copies one exact regular `.tzap` member to a writer with a key source,
+/// without first enumerating every index entry.
 ///
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or the selected
 /// member cannot be extracted.
-pub fn copy_tzap_file_to_writer_with_optional_password(
+pub fn copy_tzap_file_to_writer(
     archive: impl AsRef<Path>,
-    password: Option<&str>,
+    key: TzapExtractKeySource<'_>,
     entry_path: &str,
     writer: &mut dyn io::Write,
 ) -> Result<TzapExtractReport, TzapError> {
-    let opened = open_tzap_archive(archive, password)?;
+    let (password, recipient_private_key, key_bytes) = key_components(key);
+    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
     let Some(entry) = opened.lookup_index_entry(entry_path)? else {
-        return Ok(TzapExtractReport {
-            written_entries: 0,
-            skipped_entries: 1,
-            written_bytes: 0,
-            warnings: vec![format!("skipped missing entry {entry_path}")],
-        });
+        return Ok(skipped_missing_entry_report(entry_path));
     };
     let mut writer_ref = &mut *writer;
     let Some(_diagnostics) = opened
         .extract_file_to_writer(entry_path, &mut writer_ref)
         .map_err(|source| tzap_extract_error(entry_path, source))?
     else {
-        return Ok(TzapExtractReport {
-            written_entries: 0,
-            skipped_entries: 1,
-            written_bytes: 0,
-            warnings: vec![format!("skipped missing entry {entry_path}")],
-        });
+        return Ok(skipped_missing_entry_report(entry_path));
     };
     Ok(TzapExtractReport {
         written_entries: 1,
@@ -545,20 +297,13 @@ pub fn copy_tzap_file_to_writer_with_optional_password(
     })
 }
 
-/// Copies selected regular recipient-wrapped `.tzap` members to a writer.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened or selected members
-/// cannot be extracted.
-pub fn copy_tzap_files_to_writer_with_recipient_key(
-    archive: impl AsRef<Path>,
-    recipient_private_key: impl AsRef<Path>,
-    selector: impl Fn(&str) -> bool,
-    writer: &mut dyn io::Write,
-) -> Result<TzapExtractReport, TzapError> {
-    let opened = open_tzap_archive_with_recipient_key(archive, recipient_private_key)?;
-    copy_opened_tzap_files_to_writer(&opened, selector, writer)
+fn skipped_missing_entry_report(entry_path: &str) -> TzapExtractReport {
+    TzapExtractReport {
+        written_entries: 0,
+        skipped_entries: 1,
+        written_bytes: 0,
+        warnings: vec![format!("skipped missing entry {entry_path}")],
+    }
 }
 
 fn copy_opened_tzap_files_to_writer(
@@ -596,68 +341,23 @@ fn tzap_extract_error(path: &str, source: ExtractError) -> TzapError {
     }
 }
 
-/// Extracts one regular `.tzap` file member to an exact destination path.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, the member cannot be
-/// extracted by tzap-core, or the destination cannot be committed.
-pub fn extract_tzap_file_to_destination(
-    archive: impl AsRef<Path>,
-    password: &str,
-    entry_path: &str,
-    destination_path: &Path,
-    replace_existing: bool,
-) -> Result<Option<u64>, TzapError> {
-    extract_tzap_file_to_destination_with_optional_password(
-        archive,
-        Some(password),
-        entry_path,
-        destination_path,
-        replace_existing,
-    )
-}
-
 /// Extracts one regular `.tzap` file member to an exact destination path with
-/// an optional passphrase.
-///
-/// # Errors
-///
-/// Returns [`TzapError`] when the archive cannot be opened, the member cannot be
-/// extracted by tzap-core, or the destination cannot be committed.
-pub fn extract_tzap_file_to_destination_with_optional_password(
-    archive: impl AsRef<Path>,
-    password: Option<&str>,
-    entry_path: &str,
-    destination_path: &Path,
-    replace_existing: bool,
-) -> Result<Option<u64>, TzapError> {
-    extract_tzap_file_to_destination_with_optional_password_and_restore_options(
-        archive,
-        password,
-        entry_path,
-        destination_path,
-        replace_existing,
-        TzapRestoreOptions::default(),
-    )
-    .map(|report| report.map(|report| report.written_bytes))
-}
-
-/// Extracts one regular `.tzap` member with explicit metadata restoration options.
+/// explicit metadata restoration options.
 ///
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened, the requested
 /// restoration policy cannot be satisfied, or the destination cannot be committed.
-pub fn extract_tzap_file_to_destination_with_optional_password_and_restore_options(
+pub fn extract_tzap_file_to_destination(
     archive: impl AsRef<Path>,
-    password: Option<&str>,
+    key: TzapExtractKeySource<'_>,
     entry_path: &str,
     destination_path: &Path,
     replace_existing: bool,
     restore_options: TzapRestoreOptions,
 ) -> Result<Option<TzapFileExtractReport>, TzapError> {
-    let opened = open_tzap_archive(archive, password)?;
+    let (password, recipient_private_key, key_bytes) = key_components(key);
+    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
     extract_tzap_file_from_opened_archive(&opened, entry_path, destination_path, replace_existing, restore_options)
 }
 
@@ -689,7 +389,6 @@ struct ExtractTzapOptions<'a> {
     policy: ExtractionPolicy,
     password: Option<&'a str>,
     recipient_private_key: Option<&'a Path>,
-    recipient_private_key_secret: Option<&'a SecretBytes>,
     recipient_private_key_bytes: Option<&'a [u8]>,
     restore_options: TzapRestoreOptions,
 }
@@ -889,23 +588,13 @@ fn extract_tzap_inner(
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
     context: Option<&mut JobContext<'_>>,
 ) -> Result<TzapExtractReport, TzapError> {
-    let ExtractTzapOptions {
-        policy,
-        password,
-        recipient_private_key,
-        recipient_private_key_secret,
-        recipient_private_key_bytes,
-        restore_options,
-    } = options;
+    let ExtractTzapOptions { policy, password, recipient_private_key, recipient_private_key_bytes, restore_options } =
+        options;
     let destination = destination.as_ref();
     let destination_root = crate::safety::prepare_destination_root(destination)
         .map_err(|source| TzapError::Io { path: destination.to_path_buf(), source })?;
-    let opened = open_tzap_archive_with_key_options(
-        archive,
-        password,
-        recipient_private_key,
-        recipient_private_key_secret.map(crate::secrets::SecretBytes::expose_secret).or(recipient_private_key_bytes),
-    )?;
+    let opened =
+        open_tzap_archive_with_key_options(archive, password, recipient_private_key, recipient_private_key_bytes)?;
     let entries = opened.list_files()?;
     if overwrite_resolver.is_none()
         && policy.strip_components == 0

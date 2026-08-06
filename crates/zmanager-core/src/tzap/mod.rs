@@ -15,20 +15,9 @@ mod x509;
 mod tests;
 
 pub use extract::{
-    TzapExtractReport, TzapFileExtractReport, TzapRestoreOptions, TzapRestorePolicy,
-    copy_tzap_file_to_writer_with_optional_password, copy_tzap_files_to_writer,
-    copy_tzap_files_to_writer_with_optional_password, copy_tzap_files_to_writer_with_recipient_key,
-    extract_tzap_file_to_destination, extract_tzap_file_to_destination_with_optional_password,
-    extract_tzap_file_to_destination_with_optional_password_and_restore_options, extract_tzap_with_optional_password,
-    extract_tzap_with_optional_password_and_context, extract_tzap_with_optional_password_and_context_fast,
-    extract_tzap_with_optional_password_and_context_fast_with_restore_options,
-    extract_tzap_with_optional_password_and_restore_options,
-    extract_tzap_with_overwrite_resolver_and_optional_password,
-    extract_tzap_with_overwrite_resolver_and_optional_password_and_restore_options,
-    extract_tzap_with_overwrite_resolver_and_password,
-    extract_tzap_with_overwrite_resolver_and_recipient_key_and_restore_options, extract_tzap_with_password,
-    extract_tzap_with_recipient_key, extract_tzap_with_recipient_key_and_restore_options,
-    extract_tzap_with_recipient_key_secret_and_context,
+    TzapExtractKeySource, TzapExtractReport, TzapExtractRequest, TzapFileExtractReport, TzapRestoreOptions,
+    TzapRestorePolicy, copy_tzap_file_to_writer, copy_tzap_files_to_writer, extract_tzap,
+    extract_tzap_file_to_destination,
 };
 pub use listing::{
     TzapEntry, TzapEntryKind, TzapIndexEntry, TzapIndexListing, TzapListing,

@@ -550,52 +550,37 @@ impl From<TzapSecretStoreError> for TzapIdentityCatalogError {
 
 fn write_catalog_atomically(path: &Path, catalog: &TzapIdentityCatalog) -> Result<(), TzapIdentityCatalogError> {
     let bytes = serde_json::to_vec_pretty(catalog)?;
-    let mut temporary = path.to_path_buf();
-    temporary.set_extension(format!("tmp-{}", std::process::id()));
-    #[cfg(unix)]
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-    let mut options = fs::OpenOptions::new();
-    options.create(true).truncate(true).write(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(&temporary)?;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
+    // CR-087: the previous writer opened a `tmp-{pid}` sibling with
+    // `create(true).truncate(true)`, so concurrent saves (or stale files from
+    // a crashed run with the same pid) could clobber each other. The shared
+    // atomic writer allocates a unique `create_new` sibling and renames over
+    // the destination without ever removing it first, so a crash leaves the
+    // old or the new catalog — never neither.
+    let mut output = crate::atomic_file::AtomicOutputFile::create(path)
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     #[cfg(unix)]
     {
-        let mut permissions = file.metadata()?.permissions();
-        permissions.set_mode(0o600);
-        fs::set_permissions(&temporary, permissions)?;
+        use std::os::unix::fs::PermissionsExt as _;
+        output
+            .file_mut()
+            .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     }
-    drop(file);
-    replace_catalog_file(&temporary, path)?;
+    output
+        .file_mut()
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?
+        .write_all(&bytes)
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
+    output
+        .file_mut()
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?
+        .sync_all()
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
+    output.commit_with_atomic_replace().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     #[cfg(unix)]
     if let Ok(directory) = fs::File::open(path.parent().unwrap_or_else(|| Path::new("."))) {
         let _ = directory.sync_all();
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn replace_catalog_file(temporary: &Path, path: &Path) -> Result<(), TzapIdentityCatalogError> {
-    fs::rename(temporary, path)?;
-    Ok(())
-}
-
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn replace_catalog_file(temporary: &Path, path: &Path) -> Result<(), TzapIdentityCatalogError> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
-
-    let from: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
-    let to: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    // MoveFileExW with REPLACE_EXISTING is the Windows equivalent of an
-    // atomic rename-over-existing-file. WRITE_THROUGH ensures the rename is
-    // flushed before the call returns.
-    let result = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
-    if result == 0 {
-        return Err(io::Error::last_os_error().into());
     }
     Ok(())
 }

@@ -39,4 +39,3 @@ impl fmt::Display for JobCancelled {
 }
 
 impl std::error::Error for JobCancelled {}
-

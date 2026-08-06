@@ -99,7 +99,10 @@ fn write_secret_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
     write_atomic_secret_file(path, &bytes)
 }
 
-pub(crate) fn save_pending_auth(state_dir: &Path, pending: &crate::auth_client::TzapPendingAuthState) -> std::io::Result<()> {
+pub(crate) fn save_pending_auth(
+    state_dir: &Path,
+    pending: &crate::auth_client::TzapPendingAuthState,
+) -> std::io::Result<()> {
     write_secret_json_file(
         &state_dir.join(AUTH_PENDING_FILE),
         &json!({

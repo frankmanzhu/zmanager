@@ -2,19 +2,12 @@
 //! private module internals live inside the module they belong to.
 
 use super::{
-    TzapCreateOptions, TzapKeySource, TzapRestoreOptions, TzapRestorePolicy, TzapX509SigningOptions,
-    TzapX509TrustOptions, copy_tzap_file_to_writer_with_optional_password,
-    copy_tzap_files_to_writer_with_optional_password, create_tzap_from_manifest_with_context,
-    extract_tzap_file_to_destination, extract_tzap_with_optional_password_and_restore_options,
-    extract_tzap_with_recipient_key, extract_tzap_with_recipient_key_and_restore_options,
+    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapRestoreOptions, TzapRestorePolicy,
+    TzapX509SigningOptions, TzapX509TrustOptions, copy_tzap_file_to_writer, copy_tzap_files_to_writer,
+    create_tzap_from_manifest_with_context, extract_tzap, extract_tzap_file_to_destination,
     list_tzap_index_with_optional_password, list_tzap_with_optional_password, list_tzap_with_password,
     list_tzap_with_recipient_key, summarize_tzap_public_metadata, test_tzap_with_password_filter_and_x509_trust,
     test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
-};
-#[cfg(unix)]
-use super::{
-    extract_tzap_with_optional_password_and_context_fast,
-    extract_tzap_with_optional_password_and_context_fast_with_restore_options,
 };
 use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
@@ -322,9 +315,16 @@ fn selected_extract_uses_seekable_core_for_numbered_volumes() {
     assert!(listing.entries.iter().any(|entry| entry.path == "nested/small.txt"));
 
     let destination = temp.path("out/selected.txt");
-    let written =
-        extract_tzap_file_to_destination(&selected_volume_path, "secret", "nested/small.txt", &destination, false)
-            .unwrap();
+    let written = extract_tzap_file_to_destination(
+        &selected_volume_path,
+        TzapExtractKeySource::Password("secret"),
+        "nested/small.txt",
+        &destination,
+        false,
+        TzapRestoreOptions::default(),
+    )
+    .unwrap()
+    .map(|report| report.written_bytes);
 
     assert_eq!(written, Some(12));
     assert_eq!(fs::read(&destination).unwrap(), b"small target");
@@ -474,7 +474,7 @@ fn index_listing_matches_full_paths_kinds_and_sizes_and_exact_copy_skips_full_en
 
     let mut copied = Vec::new();
     let report =
-        copy_tzap_file_to_writer_with_optional_password(&archive, None, "folder/payload.txt", &mut copied).unwrap();
+        copy_tzap_file_to_writer(&archive, TzapExtractKeySource::None, "folder/payload.txt", &mut copied).unwrap();
     assert_eq!(copied, b"payload");
     assert_eq!(report.written_entries, 1);
     assert_eq!(report.written_bytes, 7);
@@ -504,17 +504,13 @@ fn characterize_full_and_index_tzap_listing() {
         .map(|entry| entry.path.clone())
         .expect("fixture should contain a non-empty regular file");
     let old_copy_started = std::time::Instant::now();
-    let old_copy = copy_tzap_files_to_writer_with_optional_password(
-        &archive,
-        None,
-        |path| path == copy_path,
-        &mut std::io::sink(),
-    )
-    .unwrap();
+    let old_copy =
+        copy_tzap_files_to_writer(&archive, TzapExtractKeySource::None, |path| path == copy_path, &mut std::io::sink())
+            .unwrap();
     let old_copy_elapsed = old_copy_started.elapsed();
     let exact_copy_started = std::time::Instant::now();
     let exact_copy =
-        copy_tzap_file_to_writer_with_optional_password(&archive, None, &copy_path, &mut std::io::sink()).unwrap();
+        copy_tzap_file_to_writer(&archive, TzapExtractKeySource::None, &copy_path, &mut std::io::sink()).unwrap();
     let exact_copy_elapsed = exact_copy_started.elapsed();
     assert_eq!(exact_copy.written_bytes, old_copy.written_bytes);
     eprintln!(
@@ -620,12 +616,17 @@ fn fast_extract_restores_portable_mode_and_precise_mtime() {
     let extract_token = CancellationToken::new();
     let mut extract_events = |_| {};
     let mut extract_context = JobContext::new(&extract_token, &mut extract_events);
-    let report = extract_tzap_with_optional_password_and_context_fast(
+    let report = extract_tzap(
+        TzapExtractRequest {
+            key: TzapExtractKeySource::None,
+            policy: ExtractionPolicy::default(),
+            restore_options: TzapRestoreOptions::default(),
+            overwrite_resolver: None,
+            context: Some(&mut extract_context),
+            fast: true,
+        },
         &archive,
         temp.path("out"),
-        ExtractionPolicy::default(),
-        None,
-        &mut extract_context,
     )
     .unwrap();
 
@@ -638,13 +639,21 @@ fn fast_extract_restores_portable_mode_and_precise_mtime() {
     let content_token = CancellationToken::new();
     let mut content_events = |_| {};
     let mut content_context = JobContext::new(&content_token, &mut content_events);
-    extract_tzap_with_optional_password_and_context_fast_with_restore_options(
+    extract_tzap(
+        TzapExtractRequest {
+            key: TzapExtractKeySource::None,
+            policy: ExtractionPolicy::default(),
+            restore_options: TzapRestoreOptions {
+                policy: TzapRestorePolicy::Content,
+                allow_degraded: false,
+                ..Default::default()
+            },
+            overwrite_resolver: None,
+            context: Some(&mut content_context),
+            fast: true,
+        },
         &archive,
         temp.path("content-out"),
-        ExtractionPolicy::default(),
-        None,
-        TzapRestoreOptions { policy: TzapRestorePolicy::Content, allow_degraded: false, ..Default::default() },
-        &mut content_context,
     )
     .unwrap();
     let content_metadata = fs::metadata(temp.path("content-out/payload.txt")).unwrap();
@@ -655,18 +664,22 @@ fn fast_extract_restores_portable_mode_and_precise_mtime() {
         let system_token = CancellationToken::new();
         let mut system_events = |_| {};
         let mut system_context = JobContext::new(&system_token, &mut system_events);
-        extract_tzap_with_optional_password_and_context_fast_with_restore_options(
+        extract_tzap(
+            TzapExtractRequest {
+                key: TzapExtractKeySource::None,
+                policy: ExtractionPolicy::default(),
+                restore_options: TzapRestoreOptions {
+                    policy: TzapRestorePolicy::System,
+                    // Linux birth time is observable but has no general restoration API.
+                    allow_degraded: cfg!(target_os = "linux"),
+                    ..Default::default()
+                },
+                overwrite_resolver: None,
+                context: Some(&mut system_context),
+                fast: true,
+            },
             &archive,
             temp.path("system-out"),
-            ExtractionPolicy::default(),
-            None,
-            TzapRestoreOptions {
-                policy: TzapRestorePolicy::System,
-                // Linux birth time is observable but has no general restoration API.
-                allow_degraded: cfg!(target_os = "linux"),
-                ..Default::default()
-            },
-            &mut system_context,
         )
         .unwrap();
         let source_metadata = fs::metadata(temp.path("payload.txt")).unwrap();
@@ -742,12 +755,17 @@ fn fast_extract_restores_directory_metadata_after_children() {
     let extract_token = CancellationToken::new();
     let mut extract_events = |_| {};
     let mut extract_context = JobContext::new(&extract_token, &mut extract_events);
-    extract_tzap_with_optional_password_and_context_fast(
+    extract_tzap(
+        TzapExtractRequest {
+            key: TzapExtractKeySource::None,
+            policy: ExtractionPolicy::default(),
+            restore_options: TzapRestoreOptions::default(),
+            overwrite_resolver: None,
+            context: Some(&mut extract_context),
+            fast: true,
+        },
         &archive,
         temp.path("out"),
-        ExtractionPolicy::default(),
-        None,
-        &mut extract_context,
     )
     .unwrap();
 
@@ -847,18 +865,34 @@ fn create_tzap_with_recipient_certificate_opens_with_private_key() {
     assert_eq!(report.tested_bytes, 14);
 
     let out = temp.path("out");
-    let extract_report =
-        extract_tzap_with_recipient_key(&archive, &out, ExtractionPolicy::default(), &recipient_key_path).unwrap();
+    let extract_report = extract_tzap(
+        TzapExtractRequest {
+            key: TzapExtractKeySource::RecipientKeyPath(&recipient_key_path),
+            policy: ExtractionPolicy::default(),
+            restore_options: TzapRestoreOptions::default(),
+            overwrite_resolver: None,
+            context: None,
+            fast: false,
+        },
+        &archive,
+        &out,
+    )
+    .unwrap();
     assert_eq!(extract_report.written_entries, 1);
     assert_eq!(fs::read(out.join("payload.txt")).unwrap(), b"sealed payload");
 
     let out_from_secure_store = temp.path("out-from-secure-store");
-    let extract_report = extract_tzap_with_recipient_key_and_restore_options(
+    let extract_report = extract_tzap(
+        TzapExtractRequest {
+            key: TzapExtractKeySource::RecipientKeyPath(&recipient_key_path),
+            policy: ExtractionPolicy::default(),
+            restore_options: TzapRestoreOptions::default(),
+            overwrite_resolver: None,
+            context: None,
+            fast: false,
+        },
         &archive,
         &out_from_secure_store,
-        ExtractionPolicy::default(),
-        &recipient_key_path,
-        TzapRestoreOptions::default(),
     )
     .unwrap();
     assert_eq!(extract_report.written_entries, 1);
@@ -1316,18 +1350,23 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
             _ => unreachable!(),
         };
         let destination = temp.path(format!("restore-{policy_name}"));
-        extract_tzap_with_optional_password_and_restore_options(
+        extract_tzap(
+            TzapExtractRequest {
+                key: TzapExtractKeySource::None,
+                policy: ExtractionPolicy::default(),
+                restore_options: TzapRestoreOptions {
+                    policy,
+                    // Portable metadata intentionally excludes Windows
+                    // HIDDEN/SYSTEM/ARCHIVE attributes.
+                    allow_degraded: policy == TzapRestorePolicy::Portable,
+                    allow_absolute_symlinks: false,
+                },
+                overwrite_resolver: None,
+                context: None,
+                fast: false,
+            },
             &archive,
             &destination,
-            ExtractionPolicy::default(),
-            None,
-            TzapRestoreOptions {
-                policy,
-                // Portable metadata intentionally excludes Windows
-                // HIDDEN/SYSTEM/ARCHIVE attributes.
-                allow_degraded: policy == TzapRestorePolicy::Portable,
-                allow_absolute_symlinks: false,
-            },
         )
         .unwrap();
 
@@ -1637,12 +1676,17 @@ fn preserves_all_metadata_in_tzap_round_trip() {
     }
 
     let portable_destination = temp.path("portable-extract");
-    extract_tzap_with_optional_password_and_restore_options(
+    extract_tzap(
+        TzapExtractRequest {
+            key: TzapExtractKeySource::None,
+            policy: ExtractionPolicy::default(),
+            restore_options: TzapRestoreOptions::default(),
+            overwrite_resolver: None,
+            context: None,
+            fast: false,
+        },
         &archive,
         &portable_destination,
-        ExtractionPolicy::default(),
-        None,
-        TzapRestoreOptions::default(),
     )
     .expect("portable extraction must not reject native flags");
     assert_eq!(fs::read(portable_destination.join("data.bin")).unwrap(), payload);
@@ -1681,16 +1725,21 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         use std::os::macos::fs::MetadataExt as _;
 
         let native_destination = temp.path("native-extract");
-        extract_tzap_with_optional_password_and_restore_options(
+        extract_tzap(
+            TzapExtractRequest {
+                key: TzapExtractKeySource::None,
+                policy: ExtractionPolicy::default(),
+                restore_options: TzapRestoreOptions {
+                    policy: TzapRestorePolicy::SameOs,
+                    allow_degraded: false,
+                    allow_absolute_symlinks: false,
+                },
+                overwrite_resolver: None,
+                context: None,
+                fast: false,
+            },
             &archive,
             &native_destination,
-            ExtractionPolicy::default(),
-            None,
-            TzapRestoreOptions {
-                policy: TzapRestorePolicy::SameOs,
-                allow_degraded: false,
-                allow_absolute_symlinks: false,
-            },
         )
         .expect("same-OS extraction");
 
@@ -1733,16 +1782,21 @@ fn preserves_all_metadata_in_tzap_round_trip() {
 
         if unix_process_is_elevated() {
             let system_destination = temp.path("system-extract");
-            extract_tzap_with_optional_password_and_restore_options(
+            extract_tzap(
+                TzapExtractRequest {
+                    key: TzapExtractKeySource::None,
+                    policy: ExtractionPolicy::default(),
+                    restore_options: TzapRestoreOptions {
+                        policy: TzapRestorePolicy::System,
+                        allow_degraded: false,
+                        allow_absolute_symlinks: false,
+                    },
+                    overwrite_resolver: None,
+                    context: None,
+                    fast: false,
+                },
                 &archive,
                 &system_destination,
-                ExtractionPolicy::default(),
-                None,
-                TzapRestoreOptions {
-                    policy: TzapRestorePolicy::System,
-                    allow_degraded: false,
-                    allow_absolute_symlinks: false,
-                },
             )
             .expect("system extraction");
             for (relative, source) in
@@ -1772,18 +1826,23 @@ fn preserves_all_metadata_in_tzap_round_trip() {
                 TzapRestorePolicy::System => "linux-system-extract",
                 _ => unreachable!(),
             });
-            extract_tzap_with_optional_password_and_restore_options(
+            extract_tzap(
+                TzapExtractRequest {
+                    key: TzapExtractKeySource::None,
+                    policy: ExtractionPolicy::default(),
+                    restore_options: TzapRestoreOptions {
+                        policy,
+                        // Linux birth time is captured when available but is
+                        // not generally assignable by the kernel.
+                        allow_degraded: true,
+                        allow_absolute_symlinks: false,
+                    },
+                    overwrite_resolver: None,
+                    context: None,
+                    fast: false,
+                },
                 &archive,
                 &destination,
-                ExtractionPolicy::default(),
-                None,
-                TzapRestoreOptions {
-                    policy,
-                    // Linux birth time is captured when available but is
-                    // not generally assignable by the kernel.
-                    allow_degraded: true,
-                    allow_absolute_symlinks: false,
-                },
             )
             .unwrap();
             let restored_file = fs::symlink_metadata(destination.join("data.bin")).unwrap();

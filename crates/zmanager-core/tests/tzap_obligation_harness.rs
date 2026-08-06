@@ -64,8 +64,8 @@ use zmanager_core::trust::{
     TzapTrustAnchorType, TzapVerificationState,
 };
 use zmanager_core::tzap_backend::{
-    TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context, extract_tzap_with_recipient_key,
-    list_tzap_with_recipient_key,
+    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapRestoreOptions,
+    create_tzap_from_manifest_with_context, extract_tzap, list_tzap_with_recipient_key,
 };
 
 const ACCOUNT_KEY: &str = DEFAULT_IDENTITY_INVENTORY_ACCOUNT;
@@ -257,7 +257,19 @@ fn personal_happy_path_signs_verifies_imports_contact_and_unwraps_share() {
     let listing = list_tzap_with_recipient_key(&archive, &recipient_key_path).unwrap();
     assert_eq!(listing.entries.len(), 1);
     assert_eq!(listing.entries[0].path, "payload.txt");
-    extract_tzap_with_recipient_key(&archive, &out, ExtractionPolicy::default(), &recipient_key_path).unwrap();
+    extract_tzap(
+        TzapExtractRequest {
+            key: TzapExtractKeySource::RecipientKeyPath(&recipient_key_path),
+            policy: ExtractionPolicy::default(),
+            restore_options: TzapRestoreOptions::default(),
+            overwrite_resolver: None,
+            context: None,
+            fast: false,
+        },
+        &archive,
+        &out,
+    )
+    .unwrap();
     assert_eq!(fs::read(out.join("payload.txt")).unwrap(), b"shared obligation payload");
 }
 
