@@ -10,7 +10,7 @@
 //!   as link-like are extracted as regular files; see
 //!   `crate::sevenz_backend::extraction_kind` for the rationale.
 
-use crate::jobs::{JobCancelled, JobContext};
+use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
@@ -207,27 +207,11 @@ impl std::error::Error for ZipBackendError {
     }
 }
 
-impl From<PlanError> for ZipBackendError {
-    fn from(source: PlanError) -> Self {
-        Self::Plan(source)
-    }
-}
+crate::backend_error_from_impls!(ZipBackendError);
 
 impl From<zip::result::ZipError> for ZipBackendError {
     fn from(source: zip::result::ZipError) -> Self {
         map_zip_error(source)
-    }
-}
-
-impl From<ExtractionSafetyError> for ZipBackendError {
-    fn from(source: ExtractionSafetyError) -> Self {
-        Self::Safety(source)
-    }
-}
-
-impl From<JobCancelled> for ZipBackendError {
-    fn from(_source: JobCancelled) -> Self {
-        Self::Cancelled
     }
 }
 

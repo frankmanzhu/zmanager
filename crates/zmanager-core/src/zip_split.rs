@@ -6,9 +6,8 @@
 //! and synthesizing a multi-disk EOCD. All of that lives here.
 
 use crate::zip_backend::ZipBackendError;
-use std::collections::BTreeMap;
 use std::fs::{self, File};
-use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub(crate) const ZIP_SPLIT_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x07, 0x08];
@@ -346,26 +345,12 @@ fn existing_split_zip_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, Z
         return Ok(Vec::new());
     };
     let directory = destination.parent().unwrap_or_else(|| Path::new("."));
-    let entries = match fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => {
-            return Err(ZipBackendError::Io { path: directory.to_path_buf(), source });
-        }
-    };
-    let mut paths = BTreeMap::new();
-    for entry in entries.flatten() {
-        let candidate_name = entry.file_name();
-        let Some(candidate_name) = candidate_name.to_str() else {
-            continue;
-        };
-        if let Some((candidate_base, part)) = parse_split_zip_sidecar_name(candidate_name)
-            && candidate_base.eq_ignore_ascii_case(base_name)
-        {
-            paths.insert(part, entry.path());
-        }
-    }
-    Ok(paths.into_values().collect())
+    crate::archive_split::existing_volume_paths(directory, &mut |candidate_name| {
+        parse_split_zip_sidecar_name(candidate_name)
+            .filter(|(candidate_base, _)| candidate_base.eq_ignore_ascii_case(base_name))
+            .map(|(_, part)| part)
+    })
+    .map_err(|source| ZipBackendError::Io { path: directory.to_path_buf(), source })
 }
 
 fn parse_split_zip_sidecar_name(name: &str) -> Option<(&str, u32)> {

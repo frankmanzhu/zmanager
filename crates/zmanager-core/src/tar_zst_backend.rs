@@ -1,5 +1,5 @@
 use crate::extract_materialize::DeferredHardlink;
-use crate::jobs::{JobCancelled, JobContext};
+use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
@@ -95,24 +95,6 @@ impl std::error::Error for TarZstdError {
             Self::Safety(source) => Some(source),
             Self::MissingLinkTarget { .. } | Self::Cancelled => None,
         }
-    }
-}
-
-impl From<PlanError> for TarZstdError {
-    fn from(source: PlanError) -> Self {
-        Self::Plan(source)
-    }
-}
-
-impl From<ExtractionSafetyError> for TarZstdError {
-    fn from(source: ExtractionSafetyError) -> Self {
-        Self::Safety(source)
-    }
-}
-
-impl From<JobCancelled> for TarZstdError {
-    fn from(_source: JobCancelled) -> Self {
-        Self::Cancelled
     }
 }
 
@@ -1205,4 +1187,6 @@ mod tests {
         let encoded = format!("{value:06o}\0 ");
         write_bytes(destination, encoded.as_bytes());
     }
-}
+}crate::backend_error_from_impls!(TarZstdError);
+
+

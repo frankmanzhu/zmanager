@@ -1,4 +1,4 @@
-use crate::jobs::{JobCancelled, JobContext};
+use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
@@ -196,11 +196,7 @@ impl std::error::Error for AppleArchiveError {
     }
 }
 
-impl From<PlanError> for AppleArchiveError {
-    fn from(source: PlanError) -> Self {
-        Self::Plan(source)
-    }
-}
+crate::backend_error_from_impls!(AppleArchiveError);
 
 impl From<zmanager_apple_archive::Error> for AppleArchiveError {
     fn from(source: zmanager_apple_archive::Error) -> Self {
@@ -208,18 +204,6 @@ impl From<zmanager_apple_archive::Error> for AppleArchiveError {
             zmanager_apple_archive::Error::Cancelled => Self::Cancelled,
             source => Self::Native(source),
         }
-    }
-}
-
-impl From<ExtractionSafetyError> for AppleArchiveError {
-    fn from(source: ExtractionSafetyError) -> Self {
-        Self::Safety(source)
-    }
-}
-
-impl From<JobCancelled> for AppleArchiveError {
-    fn from(_source: JobCancelled) -> Self {
-        Self::Cancelled
     }
 }
 

@@ -6,7 +6,7 @@
 //! `io::Result`-based versions here keep the checks in one place and each
 //! backend maps errors into its own error enum.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -14,6 +14,31 @@ use std::path::{Path, PathBuf};
 
 /// Number of volumes needed for `archive_size` bytes at `volume_size` each.
 #[must_use]
+/// Collects sibling paths in `directory` whose names `matcher` recognizes,
+/// ordered by the parsed part number. Shared by the zip and 7z volume splits
+/// (CR-122): both previously shipped their own `read_dir` + map skeletons.
+pub(crate) fn existing_volume_paths(
+    directory: &Path,
+    matcher: &mut impl FnMut(&str) -> Option<u32>,
+) -> io::Result<Vec<PathBuf>> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => return Err(source),
+    };
+    let mut paths = BTreeMap::new();
+    for entry in entries.flatten() {
+        let candidate_name = entry.file_name();
+        let Some(candidate_name) = candidate_name.to_str() else {
+            continue;
+        };
+        if let Some(part) = matcher(candidate_name) {
+            paths.insert(part, entry.path());
+        }
+    }
+    Ok(paths.into_values().collect())
+}
+
 pub(crate) fn split_volume_count(archive_size: u64, volume_size: u64) -> Option<usize> {
     let count = archive_size.max(1).div_ceil(volume_size);
     usize::try_from(count).ok()

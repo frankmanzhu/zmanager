@@ -55,7 +55,7 @@ pub enum TarGzError {
     /// Filesystem or stream I/O failed.
     Io { path: PathBuf, source: io::Error },
     /// The job was cancelled.
-    Cancelled(JobCancelled),
+    Cancelled,
 }
 
 impl fmt::Display for TarGzError {
@@ -66,7 +66,7 @@ impl fmt::Display for TarGzError {
             Self::Io { path, source } => {
                 write!(f, "I/O failed for {}: {source}", path.display())
             }
-            Self::Cancelled(err) => write!(f, "job cancelled: {err}"),
+            Self::Cancelled => write!(f, "job cancelled"),
         }
     }
 }
@@ -76,7 +76,7 @@ impl std::error::Error for TarGzError {
         match self {
             Self::Plan(err) => Some(err),
             Self::Io { source, .. } => Some(source),
-            Self::Cancelled(err) => Some(err),
+            Self::Cancelled => None,
             Self::InvalidLevel { .. } => None,
         }
     }
@@ -89,8 +89,8 @@ impl From<PlanError> for TarGzError {
 }
 
 impl From<JobCancelled> for TarGzError {
-    fn from(value: JobCancelled) -> Self {
-        Self::Cancelled(value)
+    fn from(_value: JobCancelled) -> Self {
+        Self::Cancelled
     }
 }
 

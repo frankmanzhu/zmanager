@@ -109,28 +109,12 @@ fn existing_7z_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, SevenZEr
         return Ok(Vec::new());
     };
     let directory = destination.parent().unwrap_or_else(|| Path::new("."));
-    let entries = match fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => {
-            return Err(SevenZError::Io { path: directory.to_path_buf(), source });
-        }
-    };
-    let mut paths = BTreeMap::new();
-
-    for entry in entries.flatten() {
-        let candidate_name = entry.file_name();
-        let Some(candidate_name) = candidate_name.to_str() else {
-            continue;
-        };
-        if let Some((base_name, part)) = parse_7z_volume_file_name(candidate_name)
-            && base_name == destination_name
-        {
-            paths.insert(part, entry.path());
-        }
-    }
-
-    Ok(paths.into_values().collect())
+    crate::archive_split::existing_volume_paths(directory, &mut |candidate_name| {
+        parse_7z_volume_file_name(candidate_name)
+            .filter(|(base_name, _)| *base_name == destination_name)
+            .map(|(_, part)| part)
+    })
+    .map_err(|source| SevenZError::Io { path: directory.to_path_buf(), source })
 }
 
 pub(crate) fn parse_7z_volume_file_name(name: &str) -> Option<(&str, u32)> {

@@ -11,7 +11,7 @@
 //!   deliberately safer than materializing links that cannot be validated;
 //!   see [`extraction_kind`].
 
-use crate::jobs::{CancellationToken, JobCancelled, JobContext};
+use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
@@ -215,27 +215,11 @@ impl std::error::Error for SevenZError {
     }
 }
 
-impl From<PlanError> for SevenZError {
-    fn from(source: PlanError) -> Self {
-        Self::Plan(source)
-    }
-}
+crate::backend_error_from_impls!(SevenZError);
 
 impl From<sevenz_rust2::Error> for SevenZError {
     fn from(source: sevenz_rust2::Error) -> Self {
         map_7z_error(source)
-    }
-}
-
-impl From<ExtractionSafetyError> for SevenZError {
-    fn from(source: ExtractionSafetyError) -> Self {
-        Self::Safety(source)
-    }
-}
-
-impl From<JobCancelled> for SevenZError {
-    fn from(_source: JobCancelled) -> Self {
-        Self::Cancelled
     }
 }
 

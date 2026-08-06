@@ -4,6 +4,32 @@
 // documentation is tracked separately from behavioral and structural cleanup.
 #![allow(clippy::missing_errors_doc)]
 
+/// Generates the standard `From` impls shared by the archive-backend error
+/// enums: planning, extraction safety, and cooperative cancellation (the
+/// latter as a unit `Cancelled` variant). Backends without one of the
+/// variants (for example the create-only tar.gz backend) keep their impls
+/// written out.
+#[macro_export]
+macro_rules! backend_error_from_impls {
+    ($error:ty) => {
+        impl From<crate::manifest::PlanError> for $error {
+            fn from(source: crate::manifest::PlanError) -> Self {
+                Self::Plan(source)
+            }
+        }
+        impl From<crate::safety::ExtractionSafetyError> for $error {
+            fn from(source: crate::safety::ExtractionSafetyError) -> Self {
+                Self::Safety(source)
+            }
+        }
+        impl From<crate::jobs::JobCancelled> for $error {
+            fn from(_source: crate::jobs::JobCancelled) -> Self {
+                Self::Cancelled
+            }
+        }
+    };
+}
+
 mod archive_split;
 mod atomic_file;
 mod extract_materialize;
