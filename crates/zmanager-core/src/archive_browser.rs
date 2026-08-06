@@ -1085,7 +1085,7 @@ fn extraction_policy(overwrite: OverwritePolicy, strip_components: usize, ignore
 }
 
 fn password_bytes(password: Option<&str>) -> Option<&[u8]> {
-    password.filter(|password| !password.is_empty()).map(str::as_bytes)
+    crate::secrets::normalized_password(password).map(str::as_bytes)
 }
 
 fn zip_entry_kind<R: Read>(file: &zip::read::ZipFile<'_, R>) -> BrowserEntryKind {

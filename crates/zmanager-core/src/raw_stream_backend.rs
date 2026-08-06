@@ -195,14 +195,14 @@ pub fn detect_raw_stream_format(path: impl AsRef<Path>) -> Option<RawStreamForma
     RAW_STREAM_FORMATS
         .iter()
         .copied()
-        .find(|format| format.suffixes().iter().any(|suffix| ends_with_ignore_ascii_case(name, suffix)))
+        .find(|format| format.suffixes().iter().any(|suffix| crate::strings::ends_with_ignore_ascii_case(name, suffix)))
 }
 
 /// Returns the synthetic archive entry name for a raw single-file stream.
 #[must_use]
 pub fn output_name_for_raw_stream(path: impl AsRef<Path>, format: RawStreamFormat) -> Option<String> {
     let name = path.as_ref().file_name().and_then(|name| name.to_str())?;
-    let stem = format.suffixes().iter().find_map(|suffix| strip_suffix_ignore_ascii_case(name, suffix))?;
+    let stem = format.suffixes().iter().find_map(|suffix| crate::strings::strip_suffix_ignore_ascii_case(name, suffix))?;
 
     (!stem.is_empty()).then(|| stem.to_owned())
 }
@@ -799,29 +799,13 @@ fn is_compressed_archive_container(name: &str) -> bool {
         ".cpio.br",
     ]
     .iter()
-    .any(|suffix| ends_with_ignore_ascii_case(name, suffix))
+    .any(|suffix| crate::strings::ends_with_ignore_ascii_case(name, suffix))
 }
 
 impl From<TempDirAllocError> for RawStreamError {
     fn from(error: TempDirAllocError) -> Self {
         Self::Io { path: error.path, source: error.source }
     }
-}
-
-fn strip_suffix_ignore_ascii_case<'a>(value: &'a str, suffix: &str) -> Option<&'a str> {
-    let value_bytes = value.as_bytes();
-    let suffix_bytes = suffix.as_bytes();
-    if value_bytes.len() < suffix_bytes.len()
-        || !value_bytes[value_bytes.len() - suffix_bytes.len()..].eq_ignore_ascii_case(suffix_bytes)
-    {
-        return None;
-    }
-
-    Some(&value[..value.len() - suffix.len()])
-}
-
-fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
-    strip_suffix_ignore_ascii_case(value, suffix).is_some()
 }
 
 #[cfg(test)]

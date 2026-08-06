@@ -230,27 +230,25 @@ fn copy_synthetic_file(
                 .commit_with_replace(replace_existing)
                 .map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
 
+            // Mode and mtime go through the shared metadata application so
+            // every backend restores modes (including privileged bits) the
+            // same way (CR-034).
             #[cfg(unix)]
-            {
-                fs::set_permissions(&destination_path, source_metadata.permissions())
-                    .map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
-            }
-
+            let source_mode = {
+                use std::os::unix::fs::PermissionsExt as _;
+                Some(source_metadata.permissions().mode())
+            };
             #[cfg(not(unix))]
-            {
-                if source_metadata.permissions().readonly() {
-                    let mut perms = source_metadata.permissions();
-                    perms.set_readonly(true);
-                    fs::set_permissions(&destination_path, perms)
-                        .map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
-                }
-            }
-
+            let source_mode = source_metadata.permissions().readonly().then_some(0o444);
             let mtime = source_metadata
                 .modified()
                 .map_err(|source| DebError::Io { path: source_path.to_path_buf(), source })?;
-            filetime::set_file_mtime(&destination_path, filetime::FileTime::from_system_time(mtime))
-                .map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
+            crate::extract_materialize::apply_metadata(
+                &destination_path,
+                source_mode,
+                Some(filetime::FileTime::from_system_time(mtime)),
+            )
+            .map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
 
             report.written_entries += 1;
             report.written_bytes += written_bytes;
@@ -346,13 +344,10 @@ fn find_top_level_member(root: &Path, prefix: &str) -> Option<PathBuf> {
 fn is_tar_zst_archive(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| ends_with_ignore_ascii_case(name, ".tar.zst") || ends_with_ignore_ascii_case(name, ".tzst"))
-}
-
-fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
-    let value = value.as_bytes();
-    let suffix = suffix.as_bytes();
-    value.len() >= suffix.len() && value[value.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+        .is_some_and(|name| {
+            crate::strings::ends_with_ignore_ascii_case(name, ".tar.zst")
+                || crate::strings::ends_with_ignore_ascii_case(name, ".tzst")
+        })
 }
 
 impl From<TempDirAllocError> for DebError {

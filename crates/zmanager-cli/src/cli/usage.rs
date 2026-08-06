@@ -663,13 +663,13 @@ pub(crate) fn json_optional_string(value: Option<&str>) -> String {
     value.map_or_else(|| "null".to_owned(), |value| format!("\"{}\"", json_escape(value)))
 }
 
-pub(crate) fn json_string_array(values: &[String]) -> String {
+pub(crate) fn json_string_array(values: &[impl AsRef<str>]) -> String {
     let mut output = String::from("[");
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
             output.push(',');
         }
-        let _ = write!(output, "\"{}\"", json_escape(value));
+        let _ = write!(output, "\"{}\"", json_escape(value.as_ref()));
     }
     output.push(']');
     output

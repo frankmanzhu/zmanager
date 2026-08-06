@@ -235,10 +235,26 @@ fn verify_accepts_custom_trust_root_certificate_file() {
         .unwrap();
     assert_success("sign", &sign);
 
-    let inventory: serde_json::Value =
-        serde_json::from_slice(&fs::read(state_dir.join("default.identity.json")).unwrap()).unwrap();
-    let root_der =
-        base64url_decode(inventory["enrolled_certificates"][0]["intermediate_chain_der"][1].as_str().unwrap());
+    // The identity store now persists through the catalog; the chain is the
+    // concatenated leaf + intermediates, so the root is the last element.
+    let catalog: serde_json::Value =
+        serde_json::from_slice(&fs::read(state_dir.join("default.identity-catalog.json")).unwrap()).unwrap();
+    let identity = catalog["signing_identities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|identity| identity["certificate_id"].is_string())
+        .unwrap();
+    let root_der: Vec<u8> = identity["certificate_chain_der"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|byte| byte.as_u64().unwrap() as u8)
+        .collect();
     let root_path = temp.path("root.der");
     fs::write(&root_path, root_der).unwrap();
 
@@ -266,28 +282,6 @@ fn verify_json_reports_invalid_without_claiming_official_validity() {
     assert!(!stdout.contains("official_tzap"));
 }
 
-fn base64url_decode(value: &str) -> Vec<u8> {
-    let mut output = Vec::new();
-    let mut buffer = 0u32;
-    let mut bits = 0u8;
-    for byte in value.bytes() {
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'-' => 62,
-            b'_' => 63,
-            _ => continue,
-        };
-        buffer = (buffer << 6) | u32::from(value);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            output.push(((buffer >> bits) & 0xff) as u8);
-        }
-    }
-    output
-}
 
 fn request_is_complete(request: &[u8]) -> bool {
     let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n").map(|position| position + 4)

@@ -1,7 +1,6 @@
 //! MVP TZAP document-envelope parsing and structural validation.
 
 use crate::{jcs, trust};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Map, Value};
 use std::fmt;
 
@@ -340,8 +339,7 @@ fn decode_required_base64url(
 }
 
 fn decode_base64url(encoded: &str, field: &'static str) -> Result<Vec<u8>, TzapDocumentEnvelopeError> {
-    trust::validate_base64url_no_padding(encoded).map_err(|_| TzapDocumentEnvelopeError::InvalidBase64Url { field })?;
-    URL_SAFE_NO_PAD.decode(encoded).map_err(|_| TzapDocumentEnvelopeError::InvalidBase64Url { field })
+    crate::trust::decode_base64url_no_padding(encoded).map_err(|_| TzapDocumentEnvelopeError::InvalidBase64Url { field })
 }
 
 fn required_canonical_sha256(

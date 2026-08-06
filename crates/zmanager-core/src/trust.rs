@@ -1,5 +1,6 @@
 //! Shared TZAP trust constants, certificate profiles, and identifier helpers.
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use openssl::asn1::Asn1Object;
 use openssl::nid::Nid;
 use openssl::x509::X509;
@@ -640,7 +641,7 @@ fn validate_root_certificate(certificate: &X509Certificate<'_>) -> Result<(), Tz
     if subject_key_identifier(certificate).is_none() {
         return Err(TzapCertificateProfileError::RootProfile { reason: "missing subject key identifier" });
     }
-    reject_forbidden_extended_key_usage(certificate, CertificateRole::Root)?;
+    reject_forbidden_extended_key_usage(certificate, CertificateRole::Root, None)?;
 
     Ok(())
 }
@@ -685,7 +686,7 @@ fn validate_intermediates(
         }
 
         require_ca_key_usage(certificate, role, Some(index))?;
-        reject_forbidden_extended_key_usage(certificate, role)?;
+        reject_forbidden_extended_key_usage(certificate, role, Some(index))?;
         require_aki_ski_pair(parsed, index)?;
         if !certificate_has_policy(certificate, TZAP_OID_CA_POLICY) {
             return Err(TzapCertificateProfileError::IntermediateProfile {
@@ -806,17 +807,18 @@ fn require_ca_key_usage(
 fn reject_forbidden_extended_key_usage(
     certificate: &X509Certificate<'_>,
     role: CertificateRole,
+    index: Option<usize>,
 ) -> Result<(), TzapCertificateProfileError> {
     if let Some(eku) = certificate
         .extended_key_usage()
-        .map_err(|_| role.profile_error("extended key usage is invalid or duplicated", None))?
+        .map_err(|_| role.profile_error("extended key usage is invalid or duplicated", index))?
     {
         if eku.value.any || eku.value.server_auth || eku.value.client_auth || eku.value.code_signing {
-            return Err(role.profile_error("certificate authorizes forbidden extended key usage", None));
+            return Err(role.profile_error("certificate authorizes forbidden extended key usage", index));
         }
         let other_oids = eku.value.other.iter().map(x509_parser::asn1_rs::Oid::to_id_string).collect::<Vec<_>>();
         if other_oids.iter().any(|oid| oid == OID_ANY_EXTENDED_KEY_USAGE) {
-            return Err(role.profile_error("certificate authorizes anyExtendedKeyUsage", None));
+            return Err(role.profile_error("certificate authorizes anyExtendedKeyUsage", index));
         }
     }
     if let Some(oids) = extended_key_usage_oids(certificate) {
@@ -825,7 +827,7 @@ fn reject_forbidden_extended_key_usage(
             .filter_map(oid_value_bytes)
             .collect::<Vec<_>>();
         if oids.iter().any(|oid| forbidden.iter().any(|forbidden| forbidden == oid)) {
-            return Err(role.profile_error("certificate authorizes forbidden extended key usage", None));
+            return Err(role.profile_error("certificate authorizes forbidden extended key usage", index));
         }
     }
     Ok(())
@@ -1156,9 +1158,6 @@ pub enum TrustIdentifierError {
     NotPositive,
 }
 
-const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
-const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
-
 fn is_lower_hex(byte: u8) -> bool {
     matches!(byte, b'0'..=b'9' | b'a'..=b'f')
 }
@@ -1193,17 +1192,42 @@ fn is_path_unreserved(byte: u8) -> bool {
     )
 }
 
+/// Computes the `sha256:` identifier of arbitrary bytes. Shared by the
+/// client and service modules (CR-124).
+#[must_use]
+pub fn sha256_identifier(bytes: &[u8]) -> String {
+    let digest: [u8; 32] = Sha256::digest(bytes).into();
+    format_sha256_identifier(&digest)
+}
+
+/// Decodes URL-safe base64 without padding, validating the alphabet first.
+/// Shared by the client modules (CR-124).
+pub fn decode_base64url_no_padding(value: &str) -> Result<Vec<u8>, String> {
+    validate_base64url_no_padding(value).map_err(|error| format!("{error:?}"))?;
+    URL_SAFE_NO_PAD.decode(value).map_err(|error| error.to_string())
+}
+
+/// Builds verification chains: the embedded chain alone plus one candidate
+/// per supplied root appended to it (CR-124).
+#[must_use]
+pub(crate) fn candidate_chains(embedded_chain_der: &[Vec<u8>], roots_der: &[Vec<u8>]) -> Vec<Vec<Vec<u8>>> {
+    let mut candidates = Vec::with_capacity(1 + roots_der.len());
+    candidates.push(embedded_chain_der.to_vec());
+    candidates.extend(roots_der.iter().map(|root_der| {
+        let mut chain = Vec::with_capacity(embedded_chain_der.len() + 1);
+        chain.extend_from_slice(embedded_chain_der);
+        chain.push(root_der.clone());
+        chain
+    }));
+    candidates
+}
+
 /// Formats a lower-case `sha256:` identifier from a 32-byte digest.
 #[must_use]
 pub fn format_sha256_identifier(digest: &[u8; 32]) -> String {
     let mut value = String::with_capacity(SHA256_IDENTIFIER_PREFIX.len() + SHA256_IDENTIFIER_HEX_LENGTH);
     value.push_str(SHA256_IDENTIFIER_PREFIX);
-    for byte in digest {
-        let hi = usize::from(byte >> 4);
-        let lo = usize::from(byte & 0x0f);
-        value.push(char::from(HEX_LOWER[hi]));
-        value.push(char::from(HEX_LOWER[lo]));
-    }
+    value.push_str(&crate::hex::hex_lower(digest));
     value
 }
 
@@ -1288,14 +1312,7 @@ pub fn canonical_serial_hex(serial_bytes: &[u8]) -> Result<String, TrustIdentifi
 
     let start = serial_bytes.iter().position(|byte| *byte != 0).ok_or(TrustIdentifierError::NotPositive)?;
     let trimmed = &serial_bytes[start..];
-    let mut out = String::with_capacity(trimmed.len().saturating_mul(2));
-    for byte in trimmed {
-        let hi = usize::from(byte >> 4);
-        let lo = usize::from(byte & 0x0f);
-        out.push(char::from(HEX_UPPER[hi]));
-        out.push(char::from(HEX_UPPER[lo]));
-    }
-    Ok(out)
+    Ok(crate::hex::hex_upper(trimmed))
 }
 
 #[must_use]
@@ -1357,8 +1374,7 @@ pub fn percent_encode_path_param(value: &str) -> String {
             encoded.push(char::from(byte));
         } else {
             encoded.push('%');
-            encoded.push(HEX_UPPER[usize::from(byte >> 4)] as char);
-            encoded.push(HEX_UPPER[usize::from(byte & 0x0f)] as char);
+            encoded.push_str(&crate::hex::hex_upper(&[byte]));
         }
     }
     encoded

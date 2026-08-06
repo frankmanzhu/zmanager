@@ -13,6 +13,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Permission bits preserved when restoring entry modes.
+/// Mode bits restored on extraction. Privileged bits (setuid/setgid/sticky)
+/// are deliberately preserved: 7-Zip 26.01 (`SetFileAttrib_PosixHighDetect`,
+/// `CPP/Windows/FileDir.cpp`) applies the archive's full mode subject only to
+/// the process umask, and dpkg does the same for `.deb` payloads, so
+/// stripping would make extraction diverge from the reference tools (CR-034).
 pub(crate) const MODE_MASK: u32 = 0o7777;
 
 /// A hardlink whose creation is deferred until all archive entries have been

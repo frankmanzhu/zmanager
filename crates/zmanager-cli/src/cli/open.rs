@@ -653,7 +653,7 @@ fn print_tzap_public_no_key_success(
         );
         print_tzap_x509_root_auth_json(root_auth);
         print!(",\"public_diagnostics\":");
-        print_json_string_array(&root_auth.diagnostics);
+        print!("{}", crate::cli::usage::json_string_array(&root_auth.diagnostics));
         println!("}}");
     } else {
         print_success_line(
@@ -668,7 +668,7 @@ fn print_tzap_public_no_key_success(
 fn print_tzap_x509_root_auth_json(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport) {
     let status = root_auth.diagnostics.first().map_or("root_auth_content_verified", String::as_str);
     print!("{{\"status\":\"{}\",\"diagnostics\":", json_escape(status));
-    print_json_string_array(&root_auth.diagnostics);
+    print!("{}", crate::cli::usage::json_string_array(&root_auth.diagnostics));
     print!(
         ",\"authenticator\":\"x509\",\"archive_root\":\"{}\",\"authenticator_id\":{},\"signer_identity_type\":{},\"total_data_block_count\":{},\"subject\":\"{}\",\"issuer\":\"{}\",\"serial_number\":\"{}\",\"certificate_sha256\":\"{}\",\"signed_at_unix_seconds\":{},\"verified_chain_subjects\":[",
         hex_lower(&root_auth.archive_root),
@@ -720,16 +720,6 @@ fn print_tzap_x509_diagnostics_text(
     }
 }
 
-fn print_json_string_array(values: &[String]) {
-    print!("[");
-    for (index, value) in values.iter().enumerate() {
-        if index > 0 {
-            print!(",");
-        }
-        print!("\"{}\"", json_escape(value));
-    }
-    print!("]");
-}
 
 fn run_raw_stream_test(
     archive: &str,

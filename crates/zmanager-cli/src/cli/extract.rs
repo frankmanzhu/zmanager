@@ -526,7 +526,11 @@ fn copy_archive_to_stdout(
                 return ExitCode::from(2);
             }
             let Some(prompt_label) = password_prompt else {
-                unreachable!("password-required error raised without a prompt label");
+                print_error_line(
+                    global,
+                    format_args!("extract to stdout failed: password required but no prompt is available"),
+                );
+                return ExitCode::from(2);
             };
             let result = match prompt_password_and_retry(prompt_label, |password| {
                 copy(Some(password.expose_secret()), &mut &selected, &mut stdout)
@@ -698,7 +702,12 @@ fn run_extract_with_policy(
         }
         Err(CliExtractError::PasswordRequired(_)) if password.is_none() => {
             let Some(prompt_label) = spec.password_prompt else {
-                unreachable!("password-required error raised without a prompt label");
+                let message = format!("{}password required but no prompt is available", spec.error_prefix);
+                if spec.progress {
+                    progress.emit(JobEvent::Failed { message: message.clone() });
+                }
+                eprintln!("{message}");
+                return ExitCode::from(2);
             };
             if global.no_password_prompt {
                 let message = format!("{}password required and prompts are disabled", spec.error_prefix);

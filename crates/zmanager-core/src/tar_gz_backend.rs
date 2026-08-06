@@ -13,7 +13,6 @@ use std::fmt;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tar::{Builder, EntryType, Header};
 
 /// Options for `.tar.gz` / `.tgz` creation.
@@ -292,7 +291,7 @@ fn append_symlink<W: io::Write>(
     if preserve_metadata && let Some(mode) = entry.permissions.unix_mode {
         header.set_mode(mode & 0o7777);
     }
-    if preserve_metadata && let Some(modified) = entry.modified.and_then(system_time_to_unix_seconds) {
+    if preserve_metadata && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds) {
         header.set_mtime(modified);
     }
     if !preserve_metadata {
@@ -302,11 +301,6 @@ fn append_symlink<W: io::Write>(
     builder
         .append_link(&mut header, &entry.archive_path, target)
         .map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })
-}
-
-fn system_time_to_unix_seconds(time: SystemTime) -> Option<u64> {
-    let duration = time.duration_since(UNIX_EPOCH).ok()?;
-    Some(duration.as_secs())
 }
 
 #[cfg(test)]

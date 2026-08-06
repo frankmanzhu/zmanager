@@ -27,7 +27,6 @@ use openssl::x509::extension::{
 };
 use openssl::x509::{X509, X509Extension, X509NameBuilder, X509Ref};
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
 use std::fmt;
 use x509_parser::extensions::ParsedExtension;
 use x509_parser::prelude::{FromDer as _, X509Certificate};
@@ -282,8 +281,8 @@ fn certificate_chain_for_leaf_key(
         ),
         serial_number: trust::canonical_serial_hex(leaf_parsed.raw_serial())
             .map_err(|_| TzapLocalServiceError::Crypto("invalid serial".to_owned()))?,
-        leaf_sha256: sha256_identifier(&leaf_der),
-        platform_sha256: sha256_identifier(&platform_der),
+        leaf_sha256: crate::trust::sha256_identifier(&leaf_der),
+        platform_sha256: crate::trust::sha256_identifier(&platform_der),
         leaf_der,
         platform_der,
         root_der,
@@ -568,12 +567,7 @@ fn parse_certificate<'a>(der: &'a [u8], label: &'static str) -> Result<X509Certi
     }
 }
 
-fn sha256_identifier(bytes: &[u8]) -> String {
-    let mut digest = [0_u8; 32];
-    digest.copy_from_slice(&Sha256::digest(bytes));
-    trust::format_sha256_identifier(&digest)
-}
-
+// See `crate::trust::sha256_identifier` (CR-124).
 fn local_certificate_id(prefix: &str, index: usize) -> String {
     format!("{prefix}{index}")
 }

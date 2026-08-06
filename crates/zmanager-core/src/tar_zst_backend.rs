@@ -9,7 +9,6 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read, Write as _};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tar::{Archive, Builder, EntryType, Header};
 
 /// Options for `.tar.zst` creation.
@@ -27,7 +26,7 @@ pub struct TarZstdCreateOptions {
 
 impl Default for TarZstdCreateOptions {
     fn default() -> Self {
-        Self { level: 3, threads: default_zstd_threads(), preserve_metadata: true, replace_existing: false }
+        Self { level: 3, threads: crate::tar_metadata::available_parallelism_at_least_two(), preserve_metadata: true, replace_existing: false }
     }
 }
 
@@ -773,7 +772,7 @@ fn append_symlink<W: io::Write>(
     if preserve_metadata && let Some(mode) = entry.permissions.unix_mode {
         header.set_mode(mode & crate::extract_materialize::MODE_MASK);
     }
-    if preserve_metadata && let Some(modified) = entry.modified.and_then(system_time_to_unix_seconds) {
+    if preserve_metadata && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds) {
         header.set_mtime(modified);
     }
     if !preserve_metadata {
@@ -830,21 +829,11 @@ fn extraction_kind<R: Read>(
     Ok(ExtractionEntryKind::Special)
 }
 
-fn default_zstd_threads() -> Option<u32> {
-    let threads = std::thread::available_parallelism().ok()?.get();
-
-    u32::try_from(threads).ok().filter(|threads| *threads > 1)
-}
-
-fn system_time_to_unix_seconds(time: SystemTime) -> Option<u64> {
-    time.duration_since(UNIX_EPOCH).ok().map(|time| time.as_secs())
-}
-
+// See `crate::tar_metadata::available_parallelism_at_least_two`.
 #[cfg(test)]
 mod tests {
     use super::{
         TarZstdCreateOptions, TarZstdError, create_tar_zst_from_path, extract_tar_zst, extract_tar_zst_with_context,
-        system_time_to_unix_seconds,
     };
     use crate::jobs::{CancellationToken, JobContext, JobEvent};
     use crate::safety::{ExtractionPolicy, ExtractionSafetyError};
@@ -1081,7 +1070,7 @@ mod tests {
 
     #[test]
     fn converts_system_time_to_unix_seconds() {
-        assert_eq!(system_time_to_unix_seconds(UNIX_EPOCH), Some(0));
+        assert_eq!(crate::tar_metadata::system_time_to_unix_seconds(UNIX_EPOCH), Some(0));
     }
 
     fn write_raw_tar_zst(path: &Path, entry_path: &str, contents: &[u8]) {

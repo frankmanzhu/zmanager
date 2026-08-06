@@ -7,8 +7,9 @@ use crate::auth_client::{
 use crate::enrollment_client::{
     ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator,
     TzapEnrollmentError, TzapEnrollmentRequest, canonicalize_local_staging_server_json_bytes, csr_der_to_pem,
-    csr_fingerprint, parse_challenge_response, parse_enrollment_response, requested_validity_days, sign_p256_challenge,
+    parse_challenge_response, parse_enrollment_response, requested_validity_days, sign_p256_challenge,
 };
+use crate::device_identity::csr_fingerprint;
 use crate::http_client::{require_success, send_json_request};
 use crate::jcs;
 use crate::json_util::{json_object, optional_string};
@@ -19,7 +20,6 @@ use crate::local_identity_store::{
 use crate::trust;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Map, Value, json};
-use sha2::{Digest as _, Sha256};
 use std::fmt;
 
 pub const RENEW_OPERATION: &str = "renew";
@@ -441,7 +441,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
                     && record.certificate_sha256 == request.previous_certificate_sha256
             })
             .ok_or(TzapCertificateLifecycleError::CertificateNotFound)?;
-        let root_sha256 = certificate.intermediate_chain_der.last().map(|der| sha256_identifier(der));
+        let root_sha256 = certificate.intermediate_chain_der.last().map(|der| crate::trust::sha256_identifier(der));
         if inventory
             .emergency_blocklist
             .blocked_issuer_sha256
@@ -644,12 +644,7 @@ fn body_error_code(bytes: &[u8]) -> Result<String, TzapCertificateLifecycleError
     Ok(optional_string::<TzapCertificateLifecycleError>(object, "error")?.unwrap_or_default())
 }
 
-fn sha256_identifier(bytes: &[u8]) -> String {
-    let mut digest = [0_u8; 32];
-    digest.copy_from_slice(&Sha256::digest(bytes));
-    crate::trust::format_sha256_identifier(&digest)
-}
-
+// See `crate::trust::sha256_identifier` (CR-124).
 fn expect_string(
     object: &Map<String, Value>,
     field: &'static str,
@@ -690,7 +685,6 @@ mod tests {
     use crate::trust::{self, TzapCertificatePublicMetadata};
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use serde_json::{Value, json};
-    use sha2::{Digest as _, Sha256};
     use std::cell::RefCell;
 
     #[test]
@@ -827,7 +821,7 @@ mod tests {
                     inventory
                         .emergency_blocklist
                         .blocked_root_sha256
-                        .push(trust::format_sha256_identifier(&Sha256::digest(root_der).into()));
+                        .push(crate::trust::sha256_identifier(root_der));
                 }
                 _ => unreachable!(),
             }

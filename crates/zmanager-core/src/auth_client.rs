@@ -783,11 +783,7 @@ fn is_url_query_unreserved(byte: u8) -> bool {
 }
 
 fn hex_digit(value: u8) -> char {
-    match value {
-        0..=9 => (b'0' + value) as char,
-        10..=15 => (b'A' + (value - 10)) as char,
-        _ => unreachable!("hex digit nibble is always less than 16"),
-    }
+    char::from(crate::hex::HEX_UPPER[usize::from(value & 0x0f)])
 }
 
 fn random_base64url(byte_count: usize) -> String {

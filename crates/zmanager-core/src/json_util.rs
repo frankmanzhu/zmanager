@@ -1,7 +1,14 @@
 //! Shared JSON field extraction helpers for TZAP client modules.
+//!
+//! Only flat, field-shaped errors belong here. The auth and document-envelope
+//! clients keep their path-shaped error helpers per-file (see round-1 CR-036:
+//! their `MissingField { path, field }` diagnostics are semantically richer
+//! than the flat `invalid_field(field)` form).
 
 use crate::certificate_lifecycle::TzapCertificateLifecycleError;
+use crate::contact_card::TzapContactCardError;
 use crate::enrollment_client::TzapEnrollmentError;
+use crate::local_identity_store::TzapLocalIdentityStoreError;
 use crate::status_client::TzapStatusClientError;
 use serde_json::{Map, Value};
 
@@ -28,6 +35,18 @@ impl JsonFieldError for TzapCertificateLifecycleError {
     }
 }
 
+impl JsonFieldError for TzapLocalIdentityStoreError {
+    fn invalid_field(field: &'static str) -> Self {
+        Self::InvalidField { field }
+    }
+}
+
+impl JsonFieldError for TzapContactCardError {
+    fn invalid_field(field: &'static str) -> Self {
+        Self::InvalidField { field }
+    }
+}
+
 pub(crate) fn json_object<'a, E: JsonFieldError>(
     value: &'a Value,
     field: &'static str,
@@ -46,11 +65,26 @@ pub(crate) fn required_string<E: JsonFieldError>(
     object: &Map<String, Value>,
     field: &'static str,
 ) -> Result<String, E> {
-    required_field(object, field)?
+    required_string_value(required_field(object, field)?, field)
+}
+
+pub(crate) fn required_string_value<E: JsonFieldError>(value: &Value, field: &'static str) -> Result<String, E> {
+    value
         .as_str()
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .ok_or_else(|| E::invalid_field(field))
+}
+
+pub(crate) fn required_array<'a, E: JsonFieldError>(
+    object: &'a Map<String, Value>,
+    field: &'static str,
+) -> Result<&'a Vec<Value>, E> {
+    required_field(object, field)?.as_array().ok_or_else(|| E::invalid_field(field))
+}
+
+pub(crate) fn required_bool<E: JsonFieldError>(object: &Map<String, Value>, field: &'static str) -> Result<bool, E> {
+    required_field(object, field)?.as_bool().ok_or_else(|| E::invalid_field(field))
 }
 
 pub(crate) fn optional_string<E: JsonFieldError>(

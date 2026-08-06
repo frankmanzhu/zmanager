@@ -9,7 +9,6 @@ use crate::json_util::{json_object, required_string};
 use crate::trust::{self, TzapCertificateStatus, TzapTrustAnchorType, TzapVerificationState};
 use openssl::x509::{X509, X509Crl};
 use serde_json::{Map, Value, json};
-use sha2::{Digest as _, Sha256};
 use std::collections::HashSet;
 use std::fmt;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -352,18 +351,38 @@ pub fn online_verification_result_from_status(
     status: &TzapStatusResponse,
     verifier_time_unix_seconds: i64,
 ) -> TzapDocumentVerificationResult {
-    if offline.state == TzapVerificationState::CryptographicallyIntactOffline
-        && offline.trust_anchor_type != TzapTrustAnchorType::Untrusted
-        && status_matches_document(expected, status)
-        && status.is_fresh_valid_for_valid_now(verifier_time_unix_seconds)
+    // Report the actual failing stage instead of always blaming the online
+    // status: the offline state may itself have failed, the status may be
+    // for a different document, or the status may be stale or non-valid.
+    if offline.state != TzapVerificationState::CryptographicallyIntactOffline
+        || offline.trust_anchor_type == TzapTrustAnchorType::Untrusted
     {
-        return TzapDocumentVerificationResult { state: TzapVerificationState::ValidNow, reason: None, ..offline };
+        return TzapDocumentVerificationResult {
+            state: TzapVerificationState::Invalid,
+            reason: Some(
+                offline
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "offline verification did not establish a valid state".to_owned()),
+            ),
+            ..offline
+        };
     }
-    TzapDocumentVerificationResult {
-        state: TzapVerificationState::Invalid,
-        reason: Some(format!("online status is {}", status.status.as_str())),
-        ..offline
+    if !status_matches_document(expected, status) {
+        return TzapDocumentVerificationResult {
+            state: TzapVerificationState::Invalid,
+            reason: Some("online status does not match the document".to_owned()),
+            ..offline
+        };
     }
+    if !status.is_fresh_valid_for_valid_now(verifier_time_unix_seconds) {
+        return TzapDocumentVerificationResult {
+            state: TzapVerificationState::Invalid,
+            reason: Some(format!("online status is {}", status.status.as_str())),
+            ..offline
+        };
+    }
+    TzapDocumentVerificationResult { state: TzapVerificationState::ValidNow, reason: None, ..offline }
 }
 
 fn status_matches_document(expected: &TzapDocumentStatusTarget, status: &TzapStatusResponse) -> bool {
@@ -400,7 +419,7 @@ pub fn validate_crl_der_against_manifest(
     crl_der: &[u8],
     issuer_certificate_der: &[u8],
 ) -> Result<(), TzapStatusClientError> {
-    if sha256_identifier(crl_der) != entry.crl_sha256 {
+    if crate::trust::sha256_identifier(crl_der) != entry.crl_sha256 {
         return Err(TzapStatusClientError::CrlValidation { reason: "DER SHA-256 does not match manifest".to_owned() });
     }
     let crl = X509Crl::from_der(crl_der)
@@ -474,11 +493,9 @@ fn validate_crl_manifest_fields(
 }
 
 fn canonical_biguint_hex(value: &num_bigint::BigUint) -> String {
-    let mut hex = value.to_str_radix(16).to_ascii_uppercase();
-    if !hex.len().is_multiple_of(2) {
-        hex.insert(0, '0');
-    }
-    hex
+    // to_bytes_be yields minimal big-endian bytes (even-length hex), matching
+    // the previous to_str_radix(16) + zero-pad behavior.
+    crate::hex::hex_upper(&value.to_bytes_be())
 }
 
 fn validate_bulk_lookups(lookups: &[TzapBulkStatusLookup]) -> Result<(), TzapStatusClientError> {
@@ -668,12 +685,7 @@ fn is_printable_ascii(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
 }
 
-fn sha256_identifier(bytes: &[u8]) -> String {
-    let mut digest = [0_u8; 32];
-    digest.copy_from_slice(&Sha256::digest(bytes));
-    trust::format_sha256_identifier(&digest)
-}
-
+// See `crate::trust::sha256_identifier` (CR-124).
 #[cfg(test)]
 mod tests {
     use super::{

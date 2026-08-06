@@ -15,11 +15,5 @@ pub fn x509_name_to_string(name: &X509NameRef) -> String {
 
 #[must_use]
 pub fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[usize::from(byte >> 4)] as char);
-        output.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    output
+    crate::hex::hex_lower(bytes)
 }

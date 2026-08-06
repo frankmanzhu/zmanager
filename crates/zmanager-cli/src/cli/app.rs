@@ -619,19 +619,8 @@ fn print_format_descriptors_json(formats: &[FormatDescriptor]) {
             print!(",");
         }
         print!("{{\"format\":\"{}\",\"extensions\":", json_escape(format.name));
-        print_string_array_json(format.extensions);
+        print!("{}", crate::cli::usage::json_string_array(format.extensions));
         print!("}}");
-    }
-    print!("]");
-}
-
-fn print_string_array_json(values: &[&str]) {
-    print!("[");
-    for (index, value) in values.iter().enumerate() {
-        if index > 0 {
-            print!(",");
-        }
-        print!("\"{}\"", json_escape(value));
     }
     print!("]");
 }

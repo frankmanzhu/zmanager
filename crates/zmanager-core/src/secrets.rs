@@ -2,6 +2,13 @@ use std::fmt;
 use std::ops::Deref;
 use zeroize::Zeroize;
 
+/// Normalizes an optional password: empty strings become `None` so backends
+/// treat them as "no password" consistently (round-1 CR-017 contract).
+#[must_use]
+pub fn normalized_password(password: Option<&str>) -> Option<&str> {
+    password.filter(|password| !password.is_empty())
+}
+
 /// Owned password material that redacts debug output and zeroizes on drop.
 #[derive(Clone, Eq, PartialEq)]
 pub struct SecretString {

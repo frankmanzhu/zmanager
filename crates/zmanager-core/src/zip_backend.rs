@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use zip::write::{FileOptions, SimpleFileOptions};
 use zip::{AesMode, CompressionMethod, ZipArchive, ZipReadOptions, ZipWriter};
 
-const ZIP_MODE_MASK: u32 = 0o0777;
 
 /// ZIP compression methods exposed in v1.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -727,7 +726,7 @@ fn zip_compression_level(options: &ZipCreateOptions) -> Option<i64> {
 }
 
 fn password_bytes(password: Option<&str>) -> Option<&[u8]> {
-    password.filter(|password| !password.is_empty()).map(str::as_bytes)
+    crate::secrets::normalized_password(password).map(str::as_bytes)
 }
 
 fn map_zip_error(source: zip::result::ZipError) -> ZipBackendError {
@@ -897,7 +896,7 @@ fn apply_zip_metadata(
         let primitive = time::PrimitiveDateTime::new(date, time_cmp);
         Some(filetime::FileTime::from_system_time(std::time::SystemTime::from(primitive.assume_utc())))
     });
-    crate::archive_split::apply_split_metadata(path, unix_mode, file_time, ZIP_MODE_MASK)
+    crate::extract_materialize::apply_metadata(path, unix_mode, file_time)
         .map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })
 }
 

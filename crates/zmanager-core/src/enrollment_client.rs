@@ -22,7 +22,6 @@ use base64::{
 };
 use openssl::pkey::{PKey, Private};
 use serde_json::{Map, Number, Value, json};
-use sha2::{Digest as _, Sha256};
 use std::fmt::{self, Write as _};
 use x509_parser::prelude::{FromDer as _, X509Certificate};
 
@@ -253,7 +252,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
             TzapEnrollmentWireProfile::Spec => json!({
                 "operation": ENROLL_OPERATION,
                 "csr_der": URL_SAFE_NO_PAD.encode(csr_der),
-                "csr_sha256": csr_fingerprint(csr_der),
+                "csr_sha256": crate::device_identity::csr_fingerprint(csr_der),
                 "device_public_key_fingerprint": signing_key.public_key_fingerprint,
                 "org_id": request.org_id,
                 "requested_validity_seconds": request.requested_validity_seconds,
@@ -261,7 +260,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
             }),
             TzapEnrollmentWireProfile::LocalStagingServer => json!({
                 "operation": ENROLL_OPERATION,
-                "csr_sha256": csr_fingerprint(csr_der),
+                "csr_sha256": crate::device_identity::csr_fingerprint(csr_der),
                 "device_public_key_fingerprint": signing_key.public_key_fingerprint,
                 "org_id": request.org_id,
                 "requested_validity_days": requested_validity_days(request.requested_validity_seconds)?,
@@ -487,7 +486,7 @@ fn validate_challenge_payload(
     expect_string(object, "operation", ENROLL_OPERATION)?;
     expect_string(object, "challenge_id", &challenge.challenge_id)?;
     expect_optional_string(object, "session_id", session.login_session_id.as_deref())?;
-    expect_string(object, "csr_sha256", &csr_fingerprint(csr_der))?;
+    expect_string(object, "csr_sha256", &crate::device_identity::csr_fingerprint(csr_der))?;
     expect_string(object, "device_public_key_fingerprint", &signing_key.public_key_fingerprint)?;
     expect_optional_string(object, "org_id", request.org_id.as_deref())?;
     expect_null(object, "renewal_of_certificate_sha256")?;
@@ -648,15 +647,10 @@ fn parse_denial(value: &Value) -> Result<TzapEnrollmentDenial, TzapEnrollmentErr
     })
 }
 
-pub(crate) fn csr_fingerprint(csr_der: &[u8]) -> String {
-    let digest: [u8; 32] = Sha256::digest(csr_der).into();
-    trust::format_csr_sha256(&digest)
-}
+pub(crate) 
 
 fn decode_base64url(value: String) -> Result<Vec<u8>, TzapEnrollmentError> {
-    trust::validate_base64url_no_padding(&value)
-        .map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })?;
-    URL_SAFE_NO_PAD.decode(value).map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })
+    crate::trust::decode_base64url_no_padding(&value).map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })
 }
 
 pub(crate) fn requested_validity_days(requested_validity_seconds: u64) -> Result<u64, TzapEnrollmentError> {
@@ -1114,7 +1108,7 @@ mod tests {
     }
 
     fn challenge_response(fixture: &EnrollmentFixture, override_values: ChallengeOverride) -> TzapAuthHttpResponse {
-        let csr_sha256 = override_values.csr_sha256.unwrap_or_else(|| super::csr_fingerprint(&fixture.csr_der));
+        let csr_sha256 = override_values.csr_sha256.unwrap_or_else(|| crate::device_identity::csr_fingerprint(&fixture.csr_der));
         let session_id = override_values.session_id.unwrap_or_else(|| fixture.session.login_session_id.clone());
         let payload = json!({
             "canonicalization": ENROLLMENT_CHALLENGE_CANONICALIZATION,
@@ -1147,7 +1141,7 @@ mod tests {
             "operation": ENROLL_OPERATION,
             "challenge_id": "challenge_local_123",
             "session_id": fixture.session.login_session_id,
-            "csr_sha256": super::csr_fingerprint(&fixture.csr_der),
+            "csr_sha256": crate::device_identity::csr_fingerprint(&fixture.csr_der),
             "device_public_key_fingerprint": fixture.signing_key.public_key_fingerprint,
             "org_id": fixture.request.org_id,
             "requested_validity_days": 90,

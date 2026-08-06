@@ -978,8 +978,17 @@ fn tzap_signing_options(input: &CreateJobInput) -> Option<TzapX509SigningOptions
     }
 }
 
-pub(crate) fn create_verify_supported(_format: CreateArchiveFormat) -> bool {
-    true
+/// Whether the format supports verify-after-create through the generic test
+/// path. All current formats do; a format without a test path must return
+/// false here instead of silently offering verification.
+pub(crate) fn create_verify_supported(format: CreateArchiveFormat) -> bool {
+    matches!(
+        format,
+        CreateArchiveFormat::Zip
+            | CreateArchiveFormat::SevenZ
+            | CreateArchiveFormat::TarZst
+            | CreateArchiveFormat::Tzap
+    )
 }
 
 fn apply_create_verification(

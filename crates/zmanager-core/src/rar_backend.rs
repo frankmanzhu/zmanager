@@ -516,7 +516,15 @@ fn plan_entry(
             }
         }
         RarEntryKind::Special => {
-            unreachable!("unsupported RAR special entries are skipped before planning")
+            // Planning skips special entries; if a future planner change lets
+            // one through, fail the entry instead of panicking the process.
+            return Err(RarBackendError::Io {
+                path: destination_path.clone(),
+                source: io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unsupported RAR special entry: {}", entry.path),
+                ),
+            });
         }
     }
 }
@@ -643,11 +651,18 @@ fn materialize_deferred_links(links: &[DeferredLink], report: &mut RarExtractRep
         .map(|link| {
             let source_path = match &link.kind {
                 DeferredLinkKind::Hardlink { source_path } | DeferredLinkKind::FileCopy { source_path } => source_path,
-                DeferredLinkKind::Symlink { .. } => unreachable!(),
+                // Symlinks are materialized eagerly above; a deferred symlink
+                // would be a planner bug, so fail loudly rather than panic.
+                DeferredLinkKind::Symlink { .. } => {
+                    return Err(RarBackendError::Io {
+                        path: link.destination_path.clone(),
+                        source: io::Error::new(io::ErrorKind::InvalidData, "deferred symlink was not materialized"),
+                    });
+                }
             };
-            (source_path.clone(), link.destination_path.clone())
+            Ok((source_path.clone(), link.destination_path.clone()))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let order = crate::safety::deferred_link_dependency_order(&paths).map_err(|source| RarBackendError::Io {
         path: pending.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()),
         source,

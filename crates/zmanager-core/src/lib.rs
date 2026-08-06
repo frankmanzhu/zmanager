@@ -9,6 +9,7 @@ mod atomic_file;
 mod extract_materialize;
 mod http_client;
 mod json_util;
+mod strings;
 mod multi_volume;
 mod sevenz_volume;
 mod tar_metadata;
@@ -51,6 +52,8 @@ pub mod tzap_backend;
 pub mod tzap_service;
 pub mod x509_format;
 pub mod zip_backend;
+
+mod hex;
 
 /// The stable engine name used in diagnostics and health checks.
 pub const ENGINE_NAME: &str = "zmanager-core";

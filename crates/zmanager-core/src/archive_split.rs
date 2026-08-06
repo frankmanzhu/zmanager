@@ -11,7 +11,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use filetime::FileTime;
 
 /// Number of volumes needed for `archive_size` bytes at `volume_size` each.
 #[must_use]
@@ -80,37 +79,3 @@ pub(crate) fn remove_file_destination_for_replace(path: &Path) -> io::Result<()>
     }
 }
 
-/// Applies portable metadata (Unix mode and modification time) to a written
-/// volume file.
-///
-/// `mode_mask` is passed explicitly because the backends disagree on whether
-/// to restore the setuid/setgid/sticky bits (`0o777` vs `0o7777`) — see
-/// CR-034 in the implementation-docs tracker; unify once the extraction
-/// posture for privileged bits is decided.
-pub(crate) fn apply_split_metadata(
-    path: &Path,
-    unix_mode: Option<u32>,
-    modified_time: Option<FileTime>,
-    mode_mask: u32,
-) -> io::Result<()> {
-    #[cfg(unix)]
-    if let Some(mode) = unix_mode {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(mode & mode_mask))?;
-    }
-
-    #[cfg(not(unix))]
-    if let Some(mode) = unix_mode
-        && mode & 0o222 == 0
-        && let Ok(metadata) = fs::metadata(path)
-    {
-        let mut perms = metadata.permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(path, perms)?;
-    }
-
-    if let Some(mtime) = modified_time {
-        filetime::set_file_mtime(path, mtime)?;
-    }
-    Ok(())
-}

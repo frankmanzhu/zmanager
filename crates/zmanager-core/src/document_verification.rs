@@ -5,7 +5,6 @@ use crate::p256_signature;
 use crate::trust::{self, TzapCertificateProfileOptions, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use openssl::x509::X509;
-use sha2::{Digest as _, Sha256};
 use std::fmt;
 use x509_parser::extensions::ParsedExtension;
 use x509_parser::prelude::{FromDer as _, X509Certificate};
@@ -155,10 +154,10 @@ fn validate_certificate_references(
     leaf: &X509Certificate<'_>,
     issuer: &X509Certificate<'_>,
 ) -> Result<(), TzapOfflineVerificationError> {
-    if sha256_identifier(&envelope.leaf_certificate_der) != envelope.signed_payload.leaf_certificate_sha256 {
+    if crate::trust::sha256_identifier(&envelope.leaf_certificate_der) != envelope.signed_payload.leaf_certificate_sha256 {
         return Err(TzapOfflineVerificationError::CertificateReference("leaf_certificate_sha256"));
     }
-    if sha256_identifier(&envelope.intermediate_chain_der[0]) != envelope.signed_payload.issuer_certificate_sha256 {
+    if crate::trust::sha256_identifier(&envelope.intermediate_chain_der[0]) != envelope.signed_payload.issuer_certificate_sha256 {
         return Err(TzapOfflineVerificationError::CertificateReference("issuer_certificate_sha256"));
     }
     if trust::canonical_serial_hex(leaf.raw_serial())
@@ -206,7 +205,7 @@ fn verify_chain_trust(
     options: &TzapOfflineVerificationOptions<'_>,
 ) -> Result<TzapDocumentVerificationResult, TzapOfflineVerificationError> {
     let mut official_error = None;
-    for chain_der in candidate_chains(embedded_chain_der, &options.official_root_certificates_der) {
+    for chain_der in crate::trust::candidate_chains(embedded_chain_der, &options.official_root_certificates_der) {
         match trust::validate_official_tzap_certificate_chain_der(
             &chain_der,
             options.official_root_pins,
@@ -226,8 +225,8 @@ fn verify_chain_trust(
     }
 
     let mut custom_error = None;
-    for chain_der in candidate_chains(embedded_chain_der, &options.custom_trust_root_certificates_der) {
-        let Some(root_sha256) = chain_der.last().map(Vec::as_slice).map(sha256_identifier) else {
+    for chain_der in crate::trust::candidate_chains(embedded_chain_der, &options.custom_trust_root_certificates_der) {
+        let Some(root_sha256) = chain_der.last().map(Vec::as_slice).map(crate::trust::sha256_identifier) else {
             continue;
         };
         if !options.custom_trust_root_sha256.iter().any(|configured| configured == &root_sha256) {
@@ -254,24 +253,8 @@ fn verify_chain_trust(
     Err(TzapOfflineVerificationError::Untrusted(reason))
 }
 
-fn candidate_chains(embedded_chain_der: &[Vec<u8>], roots_der: &[Vec<u8>]) -> Vec<Vec<Vec<u8>>> {
-    let mut candidates = Vec::with_capacity(1 + roots_der.len());
-    candidates.push(embedded_chain_der.to_vec());
-    candidates.extend(roots_der.iter().map(|root_der| {
-        let mut chain = Vec::with_capacity(embedded_chain_der.len() + 1);
-        chain.extend_from_slice(embedded_chain_der);
-        chain.push(root_der.clone());
-        chain
-    }));
-    candidates
-}
 
-fn sha256_identifier(bytes: &[u8]) -> String {
-    let mut digest = [0_u8; 32];
-    digest.copy_from_slice(&Sha256::digest(bytes));
-    trust::format_sha256_identifier(&digest)
-}
-
+// See `crate::trust::sha256_identifier` (CR-124).
 fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
     certificate.iter_extensions().find_map(|extension| {
         if let ParsedExtension::AuthorityKeyIdentifier(identifier) = extension.parsed_extension() {
@@ -314,7 +297,6 @@ mod tests {
     };
     use openssl::x509::{X509, X509Extension, X509Ref};
     use serde_json::{Value, json};
-    use sha2::{Digest as _, Sha256};
     use std::time::{SystemTime, UNIX_EPOCH};
     use x509_parser::extensions::ParsedExtension;
     use x509_parser::prelude::{FromDer as _, X509Certificate};
@@ -444,8 +426,8 @@ mod tests {
                 "payload_hash_algorithm": trust::TZAP_PAYLOAD_DIGEST_ALGORITHM,
                 "payload_hash": payload_hash,
                 "signature_algorithm": trust::TZAP_DOCUMENT_SIGNATURE_ALGORITHM,
-                "leaf_certificate_sha256": sha256_identifier(&chain.chain_der[0]),
-                "issuer_certificate_sha256": sha256_identifier(&chain.chain_der[1]),
+                "leaf_certificate_sha256": crate::trust::sha256_identifier(&chain.chain_der[0]),
+                "issuer_certificate_sha256": crate::trust::sha256_identifier(&chain.chain_der[1]),
                 "issuer_key_identifier": issuer_key_identifier,
                 "certificate_serial_number": trust::canonical_serial_hex(leaf.raw_serial()).unwrap(),
             });
@@ -489,7 +471,7 @@ mod tests {
         CertificateFixture {
             chain_der: vec![leaf.to_der().unwrap(), platform.to_der().unwrap(), root_der.clone()],
             leaf_key,
-            root_sha256: sha256_identifier(&root_der),
+            root_sha256: crate::trust::sha256_identifier(&root_der),
             root_der,
         }
     }
@@ -659,11 +641,6 @@ mod tests {
         })
     }
 
-    fn sha256_identifier(bytes: &[u8]) -> String {
-        let mut digest = [0_u8; 32];
-        digest.copy_from_slice(&Sha256::digest(bytes));
-        trust::format_sha256_identifier(&digest)
-    }
 
     fn pin_set(root_sha256: &str) -> TzapRootPinSet {
         let pin: &'static str = Box::leak(root_sha256.to_owned().into_boxed_str());

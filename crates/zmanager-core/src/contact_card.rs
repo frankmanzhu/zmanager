@@ -377,7 +377,7 @@ fn validate_contact_card_chain(
     options: &TzapContactCardImportOptions<'_>,
 ) -> Result<trust::TzapCertificateProfileValidation, TzapContactCardError> {
     let mut official_error = None;
-    for chain_der in candidate_chains(embedded_chain_der, &options.official_root_certificates_der) {
+    for chain_der in crate::trust::candidate_chains(embedded_chain_der, &options.official_root_certificates_der) {
         match trust::validate_official_tzap_certificate_chain_der(
             &chain_der,
             options.official_root_pins,
@@ -389,7 +389,7 @@ fn validate_contact_card_chain(
     }
 
     let mut custom_error = None;
-    for chain_der in candidate_chains(embedded_chain_der, &options.custom_trust_root_certificates_der) {
+    for chain_der in crate::trust::candidate_chains(embedded_chain_der, &options.custom_trust_root_certificates_der) {
         let Some(root_sha256) = chain_der.last().map(Vec::as_slice).map(trust::certificate_sha256_identifier_for_der)
         else {
             continue;
@@ -417,41 +417,23 @@ fn contact_chain_der(leaf_der: &[u8], intermediate_chain_der: &[Vec<u8>]) -> Vec
     chain
 }
 
-fn candidate_chains(embedded_chain_der: &[Vec<u8>], roots_der: &[Vec<u8>]) -> Vec<Vec<Vec<u8>>> {
-    let mut candidates = Vec::with_capacity(1 + roots_der.len());
-    candidates.push(embedded_chain_der.to_vec());
-    candidates.extend(roots_der.iter().map(|root_der| {
-        let mut chain = Vec::with_capacity(embedded_chain_der.len() + 1);
-        chain.extend_from_slice(embedded_chain_der);
-        chain.push(root_der.clone());
-        chain
-    }));
-    candidates
-}
 
+// Thin typed wrappers over the shared json_util helpers; the extraction
+// logic lives in json_util.
 fn json_object<'a>(value: &'a Value, field: &'static str) -> Result<&'a Map<String, Value>, TzapContactCardError> {
-    value.as_object().ok_or(TzapContactCardError::InvalidField { field })
+    crate::json_util::json_object(value, field)
 }
 
 fn json_field<'a>(object: &'a Map<String, Value>, field: &'static str) -> Result<&'a Value, TzapContactCardError> {
-    object.get(field).ok_or(TzapContactCardError::InvalidField { field })
+    crate::json_util::required_field(object, field)
 }
 
 fn json_string(object: &Map<String, Value>, field: &'static str) -> Result<String, TzapContactCardError> {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or(TzapContactCardError::InvalidField { field })
+    crate::json_util::required_string(object, field)
 }
 
 fn optional_u64(object: &Map<String, Value>, field: &'static str) -> Result<Option<u64>, TzapContactCardError> {
-    object
-        .get(field)
-        .filter(|value| !value.is_null())
-        .map(|value| value.as_u64().ok_or(TzapContactCardError::InvalidField { field }))
-        .transpose()
+    crate::json_util::optional_u64(object, field)
 }
 
 fn require_u64(object: &Map<String, Value>, field: &'static str, expected: u64) -> Result<(), TzapContactCardError> {
@@ -489,8 +471,7 @@ fn decode_der_array(value: &Value) -> Result<Vec<Vec<u8>>, TzapContactCardError>
 }
 
 fn decode_base64url(value: String, field: &'static str) -> Result<Vec<u8>, TzapContactCardError> {
-    trust::validate_base64url_no_padding(&value).map_err(|_| TzapContactCardError::InvalidField { field })?;
-    URL_SAFE_NO_PAD.decode(value).map_err(|_| TzapContactCardError::InvalidField { field })
+    crate::trust::decode_base64url_no_padding(&value).map_err(|_| TzapContactCardError::InvalidField { field })
 }
 
 #[cfg(test)]

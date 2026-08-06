@@ -46,7 +46,7 @@ fn vendored_libarchive_tree_is_present_for_package_and_workspace() {
 fn crate_build_script_version_metadata_is_consistent() {
     let manifest_dir = Path::new(manifest_dir());
     let build_script = fs::read_to_string(manifest_dir.join("build.rs")).expect("read build.rs");
-    let ffi_lib = fs::read_to_string(manifest_dir.join("src/lib.rs")).expect("read src/lib.rs");
+    let _ffi_lib = fs::read_to_string(manifest_dir.join("src/lib.rs")).expect("read src/lib.rs");
     let readme = fs::read_to_string(manifest_dir.join("vendor/libarchive/README.zmanager.md"))
         .or_else(|_| fs::read_to_string(manifest_dir.join("../../vendor/libarchive/README.zmanager.md")))
         .expect("read vendored libarchive README");

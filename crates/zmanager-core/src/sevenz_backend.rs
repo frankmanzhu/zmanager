@@ -73,7 +73,7 @@ impl Default for SevenZCreateOptions {
         Self {
             solid: true,
             level: None,
-            threads: default_sevenz_threads(),
+            threads: crate::tar_metadata::available_parallelism_at_least_two(),
             chunk_size: Some(DEFAULT_SEVENZ_LZMA2_CHUNK_SIZE_BYTES),
             preserve_metadata: true,
             password: None,
@@ -695,14 +695,8 @@ fn sevenz_threads(options: &SevenZCreateOptions) -> Option<u32> {
     options.threads.map(|threads| threads.clamp(1, MAX_SEVENZ_LZMA2_THREADS))
 }
 
-fn default_sevenz_threads() -> Option<u32> {
-    let threads = std::thread::available_parallelism().ok()?.get();
-
-    u32::try_from(threads).ok().filter(|threads| *threads > 1)
-}
-
 fn archive_password(password: Option<&str>) -> Password {
-    password.filter(|password| !password.is_empty()).map_or_else(Password::empty, Password::from)
+    crate::secrets::normalized_password(password).map_or_else(Password::empty, Password::from)
 }
 
 fn map_7z_error(source: sevenz_rust2::Error) -> SevenZError {
@@ -892,7 +886,7 @@ fn apply_sevenz_metadata(
     modified_time: Option<std::time::SystemTime>,
 ) -> Result<(), SevenZError> {
     let file_time = modified_time.map(filetime::FileTime::from_system_time);
-    crate::archive_split::apply_split_metadata(path, unix_mode, file_time, SEVENZ_MODE_MASK)
+    crate::extract_materialize::apply_metadata(path, unix_mode, file_time)
         .map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })
 }
 
@@ -1171,7 +1165,7 @@ mod tests {
     fn default_7z_create_options_request_parallel_lzma2_when_available() {
         let options = SevenZCreateOptions::default();
 
-        assert_eq!(options.threads, super::default_sevenz_threads());
+        assert_eq!(options.threads, crate::tar_metadata::available_parallelism_at_least_two());
         assert_eq!(options.chunk_size, Some(super::DEFAULT_SEVENZ_LZMA2_CHUNK_SIZE_BYTES));
     }
 
