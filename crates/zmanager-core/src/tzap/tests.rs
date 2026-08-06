@@ -27,6 +27,8 @@ use openssl::stack::Stack;
 use openssl::x509::extension::{BasicConstraints, KeyUsage};
 use openssl::x509::{X509, X509NameBuilder, X509Ref};
 use std::fs;
+#[cfg(windows)]
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 

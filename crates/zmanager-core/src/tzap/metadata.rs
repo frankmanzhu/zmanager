@@ -253,7 +253,10 @@ pub(crate) fn write_symlink(target: &Path, destination_path: &Path) -> Result<()
 pub(crate) fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), TzapError> {
     Err(TzapError::Io {
         path: destination_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
+        source: std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "symlink extraction is not supported on this platform",
+        ),
     })
 }
 

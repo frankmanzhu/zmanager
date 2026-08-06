@@ -86,6 +86,7 @@ impl AtomicOutputFile {
     /// there is no window where the final path is absent, so a crash at any
     /// point leaves either the old or the new file — never neither. Used by
     /// writers whose final file must never disappear (identity catalog).
+    #[allow(unsafe_code)]
     pub(crate) fn commit_with_atomic_replace(mut self) -> io::Result<()> {
         drop(self.file.take());
         #[cfg(unix)]

@@ -42,6 +42,7 @@ macro_rules! extract_report_impl {
     };
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 extract_report_impl!(crate::apple_archive_backend::AppleArchiveExtractReport);
 extract_report_impl!(crate::libarchive_backend::LibarchiveExtractReport);
 extract_report_impl!(crate::sevenz_backend::SevenZExtractReport);
