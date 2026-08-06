@@ -6,7 +6,9 @@ use crate::auth_client::{
 };
 use crate::http_client::{http_error_body, require_success, send_json_request};
 use crate::jcs;
-use crate::json_util::{json_object, optional_string, optional_u64, required_field, required_string, required_u64};
+use crate::json_util::{
+    JsonFieldError, json_object, optional_string, optional_u64, required_field, required_string, required_u64,
+};
 use crate::local_identity_store::{
     TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore,
     TzapLocalIdentityStoreError, TzapSignDeviceRouting,
@@ -272,7 +274,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
             Some(session.access_token.clone()),
             Some(body),
         )?;
-        let challenge = parse_challenge_response(&response.body)?;
+        let challenge = parse_challenge_response::<TzapEnrollmentError>(&response.body)?;
         validate_challenge_payload(self.wire_profile, session, request, signing_key, csr_der, &challenge)?;
         Ok(challenge)
     }
@@ -496,23 +498,56 @@ fn sign_challenge(
     signing_key: &TzapDeviceSigningKeyRecord,
     challenge_bytes: &[u8],
 ) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], TzapEnrollmentError> {
-    let private_key = p256_private_key_from_secret(&signing_key.private_key_der)?;
-    p256_signature::sign_p256_sha256_p1363(&private_key, challenge_bytes)
-        .map_err(|error| TzapEnrollmentError::Crypto(format!("{error:?}")))
+    sign_p256_challenge(&signing_key.private_key_der, challenge_bytes)
 }
 
-fn p256_private_key_from_secret(private_key_der: &SecretBytes) -> Result<PKey<Private>, TzapEnrollmentError> {
-    PKey::private_key_from_der(private_key_der.expose_secret())
-        .map_err(|error| TzapEnrollmentError::Crypto(error.to_string()))
+/// Error types that can report a p256 challenge-signing failure.
+pub(crate) trait ChallengeCryptoError: Sized {
+    fn crypto(reason: String) -> Self;
 }
 
-fn parse_challenge_response(bytes: &[u8]) -> Result<TzapEnrollmentChallenge, TzapEnrollmentError> {
+impl ChallengeCryptoError for TzapEnrollmentError {
+    fn crypto(reason: String) -> Self {
+        Self::Crypto(reason)
+    }
+}
+
+impl ChallengeCryptoError for crate::certificate_lifecycle::TzapCertificateLifecycleError {
+    fn crypto(reason: String) -> Self {
+        Self::Crypto(reason)
+    }
+}
+
+/// Signs a canonicalized challenge payload with the p256 key encoded in
+/// `secret_der`, shared by the enrollment and certificate-lifecycle clients.
+///
+/// The secret DER comes from [`crate::local_identity_store`] records in both
+/// clients, so a single implementation keeps the signing paths identical.
+pub(crate) fn sign_p256_challenge<E: ChallengeCryptoError>(
+    secret_der: &SecretBytes,
+    canonical_bytes: &[u8],
+) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], E> {
+    let private_key = PKey::<Private>::private_key_from_der(secret_der.expose_secret())
+        .map_err(|error| E::crypto(error.to_string()))?;
+    p256_signature::sign_p256_sha256_p1363(&private_key, canonical_bytes)
+        .map_err(|error| E::crypto(format!("{error:?}")))
+}
+
+/// Parses a challenge response body into [`TzapEnrollmentChallenge`], shared
+/// by the enrollment and certificate-lifecycle clients.
+///
+/// The response shape is identical for enrollment and renewal challenges;
+/// only the caller's error type differs, so the parser is generic over it.
+pub(crate) fn parse_challenge_response<E>(bytes: &[u8]) -> Result<TzapEnrollmentChallenge, E>
+where
+    E: JsonFieldError + From<serde_json::Error>,
+{
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object::<TzapEnrollmentError>(&value, "$")?;
+    let object = json_object::<E>(&value, "$")?;
     Ok(TzapEnrollmentChallenge {
-        challenge_id: required_string::<TzapEnrollmentError>(object, "challenge_id")?,
-        payload: required_field::<TzapEnrollmentError>(object, "challenge_payload")?.clone(),
-        canonicalization: optional_string::<TzapEnrollmentError>(object, "canonicalization")?,
+        challenge_id: required_string::<E>(object, "challenge_id")?,
+        payload: required_field::<E>(object, "challenge_payload")?.clone(),
+        canonicalization: optional_string::<E>(object, "canonicalization")?,
     })
 }
 

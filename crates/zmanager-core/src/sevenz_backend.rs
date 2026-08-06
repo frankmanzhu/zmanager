@@ -1,3 +1,16 @@
+//! `.7z` archive creation, listing, and extraction.
+//!
+//! Format API asymmetries vs the ZIP backend, deliberately kept:
+//! - There is no integrity test API (`test_7z`); 7z archives are validated by
+//!   extraction and listing. ZIP exposes `test_zip_with_password_filter`.
+//! - [`list_7z`] takes a password because 7z can encrypt its file names,
+//!   while `list_zip` does not (ZIP names are always readable).
+//! - 7z never materializes symlinks: `sevenz_rust2` exposes no link-target
+//!   metadata, so every non-directory entry — including link-like entries a
+//!   hostile archive may declare — is extracted as a regular file. This is
+//!   deliberately safer than materializing links that cannot be validated;
+//!   see [`extraction_kind`].
+
 use crate::jobs::{CancellationToken, JobCancelled, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
@@ -857,10 +870,7 @@ fn extract_7z_inner(
             &mut io_buffer,
         ) {
             Ok(()) => Ok(true),
-            Err(error) => {
-                callback_error = Some(error);
-                Err(callback_failed_error())
-            }
+            Err(error) => Err(callback_failed_with(&mut callback_error, error)),
         }
     });
 
@@ -896,8 +906,7 @@ pub fn copy_7z_files_to_writer<W: Write>(
     let result = reader.for_each_entries(|entry, entry_reader| {
         if entry.is_anti_item() || !selected(entry.name()) || entry.is_directory() {
             if let Err(error) = drain_reader(entry_reader, entry.name()) {
-                callback_error = Some(error);
-                return Err(callback_failed_error());
+                return Err(callback_failed_with(&mut callback_error, error));
             }
             report.skipped_entries += 1;
             return Ok(true);
@@ -909,10 +918,10 @@ pub fn copy_7z_files_to_writer<W: Write>(
                 report.written_bytes += copied;
                 Ok(true)
             }
-            Err(source) => {
-                callback_error = Some(SevenZError::Io { path: PathBuf::from(entry.name()), source });
-                Err(callback_failed_error())
-            }
+            Err(source) => Err(callback_failed_with(
+                &mut callback_error,
+                SevenZError::Io { path: PathBuf::from(entry.name()), source },
+            )),
         }
     });
 
@@ -993,6 +1002,9 @@ fn map_7z_error(source: sevenz_rust2::Error) -> SevenZError {
     }
 }
 
+/// One solid-mode file pair: the archive entry plus its source reader.
+type SolidFilePair<'a> = (ArchiveEntry, SourceReader<SevenZProgressReader<'a, File>>);
+
 fn write_non_solid_manifest<W: Write + Seek>(
     writer: &mut ArchiveWriter<W>,
     manifest: &ArchiveManifest,
@@ -1003,7 +1015,7 @@ fn write_non_solid_manifest<W: Write + Seek>(
     cancellation_observed: Option<&Rc<Cell<bool>>>,
 ) -> Result<(), SevenZError> {
     for entry in &manifest.entries {
-        append_non_solid_entry(
+        append_manifest_entry(
             writer,
             entry,
             preserve_metadata,
@@ -1011,54 +1023,8 @@ fn write_non_solid_manifest<W: Write + Seek>(
             progress,
             cancellation_token,
             cancellation_observed,
+            false,
         )?;
-    }
-
-    Ok(())
-}
-
-fn append_non_solid_entry<W: Write + Seek>(
-    writer: &mut ArchiveWriter<W>,
-    entry: &ManifestEntry,
-    preserve_metadata: bool,
-    report: &mut SevenZCreateReport,
-    progress: Option<&SevenZProgressCallback<'_>>,
-    cancellation_token: Option<&CancellationToken>,
-    cancellation_observed: Option<&Rc<Cell<bool>>>,
-) -> Result<(), SevenZError> {
-    match entry.file_type {
-        ManifestFileType::Directory => {
-            let archive_entry = sevenz_archive_entry(entry, preserve_metadata);
-            writer.push_archive_entry::<&[u8]>(archive_entry, None)?;
-            report.written_entries += 1;
-        }
-        ManifestFileType::File => {
-            let archive_entry = sevenz_archive_entry(entry, preserve_metadata);
-            let file = File::open(&entry.source_path)
-                .map_err(|source| SevenZError::Io { path: entry.source_path.clone(), source })?;
-            let reader = SevenZProgressReader::new(
-                file,
-                entry.archive_path.clone(),
-                progress.cloned(),
-                cancellation_token.cloned(),
-                cancellation_observed.cloned(),
-            );
-            writer.push_archive_entry(archive_entry, Some(reader))?;
-            report.written_entries += 1;
-            report.written_bytes += entry.size;
-        }
-        ManifestFileType::Symlink => {
-            report.warnings.push(format!(
-                "skipped symlink {}: 7z backend does not materialize symlink entries in v1",
-                entry.archive_path
-            ));
-        }
-        ManifestFileType::Other => {
-            report.warnings.push(format!(
-                "skipped unsupported entry {}: 7z backend only writes files and directories in v1",
-                entry.archive_path
-            ));
-        }
     }
 
     Ok(())
@@ -1077,40 +1043,18 @@ fn write_solid_manifest<W: Write + Seek>(
     let mut solid_readers = Vec::new();
 
     for entry in &manifest.entries {
-        match entry.file_type {
-            ManifestFileType::Directory => {
-                let archive_entry = sevenz_archive_entry(entry, preserve_metadata);
-                writer.push_archive_entry::<&[u8]>(archive_entry, None)?;
-                report.written_entries += 1;
-            }
-            ManifestFileType::File => {
-                let archive_entry = sevenz_archive_entry(entry, preserve_metadata);
-                let file = File::open(&entry.source_path)
-                    .map_err(|source| SevenZError::Io { path: entry.source_path.clone(), source })?;
-                let reader = SevenZProgressReader::new(
-                    file,
-                    entry.archive_path.clone(),
-                    progress.cloned(),
-                    cancellation_token.cloned(),
-                    cancellation_observed.cloned(),
-                );
-                solid_entries.push(archive_entry);
-                solid_readers.push(SourceReader::new(reader));
-                report.written_entries += 1;
-                report.written_bytes += entry.size;
-            }
-            ManifestFileType::Symlink => {
-                report.warnings.push(format!(
-                    "skipped symlink {}: 7z backend does not materialize symlink entries in v1",
-                    entry.archive_path
-                ));
-            }
-            ManifestFileType::Other => {
-                report.warnings.push(format!(
-                    "skipped unsupported entry {}: 7z backend only writes files and directories in v1",
-                    entry.archive_path
-                ));
-            }
+        if let Some((archive_entry, reader)) = append_manifest_entry(
+            writer,
+            entry,
+            preserve_metadata,
+            report,
+            progress,
+            cancellation_token,
+            cancellation_observed,
+            true,
+        )? {
+            solid_entries.push(archive_entry);
+            solid_readers.push(reader);
         }
     }
 
@@ -1119,6 +1063,66 @@ fn write_solid_manifest<W: Write + Seek>(
     }
 
     Ok(())
+}
+
+/// Appends one manifest entry to the archive, either immediately (non-solid
+/// mode) or returning the file pair for a single batched push (solid mode).
+///
+/// The Directory/Symlink/Other arms are byte-identical between the two modes;
+/// only the File arm differs in where the reader goes.
+#[allow(clippy::too_many_arguments)]
+fn append_manifest_entry<'a, W: Write + Seek>(
+    writer: &mut ArchiveWriter<W>,
+    entry: &ManifestEntry,
+    preserve_metadata: bool,
+    report: &mut SevenZCreateReport,
+    progress: Option<&SevenZProgressCallback<'a>>,
+    cancellation_token: Option<&CancellationToken>,
+    cancellation_observed: Option<&Rc<Cell<bool>>>,
+    solid: bool,
+) -> Result<Option<SolidFilePair<'a>>, SevenZError> {
+    match entry.file_type {
+        ManifestFileType::Directory => {
+            let archive_entry = sevenz_archive_entry(entry, preserve_metadata);
+            writer.push_archive_entry::<&[u8]>(archive_entry, None)?;
+            report.written_entries += 1;
+        }
+        ManifestFileType::File => {
+            let archive_entry = sevenz_archive_entry(entry, preserve_metadata);
+            let file = File::open(&entry.source_path)
+                .map_err(|source| SevenZError::Io { path: entry.source_path.clone(), source })?;
+            let reader = SevenZProgressReader::new(
+                file,
+                entry.archive_path.clone(),
+                progress.cloned(),
+                cancellation_token.cloned(),
+                cancellation_observed.cloned(),
+            );
+            let pending = if solid {
+                Some((archive_entry, SourceReader::new(reader)))
+            } else {
+                writer.push_archive_entry(archive_entry, Some(reader))?;
+                None
+            };
+            report.written_entries += 1;
+            report.written_bytes += entry.size;
+            return Ok(pending);
+        }
+        ManifestFileType::Symlink => {
+            report.warnings.push(format!(
+                "skipped symlink {}: 7z backend does not materialize symlink entries in v1",
+                entry.archive_path
+            ));
+        }
+        ManifestFileType::Other => {
+            report.warnings.push(format!(
+                "skipped unsupported entry {}: 7z backend only writes files and directories in v1",
+                entry.archive_path
+            ));
+        }
+    }
+
+    Ok(None)
 }
 
 fn sevenz_archive_entry(entry: &ManifestEntry, preserve_metadata: bool) -> ArchiveEntry {
@@ -1354,6 +1358,19 @@ fn drain_reader(reader: &mut dyn Read, archive_path: &str) -> Result<(), SevenZE
     Ok(())
 }
 
+/// Parks a real backend error and returns the sentinel error the callback
+/// must yield instead.
+///
+/// `sevenz_rust2`'s `for_each_entries` callback cannot return the backend's
+/// own error type — it is required to return `Result<bool, sevenz_rust2::Error>`.
+/// Without this dance the real error (with its path and source) would be
+/// degraded into a generic library error. The parked error is returned by
+/// the caller immediately after the callback loop completes.
+fn callback_failed_with<E>(callback_error: &mut Option<E>, error: E) -> sevenz_rust2::Error {
+    *callback_error = Some(error);
+    callback_failed_error()
+}
+
 fn callback_failed_error() -> sevenz_rust2::Error {
     sevenz_rust2::Error::Other(Cow::Borrowed("zmanager extraction callback failed"))
 }
@@ -1365,9 +1382,9 @@ mod tests {
     };
     use crate::safety::{ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError};
     use crate::secrets::SecretString;
+    use crate::test_support::TestDir;
     use std::fs::{self, File};
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::SystemTime;
 
     #[test]
     fn extraction_kind_never_materializes_link_entries() {
@@ -1394,22 +1411,22 @@ mod tests {
         assert!(matches!(result, Err(SevenZError::Io { .. })));
     }
 
+    // The permission-mode assertions are Unix-only and the source path and
+    // extracted metadata bindings are only meaningfully exercised there, so
+    // the whole test is gated instead of sprinkling `unused_variables` allows.
+    #[cfg(unix)]
     #[test]
 
     fn preserves_metadata_during_creation_and_extraction() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
         let temp = TestDir::new("preserves_metadata_sevenz");
 
         temp.write_file("project/script.sh", b"echo hello");
 
-        #[allow(unused_variables)]
         let path = temp.path("project/script.sh");
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-            fs::set_permissions(temp.path("project"), fs::Permissions::from_mode(0o1750)).unwrap();
-        }
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(temp.path("project"), fs::Permissions::from_mode(0o1750)).unwrap();
 
         let mtime = filetime::FileTime::from_unix_time(1_500_000_000, 234_567_800);
         filetime::set_file_mtime(&path, mtime).unwrap();
@@ -1425,25 +1442,12 @@ mod tests {
         extract_7z(&archive, temp.path("out"), None, ExtractionPolicy::default()).unwrap();
 
         let out_path = temp.path("out/project/script.sh");
-
-        #[allow(unused_variables)]
         let metadata = fs::metadata(&out_path).unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(metadata.permissions().mode() & 0o777, 0o755);
-            let directory_metadata = fs::metadata(temp.path("out/project")).unwrap();
-            assert_eq!(directory_metadata.permissions().mode() & 0o7777, 0o1750);
-            assert_eq!(metadata.mtime(), 1_500_000_000);
-            assert_eq!(metadata.mtime_nsec(), 234_567_800);
-        }
-
-        #[cfg(not(unix))]
-        {
-            // Windows fallback check
-        }
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o755);
+        let directory_metadata = fs::metadata(temp.path("out/project")).unwrap();
+        assert_eq!(directory_metadata.permissions().mode() & 0o7777, 0o1750);
+        assert_eq!(metadata.mtime(), 1_500_000_000);
+        assert_eq!(metadata.mtime_nsec(), 234_567_800);
 
         // Check mtime. The test creates the archive with mtime=1500000000
         let mtime_extracted = filetime::FileTime::from_last_modification_time(&metadata);
@@ -1798,41 +1802,5 @@ mod tests {
                 state.to_le_bytes()[0]
             })
             .collect()
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn create_dir(&self, relative: impl AsRef<Path>) {
-            fs::create_dir_all(self.path(relative)).unwrap();
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 }

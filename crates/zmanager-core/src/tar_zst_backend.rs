@@ -848,10 +848,11 @@ mod tests {
     };
     use crate::jobs::{CancellationToken, JobContext, JobEvent};
     use crate::safety::{ExtractionPolicy, ExtractionSafetyError};
+    use crate::test_support::TestDir;
     use std::fs::{self, File};
     use std::io::{self, Write};
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn creates_and_extracts_tar_zst() {
@@ -873,29 +874,30 @@ mod tests {
         assert!(temp.path("out/project/empty").is_dir());
     }
 
+    // The permission-mode and symlink assertions are Unix-only and the source
+    // path and extracted metadata bindings are only meaningfully exercised
+    // there, so the whole test is gated instead of sprinkling
+    // `unused_variables` allows.
+    #[cfg(unix)]
     #[test]
 
     fn preserves_metadata_during_creation_and_extraction() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
         let temp = TestDir::new("preserves_metadata_tar_zst");
 
         temp.write_file("project/script.sh", b"echo hello");
 
-        #[allow(unused_variables)]
         let path = temp.path("project/script.sh");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(temp.path("project"), fs::Permissions::from_mode(0o1750)).unwrap();
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-            fs::set_permissions(temp.path("project"), fs::Permissions::from_mode(0o1750)).unwrap();
-
-            // Add a symlink to test symlink metadata
-            std::os::unix::fs::symlink("script.sh", temp.path("project/link.sh")).unwrap();
-            // Set a specific mtime on the symlink
-            let time = filetime::FileTime::from_unix_time(1_500_000_000, 234_567_890);
-            filetime::set_file_mtime(&path, time).unwrap();
-            filetime::set_symlink_file_times(temp.path("project/link.sh"), time, time).unwrap();
-        }
+        // Add a symlink to test symlink metadata
+        std::os::unix::fs::symlink("script.sh", temp.path("project/link.sh")).unwrap();
+        // Set a specific mtime on the symlink
+        let time = filetime::FileTime::from_unix_time(1_500_000_000, 234_567_890);
+        filetime::set_file_mtime(&path, time).unwrap();
+        filetime::set_symlink_file_times(temp.path("project/link.sh"), time, time).unwrap();
 
         let archive = temp.path("archive.tar.zst");
 
@@ -909,27 +911,19 @@ mod tests {
         extract_tar_zst(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
         let out_path = temp.path("out/project/script.sh");
-
-        #[allow(unused_variables)]
         let metadata = fs::metadata(&out_path).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o755);
+        let directory_metadata = fs::metadata(temp.path("out/project")).unwrap();
+        assert_eq!(directory_metadata.permissions().mode() & 0o7777, 0o1750);
+        assert_eq!(metadata.mtime(), 1_500_000_000);
+        assert_eq!(metadata.mtime_nsec(), 234_567_890);
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(metadata.permissions().mode() & 0o777, 0o755);
-            let directory_metadata = fs::metadata(temp.path("out/project")).unwrap();
-            assert_eq!(directory_metadata.permissions().mode() & 0o7777, 0o1750);
-            assert_eq!(metadata.mtime(), 1_500_000_000);
-            assert_eq!(metadata.mtime_nsec(), 234_567_890);
-
-            // Verify symlink metadata
-            let link_metadata = fs::symlink_metadata(temp.path("out/project/link.sh")).unwrap();
-            let link_mtime = filetime::FileTime::from_last_modification_time(&link_metadata);
-            assert!(link_metadata.is_symlink());
-            assert_eq!(link_mtime.unix_seconds(), 1_500_000_000);
-            assert_eq!(link_mtime.nanoseconds(), 234_567_890);
-        }
+        // Verify symlink metadata
+        let link_metadata = fs::symlink_metadata(temp.path("out/project/link.sh")).unwrap();
+        let link_mtime = filetime::FileTime::from_last_modification_time(&link_metadata);
+        assert!(link_metadata.is_symlink());
+        assert_eq!(link_mtime.unix_seconds(), 1_500_000_000);
+        assert_eq!(link_mtime.nanoseconds(), 234_567_890);
     }
 
     #[cfg(unix)]
@@ -1221,41 +1215,5 @@ mod tests {
     fn write_checksum(destination: &mut [u8], value: u32) {
         let encoded = format!("{value:06o}\0 ");
         write_bytes(destination, encoded.as_bytes());
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn create_dir(&self, relative: impl AsRef<Path>) {
-            fs::create_dir_all(self.path(relative)).unwrap();
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 }

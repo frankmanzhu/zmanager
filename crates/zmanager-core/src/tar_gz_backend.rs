@@ -297,9 +297,9 @@ mod tests {
     use super::{TarGzCreateOptions, create_tar_gz_from_path};
     use crate::libarchive_backend::extract_archive;
     use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
     use std::fs::{self, File};
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::SystemTime;
 
     #[test]
     fn creates_and_extracts_tar_gz() {
@@ -438,41 +438,5 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.level, 3);
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn create_dir(&self, relative: impl AsRef<Path>) {
-            fs::create_dir_all(self.path(relative)).unwrap();
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 }

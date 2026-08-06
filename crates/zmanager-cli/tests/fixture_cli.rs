@@ -1,9 +1,11 @@
-use std::env;
+mod common;
+
+use common::*;
+
 use std::fs::{self, File};
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -518,7 +520,7 @@ fn zm_lists_zip_created_with_competitor_junk_paths() {
     let archive = temp.path("competitor-junk.zip");
 
     let zip_output = Command::new(zip)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("-jq")
         .arg(&archive)
         .arg("src/main.rs")
@@ -1165,7 +1167,7 @@ fn zm_create_tzap_accepts_bare_relative_archive_path() {
     fs::write(temp.path("project/file.txt"), "relative output\n").unwrap();
 
     let create = Command::new(zm_path())
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("create")
         .arg("project.tzap")
         .arg("project")
@@ -1175,7 +1177,7 @@ fn zm_create_tzap_accepts_bare_relative_archive_path() {
     assert!(temp.path("project.tzap").is_file());
 
     let list = Command::new(zm_path())
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("list")
         .arg("project.tzap")
         .arg("--name-only")
@@ -1244,7 +1246,7 @@ fn optional_zm_extracts_7zip_created_archive_when_available() {
     let archive = temp.path("competitor.7z");
 
     let create = Command::new(sevenzip)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("a")
         .arg("-t7z")
         .arg("-bd")
@@ -1548,7 +1550,7 @@ fn optional_zm_reads_infozip_and_7zip_split_zip_sets_when_available() {
             .arg("64k")
             .arg(&archive)
             .arg("project/blob.bin")
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .output()
             .unwrap();
         assert_success("zip create split zip", &create);
@@ -1577,7 +1579,7 @@ fn optional_zm_reads_infozip_and_7zip_split_zip_sets_when_available() {
             .arg("-v64k")
             .arg("sevenzip.zip")
             .arg("project/blob.bin")
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .output()
             .unwrap();
         assert_success("7zz create split zip stream", &create);
@@ -1614,7 +1616,7 @@ fn optional_zm_reads_7zip_created_split_7z_when_available() {
         .arg("-v1m")
         .arg("external.7z")
         .arg("project/blob.bin")
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .output()
         .unwrap();
     assert_success("7zz create split 7z", &create);
@@ -1643,7 +1645,7 @@ fn optional_zm_extracts_7zip_created_tar_family_archives_when_available() {
 
     let tar_archive = temp.path("project.tar");
     let create_tar = Command::new(&sevenzip)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("a")
         .arg("-ttar")
         .arg("-bd")
@@ -1658,7 +1660,7 @@ fn optional_zm_extracts_7zip_created_tar_family_archives_when_available() {
     for (format, archive_name) in [("gzip", "project.tar.gz"), ("xz", "project.tar.xz")] {
         let compressed_archive = temp.path(archive_name);
         let create_compressed = Command::new(&sevenzip)
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .arg("a")
             .arg(format!("-t{format}"))
             .arg("-bd")
@@ -1737,7 +1739,7 @@ fn zm_extracts_zip_symlink_created_by_competitor() {
     let archive = temp.path("competitor-preserve.zip");
 
     let zip_output =
-        Command::new(zip).current_dir(&temp.root).arg("-qry").arg(&archive).arg("project").output().unwrap();
+        Command::new(zip).current_dir(temp.root()).arg("-qry").arg(&archive).arg("project").output().unwrap();
     assert_success("zip -qry", &zip_output);
 
     let extract =
@@ -1900,7 +1902,7 @@ fn zm_extracts_selected_zip_entries_created_by_competitor() {
     let archive = temp.path("competitor.zip");
 
     let zip_output =
-        Command::new(zip).current_dir(&temp.root).arg("-qr").arg(&archive).arg("project").output().unwrap();
+        Command::new(zip).current_dir(temp.root()).arg("-qr").arg(&archive).arg("project").output().unwrap();
     assert_success("zip -qr competitor filter archive", &zip_output);
 
     let extract = Command::new(zm_path())
@@ -2644,51 +2646,11 @@ fn cli_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_zmanager-cli"))
 }
 
-fn zm_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_zm"))
-}
-
-fn assert_success(label: &str, output: &std::process::Output) {
-    assert!(
-        output.status.success(),
-        "{label} failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn assert_failure(label: &str, output: &std::process::Output) {
-    assert!(
-        !output.status.success(),
-        "{label} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 fn assert_json_object(stdout: &str) {
     assert!(
         stdout.starts_with('{') && stdout.trim_end().ends_with('}'),
         "stdout is not a single JSON object:\n{stdout}"
     );
-}
-
-fn strip_ansi(input: &str) -> String {
-    let mut stripped = String::new();
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' && chars.peek() == Some(&'[') {
-            let _ = chars.next();
-            for code in chars.by_ref() {
-                if ('@'..='~').contains(&code) {
-                    break;
-                }
-            }
-        } else {
-            stripped.push(ch);
-        }
-    }
-    stripped
 }
 
 fn write_zip_entries(path: &Path, method: CompressionMethod, entries: &[(&str, &[u8])]) {
@@ -2854,11 +2816,6 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf()
 }
 
-fn find_on_path(binary: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
-    env::split_paths(&path).map(|dir| dir.join(binary)).find(|candidate| candidate.is_file())
-}
-
 fn find_7zip() -> Option<PathBuf> {
     find_on_path("7zz").or_else(|| find_on_path("7z"))
 }
@@ -2877,28 +2834,4 @@ fn assert_zm_extracts_7zip_tar_family_archive(label: &str, archive: &Path, temp:
         .unwrap(),
         "created by 7zip tar\n"
     );
-}
-
-struct TestDir {
-    root: PathBuf,
-}
-
-impl TestDir {
-    fn new(name: &str) -> Self {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-
-        Self { root }
-    }
-
-    fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-        self.root.join(relative)
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
 }

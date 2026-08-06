@@ -8,7 +8,7 @@ use std::io::{self, BufReader, Read, Write};
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 const TEMP_OUTPUT_PREFIX: &str = ".zmanager";
 const TEMP_OUTPUT_SUFFIX: &str = ".tmp";
@@ -16,8 +16,24 @@ const RAW_STREAM_TEMP_EXTENSION: &str = "tmp.Z";
 
 type ProgressCallback<'a> = Option<&'a mut dyn FnMut(u64)>;
 
-pub const RAW_STREAM_SUFFIXES: &[&str] =
-    &[".zst", ".gz", ".bz2", ".xz", ".lzma", ".lz", ".br", ".lz4", ".lzo", ".Z", ".lrz"];
+/// Suffixes recognized as raw single-file streams, in
+/// [`RAW_STREAM_FORMATS`] order.
+///
+/// Derived from [`RawStreamFormat::suffixes`] so the two lists cannot drift;
+/// every format has exactly one suffix, hence the `[0]` indexing.
+pub const RAW_STREAM_SUFFIXES: &[&str] = &[
+    RawStreamFormat::Zstd.suffixes()[0],
+    RawStreamFormat::Gzip.suffixes()[0],
+    RawStreamFormat::Bzip2.suffixes()[0],
+    RawStreamFormat::Xz.suffixes()[0],
+    RawStreamFormat::Lzma.suffixes()[0],
+    RawStreamFormat::Lzip.suffixes()[0],
+    RawStreamFormat::Brotli.suffixes()[0],
+    RawStreamFormat::Lz4.suffixes()[0],
+    RawStreamFormat::Lzo.suffixes()[0],
+    RawStreamFormat::UnixCompress.suffixes()[0],
+    RawStreamFormat::Lrzip.suffixes()[0],
+];
 
 /// A raw single-file compression stream.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -435,23 +451,31 @@ fn copy_reader_to_writer_with_progress<R: Read, W: Write>(
     reader: &mut R,
     output: &mut W,
     path: &Path,
-    mut on_progress: ProgressCallback<'_>,
+    on_progress: ProgressCallback<'_>,
 ) -> Result<u64, RawStreamError> {
+    copy_bytes_with_progress(reader, output, on_progress)
+        .map_err(|source| RawStreamError::Io { path: path.to_path_buf(), source })
+}
+
+/// Shared byte-copy loop with an optional byte-count progress callback, used
+/// by both the decoder-reader path and the external-tool stdout path so the
+/// progress accounting cannot drift between them.
+fn copy_bytes_with_progress<R: Read, W: Write>(
+    reader: &mut R,
+    output: &mut W,
+    mut on_progress: ProgressCallback<'_>,
+) -> io::Result<u64> {
     let mut total_written = 0_u64;
     let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
     loop {
-        let read =
-            reader.read(&mut buffer).map_err(|source| RawStreamError::Io { path: path.to_path_buf(), source })?;
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
-        output.write_all(&buffer[..read]).map_err(|source| RawStreamError::Io { path: path.to_path_buf(), source })?;
+        output.write_all(&buffer[..read])?;
 
-        let read_u64 = u64::try_from(read).map_err(|_| RawStreamError::Io {
-            path: path.to_path_buf(),
-            source: io::Error::other("read chunk size exceeded u64"),
-        })?;
+        let read_u64 = u64::try_from(read).map_err(|_| io::Error::other("read chunk size exceeded u64"))?;
         if let Some(on_progress) = &mut on_progress {
             on_progress(read_u64);
         }
@@ -584,7 +608,7 @@ fn copy_external_tool_to_writer<W: Write>(
     tool: ExternalStreamTool,
     archive_path: &Path,
     output: &mut W,
-    mut on_progress: ProgressCallback<'_>,
+    on_progress: ProgressCallback<'_>,
 ) -> Result<u64, RawStreamError> {
     let mut child = Command::new(tool.name)
         .args(tool.args)
@@ -599,30 +623,8 @@ fn copy_external_tool_to_writer<W: Write>(
         status: None,
         message: "decoder stdout was not available".to_owned(),
     })?;
-    let written_bytes = {
-        let mut total_written = 0_u64;
-        let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
-        loop {
-            let read = stdout
-                .read(&mut buffer)
-                .map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })?;
-            if read == 0 {
-                break;
-            }
-            output
-                .write_all(&buffer[..read])
-                .map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })?;
-            let read_u64 = u64::try_from(read).map_err(|_| RawStreamError::Io {
-                path: archive_path.to_path_buf(),
-                source: io::Error::other("read chunk size exceeded u64"),
-            })?;
-            if let Some(on_progress) = &mut on_progress {
-                on_progress(read_u64);
-            }
-            total_written = total_written.saturating_add(read_u64);
-        }
-        total_written
-    };
+    let written_bytes = copy_bytes_with_progress(&mut stdout, output, on_progress)
+        .map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })?;
     let process_output = child
         .wait_with_output()
         .map_err(|source| RawStreamError::ExternalToolUnavailable { tool: tool.name, source })?;
@@ -808,13 +810,13 @@ struct TemporaryDirectory {
 impl TemporaryDirectory {
     fn new(label: &str) -> Result<Self, RawStreamError> {
         let parent = std::env::temp_dir();
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
+        // The unique pid+nanos component comes from the shared helper; the
+        // attempt counter below is a retry loop on top of it for the
+        // (theoretical) same-process-same-nanosecond collision.
+        let unique = crate::temp_names::unique_temp_name(label);
 
         for attempt in 0..100 {
-            let path = parent.join(format!(
-                "{TEMP_OUTPUT_PREFIX}-{label}-{}-{now}-{attempt}{TEMP_OUTPUT_SUFFIX}",
-                std::process::id()
-            ));
+            let path = parent.join(format!("{TEMP_OUTPUT_PREFIX}-{unique}-{attempt}{TEMP_OUTPUT_SUFFIX}"));
             match fs::create_dir(&path) {
                 Ok(()) => return Ok(Self { path }),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -867,12 +869,12 @@ mod tests {
         extract_raw_stream, output_name_for_raw_stream,
     };
     use crate::safety::{ExtractionLimits, ExtractionPolicy};
+    use crate::test_support::TestDir;
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use std::fs::{self, File};
     use std::io::Write as _;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn detects_raw_streams_but_not_compressed_archives() {
@@ -964,29 +966,5 @@ mod tests {
         assert_ne!(second.path(), first_path);
         assert!(first_path.is_dir());
         assert!(second.path().is_dir());
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 }

@@ -161,10 +161,9 @@ impl Drop for AtomicOutputFile {
 #[cfg(test)]
 mod tests {
     use super::AtomicOutputFile;
+    use crate::test_support::TestDir;
     use std::fs;
     use std::io::Write as _;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn commit_without_replace_moves_temp_file_to_final_path() {
@@ -231,28 +230,5 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::IsADirectory);
         assert!(final_path.is_dir());
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 }

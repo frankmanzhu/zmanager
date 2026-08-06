@@ -1,7 +1,10 @@
+mod common;
+
+use common::TestDir;
+
 use std::fs::{self, File};
 use std::io::{Cursor, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use sevenz_rust2::{ArchiveEntry, ArchiveWriter};
 use zip::write::SimpleFileOptions;
@@ -388,28 +391,4 @@ enum RawTarEntryKind<'a> {
     File(&'a [u8]),
     Symlink(&'a str),
     Hardlink(&'a str),
-}
-
-struct TestDir {
-    root: PathBuf,
-}
-
-impl TestDir {
-    fn new(name: &str) -> Self {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-
-        Self { root }
-    }
-
-    fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-        self.root.join(relative)
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
 }

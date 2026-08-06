@@ -338,20 +338,20 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                 password,
                 volume_size: request.volume_size,
             };
-            let result = {
-                let mut sink = |event| progress.emit(event);
-                let mut context = JobContext::new_with_progress_total(&token, &mut sink, Some(manifest.total_bytes));
-                let result = zmanager_core::zip_backend::create_zip_from_manifest_with_context(
-                    &manifest,
-                    create_destination,
-                    &options,
-                    &mut context,
-                );
-                context.flush_progress();
-                result
-            };
-            result
-                .map(|report| CreateOutcome {
+            run_create_backend(
+                &manifest,
+                &mut progress,
+                &token,
+                |context| {
+                    zmanager_core::zip_backend::create_zip_from_manifest_with_context(
+                        &manifest,
+                        create_destination,
+                        &options,
+                        context,
+                    )
+                    .map_err(|error| error.to_string())
+                },
+                |report| CreateOutcome {
                     summary: format!(
                         "created zip: {} entries, {} bytes, encrypted {}, {} warnings",
                         report.written_entries,
@@ -368,8 +368,8 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                     solid: None,
                     volume_size: report.volume_size,
                     volume_count: report.volume_count,
-                })
-                .map_err(|error| error.to_string())
+                },
+            )
         }
         ArchiveFormat::TarZst => {
             let options = zmanager_core::tar_zst_backend::TarZstdCreateOptions {
@@ -379,20 +379,17 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                 preserve_metadata: !request.no_metadata,
                 ..zmanager_core::tar_zst_backend::TarZstdCreateOptions::default()
             };
-            let result = {
-                let mut sink = |event| progress.emit(event);
-                let mut context = JobContext::new_with_progress_total(&token, &mut sink, Some(manifest.total_bytes));
-                let result = zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(
-                    &manifest,
-                    &temp,
-                    &options,
-                    &mut context,
-                );
-                context.flush_progress();
-                result
-            };
-            result
-                .map(|report| CreateOutcome {
+            run_create_backend(
+                &manifest,
+                &mut progress,
+                &token,
+                |context| {
+                    zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(
+                        &manifest, &temp, &options, context,
+                    )
+                    .map_err(|error| error.to_string())
+                },
+                |report| CreateOutcome {
                     summary: format!(
                         "created tar.zst: {} entries, {} bytes, level {}, threads {:?}, {} warnings",
                         report.written_entries,
@@ -410,8 +407,8 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                     solid: None,
                     volume_size: None,
                     volume_count: 1,
-                })
-                .map_err(|error| error.to_string())
+                },
+            )
         }
         ArchiveFormat::Tgz => {
             let options = zmanager_core::tar_gz_backend::TarGzCreateOptions {
@@ -421,20 +418,17 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                 preserve_metadata: !request.no_metadata,
                 replace_existing: backend_replace_existing,
             };
-            let result = {
-                let mut sink = |event| progress.emit(event);
-                let mut context = JobContext::new_with_progress_total(&token, &mut sink, Some(manifest.total_bytes));
-                let result = zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(
-                    &manifest,
-                    &temp,
-                    &options,
-                    &mut context,
-                );
-                context.flush_progress();
-                result
-            };
-            result
-                .map(|report| CreateOutcome {
+            run_create_backend(
+                &manifest,
+                &mut progress,
+                &token,
+                |context| {
+                    zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(
+                        &manifest, &temp, &options, context,
+                    )
+                    .map_err(|error| error.to_string())
+                },
+                |report| CreateOutcome {
                     summary: format!(
                         "created tar.gz: {} entries, {} bytes, level {}, {} warnings",
                         report.written_entries,
@@ -451,8 +445,8 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                     solid: None,
                     volume_size: None,
                     volume_count: 1,
-                })
-                .map_err(|error| error.to_string())
+                },
+            )
         }
         ArchiveFormat::Tzap => {
             let uses_secret_key = password.is_some() || request.tzap_recipient_cert.is_some();
@@ -493,20 +487,20 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                 volume_loss_tolerance: tzap_default_volume_loss_tolerance(request.volume_size),
                 x509_signing,
             };
-            let result = {
-                let mut sink = |event| progress.emit(event);
-                let mut context = JobContext::new_with_progress_total(&token, &mut sink, Some(manifest.total_bytes));
-                let result = zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(
-                    &manifest,
-                    create_destination,
-                    &options,
-                    &mut context,
-                );
-                context.flush_progress();
-                result
-            };
-            result
-                .map(|report| CreateOutcome {
+            run_create_backend(
+                &manifest,
+                &mut progress,
+                &token,
+                |context| {
+                    zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(
+                        &manifest,
+                        create_destination,
+                        &options,
+                        context,
+                    )
+                    .map_err(|error| error.to_string())
+                },
+                |report| CreateOutcome {
                     summary: format!(
                         "created tzap: {} entries, {} bytes, encrypted {}, level {}, {} warnings",
                         report.written_entries,
@@ -524,8 +518,8 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                     solid: None,
                     volume_size: report.volume_size,
                     volume_count: report.volume_count,
-                })
-                .map_err(|error| error.to_string())
+                },
+            )
         }
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveFormat::AppleArchive => {
@@ -542,20 +536,17 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                 replace_existing: backend_replace_existing,
                 ..zmanager_core::apple_archive_backend::AppleArchiveCreateOptions::default()
             };
-            let result = {
-                let mut sink = |event| progress.emit(event);
-                let mut context = JobContext::new_with_progress_total(&token, &mut sink, Some(manifest.total_bytes));
-                let result = zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(
-                    &manifest,
-                    &temp,
-                    &options,
-                    &mut context,
-                );
-                context.flush_progress();
-                result
-            };
-            result
-                .map(|report| CreateOutcome {
+            run_create_backend(
+                &manifest,
+                &mut progress,
+                &token,
+                |context| {
+                    zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(
+                        &manifest, &temp, &options, context,
+                    )
+                    .map_err(|error| error.to_string())
+                },
+                |report| CreateOutcome {
                     summary: format!(
                         "created aar: {} entries, {} bytes, compression {:?}, {} warnings",
                         report.written_entries,
@@ -572,8 +563,8 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                     solid: None,
                     volume_size: None,
                     volume_count: 1,
-                })
-                .map_err(|error| error.to_string())
+                },
+            )
         }
         ArchiveFormat::SevenZ => {
             let options = zmanager_core::sevenz_backend::SevenZCreateOptions {
@@ -586,8 +577,15 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                 volume_size: request.volume_size,
                 ..zmanager_core::sevenz_backend::SevenZCreateOptions::default()
             };
-            zmanager_core::sevenz_backend::create_7z_from_manifest(&manifest, create_destination, &options)
-                .map(|report| CreateOutcome {
+            run_create_backend(
+                &manifest,
+                &mut progress,
+                &token,
+                |_context| {
+                    zmanager_core::sevenz_backend::create_7z_from_manifest(&manifest, create_destination, &options)
+                        .map_err(|error| error.to_string())
+                },
+                |report| CreateOutcome {
                     summary: format!(
                         "created 7z: {} entries, {} bytes, solid {}, threads {:?}, encrypted {}, {} warnings",
                         report.written_entries,
@@ -606,8 +604,8 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                     solid: Some(report.solid),
                     volume_size: report.volume_size,
                     volume_count: report.volume_count,
-                })
-                .map_err(|error| error.to_string())
+                },
+            )
         }
     };
 
@@ -644,6 +642,23 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
             ExitCode::FAILURE
         }
     }
+}
+
+fn run_create_backend<R>(
+    manifest: &zmanager_core::manifest::ArchiveManifest,
+    progress: &mut ProgressReporter,
+    token: &CancellationToken,
+    run: impl FnOnce(&mut JobContext<'_>) -> Result<R, String>,
+    map_outcome: impl FnOnce(R) -> CreateOutcome,
+) -> Result<CreateOutcome, String> {
+    let result = {
+        let mut sink = |event| progress.emit(event);
+        let mut context = JobContext::new_with_progress_total(token, &mut sink, Some(manifest.total_bytes));
+        let result = run(&mut context);
+        context.flush_progress();
+        result
+    };
+    result.map(map_outcome)
 }
 
 fn create_stream(

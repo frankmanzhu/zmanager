@@ -487,11 +487,18 @@ fn replace_secret_file(temporary: &Path, path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum TzapLocalIdentityStoreError {
-    InvalidField { field: &'static str },
-    DuplicateRecord { field: &'static str, value: String },
-    Io(std::io::ErrorKind),
+    InvalidField {
+        field: &'static str,
+    },
+    DuplicateRecord {
+        field: &'static str,
+        value: String,
+    },
+    /// Filesystem I/O failed. Carries the full error (including the OS-level
+    /// message) so failures are diagnosable without re-probing the path.
+    Io(std::io::Error),
     Json(String),
 }
 
@@ -502,17 +509,24 @@ impl fmt::Display for TzapLocalIdentityStoreError {
             Self::DuplicateRecord { field, value } => {
                 write!(f, "local identity field {field} contains duplicate {value}")
             }
-            Self::Io(kind) => write!(f, "local identity store I/O failed: {kind:?}"),
+            Self::Io(error) => write!(f, "local identity store I/O failed: {error}"),
             Self::Json(message) => write!(f, "local identity JSON is invalid: {message}"),
         }
     }
 }
 
-impl std::error::Error for TzapLocalIdentityStoreError {}
+impl std::error::Error for TzapLocalIdentityStoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::InvalidField { .. } | Self::DuplicateRecord { .. } | Self::Json(_) => None,
+        }
+    }
+}
 
 impl From<std::io::Error> for TzapLocalIdentityStoreError {
     fn from(error: std::io::Error) -> Self {
-        Self::Io(error.kind())
+        Self::Io(error)
     }
 }
 
@@ -681,8 +695,9 @@ fn status_cache_from_json(value: &Value) -> Result<TzapCertificateStatusCacheRec
     let object = json_object(value, "certificate_status_cache[]")?;
     Ok(TzapCertificateStatusCacheRecord {
         certificate_sha256: json_string(object, "certificate_sha256")?,
-        status: TzapCertificateStatus::parse(&json_string(object, "status")?)
-            .ok_or(TzapLocalIdentityStoreError::InvalidField { field: "status" })?,
+        status: json_string(object, "status")?
+            .parse::<TzapCertificateStatus>()
+            .map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "status" })?,
         this_update_unix_seconds: json_u64(object, "this_update_unix_seconds")?,
         next_update_unix_seconds: json_u64(object, "next_update_unix_seconds")?,
     })
@@ -721,8 +736,9 @@ fn contact_from_json(value: &Value) -> Result<TzapContactRecord, TzapLocalIdenti
     let object = json_object(value, "contacts[]")?;
     let trust_anchor_type = match object.get("trust_anchor_type") {
         Some(Value::Null) | None => trust::TzapTrustAnchorType::Untrusted,
-        Some(_) => trust::TzapTrustAnchorType::parse(&json_string(object, "trust_anchor_type")?)
-            .ok_or(TzapLocalIdentityStoreError::InvalidField { field: "trust_anchor_type" })?,
+        Some(_) => json_string(object, "trust_anchor_type")?
+            .parse::<trust::TzapTrustAnchorType>()
+            .map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "trust_anchor_type" })?,
     };
     let verification_state = match object.get("verification_state") {
         // Records written before verification-state tracking existed have no
@@ -730,8 +746,9 @@ fn contact_from_json(value: &Value) -> Result<TzapContactRecord, TzapLocalIdenti
         // claim evidence of offline verification that never happened, so
         // treat the state as unknown instead.
         Some(Value::Null) | None => trust::TzapVerificationState::NotRecorded,
-        Some(_) => trust::TzapVerificationState::parse(&json_string(object, "verification_state")?)
-            .ok_or(TzapLocalIdentityStoreError::InvalidField { field: "verification_state" })?,
+        Some(_) => json_string(object, "verification_state")?
+            .parse::<trust::TzapVerificationState>()
+            .map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "verification_state" })?,
     };
     let missing_status_caveat = match object.get("missing_status_caveat") {
         Some(Value::Null) | None => true,
@@ -798,8 +815,10 @@ fn routing_from_json(value: &Value) -> Result<TzapSignDeviceRouting, TzapLocalId
 }
 
 fn validate_account_key(account_key: &str) -> Result<(), TzapLocalIdentityStoreError> {
-    validate_non_empty_id("account_key", account_key)?;
-    if account_key.bytes().all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_')) {
+    // Shared with the identity catalog so both stores accept the same
+    // account keys: non-empty and free of path separators and traversal
+    // markers, but otherwise unrestricted.
+    if crate::identity_catalog::validate_account_key(account_key) {
         Ok(())
     } else {
         Err(TzapLocalIdentityStoreError::InvalidField { field: "account_key" })
@@ -940,13 +959,10 @@ mod tests {
         generate_recipient_encryption_key,
     };
     use crate::secrets::SecretBytes;
+    use crate::test_support::TestDir;
     use crate::trust::{self, TzapCertificatePublicMetadata, TzapCertificateStatus};
     use serde_json::json;
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    const TEST_IDENTITY_STORE_DIR_PREFIX: &str = "zmanager-identity-store";
 
     #[test]
     fn in_memory_identity_store_round_trips_inventory() {
@@ -968,8 +984,8 @@ mod tests {
 
     #[test]
     fn file_identity_store_reloads_generated_device_keys() {
-        let temp_dir = TestIdentityStoreDir::new("reload-generated-keys");
-        let mut store = FileTzapLocalIdentityStore::new(temp_dir.path());
+        let temp_dir = TestDir::new("reload-generated-keys");
+        let mut store = FileTzapLocalIdentityStore::new(temp_dir.path(""));
         let signing_key = generate_device_signing_key_and_csr(&TzapDeviceCsrOptions::default()).unwrap();
         let recipient_key = generate_recipient_encryption_key().unwrap();
         ensure_recipient_key_is_distinct_from_signing_key(
@@ -1003,7 +1019,7 @@ mod tests {
 
         store.save_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, inventory).unwrap();
 
-        let reloaded_store = FileTzapLocalIdentityStore::new(temp_dir.path());
+        let reloaded_store = FileTzapLocalIdentityStore::new(temp_dir.path(""));
         let loaded = reloaded_store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
 
         assert_eq!(loaded.device_signing_keys[0].public_key_fingerprint, signing_key.public_key_fingerprint);
@@ -1016,7 +1032,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt as _;
 
             let mode = fs::metadata(
-                temp_dir.path().join(format!("{DEFAULT_IDENTITY_INVENTORY_ACCOUNT}{IDENTITY_INVENTORY_FILE_SUFFIX}")),
+                temp_dir.path(format!("{DEFAULT_IDENTITY_INVENTORY_ACCOUNT}{IDENTITY_INVENTORY_FILE_SUFFIX}")),
             )
             .unwrap()
             .permissions()
@@ -1028,8 +1044,8 @@ mod tests {
 
     #[test]
     fn file_identity_store_writes_inventory_atomically() {
-        let temp_dir = TestIdentityStoreDir::new("atomic-inventory-write");
-        let mut store = FileTzapLocalIdentityStore::new(temp_dir.path());
+        let temp_dir = TestDir::new("atomic-inventory-write");
+        let mut store = FileTzapLocalIdentityStore::new(temp_dir.path(""));
         let inventory = valid_inventory();
 
         // Saving twice (an overwrite) leaves a complete, loadable file and no
@@ -1039,7 +1055,7 @@ mod tests {
 
         assert_eq!(store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap(), valid_inventory());
 
-        let leftovers = fs::read_dir(temp_dir.path())
+        let leftovers = fs::read_dir(temp_dir.path(""))
             .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
@@ -1248,30 +1264,5 @@ mod tests {
 
     fn canonical_sha(byte: u8) -> String {
         trust::format_sha256_identifier(&[byte; 32])
-    }
-
-    struct TestIdentityStoreDir {
-        path: PathBuf,
-    }
-
-    impl TestIdentityStoreDir {
-        fn new(name: &str) -> Self {
-            let now =
-                SystemTime::now().duration_since(UNIX_EPOCH).expect("system clock is before unix epoch").as_nanos();
-            let path = std::env::temp_dir()
-                .join(format!("{TEST_IDENTITY_STORE_DIR_PREFIX}-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&path).expect("create test identity store dir");
-            Self { path }
-        }
-
-        fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TestIdentityStoreDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
     }
 }

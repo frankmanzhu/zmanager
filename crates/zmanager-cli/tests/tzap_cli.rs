@@ -1,11 +1,12 @@
-use std::env;
+mod common;
+
+use common::*;
+
 use std::fs;
 use std::io::{Read as _, Write as _};
 use std::net::TcpListener;
-use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Command;
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn auth_login_callback_status_and_forget_keep_session_secret_out_of_output() {
@@ -305,19 +306,6 @@ fn zm() -> Command {
     Command::new(zm_path())
 }
 
-fn zm_path() -> PathBuf {
-    if let Ok(path) = env::var("CARGO_BIN_EXE_zm") {
-        return PathBuf::from(path);
-    }
-    let mut path = env::current_exe().unwrap();
-    while path.file_name().is_some_and(|name| name != "target") {
-        path.pop();
-    }
-    path.push("debug");
-    path.push(if cfg!(windows) { "zm.exe" } else { "zm" });
-    path
-}
-
 fn sign_in_with_fake_relay(temp: &TestDir, state_dir: &std::path::Path) {
     let login = zm()
         .args(["auth", "login", "--environment", "local", "--state-dir", state_dir.to_str().unwrap(), "--json"])
@@ -348,58 +336,4 @@ fn sign_in_with_fake_relay(temp: &TestDir, state_dir: &std::path::Path) {
         .output()
         .unwrap();
     assert_success("auth callback", &callback);
-}
-
-fn assert_success(label: &str, output: &Output) {
-    assert!(
-        output.status.success(),
-        "{label} failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn assert_failure(label: &str, output: &Output) {
-    assert!(
-        !output.status.success(),
-        "{label} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[cfg(unix)]
-fn assert_owner_only_file(path: PathBuf) {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode, 0o600);
-}
-
-#[cfg(not(unix))]
-fn assert_owner_only_file(_path: PathBuf) {}
-
-struct TestDir {
-    path: PathBuf,
-}
-
-impl TestDir {
-    fn new(label: &str) -> Self {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let path = env::temp_dir().join(format!("{label}-{}-{unique}", std::process::id()));
-        fs::create_dir_all(&path).unwrap();
-        Self { path }
-    }
-
-    fn path(&self, child: &str) -> PathBuf {
-        self.path.join(child)
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        if self.path.starts_with(env::temp_dir()) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
 }

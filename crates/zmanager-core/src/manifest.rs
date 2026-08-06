@@ -111,16 +111,29 @@ pub struct ManifestWarning {
     pub message: String,
 }
 
+/// Default exclusion profile applied while planning archive entries.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ExclusionProfile {
+    /// Excludes common generated or platform clutter (for example `.DS_Store`).
+    Minimal,
+    /// Excludes common source checkout noise such as VCS data, dependency
+    /// folders, build outputs, caches, and editor metadata, and applies
+    /// `.gitignore` rules found while walking the source tree.
+    CleanSource,
+    /// Excludes nothing by default. Used when the caller explicitly opts out
+    /// of all default exclusion rules (for example a `--no-ignore` flag).
+    Unrestricted,
+}
+
 /// User-configurable manifest planner options.
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct PlanOptions {
-    /// Excludes common generated or platform clutter when true.
-    pub default_exclusions: bool,
-    /// Excludes common source checkout noise such as VCS data, dependency
-    /// folders, build outputs, caches, and editor metadata.
-    pub clean_source_exclusions: bool,
+    /// Default exclusion profile.
+    pub exclusion_profile: ExclusionProfile,
     /// Applies `.gitignore` rules found while walking the source tree.
+    ///
+    /// Kept as an independent flag because callers (for example the desktop
+    /// app) combine either profile with an explicit gitignore preference.
     pub respect_gitignore: bool,
     /// Exclude any entry whose final path component matches one of these names.
     pub exclude_names: Vec<String>,
@@ -137,8 +150,7 @@ pub struct PlanOptions {
 impl Default for PlanOptions {
     fn default() -> Self {
         Self {
-            default_exclusions: true,
-            clean_source_exclusions: false,
+            exclusion_profile: ExclusionProfile::Minimal,
             respect_gitignore: false,
             exclude_names: Vec::new(),
             exclude_archive_paths: Vec::new(),
@@ -152,7 +164,7 @@ impl PlanOptions {
     /// Returns the product-facing clean source archive profile.
     #[must_use]
     pub fn clean_source() -> Self {
-        Self { clean_source_exclusions: true, respect_gitignore: true, ..Self::default() }
+        Self { exclusion_profile: ExclusionProfile::CleanSource, respect_gitignore: true, ..Self::default() }
     }
 }
 
@@ -384,11 +396,11 @@ impl ManifestPlanner<'_> {
             return None;
         }
 
-        if self.options.default_exclusions && file_name == ".DS_Store" {
+        if self.options.exclusion_profile != ExclusionProfile::Unrestricted && file_name == ".DS_Store" {
             return Some("default macOS metadata exclusion".to_owned());
         }
 
-        if self.options.clean_source_exclusions
+        if self.options.exclusion_profile == ExclusionProfile::CleanSource
             && let Some(reason) = self.clean_source_exclusion_reason(archive_path, file_type)
         {
             return Some(reason);
@@ -762,7 +774,9 @@ fn record_archive_path_collisions(entries: &[ManifestEntry], warnings: &mut Vec<
     let mut seen_paths: HashMap<String, &str> = HashMap::new();
 
     for entry in entries {
-        let collision_key = entry.archive_path.to_ascii_lowercase();
+        // Uses the same Unicode-aware collision key as extraction planning so
+        // the manifest warns about the same collisions extraction rejects.
+        let collision_key = crate::safety::case_collision_key(&entry.archive_path);
         if let Some(previous_path) = seen_paths.insert(collision_key, &entry.archive_path) {
             warnings.push(ManifestWarning {
                 source_path: entry.source_path.clone(),
@@ -778,9 +792,8 @@ mod tests {
         ManifestEntry, ManifestFileType, PermissionSnapshot, PlanOptions, plan_archive, plan_archives,
         record_archive_path_collisions,
     };
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::test_support::TestDir;
+    use std::path::PathBuf;
 
     #[test]
     fn plans_files_directories_and_empty_directories() {
@@ -1025,7 +1038,7 @@ mod tests {
 
         assert_eq!(manifest_paths(&manifest), vec!["a.txt", "folder", "folder/b.txt"]);
         assert_eq!(manifest.total_bytes, 3);
-        assert_eq!(manifest.root, temp.root);
+        assert_eq!(manifest.root, temp.root().to_path_buf());
     }
 
     #[test]
@@ -1038,6 +1051,20 @@ mod tests {
 
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("case-insensitive"));
+    }
+
+    #[test]
+    fn warns_about_unicode_case_collisions_like_extraction_rejects() {
+        let entries = vec![test_entry("project/Über.txt"), test_entry("project/über.txt")];
+        let mut warnings = Vec::new();
+
+        record_archive_path_collisions(&entries, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        // The warning names the earlier entry whose path the later one may
+        // collide with, and points at the colliding entry's source path.
+        assert!(warnings[0].message.contains("Über.txt"));
+        assert_eq!(warnings[0].source_path, PathBuf::from("project/über.txt"));
     }
 
     fn manifest_paths(manifest: &super::ArchiveManifest) -> Vec<&str> {
@@ -1053,42 +1080,6 @@ mod tests {
             modified: None,
             permissions: PermissionSnapshot { readonly: false, unix_mode: None },
             symlink_target: None,
-        }
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn create_dir(&self, relative: impl AsRef<Path>) {
-            fs::create_dir_all(self.path(relative)).unwrap();
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
         }
     }
 }

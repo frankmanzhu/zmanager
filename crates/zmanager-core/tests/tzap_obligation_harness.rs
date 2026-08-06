@@ -1,3 +1,7 @@
+mod common;
+
+use common::TestDir;
+
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use openssl::asn1::{Asn1Object, Asn1OctetString, Asn1Time};
 use openssl::bn::BigNum;
@@ -14,7 +18,7 @@ use sha2::{Digest as _, Sha256};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use x509_parser::extensions::ParsedExtension;
 use x509_parser::prelude::{FromDer as _, X509Certificate};
 use zmanager_core::auth_client::{
@@ -1122,30 +1126,5 @@ impl TzapAuthHttpTransport for FakeTransport {
     fn send(&self, request: &TzapAuthHttpRequest) -> Result<TzapAuthHttpResponse, TzapAuthError> {
         self.requests.borrow_mut().push(request.clone());
         self.responses.borrow_mut().pop_front().ok_or(TzapAuthError::HttpStatus { status_code: 599 })
-    }
-}
-
-struct TestDir {
-    path: PathBuf,
-}
-
-impl TestDir {
-    fn new(label: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("{label}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).unwrap();
-        Self { path }
-    }
-
-    fn path(&self, child: &str) -> PathBuf {
-        self.path.join(child)
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        if self.path.starts_with(std::env::temp_dir()) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
     }
 }

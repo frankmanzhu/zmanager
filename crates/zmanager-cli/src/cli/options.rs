@@ -159,15 +159,9 @@ pub(crate) fn resolve_input_path(value: &str, current_dir: Option<&Path>) -> Pat
 }
 pub(crate) fn read_optional_password_stdin(
     enabled: bool,
-    label: &str,
     global: &GlobalOptions,
 ) -> Result<Option<SecretString>, ExitCode> {
-    if enabled {
-        prompt_password_from_stdin(Some(global)).map(Some)
-    } else {
-        let _ = label;
-        Ok(None)
-    }
+    if enabled { prompt_password_from_stdin(Some(global)).map(Some) } else { Ok(None) }
 }
 
 pub(crate) fn validate_recipient_key_open_option(

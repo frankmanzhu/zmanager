@@ -4,7 +4,7 @@ use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::planning::plan_sources;
 use crate::cli::usage::{
     AUTH_HELP, CERT_HELP, CONTACT_HELP, DEVICE_HELP, ME_HELP, SHARE_HELP, SIGN_HELP, VERIFY_HELP, command_usage_error,
-    json_escape, print_error_line, print_help_stdout, print_success_line, wants_help,
+    json_escape, json_optional_string, print_error_line, print_help_stdout, print_success_line, wants_help,
 };
 use serde_json::{Value, json};
 use std::env;
@@ -138,33 +138,17 @@ fn auth_login_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
             Ok(false) => {}
             Err(error) => return command_usage_error("auth", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "auth", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
             "--print-url" => index += 1,
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("auth", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("auth", &error, &global),
-                };
-            }
             "--environment" => {
-                let value = match take_value(args, &mut index, "--environment") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("auth", &error, &global),
-                };
-                endpoints.environment = match value.as_str() {
-                    "local" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Local,
-                    "staging" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging,
-                    "prod" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod,
-                    _ => {
-                        return command_usage_error("auth", "environment must be local, staging, or prod", &global);
-                    }
-                };
+                if let Err(code) = parse_environment_option(args, &mut index, &mut endpoints.environment, &global) {
+                    return code;
+                }
             }
             "--auth-base-url" => {
                 endpoints.auth_base_url = Some(match take_value(args, &mut index, "--auth-base-url") {
@@ -263,19 +247,12 @@ fn auth_callback_command(args: &[String], mut global: GlobalOptions) -> ExitCode
             Ok(false) => {}
             Err(error) => return command_usage_error("auth", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "auth", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("auth", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("auth", &error, &global),
-                };
-            }
             "--state" => {
                 state = Some(match take_value(args, &mut index, "--state") {
                     Ok(value) => value,
@@ -454,18 +431,9 @@ fn auth_account_command(args: &[String], mut global: GlobalOptions) -> ExitCode 
         }
         match args[index].as_str() {
             "--environment" => {
-                let value = match take_value(args, &mut index, "--environment") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("auth", &error, &global),
-                };
-                endpoints.environment = match value.as_str() {
-                    "local" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Local,
-                    "staging" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging,
-                    "prod" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod,
-                    _ => {
-                        return command_usage_error("auth", "environment must be local, staging, or prod", &global);
-                    }
-                };
+                if let Err(code) = parse_environment_option(args, &mut index, &mut endpoints.environment, &global) {
+                    return code;
+                }
             }
             "--account-base-url" => {
                 endpoints.account_base_url = Some(match take_value(args, &mut index, "--account-base-url") {
@@ -555,20 +523,17 @@ fn cert_renew_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     if options.service_base_url.is_some() {
         return run_hosted_cert_renew(&options, &global);
     }
+    let certificate_id = options.certificate_id.as_deref().unwrap_or_default();
     run_fake_cert_operation("cert_renew", &options.context, &global, |store, session, fake_options| {
-        zmanager_core::local_fake_tzap::renew_local_fake_certificate(
-            store,
-            session,
-            fake_options,
-            &options.certificate_id,
+        zmanager_core::local_fake_tzap::renew_local_fake_certificate(store, session, fake_options, certificate_id).map(
+            |certificate| {
+                json!({
+                    "ok": true,
+                    "operation": "cert_renew",
+                    "certificate": certificate_summary_value(&certificate),
+                })
+            },
         )
-        .map(|certificate| {
-            json!({
-                "ok": true,
-                "operation": "cert_renew",
-                "certificate": certificate_summary_value(&certificate),
-            })
-        })
     })
 }
 
@@ -662,19 +627,12 @@ fn device_revoke_command(args: &[String], mut global: GlobalOptions) -> ExitCode
             Ok(false) => {}
             Err(error) => return command_usage_error("device", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "device", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("device", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("device", &error, &global),
-                };
-            }
             "--device-id" => {
                 sign_device_id = Some(match take_value(args, &mut index, "--device-id") {
                     Ok(value) => value,
@@ -746,19 +704,12 @@ pub(crate) fn sign_command(args: &[String], mut global: GlobalOptions) -> ExitCo
             Ok(false) => {}
             Err(error) => return command_usage_error("sign", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "sign", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("sign", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("sign", &error, &global),
-                };
-            }
             "--certificate-id" => {
                 certificate_id = Some(match take_value(args, &mut index, "--certificate-id") {
                     Ok(value) => value,
@@ -999,19 +950,12 @@ pub(crate) fn contact_keygen_command(args: &[String], mut global: GlobalOptions)
             Ok(false) => {}
             Err(error) => return command_usage_error("contact", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "contact", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                };
-            }
             "--label" => {
                 label = match take_value(args, &mut index, "--label") {
                     Ok(value) => value,
@@ -1106,19 +1050,12 @@ fn contact_remove_command(args: &[String], mut global: GlobalOptions) -> ExitCod
             Ok(false) => {}
             Err(error) => return command_usage_error("contact", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "contact", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                };
-            }
             value if value.starts_with('-') => {
                 return command_usage_error("contact", &format!("unknown contact option: {value}"), &global);
             }
@@ -1172,19 +1109,12 @@ fn contact_import_command(args: &[String], mut global: GlobalOptions) -> ExitCod
             Ok(false) => {}
             Err(error) => return command_usage_error("contact", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "contact", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                };
-            }
             "--accept" => {
                 accepted = true;
                 index += 1;
@@ -1276,19 +1206,12 @@ fn contact_export_command(args: &[String], mut global: GlobalOptions) -> ExitCod
             Ok(false) => {}
             Err(error) => return command_usage_error("contact", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "contact", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("contact", &error, &global),
-                };
-            }
             "--recipient-key-id" => {
                 recipient_key_id = Some(match take_value(args, &mut index, "--recipient-key-id") {
                     Ok(value) => value,
@@ -1384,19 +1307,12 @@ pub(crate) fn share_command(args: &[String], mut global: GlobalOptions) -> ExitC
             Ok(false) => {}
             Err(error) => return command_usage_error("share", &error, &global),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, "share", &global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return code,
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(match take_value(args, &mut index, "--state-dir") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("share", &error, &global),
-                });
-            }
-            "--account-key" => {
-                context.account_key = match take_value(args, &mut index, "--account-key") {
-                    Ok(value) => value,
-                    Err(error) => return command_usage_error("share", &error, &global),
-                };
-            }
             "--contact" => contact_ids.push(match take_value(args, &mut index, "--contact") {
                 Ok(value) => value,
                 Err(error) => return command_usage_error("share", &error, &global),
@@ -1575,21 +1491,12 @@ fn parse_tzap_context_args(
             Ok(false) => {}
             Err(error) => return Err(command_usage_error(command, &error, global)),
         }
-        match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(
-                    take_value(args, &mut index, "--state-dir")
-                        .map_err(|error| command_usage_error(command, &error, global))?,
-                );
-            }
-            "--account-key" => {
-                context.account_key = take_value(args, &mut index, "--account-key")
-                    .map_err(|error| command_usage_error(command, &error, global))?;
-            }
-            other => {
-                return Err(command_usage_error(command, &format!("unknown {command} option: {other}"), global));
-            }
+        match parse_tzap_context_option(args, &mut index, &mut context, command, global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return Err(code),
         }
+        return Err(command_usage_error(command, &format!("unknown {command} option: {}", args[index]), global));
     }
     Ok(context)
 }
@@ -1608,17 +1515,12 @@ fn parse_cert_id_operation_args(
             Ok(false) => {}
             Err(error) => return Err(command_usage_error(command, &error, global)),
         }
+        match parse_tzap_context_option(args, &mut index, &mut context, command, global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return Err(code),
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                context.state_dir = PathBuf::from(
-                    take_value(args, &mut index, "--state-dir")
-                        .map_err(|error| command_usage_error(command, &error, global))?,
-                );
-            }
-            "--account-key" => {
-                context.account_key = take_value(args, &mut index, "--account-key")
-                    .map_err(|error| command_usage_error(command, &error, global))?;
-            }
             "--certificate-id" => {
                 certificate_id = Some(
                     take_value(args, &mut index, "--certificate-id")
@@ -1636,23 +1538,71 @@ fn parse_cert_id_operation_args(
     Ok((context, certificate_id))
 }
 
+fn parse_tzap_context_option(
+    args: &[String],
+    index: &mut usize,
+    context: &mut TzapCliContext,
+    command: &str,
+    global: &GlobalOptions,
+) -> Result<bool, ExitCode> {
+    match args[*index].as_str() {
+        "--state-dir" => {
+            context.state_dir = PathBuf::from(
+                take_value(args, index, "--state-dir").map_err(|error| command_usage_error(command, &error, global))?,
+            );
+        }
+        "--account-key" => {
+            context.account_key = take_value(args, index, "--account-key")
+                .map_err(|error| command_usage_error(command, &error, global))?;
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+fn parse_environment_option(
+    args: &[String],
+    index: &mut usize,
+    environment: &mut zmanager_core::auth_client::TzapHostedAuthEnvironment,
+    global: &GlobalOptions,
+) -> Result<(), ExitCode> {
+    let value =
+        take_value(args, index, "--environment").map_err(|error| command_usage_error("auth", &error, global))?;
+    *environment = match value.as_str() {
+        "local" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Local,
+        "staging" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging,
+        "prod" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod,
+        _ => return Err(command_usage_error("auth", "environment must be local, staging, or prod", global)),
+    };
+    Ok(())
+}
+
 #[derive(Debug)]
-struct HostedCertRenewOptions {
+struct HostedCertOptions {
     context: TzapCliContext,
-    certificate_id: String,
+    certificate_id: Option<String>,
     service_base_url: Option<String>,
     trusted_root_cert_paths: Vec<PathBuf>,
     org_id: Option<String>,
     requested_validity_seconds: u64,
 }
 
-fn parse_hosted_cert_renew_args(
+fn parse_hosted_cert_renew_args(args: &[String], global: &mut GlobalOptions) -> Result<HostedCertOptions, ExitCode> {
+    parse_hosted_cert_args(args, global, true)
+}
+
+fn parse_cert_enroll_args(args: &[String], global: &mut GlobalOptions) -> Result<HostedCertOptions, ExitCode> {
+    parse_hosted_cert_args(args, global, false)
+}
+
+fn parse_hosted_cert_args(
     args: &[String],
     global: &mut GlobalOptions,
-) -> Result<HostedCertRenewOptions, ExitCode> {
-    let mut options = HostedCertRenewOptions {
+    require_certificate_id: bool,
+) -> Result<HostedCertOptions, ExitCode> {
+    let mut options = HostedCertOptions {
         context: TzapCliContext::default(),
-        certificate_id: String::new(),
+        certificate_id: None,
         service_base_url: None,
         trusted_root_cert_paths: Vec::new(),
         org_id: None,
@@ -1665,20 +1615,20 @@ fn parse_hosted_cert_renew_args(
             Ok(false) => {}
             Err(error) => return Err(command_usage_error("cert", &error, global)),
         }
+        match parse_tzap_context_option(args, &mut index, &mut options.context, "cert", global) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(code) => return Err(code),
+        }
         match args[index].as_str() {
-            "--state-dir" => {
-                options.context.state_dir = PathBuf::from(
-                    take_value(args, &mut index, "--state-dir")
+            "--certificate-id" if require_certificate_id => {
+                options.certificate_id = Some(
+                    take_value(args, &mut index, "--certificate-id")
                         .map_err(|error| command_usage_error("cert", &error, global))?,
                 );
             }
-            "--account-key" => {
-                options.context.account_key = take_value(args, &mut index, "--account-key")
-                    .map_err(|error| command_usage_error("cert", &error, global))?;
-            }
             "--certificate-id" => {
-                options.certificate_id = take_value(args, &mut index, "--certificate-id")
-                    .map_err(|error| command_usage_error("cert", &error, global))?;
+                return Err(command_usage_error("cert", "unknown cert option: --certificate-id", global));
             }
             "--service-base-url" => {
                 options.service_base_url = Some(
@@ -1710,7 +1660,7 @@ fn parse_hosted_cert_renew_args(
             }
         }
     }
-    if options.certificate_id.is_empty() {
+    if require_certificate_id && options.certificate_id.as_deref().unwrap_or("").is_empty() {
         return Err(command_usage_error("cert", "missing --certificate-id", global));
     }
     if options.service_base_url.is_none() && !options.trusted_root_cert_paths.is_empty() {
@@ -1723,88 +1673,43 @@ fn parse_hosted_cert_renew_args(
 }
 
 #[derive(Debug)]
-struct CertEnrollOptions {
-    context: TzapCliContext,
-    service_base_url: Option<String>,
-    trusted_root_cert_paths: Vec<PathBuf>,
-    org_id: Option<String>,
-    requested_validity_seconds: u64,
+enum HostedCertOperationError {
+    Operation(String),
+    Message(String),
 }
 
-fn parse_cert_enroll_args(args: &[String], global: &mut GlobalOptions) -> Result<CertEnrollOptions, ExitCode> {
-    let mut options = CertEnrollOptions {
-        context: TzapCliContext::default(),
-        service_base_url: None,
-        trusted_root_cert_paths: Vec::new(),
-        org_id: None,
-        requested_validity_seconds: DEFAULT_TZAP_CERT_VALIDITY_SECONDS,
-    };
-    let mut index = 0usize;
-    while index < args.len() {
-        match parse_global_option(args, &mut index, global) {
-            Ok(true) => continue,
-            Ok(false) => {}
-            Err(error) => return Err(command_usage_error("cert", &error, global)),
-        }
-        match args[index].as_str() {
-            "--state-dir" => {
-                options.context.state_dir = PathBuf::from(
-                    take_value(args, &mut index, "--state-dir")
-                        .map_err(|error| command_usage_error("cert", &error, global))?,
-                );
-            }
-            "--account-key" => {
-                options.context.account_key = take_value(args, &mut index, "--account-key")
-                    .map_err(|error| command_usage_error("cert", &error, global))?;
-            }
-            "--service-base-url" => {
-                options.service_base_url = Some(
-                    take_value(args, &mut index, "--service-base-url")
-                        .map_err(|error| command_usage_error("cert", &error, global))?,
-                );
-            }
-            "--trusted-root-cert" => {
-                options.trusted_root_cert_paths.push(PathBuf::from(
-                    take_value(args, &mut index, "--trusted-root-cert")
-                        .map_err(|error| command_usage_error("cert", &error, global))?,
-                ));
-            }
-            "--org-id" => {
-                options.org_id = Some(
-                    take_value(args, &mut index, "--org-id")
-                        .map_err(|error| command_usage_error("cert", &error, global))?,
-                );
-            }
-            "--requested-validity-seconds" => {
-                let value = take_value(args, &mut index, "--requested-validity-seconds")
-                    .map_err(|error| command_usage_error("cert", &error, global))?;
-                options.requested_validity_seconds = value.parse::<u64>().map_err(|_| {
-                    command_usage_error("cert", "--requested-validity-seconds must be an integer", global)
-                })?;
-            }
-            other => {
-                return Err(command_usage_error("cert", &format!("unknown cert option: {other}"), global));
-            }
-        }
-    }
-    if options.service_base_url.is_none() && !options.trusted_root_cert_paths.is_empty() {
-        return Err(command_usage_error("cert", "--trusted-root-cert requires --service-base-url", global));
-    }
-    if options.service_base_url.is_none() && options.org_id.is_some() {
-        return Err(command_usage_error("cert", "--org-id requires --service-base-url", global));
-    }
-    Ok(options)
-}
-fn run_hosted_cert_enroll(options: &CertEnrollOptions, global: &GlobalOptions) -> ExitCode {
+#[allow(clippy::too_many_arguments)]
+fn run_hosted_cert_operation<F>(
+    operation: &'static str,
+    hosted_kind_label: &'static str,
+    error_prefix: &'static str,
+    options: &HostedCertOptions,
+    global: &GlobalOptions,
+    run: F,
+) -> ExitCode
+where
+    F: FnOnce(
+        &str,
+        &zmanager_core::auth_client::TzapSessionRecord,
+        &mut zmanager_core::local_identity_store::FileTzapLocalIdentityStore,
+        Vec<String>,
+        Vec<Vec<u8>>,
+    )
+        -> Result<zmanager_core::local_identity_store::TzapEnrolledCertificateRecord, HostedCertOperationError>,
+{
     let Some(service_base_url) = options.service_base_url.as_deref() else {
-        unreachable!("hosted enrollment checked by caller")
+        unreachable!("hosted operation checked by caller")
     };
     if options.trusted_root_cert_paths.is_empty() {
-        return command_usage_error("cert", "hosted enrollment requires at least one --trusted-root-cert", global);
+        return command_usage_error(
+            "cert",
+            &format!("hosted {hosted_kind_label} requires at least one --trusted-root-cert"),
+            global,
+        );
     }
     let session_store = FileTzapSessionStore::new(&options.context.state_dir);
     let Some(session) = session_store.load_session(&options.context.account_key) else {
-        print_stable_tzap_error("cert_enroll", MISSING_TZAP_SESSION, global);
+        print_stable_tzap_error(operation, MISSING_TZAP_SESSION, global);
         return ExitCode::FAILURE;
     };
     let mut trusted_root_sha256 = Vec::new();
@@ -1812,184 +1717,162 @@ fn run_hosted_cert_enroll(options: &CertEnrollOptions, global: &GlobalOptions) -
         match load_custom_root_certificates(&options.trusted_root_cert_paths, &mut trusted_root_sha256) {
             Ok(roots) => roots,
             Err(error) => {
-                print_error_line(global, format_args!("cert enroll failed: {error}"));
+                print_error_line(global, format_args!("{error_prefix}{error}"));
                 return ExitCode::FAILURE;
             }
         };
-
     let mut identity_store =
         zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&options.context.state_dir);
-    let now_unix_seconds = current_unix_seconds();
-    let request = zmanager_core::enrollment_client::TzapEnrollmentRequest {
-        account_key: options.context.account_key.clone(),
-        org_id: options.org_id.clone().or_else(|| session.selected_org_id.clone()),
-        requested_validity_seconds: options.requested_validity_seconds,
-        now_unix_seconds,
-    };
-    let (signing_key, csr_der) =
-        match create_and_store_staging_enrollment_key(&mut identity_store, &request, now_unix_seconds) {
-            Ok(material) => material,
-            Err(error) => {
-                print_error_line(global, format_args!("cert enroll failed: {error}"));
-                return ExitCode::FAILURE;
-            }
-        };
-    let transport = CliHttpJsonTransport;
-    let client =
-        zmanager_core::enrollment_client::TzapEnrollmentClient::local_staging_server(service_base_url, &transport);
-    let validator = CliTrustedEnrollmentCertificateValidator {
-        trusted_root_sha256,
-        trusted_root_der,
-        options: zmanager_core::trust::TzapCertificateProfileOptions::default(),
-    };
-    match zmanager_core::enrollment_client::enroll_device_certificate(
-        &client,
-        &validator,
-        &mut identity_store,
-        &session,
-        &request,
-        &signing_key,
-        &csr_der,
-    ) {
+    match run(service_base_url, &session, &mut identity_store, trusted_root_sha256, trusted_root_der) {
         Ok(certificate) => {
             if global.json {
                 println!(
                     "{}",
                     json!({
                         "ok": true,
-                        "operation": "cert_enroll",
+                        "operation": operation,
                         "service_base_url": service_base_url,
                         "certificate": certificate_summary_value(&certificate),
                     })
                 );
             } else {
-                print_success_line(global, format_args!("cert_enroll complete"));
+                print_success_line(global, format_args!("{operation} complete"));
             }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_stable_tzap_error("cert_enroll", &error.to_string(), global);
+        Err(HostedCertOperationError::Operation(message)) => {
+            print_stable_tzap_error(operation, &message, global);
+            ExitCode::FAILURE
+        }
+        Err(HostedCertOperationError::Message(message)) => {
+            print_error_line(global, format_args!("{error_prefix}{message}"));
             ExitCode::FAILURE
         }
     }
 }
 
-fn run_hosted_cert_renew(options: &HostedCertRenewOptions, global: &GlobalOptions) -> ExitCode {
-    let Some(service_base_url) = options.service_base_url.as_deref() else {
-        unreachable!("hosted renewal checked by caller")
-    };
-    if options.trusted_root_cert_paths.is_empty() {
-        return command_usage_error("cert", "hosted renewal requires at least one --trusted-root-cert", global);
-    }
-    let session_store = FileTzapSessionStore::new(&options.context.state_dir);
-    let Some(session) = session_store.load_session(&options.context.account_key) else {
-        print_stable_tzap_error("cert_renew", MISSING_TZAP_SESSION, global);
-        return ExitCode::FAILURE;
-    };
-    let mut trusted_root_sha256 = Vec::new();
-    let trusted_root_der =
-        match load_custom_root_certificates(&options.trusted_root_cert_paths, &mut trusted_root_sha256) {
-            Ok(roots) => roots,
-            Err(error) => {
-                print_error_line(global, format_args!("cert renew failed: {error}"));
-                return ExitCode::FAILURE;
-            }
-        };
-    let mut identity_store =
-        zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&options.context.state_dir);
-    let inventory = match identity_store.load_inventory(&options.context.account_key) {
-        Ok(inventory) => inventory,
-        Err(error) => {
-            print_error_line(global, format_args!("cert renew failed: cannot load identity store: {error}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let previous_certificate = if let Some(certificate) =
-        inventory.enrolled_certificates.iter().find(|record| record.certificate_id == options.certificate_id)
-    {
-        certificate.clone()
-    } else {
-        print_error_line(
-            global,
-            format_args!("cert renew failed: certificate {} not found locally", options.certificate_id),
-        );
-        return ExitCode::FAILURE;
-    };
-    let signing_key = if let Some(record) =
-        inventory.device_signing_keys.iter().find(|record| record.key_id == previous_certificate.signing_key_id)
-    {
-        record.clone()
-    } else {
-        print_error_line(
-            global,
-            format_args!("cert renew failed: signing key {} not found", previous_certificate.signing_key_id),
-        );
-        return ExitCode::FAILURE;
-    };
-    let csr_der = match zmanager_core::device_identity::generate_device_csr_from_private_key(
-        &signing_key.private_key_der,
-        &zmanager_core::device_identity::TzapDeviceCsrOptions::default(),
-    ) {
-        Ok(csr) => csr,
-        Err(error) => {
-            print_error_line(global, format_args!("cert renew failed: cannot generate CSR: {error}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let now_unix_seconds = current_unix_seconds();
-    let login_base_url = zmanager_core::auth_client::LOGIN_TZAP_BASE_URL;
-    let transport = CliHttpJsonTransport;
-    let lifecycle = zmanager_core::certificate_lifecycle::TzapCertificateLifecycleClient::local_staging_server(
-        service_base_url,
-        login_base_url,
-        &transport,
-    );
-    let validator = CliTrustedEnrollmentCertificateValidator {
-        trusted_root_sha256,
-        trusted_root_der,
-        options: zmanager_core::trust::TzapCertificateProfileOptions::default(),
-    };
-    let org_id = options.org_id.clone().or_else(|| session.selected_org_id.clone());
-    let renewal_request = zmanager_core::certificate_lifecycle::TzapRenewalRequest {
-        account_key: options.context.account_key.clone(),
-        previous_certificate_id: previous_certificate.certificate_id,
-        previous_certificate_sha256: previous_certificate.certificate_sha256,
-        org_id,
-        requested_validity_seconds: options.requested_validity_seconds,
-        renewal_policy: zmanager_core::certificate_lifecycle::TzapRenewalPolicy::SameKeyRequired,
-        now_unix_seconds,
-        server_grace_seconds: zmanager_core::certificate_lifecycle::RENEWAL_GRACE_MAX_SECONDS,
-    };
-    match lifecycle.renew_certificate(
-        &validator,
-        &mut identity_store,
-        &session,
-        &renewal_request,
-        &signing_key,
-        &signing_key,
-        &csr_der,
-    ) {
-        Ok(certificate) => {
-            if global.json {
-                println!(
-                    "{}",
-                    json!({
-                        "ok": true,
-                        "operation": "cert_renew",
-                        "service_base_url": service_base_url,
-                        "certificate": certificate_summary_value(&certificate),
-                    })
-                );
+fn run_hosted_cert_enroll(options: &HostedCertOptions, global: &GlobalOptions) -> ExitCode {
+    run_hosted_cert_operation(
+        "cert_enroll",
+        "enrollment",
+        "cert enroll failed: ",
+        options,
+        global,
+        |service_base_url, session, identity_store, trusted_root_sha256, trusted_root_der| {
+            let now_unix_seconds = current_unix_seconds();
+            let request = zmanager_core::enrollment_client::TzapEnrollmentRequest {
+                account_key: options.context.account_key.clone(),
+                org_id: options.org_id.clone().or_else(|| session.selected_org_id.clone()),
+                requested_validity_seconds: options.requested_validity_seconds,
+                now_unix_seconds,
+            };
+            let (signing_key, csr_der) =
+                match create_and_store_staging_enrollment_key(identity_store, &request, now_unix_seconds) {
+                    Ok(material) => material,
+                    Err(error) => return Err(HostedCertOperationError::Message(error)),
+                };
+            let transport = CliHttpJsonTransport;
+            let client = zmanager_core::enrollment_client::TzapEnrollmentClient::local_staging_server(
+                service_base_url,
+                &transport,
+            );
+            let validator = CliTrustedEnrollmentCertificateValidator {
+                trusted_root_sha256,
+                trusted_root_der,
+                options: zmanager_core::trust::TzapCertificateProfileOptions::default(),
+            };
+            zmanager_core::enrollment_client::enroll_device_certificate(
+                &client,
+                &validator,
+                identity_store,
+                session,
+                &request,
+                &signing_key,
+                &csr_der,
+            )
+            .map_err(|error| HostedCertOperationError::Operation(error.to_string()))
+        },
+    )
+}
+
+fn run_hosted_cert_renew(options: &HostedCertOptions, global: &GlobalOptions) -> ExitCode {
+    let certificate_id = options.certificate_id.as_deref().unwrap_or_default();
+    run_hosted_cert_operation(
+        "cert_renew",
+        "renewal",
+        "cert renew failed: ",
+        options,
+        global,
+        |service_base_url, session, identity_store, trusted_root_sha256, trusted_root_der| {
+            let inventory = match identity_store.load_inventory(&options.context.account_key) {
+                Ok(inventory) => inventory,
+                Err(error) => {
+                    return Err(HostedCertOperationError::Message(format!("cannot load identity store: {error}")));
+                }
+            };
+            let previous_certificate = if let Some(certificate) =
+                inventory.enrolled_certificates.iter().find(|record| record.certificate_id == certificate_id)
+            {
+                certificate.clone()
             } else {
-                print_success_line(global, format_args!("cert_renew complete"));
-            }
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            print_stable_tzap_error("cert_renew", &error.to_string(), global);
-            ExitCode::FAILURE
-        }
-    }
+                return Err(HostedCertOperationError::Message(format!(
+                    "certificate {certificate_id} not found locally"
+                )));
+            };
+            let signing_key = if let Some(record) =
+                inventory.device_signing_keys.iter().find(|record| record.key_id == previous_certificate.signing_key_id)
+            {
+                record.clone()
+            } else {
+                return Err(HostedCertOperationError::Message(format!(
+                    "signing key {} not found",
+                    previous_certificate.signing_key_id
+                )));
+            };
+            let csr_der = match zmanager_core::device_identity::generate_device_csr_from_private_key(
+                &signing_key.private_key_der,
+                &zmanager_core::device_identity::TzapDeviceCsrOptions::default(),
+            ) {
+                Ok(csr) => csr,
+                Err(error) => return Err(HostedCertOperationError::Message(format!("cannot generate CSR: {error}"))),
+            };
+            let now_unix_seconds = current_unix_seconds();
+            let login_base_url = zmanager_core::auth_client::LOGIN_TZAP_BASE_URL;
+            let transport = CliHttpJsonTransport;
+            let lifecycle = zmanager_core::certificate_lifecycle::TzapCertificateLifecycleClient::local_staging_server(
+                service_base_url,
+                login_base_url,
+                &transport,
+            );
+            let validator = CliTrustedEnrollmentCertificateValidator {
+                trusted_root_sha256,
+                trusted_root_der,
+                options: zmanager_core::trust::TzapCertificateProfileOptions::default(),
+            };
+            let org_id = options.org_id.clone().or_else(|| session.selected_org_id.clone());
+            let renewal_request = zmanager_core::certificate_lifecycle::TzapRenewalRequest {
+                account_key: options.context.account_key.clone(),
+                previous_certificate_id: previous_certificate.certificate_id,
+                previous_certificate_sha256: previous_certificate.certificate_sha256,
+                org_id,
+                requested_validity_seconds: options.requested_validity_seconds,
+                renewal_policy: zmanager_core::certificate_lifecycle::TzapRenewalPolicy::SameKeyRequired,
+                now_unix_seconds,
+                server_grace_seconds: zmanager_core::certificate_lifecycle::RENEWAL_GRACE_MAX_SECONDS,
+            };
+            lifecycle
+                .renew_certificate(
+                    &validator,
+                    identity_store,
+                    session,
+                    &renewal_request,
+                    &signing_key,
+                    &signing_key,
+                    &csr_der,
+                )
+                .map_err(|error| HostedCertOperationError::Operation(error.to_string()))
+        },
+    )
 }
 
 pub(crate) fn create_and_store_staging_enrollment_key(
@@ -2048,17 +1931,7 @@ impl zmanager_core::enrollment_client::TzapEnrollmentCertificateValidator for Cl
         zmanager_core::trust::TzapCertificatePublicMetadata,
         zmanager_core::enrollment_client::TzapEnrollmentError,
     > {
-        let validation = zmanager_core::trust::validate_custom_tzap_certificate_chain_der(chain_der, &self.options)
-            .map_err(|error| {
-                zmanager_core::enrollment_client::TzapEnrollmentError::CertificateChain(error.to_string())
-            })?;
-        if !self.trusted_root_sha256.iter().any(|trusted| trusted == &validation.root_certificate_sha256) {
-            return Err(zmanager_core::enrollment_client::TzapEnrollmentError::CertificateChain(format!(
-                "root certificate is not in the temporary trust store: {}",
-                validation.root_certificate_sha256
-            )));
-        }
-        Ok(validation.public_metadata)
+        self.validate_custom_chain_with_root_pin(chain_der).map(|validation| validation.public_metadata)
     }
 
     fn validate_and_complete_certificate_chain(
@@ -2094,6 +1967,17 @@ impl CliTrustedEnrollmentCertificateValidator {
         (Vec<Vec<u8>>, zmanager_core::trust::TzapCertificatePublicMetadata),
         zmanager_core::enrollment_client::TzapEnrollmentError,
     > {
+        self.validate_custom_chain_with_root_pin(chain_der)
+            .map(|validation| (chain_der.to_vec(), validation.public_metadata))
+    }
+
+    fn validate_custom_chain_with_root_pin(
+        &self,
+        chain_der: &[Vec<u8>],
+    ) -> Result<
+        zmanager_core::trust::TzapCertificateProfileValidation,
+        zmanager_core::enrollment_client::TzapEnrollmentError,
+    > {
         let validation = zmanager_core::trust::validate_custom_tzap_certificate_chain_der(chain_der, &self.options)
             .map_err(|error| {
                 zmanager_core::enrollment_client::TzapEnrollmentError::CertificateChain(error.to_string())
@@ -2104,7 +1988,7 @@ impl CliTrustedEnrollmentCertificateValidator {
                 validation.root_certificate_sha256
             )));
         }
-        Ok((chain_der.to_vec(), validation.public_metadata))
+        Ok(validation)
     }
 }
 
@@ -2559,8 +2443,8 @@ fn print_session_summary(session: &zmanager_core::auth_client::TzapSessionRecord
             session.expires_at_unix_seconds,
             expired,
             json_escape(session.identity_assurance.as_str()),
-            optional_json_string(session.selected_org_id.as_deref()),
-            optional_json_string(session.login_session_id.as_deref())
+            json_optional_string(session.selected_org_id.as_deref()),
+            json_optional_string(session.login_session_id.as_deref())
         );
     } else {
         let status = if expired { "expired" } else { "active" };
@@ -2568,22 +2452,8 @@ fn print_session_summary(session: &zmanager_core::auth_client::TzapSessionRecord
     }
 }
 
-fn optional_json_string(value: Option<&str>) -> String {
-    value.map_or_else(|| "null".to_owned(), |value| format!("\"{}\"", json_escape(value)))
-}
 fn print_certificate_json(cert: &zmanager_core::local_identity_store::TzapEnrolledCertificateRecord) {
-    print!(
-        "{{\"certificate_id\":\"{}\",\"certificate_sha256\":\"{}\",\"state\":\"{}\",\"not_before_unix_seconds\":{},\"not_after_unix_seconds\":{},\"public_signer_id\":\"{}\",\"public_org_id\":{},\"public_device_id\":\"{}\",\"assurance_level\":\"{}\"}}",
-        json_escape(&cert.certificate_id),
-        json_escape(&cert.certificate_sha256),
-        json_escape(cert.state.as_str()),
-        cert.not_before_unix_seconds,
-        cert.not_after_unix_seconds,
-        json_escape(&cert.public_metadata.public_signer_id),
-        optional_json_string(cert.public_metadata.public_org_id.as_deref()),
-        json_escape(&cert.public_metadata.public_device_id),
-        json_escape(cert.public_metadata.assurance_level.as_str())
-    );
+    print!("{}", certificate_summary_value(cert));
 }
 
 fn print_verification_result(
@@ -2595,8 +2465,8 @@ fn print_verification_result(
             "{{\"state\":\"{}\",\"trust_anchor_type\":\"{}\",\"reason\":{},\"root_certificate_sha256\":{}}}",
             json_escape(result.state.as_str()),
             json_escape(result.trust_anchor_type.as_str()),
-            optional_json_string(result.reason.as_deref()),
-            optional_json_string(result.root_certificate_sha256.as_deref())
+            json_optional_string(result.reason.as_deref()),
+            json_optional_string(result.root_certificate_sha256.as_deref())
         );
     } else {
         println!("{} ({})", result.state.as_str(), result.trust_anchor_type.as_str());

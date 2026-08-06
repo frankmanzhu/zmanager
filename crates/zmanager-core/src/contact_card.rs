@@ -12,7 +12,6 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use openssl::pkey::{PKey, Private};
 use openssl::x509::X509;
 use serde_json::{Map, Value, json};
-use sha2::Digest as _;
 use std::fmt;
 
 pub const CONTACT_CARD_CONTAINER_VERSION: u64 = 1;
@@ -137,9 +136,42 @@ pub fn export_tzap_contact_card(
     }))
 }
 
+/// Verifies a contact card's chain and signature, always recording the
+/// offline verification state. See
+/// [`verify_tzap_contact_card_with_missing_status_caveat`] for the
+/// parameterized form; this wrapper always reports the caveat (this
+/// verification itself never performs an online status check).
+///
+/// # Errors
+///
+/// Returns [`TzapContactCardError`] when the card is malformed, the chain is
+/// rejected, or the signature does not verify.
 pub fn verify_tzap_contact_card(
     card: &Value,
     options: &TzapContactCardImportOptions<'_>,
+) -> Result<TzapVerifiedContactCard, TzapContactCardError> {
+    verify_tzap_contact_card_with_missing_status_caveat(card, options, true)
+}
+
+/// Verifies a contact card's chain and signature, recording the offline
+/// verification state.
+///
+/// `missing_status_caveat` records whether an online certificate-status check
+/// was not performed for this card. Callers should pass `false` only when
+/// they independently performed a status lookup (for example via
+/// [`crate::status_client`]) and it succeeded; `true` (the default, used by
+/// [`verify_tzap_contact_card`]) is the honest value for any verification
+/// that does not include such a check, so downstream consumers never mistake
+/// a card whose status is unknown for one that was checked.
+///
+/// # Errors
+///
+/// Returns [`TzapContactCardError`] when the card is malformed, the chain is
+/// rejected, or the signature does not verify.
+pub fn verify_tzap_contact_card_with_missing_status_caveat(
+    card: &Value,
+    options: &TzapContactCardImportOptions<'_>,
+    missing_status_caveat: bool,
 ) -> Result<TzapVerifiedContactCard, TzapContactCardError> {
     let object = json_object(card, "$")?;
     require_u64(object, "version", CONTACT_CARD_CONTAINER_VERSION)?;
@@ -160,13 +192,13 @@ pub fn verify_tzap_contact_card(
     let intermediate_chain_der = decode_der_array(json_field(payload_object, "intermediate_chain_der")?)?;
     let chain_der = contact_chain_der(&leaf_der, &intermediate_chain_der);
     let validation = validate_contact_card_chain(&chain_der, options)?;
-    let signing_certificate_sha256 = sha256_identifier(&leaf_der);
+    let signing_certificate_sha256 = trust::certificate_sha256_identifier_for_der(&leaf_der);
     if signing_certificate_sha256 != json_string(payload_object, "signing_certificate_sha256")? {
         return Err(TzapContactCardError::InvalidField { field: "signing_certificate_sha256" });
     }
     let recipient_public_key =
         decode_base64url(json_string(payload_object, "recipient_public_key")?, "recipient_public_key")?;
-    let recipient_public_key_fingerprint = sha256_identifier(&recipient_public_key);
+    let recipient_public_key_fingerprint = trust::certificate_sha256_identifier_for_der(&recipient_public_key);
     if recipient_public_key_fingerprint != json_string(payload_object, "recipient_key_fingerprint")? {
         return Err(TzapContactCardError::InvalidField { field: "recipient_key_fingerprint" });
     }
@@ -187,13 +219,32 @@ pub fn verify_tzap_contact_card(
         payload,
         trust_anchor_type: validation.trust_anchor_type,
         verification_state: TzapVerificationState::CryptographicallyIntactOffline,
-        missing_status_caveat: true,
+        missing_status_caveat,
         signing_certificate_sha256,
         recipient_public_key_fingerprint,
         display_name,
     })
 }
 
+/// Imports a verified contact card into the store.
+///
+/// `accepted_at_unix_seconds` doubles as the consent flag: `None` means the
+/// caller has not obtained explicit user acceptance and the import is
+/// refused ([`TzapContactCardError::AcceptanceRequired`]); `Some(timestamp)`
+/// records the moment of acceptance. A timestamp is used instead of a
+/// separate boolean so the stored record carries the consent evidence itself
+/// rather than a bare flag that cannot be audited.
+///
+/// Import replaces an existing contact with the same `contact_id`
+/// (deterministic from the recipient public key), silently overwriting the
+/// previous record with the freshly verified one. Re-importing a card for the
+/// same recipient therefore refreshes the stored contact; callers that need
+/// to detect replacement must compare the previous inventory themselves.
+///
+/// # Errors
+///
+/// Returns [`TzapContactCardError`] when acceptance is missing, the card does
+/// not verify, or the store write fails.
 pub fn import_tzap_contact_card(
     store: &mut impl TzapLocalIdentityStore,
     account_key: &str,
@@ -339,7 +390,8 @@ fn validate_contact_card_chain(
 
     let mut custom_error = None;
     for chain_der in candidate_chains(embedded_chain_der, &options.custom_trust_root_certificates_der) {
-        let Some(root_sha256) = chain_der.last().map(Vec::as_slice).map(sha256_identifier) else {
+        let Some(root_sha256) = chain_der.last().map(Vec::as_slice).map(trust::certificate_sha256_identifier_for_der)
+        else {
             continue;
         };
         if !options.custom_trust_root_sha256.iter().any(|configured| configured == &root_sha256) {
@@ -441,11 +493,6 @@ fn decode_base64url(value: String, field: &'static str) -> Result<Vec<u8>, TzapC
     URL_SAFE_NO_PAD.decode(value).map_err(|_| TzapContactCardError::InvalidField { field })
 }
 
-fn sha256_identifier(bytes: &[u8]) -> String {
-    let digest: [u8; 32] = sha2::Sha256::digest(bytes).into();
-    trust::format_sha256_identifier(&digest)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -473,7 +520,6 @@ mod tests {
     };
     use openssl::x509::{X509, X509Extension, X509Ref};
     use serde_json::json;
-    use sha2::{Digest as _, Sha256};
     use x509_parser::extensions::ParsedExtension;
     use x509_parser::prelude::{FromDer as _, X509Certificate};
 
@@ -572,8 +618,8 @@ mod tests {
                 },
                 certificate: TzapEnrolledCertificateRecord {
                     certificate_id: "cert-1".to_owned(),
-                    certificate_sha256: sha256_identifier(&chain.leaf_der),
-                    issuer_certificate_sha256: sha256_identifier(&chain.platform_der),
+                    certificate_sha256: trust::certificate_sha256_identifier_for_der(&chain.leaf_der),
+                    issuer_certificate_sha256: trust::certificate_sha256_identifier_for_der(&chain.platform_der),
                     issuer_key_identifier: chain.issuer_key_identifier,
                     serial_number: chain.serial_number,
                     leaf_certificate_der: chain.leaf_der,
@@ -652,7 +698,7 @@ mod tests {
             issuer_key_identifier,
             serial_number,
             platform_der,
-            root_sha256: sha256_identifier(&root_der),
+            root_sha256: trust::certificate_sha256_identifier_for_der(&root_der),
             root_der,
         }
     }
@@ -824,11 +870,6 @@ mod tests {
                 None
             }
         })
-    }
-
-    fn sha256_identifier(bytes: &[u8]) -> String {
-        let digest: [u8; 32] = Sha256::digest(bytes).into();
-        trust::format_sha256_identifier(&digest)
     }
 
     fn now_unix_seconds() -> i64 {

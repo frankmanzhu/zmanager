@@ -4,7 +4,7 @@
 //! and compatibility. New readers should use this module so public metadata
 //! never requires hydrating private key bytes.
 
-use crate::local_identity_store::{TzapLocalIdentityStore, TzapLocalIdentityStoreError};
+use crate::local_identity_store::{TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapLocalIdentityStoreError};
 use crate::secrets::SecretBytes;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngCore;
@@ -263,7 +263,49 @@ pub struct TzapIdentityCatalog {
     pub contacts: Vec<TzapPublicContactRecord>,
     pub status_cache: Vec<TzapPublicStatusCacheRecord>,
     pub emergency_blocklist: TzapPublicEmergencyBlocklist,
-    pub pending_mutations: Vec<String>,
+    pub pending_mutations: Vec<PendingMutation>,
+}
+
+/// One crash-recoverable catalog transaction that was recorded before its
+/// side effects completed.
+///
+/// The wire format deliberately matches the historical string marker
+/// (`legacy-migration-<unix seconds>`), so catalogs written by older versions
+/// keep loading after an upgrade.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum PendingMutation {
+    /// A legacy inventory migration wrote its public catalog first and is
+    /// expected to finish copying secret material into the secure store.
+    LegacyMigration { started_at_unix_seconds: u64 },
+}
+
+impl PendingMutation {
+    fn wire_value(&self) -> String {
+        match self {
+            Self::LegacyMigration { started_at_unix_seconds } => {
+                format!("legacy-migration-{started_at_unix_seconds}")
+            }
+        }
+    }
+}
+
+impl Serialize for PendingMutation {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.wire_value())
+    }
+}
+
+impl<'de> Deserialize<'de> for PendingMutation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if let Some(started_at) = value.strip_prefix("legacy-migration-") {
+            let started_at_unix_seconds =
+                started_at.parse().map_err(|_| serde::de::Error::custom("invalid legacy migration marker"))?;
+            Ok(Self::LegacyMigration { started_at_unix_seconds })
+        } else {
+            Err(serde::de::Error::custom(format!("unknown pending mutation marker: {value}")))
+        }
+    }
 }
 
 impl TzapIdentityCatalog {
@@ -377,7 +419,9 @@ impl FileTzapIdentityCatalogStore {
     }
 
     fn catalog_path(&self, account_key: &str) -> Result<PathBuf, TzapIdentityCatalogError> {
-        validate_account_key(account_key)?;
+        if !validate_account_key(account_key) {
+            return Err(TzapIdentityCatalogError::InvalidAccountKey);
+        }
         Ok(self.root.join(format!("{account_key}{PUBLIC_CATALOG_FILE_SUFFIX}")))
     }
 }
@@ -465,7 +509,7 @@ impl TzapIdentityCatalogStore for FileTzapIdentityCatalogStore {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum TzapIdentityCatalogError {
     InvalidAccountKey,
     InvalidCatalog { field: &'static str },
@@ -540,73 +584,9 @@ pub fn migrate_legacy_inventory(
     account_key: &str,
     now_unix_seconds: u64,
 ) -> Result<TzapLegacyMigrationReport, TzapIdentityCatalogError> {
-    if let Some(mut catalog) = catalog_store.load_catalog(account_key)? {
-        let has_pending_migration =
-            catalog.pending_mutations.iter().any(|mutation| mutation.starts_with("legacy-migration-"));
-        if has_pending_migration {
-            // A catalog is written before its secrets during migration. On a
-            // restart, retry the same references from the intact legacy file
-            // instead of creating a second set of orphaned keychain entries.
-            let inventory = legacy_store.load_inventory(account_key)?;
-            let signing_by_id = inventory
-                .device_signing_keys
-                .iter()
-                .map(|record| (record.key_id.as_str(), &record.private_key_der))
-                .collect::<HashMap<_, _>>();
-            let signing_by_certificate = inventory
-                .enrolled_certificates
-                .iter()
-                .map(|record| (record.certificate_id.as_str(), record.signing_key_id.as_str()))
-                .collect::<HashMap<_, _>>();
-            for identity in &catalog.signing_identities {
-                if matches!(
-                    secret_store.resolve(TzapSecretPurpose::SigningKey, &identity.signing_key_ref),
-                    Err(TzapSecretStoreError::Missing { .. })
-                ) {
-                    let key_id =
-                        signing_by_certificate.get(identity.id.as_str()).copied().unwrap_or(identity.id.as_str());
-                    let material = signing_by_id.get(key_id).ok_or(TzapIdentityCatalogError::InvalidCatalog {
-                        field: "legacy_migration.signing_key_ref",
-                    })?;
-                    secret_store.put_at(
-                        TzapSecretPurpose::SigningKey,
-                        &identity.signing_key_ref,
-                        (*material).clone(),
-                    )?;
-                }
-            }
-            let recipient_by_id = inventory
-                .recipient_encryption_keys
-                .iter()
-                .map(|record| (record.key_id.as_str(), &record.private_key_der))
-                .collect::<HashMap<_, _>>();
-            for key in &catalog.recipient_keys {
-                if matches!(
-                    secret_store.resolve(TzapSecretPurpose::RecipientKey, &key.private_key_ref),
-                    Err(TzapSecretStoreError::Missing { .. })
-                ) {
-                    let material =
-                        recipient_by_id.get(key.id.as_str()).ok_or(TzapIdentityCatalogError::InvalidCatalog {
-                            field: "legacy_migration.recipient_key_ref",
-                        })?;
-                    secret_store.put_at(TzapSecretPurpose::RecipientKey, &key.private_key_ref, (*material).clone())?;
-                }
-            }
-            for identity in &catalog.signing_identities {
-                secret_store.resolve(TzapSecretPurpose::SigningKey, &identity.signing_key_ref)?;
-            }
-            for key in &catalog.recipient_keys {
-                secret_store.resolve(TzapSecretPurpose::RecipientKey, &key.private_key_ref)?;
-            }
-            catalog.pending_mutations.retain(|mutation| !mutation.starts_with("legacy-migration-"));
-            let expected_revision = catalog.revision;
-            catalog.revision = catalog.revision.saturating_add(1);
-            catalog_store.save_catalog(account_key, Some(expected_revision), catalog.clone())?;
-            return Ok(TzapLegacyMigrationReport {
-                migrated: true,
-                signing_identity_count: catalog.signing_identities.len(),
-                recipient_key_count: catalog.recipient_keys.len(),
-            });
+    if let Some(catalog) = catalog_store.load_catalog(account_key)? {
+        if has_pending_legacy_migration(&catalog) {
+            return resume_pending_migration(legacy_store, catalog_store, secret_store, account_key, catalog);
         }
         return Ok(TzapLegacyMigrationReport {
             migrated: false,
@@ -616,6 +596,105 @@ pub fn migrate_legacy_inventory(
     }
 
     let inventory = legacy_store.load_inventory(account_key)?;
+    let (catalog, signing_refs, recipient_refs) = build_catalog_from_legacy(&inventory, now_unix_seconds)?;
+    commit_migration(catalog_store, secret_store, account_key, catalog, &inventory, &signing_refs, &recipient_refs)?;
+
+    let catalog = catalog_store
+        .load_catalog(account_key)?
+        .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.catalog" })?;
+    Ok(TzapLegacyMigrationReport {
+        migrated: true,
+        signing_identity_count: catalog.signing_identities.len(),
+        recipient_key_count: catalog.recipient_keys.len(),
+    })
+}
+
+fn has_pending_legacy_migration(catalog: &TzapIdentityCatalog) -> bool {
+    catalog.pending_mutations.iter().any(|mutation| matches!(mutation, PendingMutation::LegacyMigration { .. }))
+}
+
+/// Resumes a migration whose public catalog was committed but whose secret
+/// store writes did not finish before a crash.
+///
+/// A catalog is written before its secrets during migration. On a restart,
+/// retry the same references from the intact legacy file instead of creating
+/// a second set of orphaned keychain entries.
+fn resume_pending_migration(
+    legacy_store: &impl TzapLocalIdentityStore,
+    catalog_store: &mut impl TzapIdentityCatalogStore,
+    secret_store: &mut impl TzapSecretMaterialStore,
+    account_key: &str,
+    mut catalog: TzapIdentityCatalog,
+) -> Result<TzapLegacyMigrationReport, TzapIdentityCatalogError> {
+    let inventory = legacy_store.load_inventory(account_key)?;
+    let signing_by_id = inventory
+        .device_signing_keys
+        .iter()
+        .map(|record| (record.key_id.as_str(), &record.private_key_der))
+        .collect::<HashMap<_, _>>();
+    let signing_by_certificate = inventory
+        .enrolled_certificates
+        .iter()
+        .map(|record| (record.certificate_id.as_str(), record.signing_key_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    for identity in &catalog.signing_identities {
+        if matches!(
+            secret_store.resolve(TzapSecretPurpose::SigningKey, &identity.signing_key_ref),
+            Err(TzapSecretStoreError::Missing { .. })
+        ) {
+            let key_id = signing_by_certificate.get(identity.id.as_str()).copied().unwrap_or(identity.id.as_str());
+            let material = signing_by_id
+                .get(key_id)
+                .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "legacy_migration.signing_key_ref" })?;
+            secret_store.put_at(TzapSecretPurpose::SigningKey, &identity.signing_key_ref, (*material).clone())?;
+        }
+    }
+    let recipient_by_id = inventory
+        .recipient_encryption_keys
+        .iter()
+        .map(|record| (record.key_id.as_str(), &record.private_key_der))
+        .collect::<HashMap<_, _>>();
+    for key in &catalog.recipient_keys {
+        if matches!(
+            secret_store.resolve(TzapSecretPurpose::RecipientKey, &key.private_key_ref),
+            Err(TzapSecretStoreError::Missing { .. })
+        ) {
+            let material = recipient_by_id
+                .get(key.id.as_str())
+                .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "legacy_migration.recipient_key_ref" })?;
+            secret_store.put_at(TzapSecretPurpose::RecipientKey, &key.private_key_ref, (*material).clone())?;
+        }
+    }
+    for identity in &catalog.signing_identities {
+        secret_store.resolve(TzapSecretPurpose::SigningKey, &identity.signing_key_ref)?;
+    }
+    for key in &catalog.recipient_keys {
+        secret_store.resolve(TzapSecretPurpose::RecipientKey, &key.private_key_ref)?;
+    }
+    catalog.pending_mutations.retain(|mutation| !matches!(mutation, PendingMutation::LegacyMigration { .. }));
+    let expected_revision = catalog.revision;
+    catalog.revision = catalog.revision.saturating_add(1);
+    catalog_store.save_catalog(account_key, Some(expected_revision), catalog.clone())?;
+    Ok(TzapLegacyMigrationReport {
+        migrated: true,
+        signing_identity_count: catalog.signing_identities.len(),
+        recipient_key_count: catalog.recipient_keys.len(),
+    })
+}
+
+/// Secret references produced while building a catalog, keyed by legacy
+/// record id.
+type SecretRefMap = HashMap<String, TzapSecretRef>;
+
+/// Builds the public catalog (and its secret references) from a legacy
+/// inventory without writing anything to either store.
+///
+/// Returns the catalog, the signing-key references, and the recipient-key
+/// references, all keyed by legacy record id.
+fn build_catalog_from_legacy(
+    inventory: &TzapLocalIdentityInventory,
+    now_unix_seconds: u64,
+) -> Result<(TzapIdentityCatalog, SecretRefMap, SecretRefMap), TzapIdentityCatalogError> {
     let mut signing_refs = HashMap::new();
     let mut recipient_refs = HashMap::new();
     for record in &inventory.device_signing_keys {
@@ -626,163 +705,167 @@ pub fn migrate_legacy_inventory(
         verify_private_matches_public_key(&record.private_key_der, &record.public_key_der)?;
         recipient_refs.insert(record.key_id.clone(), TzapSecretRef::generate());
     }
-    let result = (|| {
-        let mut signing_identities = Vec::new();
-        let mut certificate_key_ids = HashSet::new();
-        for certificate in &inventory.enrolled_certificates {
-            let signing_key_ref = signing_refs
-                .get(&certificate.signing_key_id)
-                .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "enrolled_certificates.signing_key_id" })?
-                .clone();
-            certificate_key_ids.insert(certificate.signing_key_id.clone());
+
+    let mut signing_identities = Vec::new();
+    let mut certificate_key_ids = HashSet::new();
+    for certificate in &inventory.enrolled_certificates {
+        let signing_key_ref = signing_refs
+            .get(&certificate.signing_key_id)
+            .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "enrolled_certificates.signing_key_id" })?
+            .clone();
+        certificate_key_ids.insert(certificate.signing_key_id.clone());
+        signing_identities.push(TzapPublicSigningIdentityRecord {
+            id: certificate.certificate_id.clone(),
+            local_alias: None,
+            certificate_id: Some(certificate.certificate_id.clone()),
+            certificate_sha256: Some(certificate.certificate_sha256.clone()),
+            issuer_certificate_sha256: Some(certificate.issuer_certificate_sha256.clone()),
+            issuer_key_identifier: Some(certificate.issuer_key_identifier.clone()),
+            serial_number: Some(certificate.serial_number.clone()),
+            certificate_chain_der: std::iter::once(certificate.leaf_certificate_der.clone())
+                .chain(certificate.intermediate_chain_der.clone())
+                .collect(),
+            not_before_unix_seconds: Some(certificate.not_before_unix_seconds),
+            not_after_unix_seconds: Some(certificate.not_after_unix_seconds),
+            public_signer_id: Some(certificate.public_metadata.public_signer_id.clone()),
+            public_org_id: certificate.public_metadata.public_org_id.clone(),
+            public_device_id: Some(certificate.public_metadata.public_device_id.clone()),
+            assurance_level: Some(certificate.public_metadata.assurance_level.as_str().to_owned()),
+            sign_device_id: Some(certificate.sign_device_id.clone()),
+            signing_key_ref,
+            lifecycle: certificate.state.as_str().to_owned(),
+        });
+    }
+    for key in &inventory.device_signing_keys {
+        if !certificate_key_ids.contains(&key.key_id) {
             signing_identities.push(TzapPublicSigningIdentityRecord {
-                id: certificate.certificate_id.clone(),
-                local_alias: None,
-                certificate_id: Some(certificate.certificate_id.clone()),
-                certificate_sha256: Some(certificate.certificate_sha256.clone()),
-                issuer_certificate_sha256: Some(certificate.issuer_certificate_sha256.clone()),
-                issuer_key_identifier: Some(certificate.issuer_key_identifier.clone()),
-                serial_number: Some(certificate.serial_number.clone()),
-                certificate_chain_der: std::iter::once(certificate.leaf_certificate_der.clone())
-                    .chain(certificate.intermediate_chain_der.clone())
-                    .collect(),
-                not_before_unix_seconds: Some(certificate.not_before_unix_seconds),
-                not_after_unix_seconds: Some(certificate.not_after_unix_seconds),
-                public_signer_id: Some(certificate.public_metadata.public_signer_id.clone()),
-                public_org_id: certificate.public_metadata.public_org_id.clone(),
-                public_device_id: Some(certificate.public_metadata.public_device_id.clone()),
-                assurance_level: Some(format!("{:?}", certificate.public_metadata.assurance_level)),
-                sign_device_id: Some(certificate.sign_device_id.clone()),
-                signing_key_ref,
-                lifecycle: certificate.state.as_str().to_owned(),
+                id: key.key_id.clone(),
+                local_alias: key.label.clone(),
+                certificate_id: None,
+                certificate_sha256: None,
+                issuer_certificate_sha256: None,
+                issuer_key_identifier: None,
+                serial_number: None,
+                certificate_chain_der: Vec::new(),
+                not_before_unix_seconds: None,
+                not_after_unix_seconds: None,
+                public_signer_id: None,
+                public_org_id: None,
+                public_device_id: None,
+                assurance_level: None,
+                sign_device_id: None,
+                signing_key_ref: signing_refs.get(&key.key_id).expect("signing ref inserted above").clone(),
+                lifecycle: "pending".to_owned(),
             });
         }
-        for key in &inventory.device_signing_keys {
-            if !certificate_key_ids.contains(&key.key_id) {
-                signing_identities.push(TzapPublicSigningIdentityRecord {
-                    id: key.key_id.clone(),
-                    local_alias: key.label.clone(),
-                    certificate_id: None,
-                    certificate_sha256: None,
-                    issuer_certificate_sha256: None,
-                    issuer_key_identifier: None,
-                    serial_number: None,
-                    certificate_chain_der: Vec::new(),
-                    not_before_unix_seconds: None,
-                    not_after_unix_seconds: None,
-                    public_signer_id: None,
-                    public_org_id: None,
-                    public_device_id: None,
-                    assurance_level: None,
-                    sign_device_id: None,
-                    signing_key_ref: signing_refs.get(&key.key_id).expect("signing ref inserted above").clone(),
-                    lifecycle: "pending".to_owned(),
-                });
-            }
-        }
+    }
 
-        let recipient_keys = inventory
-            .recipient_encryption_keys
-            .iter()
-            .map(|key| TzapPublicRecipientKeyRecord {
-                id: key.key_id.clone(),
-                local_label: key.label.clone(),
-                algorithm: key.algorithm.clone(),
-                public_key_der: key.public_key_der.clone(),
-                fingerprint: key.public_key_fingerprint.clone(),
-                private_key_ref: recipient_refs.get(&key.key_id).expect("recipient ref inserted above").clone(),
-                lifecycle: "active".to_owned(),
-                created_at_unix_seconds: key.created_at_unix_seconds,
-                retired_at_unix_seconds: None,
+    let recipient_keys = inventory
+        .recipient_encryption_keys
+        .iter()
+        .map(|key| TzapPublicRecipientKeyRecord {
+            id: key.key_id.clone(),
+            local_label: key.label.clone(),
+            algorithm: key.algorithm.clone(),
+            public_key_der: key.public_key_der.clone(),
+            fingerprint: key.public_key_fingerprint.clone(),
+            private_key_ref: recipient_refs.get(&key.key_id).expect("recipient ref inserted above").clone(),
+            lifecycle: "active".to_owned(),
+            created_at_unix_seconds: key.created_at_unix_seconds,
+            retired_at_unix_seconds: None,
+        })
+        .collect::<Vec<_>>();
+    let mut catalog = TzapIdentityCatalog::empty();
+    catalog.revision = 1;
+    catalog.signing_identities = signing_identities;
+    catalog.recipient_keys = recipient_keys;
+    catalog.contacts = inventory
+        .contacts
+        .iter()
+        .map(|contact| {
+            let recipient_public_key_der = contact
+                .contact_card_payload
+                .get("recipient_public_key")
+                .and_then(Value::as_str)
+                .and_then(|value| URL_SAFE_NO_PAD.decode(value).ok())
+                .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "contacts.recipient_public_key" })?;
+            Ok::<_, TzapIdentityCatalogError>(TzapPublicContactRecord {
+                contact_id: contact.contact_id.clone(),
+                display_name: contact.display_name.clone(),
+                signing_certificate_sha256: contact.signing_certificate_sha256.clone(),
+                recipient_public_key_fingerprint: contact.recipient_public_key_fingerprint.clone(),
+                recipient_public_key_der,
+                trust_source: contact.trust_anchor_type.as_str().to_owned(),
+                verification_state: contact.verification_state.as_str().to_owned(),
+                missing_status_caveat: contact.missing_status_caveat,
+                contact_card_payload: contact.contact_card_payload.clone(),
+                accepted_at_unix_seconds: contact.accepted_at_unix_seconds,
             })
-            .collect::<Vec<_>>();
-        let mut catalog = TzapIdentityCatalog::empty();
-        catalog.revision = 1;
-        catalog.signing_identities = signing_identities;
-        catalog.recipient_keys = recipient_keys;
-        catalog.contacts = inventory
-            .contacts
-            .iter()
-            .map(|contact| {
-                let recipient_public_key_der = contact
-                    .contact_card_payload
-                    .get("recipient_public_key")
-                    .and_then(Value::as_str)
-                    .and_then(|value| URL_SAFE_NO_PAD.decode(value).ok())
-                    .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "contacts.recipient_public_key" })?;
-                Ok::<_, TzapIdentityCatalogError>(TzapPublicContactRecord {
-                    contact_id: contact.contact_id.clone(),
-                    display_name: contact.display_name.clone(),
-                    signing_certificate_sha256: contact.signing_certificate_sha256.clone(),
-                    recipient_public_key_fingerprint: contact.recipient_public_key_fingerprint.clone(),
-                    recipient_public_key_der,
-                    trust_source: format!("{:?}", contact.trust_anchor_type),
-                    verification_state: contact.verification_state.as_str().to_owned(),
-                    missing_status_caveat: contact.missing_status_caveat,
-                    contact_card_payload: contact.contact_card_payload.clone(),
-                    accepted_at_unix_seconds: contact.accepted_at_unix_seconds,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        catalog.status_cache = inventory
-            .certificate_status_cache
-            .iter()
-            .map(|record| TzapPublicStatusCacheRecord {
-                lookup_id: record.certificate_sha256.clone(),
-                status: record.status.as_str().to_owned(),
-                this_update: record.this_update_unix_seconds.to_string(),
-                next_update: record.next_update_unix_seconds.to_string(),
-            })
-            .collect();
-        catalog.emergency_blocklist = TzapPublicEmergencyBlocklist {
-            blocked_root_sha256: inventory.emergency_blocklist.blocked_root_sha256.clone(),
-            blocked_issuer_sha256: inventory.emergency_blocklist.blocked_issuer_sha256.clone(),
-            updated_at_unix_seconds: inventory.emergency_blocklist.updated_at_unix_seconds,
-        };
-        let migration_marker = format!("legacy-migration-{now_unix_seconds}");
-        catalog.pending_mutations.push(migration_marker.clone());
-        catalog.validate()?;
-        // Commit the public intent first. The secret store writes below use
-        // these exact references, so startup can resume this transaction.
-        catalog_store.save_catalog(account_key, None, catalog)?;
-        for record in &inventory.device_signing_keys {
-            secret_store.put_at(
-                TzapSecretPurpose::SigningKey,
-                signing_refs.get(&record.key_id).expect("reference generated"),
-                record.private_key_der.clone(),
-            )?;
-        }
-        for record in &inventory.recipient_encryption_keys {
-            secret_store.put_at(
-                TzapSecretPurpose::RecipientKey,
-                recipient_refs.get(&record.key_id).expect("reference generated"),
-                record.private_key_der.clone(),
-            )?;
-        }
-        let mut committed = catalog_store
-            .load_catalog(account_key)?
-            .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.catalog" })?;
-        for identity in &committed.signing_identities {
-            secret_store.resolve(TzapSecretPurpose::SigningKey, &identity.signing_key_ref)?;
-        }
-        for key in &committed.recipient_keys {
-            secret_store.resolve(TzapSecretPurpose::RecipientKey, &key.private_key_ref)?;
-        }
-        committed.pending_mutations.retain(|mutation| mutation != &migration_marker);
-        let expected_revision = committed.revision;
-        committed.revision = committed.revision.saturating_add(1);
-        catalog_store.save_catalog(account_key, Some(expected_revision), committed)?;
-        Ok::<_, TzapIdentityCatalogError>(())
-    })();
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    catalog.status_cache = inventory
+        .certificate_status_cache
+        .iter()
+        .map(|record| TzapPublicStatusCacheRecord {
+            lookup_id: record.certificate_sha256.clone(),
+            status: record.status.as_str().to_owned(),
+            this_update: record.this_update_unix_seconds.to_string(),
+            next_update: record.next_update_unix_seconds.to_string(),
+        })
+        .collect();
+    catalog.emergency_blocklist = TzapPublicEmergencyBlocklist {
+        blocked_root_sha256: inventory.emergency_blocklist.blocked_root_sha256.clone(),
+        blocked_issuer_sha256: inventory.emergency_blocklist.blocked_issuer_sha256.clone(),
+        updated_at_unix_seconds: inventory.emergency_blocklist.updated_at_unix_seconds,
+    };
+    catalog.pending_mutations.push(PendingMutation::LegacyMigration { started_at_unix_seconds: now_unix_seconds });
+    catalog.validate()?;
+    Ok((catalog, signing_refs, recipient_refs))
+}
 
-    result?;
-
-    let catalog = catalog_store.load_catalog(account_key)?.expect("catalog was written before migration completed");
-    Ok(TzapLegacyMigrationReport {
-        migrated: true,
-        signing_identity_count: catalog.signing_identities.len(),
-        recipient_key_count: catalog.recipient_keys.len(),
-    })
+/// Commits a built catalog: writes the public intent first, copies every
+/// secret into the secure store under the recorded references, verifies the
+/// result, then clears the pending-migration marker.
+fn commit_migration(
+    catalog_store: &mut impl TzapIdentityCatalogStore,
+    secret_store: &mut impl TzapSecretMaterialStore,
+    account_key: &str,
+    catalog: TzapIdentityCatalog,
+    inventory: &TzapLocalIdentityInventory,
+    signing_refs: &HashMap<String, TzapSecretRef>,
+    recipient_refs: &HashMap<String, TzapSecretRef>,
+) -> Result<(), TzapIdentityCatalogError> {
+    // Commit the public intent first. The secret store writes below use
+    // these exact references, so startup can resume this transaction.
+    catalog_store.save_catalog(account_key, None, catalog)?;
+    for record in &inventory.device_signing_keys {
+        secret_store.put_at(
+            TzapSecretPurpose::SigningKey,
+            signing_refs.get(&record.key_id).expect("reference generated"),
+            record.private_key_der.clone(),
+        )?;
+    }
+    for record in &inventory.recipient_encryption_keys {
+        secret_store.put_at(
+            TzapSecretPurpose::RecipientKey,
+            recipient_refs.get(&record.key_id).expect("reference generated"),
+            record.private_key_der.clone(),
+        )?;
+    }
+    let mut committed = catalog_store
+        .load_catalog(account_key)?
+        .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.catalog" })?;
+    for identity in &committed.signing_identities {
+        secret_store.resolve(TzapSecretPurpose::SigningKey, &identity.signing_key_ref)?;
+    }
+    for key in &committed.recipient_keys {
+        secret_store.resolve(TzapSecretPurpose::RecipientKey, &key.private_key_ref)?;
+    }
+    committed.pending_mutations.retain(|mutation| !matches!(mutation, PendingMutation::LegacyMigration { .. }));
+    let expected_revision = committed.revision;
+    committed.revision = committed.revision.saturating_add(1);
+    catalog_store.save_catalog(account_key, Some(expected_revision), committed)?;
+    Ok(())
 }
 
 fn verify_private_matches_fingerprint(
@@ -872,12 +955,16 @@ fn random_identifier() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn validate_account_key(value: &str) -> Result<(), TzapIdentityCatalogError> {
-    if value.is_empty() || value.contains('/') || value.contains('\\') || value.contains("..") {
-        Err(TzapIdentityCatalogError::InvalidAccountKey)
-    } else {
-        Ok(())
-    }
+/// Validates an identity account key under the shared catalog rule.
+///
+/// Account keys are used as file names, so path separators and parent
+/// traversal markers are rejected. This is deliberately conservative:
+/// accepting a wider alphabet (spaces, dots) is fine as long as the key
+/// cannot escape its directory. [`crate::local_identity_store`] uses the
+/// same rule so both stores accept the same account keys.
+#[must_use]
+pub(crate) fn validate_account_key(value: &str) -> bool {
+    !value.is_empty() && !value.contains('/') && !value.contains('\\') && !value.contains("..")
 }
 
 fn validate_non_empty(field: &'static str, value: &str) -> Result<(), TzapIdentityCatalogError> {
@@ -955,10 +1042,10 @@ mod tests {
 
         // A fresh lock belongs to a live writer: the save must be refused.
         fs::write(&lock_path, b"").unwrap();
-        assert_eq!(
+        assert!(matches!(
             store.save_catalog("default", None, catalog.clone()),
             Err(TzapIdentityCatalogError::ConcurrentWrite)
-        );
+        ));
 
         // A lock abandoned by a crashed writer must not block saves forever:
         // once it is old enough it is stolen and the save succeeds.
@@ -1019,7 +1106,7 @@ mod tests {
         secrets.delete(TzapSecretPurpose::SigningKey, &signing_ref).unwrap();
         secrets.delete(TzapSecretPurpose::RecipientKey, &recipient_ref).unwrap();
         let mut interrupted = catalog.clone();
-        interrupted.pending_mutations.push("legacy-migration-interrupted".to_owned());
+        interrupted.pending_mutations.push(PendingMutation::LegacyMigration { started_at_unix_seconds: 1 });
         let expected_revision = interrupted.revision;
         interrupted.revision += 1;
         catalogs.save_catalog("default", Some(expected_revision), interrupted).unwrap();

@@ -10,6 +10,10 @@ mod extract_materialize;
 mod http_client;
 mod json_util;
 mod tar_metadata;
+mod temp_names;
+#[cfg(test)]
+mod test_support;
+mod tzap;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_archive_backend;

@@ -1,3 +1,7 @@
+mod common;
+
+use common::*;
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -875,10 +879,6 @@ fn assert_help_contains(args: &[&str], needles: &[&str]) {
     }
 }
 
-fn zm_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_zm"))
-}
-
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -889,15 +889,6 @@ fn workspace_root() -> PathBuf {
 
 fn command_available(command: &str) -> bool {
     Command::new(command).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
-}
-
-fn assert_success(label: &str, output: &std::process::Output) {
-    assert!(
-        output.status.success(),
-        "{label} failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn assert_usage_failure(label: &str, output: &std::process::Output) {
@@ -916,24 +907,6 @@ fn assert_contains(haystack: &str, needle: &str) {
 
 fn assert_not_contains(haystack: &str, needle: &str) {
     assert!(!haystack.contains(needle), "expected output not to contain {needle:?}\n{haystack}");
-}
-
-fn strip_ansi(input: &str) -> String {
-    let mut stripped = String::new();
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' && chars.peek() == Some(&'[') {
-            let _ = chars.next();
-            for code in chars.by_ref() {
-                if ('@'..='~').contains(&code) {
-                    break;
-                }
-            }
-        } else {
-            stripped.push(ch);
-        }
-    }
-    stripped
 }
 
 fn normalize_newlines(input: &str) -> String {

@@ -919,11 +919,11 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     use crate::safety::ExtractionPolicy;
     #[cfg(any(target_os = "macos", target_os = "ios"))]
+    use crate::test_support::TestDir;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     use std::fs;
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    use std::path::{Path, PathBuf};
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn detects_aar_extension_case_insensitively() {
@@ -1099,39 +1099,5 @@ mod tests {
     #[test]
     fn native_operations_report_supported_on_apple_targets() {
         assert!(apple_archive_supported());
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
-            let root = std::env::temp_dir().join(format!("zmanager-core-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, data: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, data).unwrap();
-        }
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 }

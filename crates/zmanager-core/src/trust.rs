@@ -100,38 +100,26 @@ impl TzapCertificateStatus {
             Self::UnsupportedLookupForm => "unsupported_lookup_form",
         }
     }
-
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "valid" => Some(Self::Valid),
-            "revoked" => Some(Self::Revoked),
-            "expired" => Some(Self::Expired),
-            "not_yet_valid" => Some(Self::NotYetValid),
-            "suspended" => Some(Self::Suspended),
-            "issuer_suspended" => Some(Self::IssuerSuspended),
-            "issuer_revoked" => Some(Self::IssuerRevoked),
-            "unknown_certificate" => Some(Self::UnknownCertificate),
-            "unknown_issuer" => Some(Self::UnknownIssuer),
-            "malformed_lookup" => Some(Self::MalformedLookup),
-            "unsupported_lookup_form" => Some(Self::UnsupportedLookupForm),
-            _ => None,
-        }
-    }
-
-    /// Parses the stable wire value.
-    #[must_use]
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(value: &str) -> Option<Self> {
-        Self::parse(value)
-    }
 }
 
 impl std::str::FromStr for TzapCertificateStatus {
     type Err = ();
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::parse(value).ok_or(())
+        match value {
+            "valid" => Ok(Self::Valid),
+            "revoked" => Ok(Self::Revoked),
+            "expired" => Ok(Self::Expired),
+            "not_yet_valid" => Ok(Self::NotYetValid),
+            "suspended" => Ok(Self::Suspended),
+            "issuer_suspended" => Ok(Self::IssuerSuspended),
+            "issuer_revoked" => Ok(Self::IssuerRevoked),
+            "unknown_certificate" => Ok(Self::UnknownCertificate),
+            "unknown_issuer" => Ok(Self::UnknownIssuer),
+            "malformed_lookup" => Ok(Self::MalformedLookup),
+            "unsupported_lookup_form" => Ok(Self::UnsupportedLookupForm),
+            _ => Err(()),
+        }
     }
 }
 
@@ -160,32 +148,20 @@ impl TzapVerificationState {
             Self::Invalid => "invalid",
         }
     }
-
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "valid_now" => Some(Self::ValidNow),
-            "valid_at_trusted_time" => Some(Self::ValidAtTrustedTime),
-            "cryptographically_intact_offline" => Some(Self::CryptographicallyIntactOffline),
-            "not_recorded" => Some(Self::NotRecorded),
-            "invalid" => Some(Self::Invalid),
-            _ => None,
-        }
-    }
-
-    /// Parses the stable wire value.
-    #[must_use]
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(value: &str) -> Option<Self> {
-        Self::parse(value)
-    }
 }
 
 impl std::str::FromStr for TzapVerificationState {
     type Err = ();
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::parse(value).ok_or(())
+        match value {
+            "valid_now" => Ok(Self::ValidNow),
+            "valid_at_trusted_time" => Ok(Self::ValidAtTrustedTime),
+            "cryptographically_intact_offline" => Ok(Self::CryptographicallyIntactOffline),
+            "not_recorded" => Ok(Self::NotRecorded),
+            "invalid" => Ok(Self::Invalid),
+            _ => Err(()),
+        }
     }
 }
 
@@ -205,30 +181,18 @@ impl TzapTrustAnchorType {
             Self::Untrusted => "untrusted",
         }
     }
-
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "official_tzap" => Some(Self::OfficialTzap),
-            "custom" => Some(Self::Custom),
-            "untrusted" => Some(Self::Untrusted),
-            _ => None,
-        }
-    }
-
-    /// Parses the stable wire value.
-    #[must_use]
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(value: &str) -> Option<Self> {
-        Self::parse(value)
-    }
 }
 
 impl std::str::FromStr for TzapTrustAnchorType {
     type Err = ();
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::parse(value).ok_or(())
+        match value {
+            "official_tzap" => Ok(Self::OfficialTzap),
+            "custom" => Ok(Self::Custom),
+            "untrusted" => Ok(Self::Untrusted),
+            _ => Err(()),
+        }
     }
 }
 
@@ -253,23 +217,14 @@ impl TzapIdentityAssurance {
         }
     }
 
+    /// Parses the stable wire value.
+    ///
+    /// Kept as a thin wrapper around [`std::str::FromStr`] because the
+    /// zmanager-desktop app calls this inherent method; it must stay in sync
+    /// with the trait implementation.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "oauth_verified_email" => Some(Self::OauthVerifiedEmail),
-            "oauth_verified_provider_account" => Some(Self::OauthVerifiedProviderAccount),
-            "org_admin_approved_device" => Some(Self::OrgAdminApprovedDevice),
-            "enterprise_sso_verified" => Some(Self::EnterpriseSsoVerified),
-            "contract_verified" => Some(Self::ContractVerified),
-            _ => None,
-        }
-    }
-
-    /// Parses the stable wire value.
-    #[must_use]
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(value: &str) -> Option<Self> {
-        Self::parse(value)
+        value.parse().ok()
     }
 }
 
@@ -277,7 +232,14 @@ impl std::str::FromStr for TzapIdentityAssurance {
     type Err = ();
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::parse(value).ok_or(())
+        match value {
+            "oauth_verified_email" => Ok(Self::OauthVerifiedEmail),
+            "oauth_verified_provider_account" => Ok(Self::OauthVerifiedProviderAccount),
+            "org_admin_approved_device" => Ok(Self::OrgAdminApprovedDevice),
+            "enterprise_sso_verified" => Ok(Self::EnterpriseSsoVerified),
+            "contract_verified" => Ok(Self::ContractVerified),
+            _ => Err(()),
+        }
     }
 }
 
@@ -1618,12 +1580,12 @@ mod tests {
     #[test]
     fn enum_roundtrip_helpers_work() {
         assert_eq!(
-            super::TzapIdentityAssurance::parse("oauth_verified_email"),
+            "oauth_verified_email".parse::<TzapIdentityAssurance>().ok(),
             Some(TzapIdentityAssurance::OauthVerifiedEmail)
         );
-        assert_eq!(TzapCertificateStatus::parse("valid"), Some(TzapCertificateStatus::Valid));
+        assert_eq!("valid".parse::<TzapCertificateStatus>().ok(), Some(TzapCertificateStatus::Valid));
         assert_eq!(
-            TzapCertificateStatus::parse("unsupported_lookup_form"),
+            "unsupported_lookup_form".parse::<TzapCertificateStatus>().ok(),
             Some(TzapCertificateStatus::UnsupportedLookupForm)
         );
         assert_eq!(TzapVerificationState::Invalid.as_str(), "invalid");

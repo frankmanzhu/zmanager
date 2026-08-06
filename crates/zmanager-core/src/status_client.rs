@@ -220,8 +220,9 @@ impl TzapStatusResponse {
 
     pub fn from_json_value(value: &Value) -> Result<Self, TzapStatusClientError> {
         let object = json_object::<TzapStatusClientError>(value, "object")?;
-        let status = TzapCertificateStatus::parse(&required_string::<TzapStatusClientError>(object, "status")?)
-            .ok_or(TzapStatusClientError::InvalidField { field: "status" })?;
+        let status = required_string::<TzapStatusClientError>(object, "status")?
+            .parse::<TzapCertificateStatus>()
+            .map_err(|()| TzapStatusClientError::InvalidField { field: "status" })?;
         let query = parse_query_echo(object)?;
         let response = Self {
             status,

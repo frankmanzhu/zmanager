@@ -51,16 +51,15 @@ pub(crate) fn plan_sources(
     no_ignore: bool,
     follow_symlinks: bool,
 ) -> Result<zmanager_core::manifest::ArchiveManifest, zmanager_core::manifest::PlanError> {
-    let mut options = if clean {
-        zmanager_core::manifest::PlanOptions::clean_source()
+    use zmanager_core::manifest::{ExclusionProfile, PlanOptions};
+
+    let mut options = if no_ignore {
+        PlanOptions { exclusion_profile: ExclusionProfile::Unrestricted, ..PlanOptions::default() }
+    } else if clean {
+        PlanOptions::clean_source()
     } else {
-        zmanager_core::manifest::PlanOptions::default()
+        PlanOptions::default()
     };
-    if no_ignore {
-        options.default_exclusions = false;
-        options.clean_source_exclusions = false;
-        options.respect_gitignore = false;
-    }
     options.follow_symlinks = follow_symlinks;
     zmanager_core::manifest::plan_archives(sources, &options)
 }

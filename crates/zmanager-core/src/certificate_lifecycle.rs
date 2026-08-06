@@ -7,7 +7,7 @@ use crate::auth_client::{
 use crate::enrollment_client::{
     ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator,
     TzapEnrollmentError, TzapEnrollmentRequest, canonicalize_local_staging_server_json_bytes, csr_der_to_pem,
-    csr_fingerprint, parse_enrollment_response, requested_validity_days,
+    csr_fingerprint, parse_challenge_response, parse_enrollment_response, requested_validity_days, sign_p256_challenge,
 };
 use crate::http_client::{require_success, send_json_request};
 use crate::jcs;
@@ -16,10 +16,8 @@ use crate::local_identity_store::{
     TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore,
     TzapLocalIdentityStoreError, TzapOrganizationDeviceRetirement,
 };
-use crate::p256_signature;
 use crate::trust;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use openssl::pkey::{PKey, Private};
 use serde_json::{Map, Value, json};
 use sha2::{Digest as _, Sha256};
 use std::fmt;
@@ -396,7 +394,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
             Some(session.access_token.clone()),
             Some(body),
         )?;
-        parse_renewal_challenge_response(&response.body)
+        parse_challenge_response::<TzapCertificateLifecycleError>(&response.body)
     }
 
     fn submit_renewal(
@@ -574,22 +572,6 @@ fn validate_renewal_challenge(
     Ok(())
 }
 
-fn parse_renewal_challenge_response(
-    bytes: &[u8],
-) -> Result<crate::enrollment_client::TzapEnrollmentChallenge, TzapCertificateLifecycleError> {
-    let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object::<TzapCertificateLifecycleError>(&value, "$")?;
-    Ok(crate::enrollment_client::TzapEnrollmentChallenge {
-        challenge_id: optional_string::<TzapCertificateLifecycleError>(object, "challenge_id")?
-            .ok_or(TzapCertificateLifecycleError::InvalidField { field: "challenge_id" })?,
-        payload: object
-            .get("challenge_payload")
-            .ok_or(TzapCertificateLifecycleError::InvalidField { field: "challenge_payload" })?
-            .clone(),
-        canonicalization: optional_string::<TzapCertificateLifecycleError>(object, "canonicalization")?,
-    })
-}
-
 fn sign_old_certificate_challenge(
     wire_profile: TzapCertificateLifecycleWireProfile,
     previous_signing_key: &TzapDeviceSigningKeyRecord,
@@ -603,10 +585,8 @@ fn sign_old_certificate_challenge(
                 .map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?
         }
     };
-    let private_key = PKey::<Private>::private_key_from_der(previous_signing_key.private_key_der.expose_secret())
-        .map_err(|error| TzapCertificateLifecycleError::Crypto(error.to_string()))?;
-    let signature = p256_signature::sign_p256_sha256_p1363(&private_key, &canonical)
-        .map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?;
+    let signature =
+        sign_p256_challenge::<TzapCertificateLifecycleError>(&previous_signing_key.private_key_der, &canonical)?;
     Ok(URL_SAFE_NO_PAD.encode(signature))
 }
 
@@ -616,10 +596,7 @@ fn sign_new_key_challenge_staging(
 ) -> Result<String, TzapCertificateLifecycleError> {
     let canonical = canonicalize_local_staging_server_json_bytes(challenge_payload)
         .map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?;
-    let private_key = PKey::<Private>::private_key_from_der(signing_key.private_key_der.expose_secret())
-        .map_err(|error| TzapCertificateLifecycleError::Crypto(error.to_string()))?;
-    let signature = p256_signature::sign_p256_sha256_p1363(&private_key, &canonical)
-        .map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?;
+    let signature = sign_p256_challenge::<TzapCertificateLifecycleError>(&signing_key.private_key_der, &canonical)?;
     Ok(URL_SAFE_NO_PAD.encode(signature))
 }
 

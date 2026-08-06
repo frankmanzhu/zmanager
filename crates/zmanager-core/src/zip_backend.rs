@@ -1,3 +1,15 @@
+//! ZIP archive creation, listing, integrity testing, and extraction.
+//!
+//! Format API asymmetries vs the 7z backend, deliberately kept:
+//! - Integrity testing (`test_zip_with_password_filter`) exists only on the
+//!   ZIP side; 7z has no test API.
+//! - [`crate::sevenz_backend::list_7z`] takes a password because 7z can
+//!   encrypt its file names, while `list_zip` does not (ZIP names are always
+//!   readable from the central directory).
+//! - 7z never materializes symlinks — entries that a hostile archive declares
+//!   as link-like are extracted as regular files; see
+//!   `crate::sevenz_backend::extraction_kind` for the rationale.
+
 use crate::jobs::{JobCancelled, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
@@ -378,9 +390,8 @@ fn split_zip_temp_archive(
         return Ok(1);
     }
 
-    let logical_size = archive_size
-        .checked_add(u64::try_from(ZIP_SPLIT_SIGNATURE.len()).unwrap_or(4))
-        .ok_or_else(|| unsupported_split_zip("archive is too large to split"))?;
+    let logical_size =
+        archive_size.checked_add(4u64).ok_or_else(|| unsupported_split_zip("archive is too large to split"))?;
     let volume_count = crate::archive_split::split_volume_count(logical_size, volume_size)
         .ok_or_else(|| unsupported_split_zip("too many ZIP volumes"))?;
     let layout = ZipSplitLayout::new(logical_size, volume_size, &eocd)?;
@@ -431,7 +442,7 @@ impl ZipSplitLayout {
     fn new(logical_size: u64, volume_size: u64, eocd: &ZipEndOfCentralDirectory) -> Result<Self, ZipBackendError> {
         let central_directory_logical_offset = eocd
             .central_directory_offset
-            .checked_add(u64::try_from(ZIP_SPLIT_SIGNATURE.len()).unwrap_or(4))
+            .checked_add(4u64)
             .ok_or_else(|| unsupported_split_zip("central directory offset overflow"))?;
         let (central_directory_disk, central_directory_offset_on_disk) =
             split_zip_location(central_directory_logical_offset, volume_size)?;
@@ -570,7 +581,7 @@ fn patch_split_zip_central_directory(
             return Err(unsupported_split_zip("ZIP64 local header offsets are not supported for split output"));
         }
         let logical_header_offset = u64::from(local_header_offset)
-            .checked_add(u64::try_from(ZIP_SPLIT_SIGNATURE.len()).unwrap_or(4))
+            .checked_add(4u64)
             .ok_or_else(|| unsupported_split_zip("local header offset overflow"))?;
         let (disk, relative_offset) = split_zip_location(logical_header_offset, volume_size)?;
         central_directory[offset + 34..offset + 36].copy_from_slice(&disk.to_le_bytes());
@@ -1207,6 +1218,10 @@ fn password_bytes(password: Option<&str>) -> Option<&[u8]> {
 }
 
 fn map_zip_error(source: zip::result::ZipError) -> ZipBackendError {
+    // The zip crate has no structured "password required" error variant: it
+    // reports the condition as a `ZipError::UnsupportedArchive` carrying the
+    // PASSWORD_REQUIRED message string, which is why this match is stringly
+    // typed. Re-check for a structured variant when the zip crate is upgraded.
     match &source {
         zip::result::ZipError::UnsupportedArchive(message) if *message == zip::result::ZipError::PASSWORD_REQUIRED => {
             ZipBackendError::PasswordRequired
@@ -1326,7 +1341,8 @@ fn write_zip_entry<R: Read>(
                     context.warning(warning);
                 }
             } else {
-                write_symlink(target, destination_path)?;
+                crate::extract_materialize::write_symlink(target, destination_path)
+                    .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })?;
                 apply_symlink_mtime(destination_path, modified_time)?;
                 report.written_entries += 1;
             }
@@ -1437,25 +1453,6 @@ fn write_hardlink(source_path: &Path, destination_path: &Path) -> Result<(), Zip
         .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })
 }
 
-#[cfg(unix)]
-fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), ZipBackendError> {
-    use std::os::unix::fs::symlink;
-
-    if let Some(parent) = destination_path.parent() {
-        fs::create_dir_all(parent).map_err(|source| ZipBackendError::Io { path: parent.to_path_buf(), source })?;
-    }
-    symlink(target, destination_path)
-        .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })
-}
-
-#[cfg(not(unix))]
-fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), ZipBackendError> {
-    Err(ZipBackendError::Io {
-        path: destination_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1467,10 +1464,10 @@ mod tests {
     use crate::manifest::{PlanOptions, plan_archive};
     use crate::safety::{ExtractionPolicy, ExtractionSafetyError};
     use crate::secrets::SecretString;
+    use crate::test_support::TestDir;
     use std::fs::{self, File};
     use std::io::{self, Read, Write};
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::Path;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
@@ -1930,10 +1927,6 @@ mod tests {
             .collect()
     }
 
-    struct TestDir {
-        root: PathBuf,
-    }
-
     #[derive(Default)]
     struct WriteOnlyBuffer {
         bytes: Vec<u8>,
@@ -1947,38 +1940,6 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
-        }
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn create_dir(&self, relative: impl AsRef<Path>) {
-            fs::create_dir_all(self.path(relative)).unwrap();
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
         }
     }
 }

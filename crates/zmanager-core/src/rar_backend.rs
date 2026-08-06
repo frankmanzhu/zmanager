@@ -193,6 +193,18 @@ pub fn list_rar_with_password(
     Ok(RarListing { entries })
 }
 
+/// Options for the single core RAR extraction implementation.
+///
+/// Every public extract entry point is a thin wrapper that builds this struct
+/// (listing the archive when the caller did not already do so) and delegates
+/// here, so the extraction pipeline has exactly one implementation.
+pub(crate) struct RarExtractOptions<'password, 'resolver, 'context> {
+    pub(crate) password: Option<&'password str>,
+    pub(crate) overwrite_resolver: Option<&'resolver mut dyn OverwriteResolver>,
+    pub(crate) context: Option<&'resolver mut JobContext<'context>>,
+    pub(crate) entries: Vec<zmanager_unrar::RarEntry>,
+}
+
 /// Extracts a RAR archive through bundled `UnRAR` and the shared safety planner.
 ///
 /// # Errors
@@ -205,7 +217,13 @@ pub fn extract_rar_with_password(
     policy: ExtractionPolicy,
     password: Option<&str>,
 ) -> Result<RarExtractReport, RarBackendError> {
-    extract_rar_inner(archive, destination, policy, password, None, None)
+    let entries = zmanager_unrar::list_archive(archive.as_ref(), password)?;
+    extract_rar_with_options(
+        archive.as_ref(),
+        destination.as_ref(),
+        policy,
+        RarExtractOptions { password, overwrite_resolver: None, context: None, entries },
+    )
 }
 
 /// Extracts a RAR archive with an overwrite resolver.
@@ -221,7 +239,13 @@ pub fn extract_rar_with_overwrite_resolver_and_password(
     password: Option<&str>,
     overwrite_resolver: &mut dyn OverwriteResolver,
 ) -> Result<RarExtractReport, RarBackendError> {
-    extract_rar_inner(archive, destination, policy, password, Some(overwrite_resolver), None)
+    let entries = zmanager_unrar::list_archive(archive.as_ref(), password)?;
+    extract_rar_with_options(
+        archive.as_ref(),
+        destination.as_ref(),
+        policy,
+        RarExtractOptions { password, overwrite_resolver: Some(overwrite_resolver), context: None, entries },
+    )
 }
 
 /// Extracts a RAR archive through bundled `UnRAR` and the shared safety
@@ -238,7 +262,13 @@ pub fn extract_rar_with_password_and_context(
     password: Option<&str>,
     context: &mut JobContext<'_>,
 ) -> Result<RarExtractReport, RarBackendError> {
-    extract_rar_inner(archive, destination, policy, password, None, Some(context))
+    let entries = zmanager_unrar::list_archive(archive.as_ref(), password)?;
+    extract_rar_with_options(
+        archive.as_ref(),
+        destination.as_ref(),
+        policy,
+        RarExtractOptions { password, overwrite_resolver: None, context: Some(context), entries },
+    )
 }
 
 pub(crate) fn extract_rar_entries_with_password_and_context(
@@ -249,32 +279,28 @@ pub(crate) fn extract_rar_entries_with_password_and_context(
     entries: Vec<zmanager_unrar::RarEntry>,
     context: &mut JobContext<'_>,
 ) -> Result<RarExtractReport, RarBackendError> {
-    extract_rar_inner_with_entries(archive, destination, policy, password, entries, None, Some(context))
+    extract_rar_with_options(
+        archive.as_ref(),
+        destination.as_ref(),
+        policy,
+        RarExtractOptions { password, overwrite_resolver: None, context: Some(context), entries },
+    )
 }
 
-fn extract_rar_inner(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
+/// The single core RAR extraction implementation used by every public entry
+/// point.
+///
+/// The explicit lifetimes are required: eliding them makes the trait-object
+/// reborrow of the overwrite resolver unify with the struct's field lifetime
+/// and fail to compile.
+#[allow(clippy::elidable_lifetime_names)]
+fn extract_rar_with_options<'password, 'resolver, 'context>(
+    archive: &Path,
+    destination: &Path,
     policy: ExtractionPolicy,
-    password: Option<&str>,
-    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
-    context: Option<&mut JobContext<'_>>,
+    options: RarExtractOptions<'password, 'resolver, 'context>,
 ) -> Result<RarExtractReport, RarBackendError> {
-    let entries = zmanager_unrar::list_archive(archive.as_ref(), password)?;
-    extract_rar_inner_with_entries(archive, destination, policy, password, entries, overwrite_resolver, context)
-}
-
-fn extract_rar_inner_with_entries(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    entries: Vec<zmanager_unrar::RarEntry>,
-    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
-    mut context: Option<&mut JobContext<'_>>,
-) -> Result<RarExtractReport, RarBackendError> {
-    let archive = archive.as_ref();
-    let destination = destination.as_ref();
+    let RarExtractOptions { password, overwrite_resolver, mut context, entries } = options;
     let destination_root = crate::safety::prepare_destination_root(destination)
         .map_err(|source| RarBackendError::Io { path: destination.to_path_buf(), source })?;
 
@@ -327,30 +353,79 @@ struct PlannedRarExtraction {
     report: RarExtractReport,
 }
 
+/// One planned writable entry, produced without touching the filesystem.
+///
+/// Planning is split into a pure per-entry plan phase and a commit phase so
+/// a failing entry cannot leave partially created directories behind.
+enum PlannedEntry {
+    Directory {
+        destination_path: PathBuf,
+        replace_existing: bool,
+        file_attr: u32,
+        mtime: u64,
+    },
+    File {
+        archive_path: String,
+        destination_path: PathBuf,
+        replace_existing: bool,
+        file_attr: u32,
+        mtime: u64,
+        size: u64,
+    },
+    Symlink {
+        destination_path: PathBuf,
+        replace_existing: bool,
+        target: PathBuf,
+        file_attr: u32,
+        mtime: u64,
+    },
+    Hardlink {
+        destination_path: PathBuf,
+        replace_existing: bool,
+        source_path: PathBuf,
+        file_attr: u32,
+        mtime: u64,
+    },
+    FileCopy {
+        destination_path: PathBuf,
+        replace_existing: bool,
+        source_path: PathBuf,
+        file_attr: u32,
+        mtime: u64,
+    },
+}
+
+// The by-value policy is the contract that keeps the public wrappers free of
+// `needless_pass_by_value` warnings: they hand ownership down, and the planner
+// clones the policy exactly once here.
+#[allow(clippy::needless_pass_by_value)]
 fn plan_rar_entries(
     entries: Vec<zmanager_unrar::RarEntry>,
     destination: &Path,
     policy: ExtractionPolicy,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
 ) -> Result<PlannedRarExtraction, RarBackendError> {
-    let target_policy = policy.clone();
+    // The planner owns the policy; clone it exactly once instead of holding a
+    // reference through the whole planning loop.
     let mut planner = match overwrite_resolver {
-        Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(destination, policy, resolver),
-        None => ExtractionSafetyPlanner::new(destination, policy),
+        Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(destination, policy.clone(), resolver),
+        None => ExtractionSafetyPlanner::new(destination, policy.clone()),
     };
-    let mut selections = BTreeMap::new();
-    let mut metadata_map = BTreeMap::new();
-    let mut deferred_links = Vec::new();
-    let mut deferred_dirs = Vec::new();
-    let mut entry_progress = Vec::new();
-    let mut report =
-        RarExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let mut plans = Vec::new();
+    let mut extraction = PlannedRarExtraction {
+        selections: BTreeMap::new(),
+        metadata_map: BTreeMap::new(),
+        deferred_links: Vec::new(),
+        deferred_dirs: Vec::new(),
+        entry_progress: Vec::new(),
+        report: RarExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() },
+    };
 
     for entry in entries {
         reject_large_dictionary(&entry)?;
-        let Some(extraction_kind) = extraction_entry_kind(&entry, &target_policy)? else {
-            report.skipped_entries += 1;
-            report.warnings.push(format!("skipped {}: unsupported RAR special entry", entry.path));
+        let Some(extraction_kind) = extraction_entry_kind(&entry, &policy)? else {
+            extraction.report.skipped_entries += 1;
+            extraction.report.warnings.push(format!("skipped {}: unsupported RAR special entry", entry.path));
             continue;
         };
         let safety_entry = ExtractionEntry {
@@ -370,130 +445,140 @@ fn plan_rar_entries(
                 if matches!(entry.kind, RarEntryKind::FileCopy) {
                     planner.reserve_expanded_bytes(&entry.path, entry.unpacked_size)?;
                 }
-                plan_writable_entry(
-                    entry,
-                    destination,
-                    &target_policy,
-                    WritableEntryPlan {
-                        destination_path,
-                        replace_existing,
-                        selections: &mut selections,
-                        metadata_map: &mut metadata_map,
-                        deferred_links: &mut deferred_links,
-                        deferred_dirs: &mut deferred_dirs,
-                        entry_progress: &mut entry_progress,
-                        report: &mut report,
-                    },
-                )?;
+                extraction.entry_progress.push((entry.path.clone(), entry.unpacked_size));
+                plans.push(plan_entry(entry, destination_path, replace_existing, destination, &policy)?);
             }
             ExtractionDecision::Skip { reason, .. } => {
-                report.skipped_entries += 1;
-                report.warnings.push(format!("skipped {}: {reason}", entry.path));
+                extraction.report.skipped_entries += 1;
+                extraction.report.warnings.push(format!("skipped {}: {reason}", entry.path));
             }
         }
     }
 
-    Ok(PlannedRarExtraction { selections, metadata_map, deferred_links, deferred_dirs, entry_progress, report })
+    for plan in plans {
+        commit_planned_entry(plan, &mut extraction)?;
+    }
+
+    Ok(extraction)
+}
+
+fn plan_entry(
+    entry: zmanager_unrar::RarEntry,
+    destination_path: PathBuf,
+    replace_existing: bool,
+    destination: &Path,
+    policy: &ExtractionPolicy,
+) -> Result<PlannedEntry, RarBackendError> {
+    match entry.kind {
+        RarEntryKind::Directory => Ok(PlannedEntry::Directory {
+            destination_path,
+            replace_existing,
+            file_attr: entry.file_attr,
+            mtime: entry.mtime,
+        }),
+        RarEntryKind::File => Ok(PlannedEntry::File {
+            archive_path: entry.path,
+            destination_path,
+            replace_existing,
+            file_attr: entry.file_attr,
+            mtime: entry.mtime,
+            size: entry.unpacked_size,
+        }),
+        RarEntryKind::Symlink => {
+            let target = link_target(&entry)?;
+            Ok(PlannedEntry::Symlink {
+                destination_path,
+                replace_existing,
+                target: PathBuf::from(target),
+                file_attr: entry.file_attr,
+                mtime: entry.mtime,
+            })
+        }
+        RarEntryKind::Hardlink | RarEntryKind::FileCopy => {
+            let target = link_target(&entry)?;
+            let source_path = archive_target_destination(destination, target, policy)?;
+            if entry.kind == RarEntryKind::Hardlink {
+                Ok(PlannedEntry::Hardlink {
+                    destination_path,
+                    replace_existing,
+                    source_path,
+                    file_attr: entry.file_attr,
+                    mtime: entry.mtime,
+                })
+            } else {
+                Ok(PlannedEntry::FileCopy {
+                    destination_path,
+                    replace_existing,
+                    source_path,
+                    file_attr: entry.file_attr,
+                    mtime: entry.mtime,
+                })
+            }
+        }
+        RarEntryKind::Special => {
+            unreachable!("unsupported RAR special entries are skipped before planning")
+        }
+    }
+}
+
+fn commit_planned_entry(plan: PlannedEntry, extraction: &mut PlannedRarExtraction) -> Result<(), RarBackendError> {
+    match plan {
+        PlannedEntry::Directory { destination_path, replace_existing, file_attr, mtime } => {
+            if replace_existing {
+                remove_destination(&destination_path)?;
+            }
+            fs::create_dir_all(&destination_path)
+                .map_err(|source| RarBackendError::Io { path: destination_path.clone(), source })?;
+            extraction.deferred_dirs.push((destination_path, file_attr, mtime));
+            extraction.report.written_entries += 1;
+        }
+        PlannedEntry::File { archive_path, destination_path, replace_existing, file_attr, mtime, size } => {
+            if replace_existing {
+                remove_destination(&destination_path)?;
+            }
+            if let Some(parent) = destination_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|source| RarBackendError::Io { path: parent.to_path_buf(), source })?;
+            }
+            extraction.report.written_bytes += size;
+            extraction.metadata_map.insert(archive_path.clone(), (file_attr, mtime));
+            extraction.selections.insert(archive_path, destination_path);
+        }
+        PlannedEntry::Symlink { destination_path, replace_existing, target, file_attr, mtime } => {
+            extraction.deferred_links.push(DeferredLink {
+                destination_path,
+                replace_existing,
+                kind: DeferredLinkKind::Symlink { target },
+                file_attr,
+                mtime,
+            });
+        }
+        PlannedEntry::Hardlink { destination_path, replace_existing, source_path, file_attr, mtime } => {
+            extraction.deferred_links.push(DeferredLink {
+                destination_path,
+                replace_existing,
+                kind: DeferredLinkKind::Hardlink { source_path },
+                file_attr,
+                mtime,
+            });
+        }
+        PlannedEntry::FileCopy { destination_path, replace_existing, source_path, file_attr, mtime } => {
+            extraction.deferred_links.push(DeferredLink {
+                destination_path,
+                replace_existing,
+                kind: DeferredLinkKind::FileCopy { source_path },
+                file_attr,
+                mtime,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn reject_large_dictionary(entry: &zmanager_unrar::RarEntry) -> Result<(), RarBackendError> {
     if entry.dictionary_size > MAX_LARGE_DICTIONARY_BYTES {
         return Err(RarBackendError::DictionaryTooLarge { path: entry.path.clone(), size: entry.dictionary_size });
     }
-    Ok(())
-}
-
-struct WritableEntryPlan<'a> {
-    destination_path: PathBuf,
-    replace_existing: bool,
-    selections: &'a mut BTreeMap<String, PathBuf>,
-    metadata_map: &'a mut BTreeMap<String, (u32, u64)>,
-    deferred_links: &'a mut Vec<DeferredLink>,
-    deferred_dirs: &'a mut Vec<(PathBuf, u32, u64)>,
-    entry_progress: &'a mut Vec<(String, u64)>,
-    report: &'a mut RarExtractReport,
-}
-
-fn plan_writable_entry(
-    entry: zmanager_unrar::RarEntry,
-    destination: &Path,
-    target_policy: &ExtractionPolicy,
-    mut plan: WritableEntryPlan<'_>,
-) -> Result<(), RarBackendError> {
-    plan.entry_progress.push((entry.path.clone(), entry.unpacked_size));
-
-    match entry.kind {
-        RarEntryKind::Directory => plan_directory_entry(&entry, &mut plan)?,
-        RarEntryKind::File => plan_file_entry(entry, plan)?,
-        RarEntryKind::Symlink => plan_symlink_entry(&entry, plan)?,
-        RarEntryKind::Hardlink | RarEntryKind::FileCopy => {
-            plan_hardlink_like_entry(&entry, destination, target_policy, plan)?;
-        }
-        RarEntryKind::Special => {
-            unreachable!("unsupported RAR special entries are skipped before planning")
-        }
-    }
-    Ok(())
-}
-
-fn plan_directory_entry(
-    entry: &zmanager_unrar::RarEntry,
-    plan: &mut WritableEntryPlan<'_>,
-) -> Result<(), RarBackendError> {
-    if plan.replace_existing {
-        remove_destination(&plan.destination_path)?;
-    }
-    fs::create_dir_all(&plan.destination_path)
-        .map_err(|source| RarBackendError::Io { path: plan.destination_path.clone(), source })?;
-    plan.deferred_dirs.push((plan.destination_path.clone(), entry.file_attr, entry.mtime));
-    plan.report.written_entries += 1;
-    Ok(())
-}
-
-fn plan_file_entry(entry: zmanager_unrar::RarEntry, plan: WritableEntryPlan<'_>) -> Result<(), RarBackendError> {
-    if plan.replace_existing {
-        remove_destination(&plan.destination_path)?;
-    }
-    if let Some(parent) = plan.destination_path.parent() {
-        fs::create_dir_all(parent).map_err(|source| RarBackendError::Io { path: parent.to_path_buf(), source })?;
-    }
-    plan.report.written_bytes += entry.unpacked_size;
-    plan.metadata_map.insert(entry.path.clone(), (entry.file_attr, entry.mtime));
-    plan.selections.insert(entry.path, plan.destination_path);
-    Ok(())
-}
-
-fn plan_symlink_entry(entry: &zmanager_unrar::RarEntry, plan: WritableEntryPlan<'_>) -> Result<(), RarBackendError> {
-    let target = link_target(entry)?;
-    plan.deferred_links.push(DeferredLink {
-        destination_path: plan.destination_path,
-        replace_existing: plan.replace_existing,
-        kind: DeferredLinkKind::Symlink { target: PathBuf::from(target) },
-        file_attr: entry.file_attr,
-        mtime: entry.mtime,
-    });
-    Ok(())
-}
-
-fn plan_hardlink_like_entry(
-    entry: &zmanager_unrar::RarEntry,
-    destination: &Path,
-    target_policy: &ExtractionPolicy,
-    plan: WritableEntryPlan<'_>,
-) -> Result<(), RarBackendError> {
-    let target = link_target(entry)?;
-    let source_path = archive_target_destination(destination, target, target_policy)?;
-    plan.deferred_links.push(DeferredLink {
-        destination_path: plan.destination_path,
-        replace_existing: plan.replace_existing,
-        kind: if entry.kind == RarEntryKind::Hardlink {
-            DeferredLinkKind::Hardlink { source_path }
-        } else {
-            DeferredLinkKind::FileCopy { source_path }
-        },
-        file_attr: entry.file_attr,
-        mtime: entry.mtime,
-    });
     Ok(())
 }
 
@@ -583,7 +668,8 @@ fn materialize_deferred_link(link: &DeferredLink, report: &mut RarExtractReport)
 
     match &link.kind {
         DeferredLinkKind::Symlink { target } => {
-            write_symlink(target, &link.destination_path)?;
+            crate::extract_materialize::write_symlink(target, &link.destination_path)
+                .map_err(|source| RarBackendError::Io { path: link.destination_path.clone(), source })?;
         }
         DeferredLinkKind::Hardlink { source_path } => {
             fs::hard_link(source_path, &link.destination_path)
@@ -651,22 +737,6 @@ fn apply_rar_metadata(path: &Path, file_attr: u32, mtime: u64) -> io::Result<()>
         }
     }
     Ok(())
-}
-
-#[cfg(unix)]
-fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), RarBackendError> {
-    use std::os::unix::fs::symlink;
-
-    symlink(target, destination_path)
-        .map_err(|source| RarBackendError::Io { path: destination_path.to_path_buf(), source })
-}
-
-#[cfg(not(unix))]
-fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), RarBackendError> {
-    Err(RarBackendError::Io {
-        path: destination_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
-    })
 }
 
 fn link_target(entry: &zmanager_unrar::RarEntry) -> Result<&str, RarBackendError> {
@@ -737,11 +807,9 @@ mod tests {
         apply_rar_metadata, materialize_deferred_links,
     };
     #[cfg(unix)]
+    use crate::test_support::TestDir;
+    #[cfg(unix)]
     use std::fs;
-    #[cfg(unix)]
-    use std::path::{Path, PathBuf};
-    #[cfg(unix)]
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[cfg(unix)]
     #[test]
@@ -816,32 +884,6 @@ mod tests {
         assert_eq!(report.written_entries, 2);
         assert_eq!(fs::metadata(&target).unwrap().ino(), fs::metadata(&first).unwrap().ino());
         assert_eq!(fs::metadata(&target).unwrap().ino(), fs::metadata(&middle).unwrap().ino());
-    }
-
-    #[cfg(unix)]
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    #[cfg(unix)]
-    impl TestDir {
-        fn new(label: &str) -> Self {
-            let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{label}-{}-{unique}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-    }
-
-    #[cfg(unix)]
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 
     #[test]

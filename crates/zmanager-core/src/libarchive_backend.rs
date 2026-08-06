@@ -10,7 +10,7 @@ use std::fs::{self, File};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use zmanager_libarchive::{FileType, ReadArchive};
 
 const NUMBERED_VOLUME_EXTENSION_WIDTH: usize = 3;
@@ -592,8 +592,7 @@ fn is_tar_brotli_archive(path: &Path) -> bool {
 }
 
 fn temporary_decoded_tar_path() -> PathBuf {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
-    std::env::temp_dir().join(format!("zmanager-tar-br-{}-{now}.tar", std::process::id()))
+    std::env::temp_dir().join(format!("{}.tar", crate::temp_names::unique_temp_name("zmanager-tar-br")))
 }
 
 /// Returns true when `path` belongs to a standard split ZIP set.
@@ -1093,13 +1092,13 @@ mod tests {
         parse_numbered_archive_volume_name,
     };
     use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
     use std::fs;
     #[cfg(unix)]
     use std::fs::File;
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn lists_and_extracts_tar_archive() {
@@ -1109,7 +1108,7 @@ mod tests {
         let temp = TestDir::new("lists_and_extracts_tar_archive");
         temp.write_file("payload/file.txt", b"hello");
         let archive = temp.path("archive.tar");
-        create_bsdtar_archive(&temp.root, "payload", &archive, "-cf");
+        create_bsdtar_archive(temp.root(), "payload", &archive, "-cf");
 
         let listing = list_archive(&archive).unwrap();
         let report = extract_archive(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
@@ -1289,7 +1288,7 @@ mod tests {
 
         for (archive_name, flags) in formats {
             let archive = temp.path(archive_name);
-            create_bsdtar_archive(&temp.root, "payload", &archive, flags);
+            create_bsdtar_archive(temp.root(), "payload", &archive, flags);
             let listing = list_archive(&archive).unwrap();
 
             assert!(
@@ -1337,7 +1336,10 @@ mod tests {
         let from_first = discover_multi_volume_paths(&temp.path("payload.7z.001"));
         let from_middle = discover_multi_volume_paths(&temp.path("payload.7z.002"));
 
-        assert_eq!(relative_names(&temp.root, &from_first), vec!["payload.7z.001", "payload.7z.002", "payload.7z.003"]);
+        assert_eq!(
+            relative_names(temp.root(), &from_first),
+            vec!["payload.7z.001", "payload.7z.002", "payload.7z.003"]
+        );
         assert_eq!(from_middle, from_first);
     }
 
@@ -1352,7 +1354,7 @@ mod tests {
         let from_middle = discover_multi_volume_paths(&temp.path("payload.zip.002"));
 
         assert_eq!(
-            relative_names(&temp.root, &from_first),
+            relative_names(temp.root(), &from_first),
             vec!["payload.zip.001", "payload.zip.002", "payload.zip.003"]
         );
         assert_eq!(from_middle, from_first);
@@ -1368,7 +1370,7 @@ mod tests {
         let from_final = discover_multi_volume_paths(&temp.path("payload.zip"));
         let from_sidecar = discover_multi_volume_paths(&temp.path("payload.z01"));
 
-        assert_eq!(relative_names(&temp.root, &from_final), vec!["payload.z01", "payload.z02", "payload.zip"]);
+        assert_eq!(relative_names(temp.root(), &from_final), vec!["payload.z01", "payload.z02", "payload.zip"]);
         assert_eq!(from_sidecar, from_final);
         assert!(is_split_zip_path(&temp.path("payload.zip")));
     }
@@ -1531,38 +1533,6 @@ mod tests {
         let mut encoder = brotli::CompressorWriter::new(file, crate::DEFAULT_IO_BUFFER_BYTES, 5, 22);
         encoder.write_all(&tar_bytes).unwrap();
         encoder.flush().unwrap();
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 
     #[test]

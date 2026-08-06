@@ -636,20 +636,19 @@ pub(crate) fn print_entries_json(entries: &[GenericEntry]) {
         }
         let compressed_size = entry.compressed_size.map_or_else(|| "null".to_owned(), |value| value.to_string());
         let mode = entry.mode.map_or_else(|| "null".to_owned(), |value| value.to_string());
-        let modified = serde_json::to_string(&entry.modified).unwrap_or_else(|_| "null".to_owned());
-        let created = serde_json::to_string(&entry.created).unwrap_or_else(|_| "null".to_owned());
-        let accessed = serde_json::to_string(&entry.accessed).unwrap_or_else(|_| "null".to_owned());
-        let encrypted = serde_json::to_string(&entry.encrypted).unwrap_or_else(|_| "null".to_owned());
-        let method = serde_json::to_string(&entry.method).unwrap_or_else(|_| "null".to_owned());
-        let solid = serde_json::to_string(&entry.solid).unwrap_or_else(|_| "null".to_owned());
-        let link_target = serde_json::to_string(&entry.link_target).unwrap_or_else(|_| "null".to_owned());
-        let attributes = serde_json::to_string(&entry.attributes).unwrap_or_else(|_| "null".to_owned());
-        let uid = serde_json::to_string(&entry.uid).unwrap_or_else(|_| "null".to_owned());
-        let gid = serde_json::to_string(&entry.gid).unwrap_or_else(|_| "null".to_owned());
-        let owner = serde_json::to_string(&entry.owner).unwrap_or_else(|_| "null".to_owned());
-        let group = serde_json::to_string(&entry.group).unwrap_or_else(|_| "null".to_owned());
-        let metadata_diagnostics =
-            serde_json::to_string(&entry.metadata_diagnostics).unwrap_or_else(|_| "[]".to_owned());
+        let modified = json_optional_string(entry.modified.as_deref());
+        let created = json_optional_string(entry.created.as_deref());
+        let accessed = json_optional_string(entry.accessed.as_deref());
+        let encrypted = entry.encrypted.map_or_else(|| "null".to_owned(), |value| value.to_string());
+        let method = json_optional_string(entry.method.as_deref());
+        let solid = entry.solid.map_or_else(|| "null".to_owned(), |value| value.to_string());
+        let link_target = json_optional_string(entry.link_target.as_deref());
+        let attributes = json_optional_string(entry.attributes.as_deref());
+        let uid = entry.uid.map_or_else(|| "null".to_owned(), |value| value.to_string());
+        let gid = entry.gid.map_or_else(|| "null".to_owned(), |value| value.to_string());
+        let owner = json_optional_string(entry.owner.as_deref());
+        let group = json_optional_string(entry.group.as_deref());
+        let metadata_diagnostics = json_string_array(&entry.metadata_diagnostics);
         print!(
             "{{\"kind\":\"{}\",\"name\":\"{}\",\"size\":{},\"compressed_size\":{compressed_size},\"mode\":{mode},\"modified\":{modified},\"created\":{created},\"accessed\":{accessed},\"encrypted\":{encrypted},\"method\":{method},\"solid\":{solid},\"link_target\":{link_target},\"attributes\":{attributes},\"uid\":{uid},\"gid\":{gid},\"owner\":{owner},\"group\":{group},\"metadata_diagnostics\":{metadata_diagnostics}}}",
             json_escape(&entry.kind),
@@ -658,6 +657,22 @@ pub(crate) fn print_entries_json(entries: &[GenericEntry]) {
         );
     }
     println!("]}}");
+}
+
+pub(crate) fn json_optional_string(value: Option<&str>) -> String {
+    value.map_or_else(|| "null".to_owned(), |value| format!("\"{}\"", json_escape(value)))
+}
+
+pub(crate) fn json_string_array(values: &[String]) -> String {
+    let mut output = String::from("[");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        let _ = write!(output, "\"{}\"", json_escape(value));
+    }
+    output.push(']');
+    output
 }
 pub(crate) fn tzap_timestamp_string(seconds: i64, nanoseconds: u32) -> Option<String> {
     if seconds == 0 && nanoseconds == 0 {
@@ -707,21 +722,12 @@ pub(crate) fn print_extract_summary(
     archive: &Path,
     destination: &Path,
     outcome: &ExtractOutcome,
-    global: Option<&GlobalOptions>,
+    global: &GlobalOptions,
 ) {
-    match global {
-        Some(global) if global.json => print_extract_summary_json(archive, destination, outcome),
-        Some(global) if global.quiet => {}
-        Some(global) => print_extract_summary_text(outcome, global),
-        None => {
-            println!(
-                "{} extract ok: {} written, {} skipped, {} bytes",
-                outcome.label, outcome.written_entries, outcome.skipped_entries, outcome.written_bytes
-            );
-            for warning in &outcome.warnings {
-                println!("warning\t{warning}");
-            }
-        }
+    if global.json {
+        print_extract_summary_json(archive, destination, outcome);
+    } else if !global.quiet {
+        print_extract_summary_text(outcome, global);
     }
 }
 
@@ -764,7 +770,7 @@ pub(crate) fn print_raw_stream_extract_summary(
             json_escape(&archive.display().to_string()),
             json_escape(format.name()),
             FORMAT_RAW_STREAM,
-            usize::from(report.output_path.is_some()),
+            u64::from(report.output_path.is_some()),
             report.skipped_entries,
             report.written_bytes,
             report.warnings.len()
@@ -1175,6 +1181,10 @@ pub(crate) fn prompt_password(prompt: &str) -> Result<SecretString, ExitCode> {
             Err(ExitCode::FAILURE)
         }
     }
+}
+
+pub(crate) fn prompt_password_and_retry<T>(prompt: &str, retry: impl FnOnce(SecretString) -> T) -> Result<T, ExitCode> {
+    prompt_password(prompt).map(retry)
 }
 
 pub(crate) fn normalize_prompted_password(mut password: String, bytes_read: usize) -> Option<String> {

@@ -305,12 +305,21 @@ pub fn list_entries_with_options(
         list_7z_entries(path, options.password)
     } else if is_tzap_archive_path(path) {
         list_tzap_entries(path, options.password)
-    } else if is_apple_archive_path_browser(path) {
-        list_apple_archive_entries(path, options.password)
-    } else if let Some(format) = raw_stream_backend::detect_raw_stream_format(path) {
-        list_raw_stream_entry(path, format)
     } else {
-        list_libarchive_entries(path)
+        // Apple Archive runs after TZAP and before raw streams, matching the
+        // old always-present chain; the branch is cfg-gated so non-Apple
+        // builds carry no stubs.
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        {
+            if is_apple_archive_path_browser(path) {
+                return list_apple_archive_entries(path, options.password);
+            }
+        }
+        if let Some(format) = raw_stream_backend::detect_raw_stream_format(path) {
+            list_raw_stream_entry(path, format)
+        } else {
+            list_libarchive_entries(path)
+        }
     }
 }
 
@@ -359,42 +368,12 @@ pub fn visit_entries_with_options(
     }
     if is_tzap_archive_path(path) {
         let listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, options.password)?;
-        let mut entries = listing.entries;
+        let mut entries = listing.entries.clone();
         entries.sort_by_key(|e| e.path.matches('/').count());
-        let method_str = if listing.encrypted {
-            match listing.kdf_algo {
-                tzap_core::format::KdfAlgo::Argon2id => Some("Zstd (Argon2id)".to_owned()),
-                tzap_core::format::KdfAlgo::RecipientWrap => Some("Zstd (Recipient)".to_owned()),
-                _ => Some("Zstd (Encrypted)".to_owned()),
-            }
-        } else {
-            Some("Zstd".to_owned())
-        };
 
         let mut visited = 0;
-        for entry in entries {
-            let browser_entry = BrowserEntry {
-                path: entry.path,
-                kind: tzap_entry_kind(entry.kind),
-                size: Some(entry.size),
-                compressed_size: Some(entry.compressed_size),
-                modified: tzap_modified_string(entry.mtime, entry.mtime_nanoseconds),
-                mode: Some(entry.mode),
-                metadata_diagnostics: Vec::new(),
-                encrypted: Some(listing.encrypted),
-                method: method_str.clone(),
-                crc: None,
-                comment: None,
-                created: entry.created.and_then(|(s, ns)| tzap_modified_string(s, ns)),
-                accessed: entry.accessed.and_then(|(s, ns)| tzap_modified_string(s, ns)),
-                solid: Some(true),
-                link_target: entry.link_target,
-                attributes: entry.attributes.map(|a| format!("{a:08X}")),
-                uid: entry.uid.map(|u| u as u32),
-                gid: entry.gid.map(|g| g as u32),
-                owner: entry.uname,
-                group: entry.gname,
-            };
+        for entry in &entries {
+            let browser_entry = tzap_browser_entry(&listing, entry);
             if !visitor(browser_entry) {
                 return Err(ArchiveBrowserError::Cancelled);
             }
@@ -465,30 +444,39 @@ pub fn extract_entry_with_options(
                 allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
             },
         )
-    } else if is_apple_archive_path_browser(archive_path) {
-        extract_apple_archive_entry_browser(
-            archive_path,
-            entry_path,
-            &destination_root,
-            destination,
-            &policy,
-            options.password,
-        )
-    } else if let Some(format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
-        extract_raw_stream_entry(archive_path, format, entry_path, &destination_root, &policy)
     } else {
-        let report = libarchive_backend::extract_archive_entry_with_password(
-            archive_path,
-            entry_path,
-            &destination_root,
-            policy,
-            options.password,
-        )?;
-        Ok(EntryExtractReport {
-            destination_path: destination.join(entry_path),
-            written_bytes: report.written_bytes,
-            metadata_diagnostics: Vec::new(),
-        })
+        // Apple Archive runs after TZAP and before raw streams, matching the
+        // old always-present chain; the branch is cfg-gated so non-Apple
+        // builds carry no stubs.
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        {
+            if is_apple_archive_path_browser(archive_path) {
+                return extract_apple_archive_entry_browser(
+                    archive_path,
+                    entry_path,
+                    &destination_root,
+                    destination,
+                    &policy,
+                    options.password,
+                );
+            }
+        }
+        if let Some(format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
+            extract_raw_stream_entry(archive_path, format, entry_path, &destination_root, &policy)
+        } else {
+            let report = libarchive_backend::extract_archive_entry_with_password(
+                archive_path,
+                entry_path,
+                &destination_root,
+                policy,
+                options.password,
+            )?;
+            Ok(EntryExtractReport {
+                destination_path: destination.join(entry_path),
+                written_bytes: report.written_bytes,
+                metadata_diagnostics: Vec::new(),
+            })
+        }
     }
 }
 
@@ -523,8 +511,7 @@ pub fn preview_entry_with_options(
     entry_path: &str,
     options: BrowserExtractOptions<'_>,
 ) -> Result<PreviewExtractReport, ArchiveBrowserError> {
-    let cleanup_root =
-        std::env::temp_dir().join(format!("{PREVIEW_TEMP_PREFIX}-{}-{}", std::process::id(), unique_preview_id()));
+    let cleanup_root = std::env::temp_dir().join(crate::temp_names::unique_temp_name(PREVIEW_TEMP_PREFIX));
     fs::create_dir_all(&cleanup_root)
         .map_err(|source| ArchiveBrowserError::Io { path: cleanup_root.clone(), source })?;
 
@@ -741,42 +728,7 @@ fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing
 
 fn list_tzap_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, password)?;
-    let method_str = if listing.encrypted {
-        match listing.kdf_algo {
-            tzap_core::format::KdfAlgo::Argon2id => Some("Zstd (Argon2id)".to_owned()),
-            tzap_core::format::KdfAlgo::RecipientWrap => Some("Zstd (Recipient)".to_owned()),
-            _ => Some("Zstd (Encrypted)".to_owned()),
-        }
-    } else {
-        Some("Zstd".to_owned())
-    };
-
-    let entries = listing
-        .entries
-        .into_iter()
-        .map(|entry| BrowserEntry {
-            path: entry.path,
-            kind: tzap_entry_kind(entry.kind),
-            size: Some(entry.size),
-            compressed_size: Some(entry.compressed_size),
-            modified: tzap_modified_string(entry.mtime, entry.mtime_nanoseconds),
-            mode: Some(entry.mode),
-            metadata_diagnostics: vec![],
-            encrypted: Some(listing.encrypted),
-            method: method_str.clone(),
-            crc: None,
-            comment: None,
-            created: entry.created.and_then(|(sec, nsec)| tzap_modified_string(sec, nsec)),
-            accessed: entry.accessed.and_then(|(sec, nsec)| tzap_modified_string(sec, nsec)),
-            solid: Some(true),
-            link_target: entry.link_target,
-            attributes: entry.attributes.map(|attr| format!("{attr:#010X}")),
-            uid: entry.uid.map(|x| x as u32),
-            gid: entry.gid.map(|x| x as u32),
-            owner: entry.uname,
-            group: entry.gname,
-        })
-        .collect();
+    let entries = listing.entries.iter().map(|entry| tzap_browser_entry(&listing, entry)).collect();
     Ok(BrowserListing { entries })
 }
 
@@ -786,43 +738,49 @@ fn list_tzap_directory(
     password: Option<&str>,
 ) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_directory_with_optional_password(path, dir_path, password)?;
-    let method_str = if listing.encrypted {
+    let entries = listing.entries.iter().map(|entry| tzap_browser_entry(&listing, entry)).collect();
+    Ok(BrowserListing { entries })
+}
+
+/// Maps one TZAP index entry into a browser row.
+///
+/// Shared by the progressive visitor, the full listing, and the directory
+/// listing so the three mapping paths cannot drift.
+fn tzap_browser_entry(
+    listing: &crate::tzap_backend::TzapIndexListing,
+    entry: &crate::tzap_backend::TzapIndexEntry,
+) -> BrowserEntry {
+    let method = if listing.encrypted {
         match listing.kdf_algo {
-            tzap_core::format::KdfAlgo::Argon2id => Some("Zstd (Argon2id)".to_owned()),
-            tzap_core::format::KdfAlgo::RecipientWrap => Some("Zstd (Recipient)".to_owned()),
-            _ => Some("Zstd (Encrypted)".to_owned()),
+            tzap_core::format::KdfAlgo::Argon2id => "Zstd (Argon2id)",
+            tzap_core::format::KdfAlgo::RecipientWrap => "Zstd (Recipient)",
+            _ => "Zstd (Encrypted)",
         }
     } else {
-        Some("Zstd".to_owned())
+        "Zstd"
     };
-
-    let entries = listing
-        .entries
-        .into_iter()
-        .map(|entry| BrowserEntry {
-            path: entry.path,
-            kind: tzap_entry_kind(entry.kind),
-            size: Some(entry.size),
-            compressed_size: Some(entry.compressed_size),
-            modified: tzap_modified_string(entry.mtime, entry.mtime_nanoseconds),
-            mode: Some(entry.mode),
-            metadata_diagnostics: vec![],
-            encrypted: Some(listing.encrypted),
-            method: method_str.clone(),
-            crc: None,
-            comment: None,
-            created: entry.created.and_then(|(sec, nsec)| tzap_modified_string(sec, nsec)),
-            accessed: entry.accessed.and_then(|(sec, nsec)| tzap_modified_string(sec, nsec)),
-            solid: Some(true),
-            link_target: entry.link_target,
-            attributes: entry.attributes.map(|attr| format!("{attr:#010X}")),
-            uid: entry.uid.map(|x| x as u32),
-            gid: entry.gid.map(|x| x as u32),
-            owner: entry.uname,
-            group: entry.gname,
-        })
-        .collect();
-    Ok(BrowserListing { entries })
+    BrowserEntry {
+        path: entry.path.clone(),
+        kind: tzap_entry_kind(entry.kind),
+        size: Some(entry.size),
+        compressed_size: Some(entry.compressed_size),
+        modified: tzap_modified_string(entry.mtime, entry.mtime_nanoseconds),
+        mode: Some(entry.mode),
+        metadata_diagnostics: Vec::new(),
+        encrypted: Some(listing.encrypted),
+        method: Some(method.to_owned()),
+        crc: None,
+        comment: None,
+        created: entry.created.and_then(|(sec, nsec)| tzap_modified_string(sec, nsec)),
+        accessed: entry.accessed.and_then(|(sec, nsec)| tzap_modified_string(sec, nsec)),
+        solid: Some(true),
+        link_target: entry.link_target.clone(),
+        attributes: entry.attributes.map(|attr| format!("{attr:#010X}")),
+        uid: entry.uid.map(|uid| uid as u32),
+        gid: entry.gid.map(|gid| gid as u32),
+        owner: entry.uname.clone(),
+        group: entry.gname.clone(),
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -830,14 +788,13 @@ fn is_apple_archive_path_browser(path: &Path) -> bool {
     apple_archive_backend::is_apple_archive_path(path)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn is_apple_archive_path_browser(_path: &Path) -> bool {
-    false
-}
-
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = apple_archive_backend::list_apple_archive(path, password)?;
+    // The Apple Archive listing does not expose an encryption flag (the
+    // native reader decrypts transparently when a password is supplied), so
+    // the `.aea` extension is the only available signal. Revisit if the
+    // backend starts reporting encryption on the listing.
     let encrypted = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("aea"));
     let entries = listing
         .entries
@@ -868,11 +825,6 @@ fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<Bro
     Ok(BrowserListing { entries })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn list_apple_archive_entries(_path: &Path, _password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
-    unreachable!()
-}
-
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn extract_apple_archive_entry_browser(
     archive_path: &Path,
@@ -894,18 +846,6 @@ fn extract_apple_archive_entry_browser(
         written_bytes: report.written_bytes,
         metadata_diagnostics: Vec::new(),
     })
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn extract_apple_archive_entry_browser(
-    _archive_path: &Path,
-    _entry_path: &str,
-    _destination_root: &Path,
-    _destination: &Path,
-    _policy: &ExtractionPolicy,
-    _password: Option<&str>,
-) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    unreachable!()
 }
 
 fn extract_tzap_entry(
@@ -961,10 +901,11 @@ fn extract_tzap_entry(
                 metadata_diagnostics: report.metadata_diagnostics,
             })
         }
-        ExtractionEntryKind::Symlink { .. }
-        | ExtractionEntryKind::Hardlink { .. }
-        | ExtractionEntryKind::Device
-        | ExtractionEntryKind::Special => Err(ArchiveBrowserError::UnsupportedEntry {
+        // Unreachable: tzap_extraction_kind rejects link-like and special
+        // TZAP entries before planning, so no such kind reaches this match.
+        // Kept as a graceful fallback rather than a panic so a future change
+        // to the kind mapping cannot turn hostile input into a crash.
+        _ => Err(ArchiveBrowserError::UnsupportedEntry {
             path: safety_entry.archive_path,
             kind: BrowserEntryKind::Special,
         }),
@@ -1165,10 +1106,8 @@ fn zip_extraction_kind<R: Read>(
     }
     if file.is_symlink() {
         let mut target = String::new();
-        file.read_to_string(&mut target).map_err(|_| ArchiveBrowserError::UnsupportedEntry {
-            path: file.name().to_owned(),
-            kind: BrowserEntryKind::Symlink,
-        })?;
+        file.read_to_string(&mut target)
+            .map_err(|source| ArchiveBrowserError::Io { path: PathBuf::from(file.name()), source })?;
         return Ok(ExtractionEntryKind::Symlink { target: PathBuf::from(target) });
     }
     Ok(ExtractionEntryKind::File)
@@ -1315,10 +1254,6 @@ fn is_7z_archive(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("7z"))
 }
 
-fn unique_preview_id() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1332,14 +1267,15 @@ mod tests {
     use crate::secrets::SecretString;
     use crate::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
     use crate::tar_zst_backend::{TarZstdCreateOptions, create_tar_zst_from_path};
+    use crate::test_support::TestDir;
     use crate::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
     use crate::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
     use bzip2::Compression;
     use bzip2::write::BzEncoder;
     use std::fs::{self, File};
     use std::io::{self, Write};
-    use std::path::{Path, PathBuf};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::path::Path;
+    use std::time::{Duration, UNIX_EPOCH};
     use tar::{Builder, Header};
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
@@ -1413,7 +1349,7 @@ mod tests {
         let archive = temp.path("archive.tzap");
 
         let manifest = ArchiveManifest {
-            root: temp.root.clone(),
+            root: temp.root().to_path_buf(),
             entries: vec![ManifestEntry {
                 archive_path: "payload.txt".to_owned(),
                 source_path: payload,
@@ -1646,39 +1582,6 @@ mod tests {
         encoder.write_all(contents).unwrap();
         encoder.finish().unwrap();
     }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
     #[test]
     fn list_tzap_directory_pages_virtual_subdirectories() {
         let temp = TestDir::new("list-tzap-directory");
@@ -1687,7 +1590,7 @@ mod tests {
         let archive = temp.path("test.tzap");
 
         let manifest = ArchiveManifest {
-            root: temp.root.clone(),
+            root: temp.root().to_path_buf(),
             entries: vec![ManifestEntry {
                 archive_path: "payload.txt".to_owned(),
                 source_path: payload,

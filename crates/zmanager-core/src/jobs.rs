@@ -540,20 +540,24 @@ impl<'a> JobContext<'a> {
         self.sink.emit(event);
     }
 
-    /// Emits an entry-started event.
+    /// Emits an entry-started event carrying the entry's known byte size.
+    ///
+    /// Backends pass real sizes where they know them (for example the TZAP
+    /// modules), so the event carries them rather than discarding them.
     pub fn entry_started(&mut self, path: impl Into<String>, bytes: Option<u64>) {
-        let _ = bytes;
         let path = path.into();
+        self.emit(JobEvent::EntryStarted { path: path.clone(), bytes });
         if let Some(batch) = self.progress.record_activity(Some(&path), 0, 0) {
             self.emit_bytes_processed_batch(batch);
         }
     }
 
-    /// Emits an entry-finished event.
+    /// Emits an entry-finished event carrying the processed byte count and
+    /// accounts one completed entry, matching the backends' own emit paths.
     pub fn entry_finished(&mut self, path: impl Into<String>, bytes: u64) {
-        let _ = bytes;
         self.total_entries_processed = self.total_entries_processed.saturating_add(1);
         let path = path.into();
+        self.emit(JobEvent::EntryFinished { path: path.clone(), bytes });
         if let Some(batch) = self.progress.record_activity(Some(&path), 0, 1) {
             self.emit_bytes_processed_batch(batch);
         }
@@ -1026,24 +1030,30 @@ pub fn run_rar_extract_job_with_password_and_policy(
         });
     }
 
-    let listing = rar_backend::list_rar_with_password(&archive_path, password).ok();
-    let total_bytes = listing.as_ref().map(|listing| listing.entries.iter().map(|entry| entry.size).sum());
+    let listing = match rar_backend::list_rar_with_password(&archive_path, password) {
+        Ok(listing) => listing,
+        Err(error) => {
+            // The listing is what determines the extraction entry set; a
+            // listing failure (bad password, corrupt archive) must surface
+            // instead of silently falling back to a full extraction.
+            sink.emit(JobEvent::Started { kind: JobKind::RarExtract, total_bytes: None });
+            sink.emit(JobEvent::Failed { message: error.to_string() });
+            return Err(error);
+        }
+    };
+    let total_bytes: Option<u64> = Some(listing.entries.iter().map(|entry| entry.size).sum());
     sink.emit(JobEvent::Started { kind: JobKind::RarExtract, total_bytes });
 
+    let entries = listing.entries.into_iter().map(rar_backend::RarListEntry::into_unrar_entry).collect::<Vec<_>>();
     let mut context = JobContext::new_with_progress_total(token, sink, total_bytes);
-    let result = if let Some(listing) = listing {
-        let entries = listing.entries.into_iter().map(rar_backend::RarListEntry::into_unrar_entry).collect::<Vec<_>>();
-        rar_backend::extract_rar_entries_with_password_and_context(
-            archive_path,
-            destination,
-            policy,
-            password,
-            entries,
-            &mut context,
-        )
-    } else {
-        rar_backend::extract_rar_with_password_and_context(archive_path, destination, policy, password, &mut context)
-    };
+    let result = rar_backend::extract_rar_entries_with_password_and_context(
+        archive_path,
+        destination,
+        policy,
+        password,
+        entries,
+        &mut context,
+    );
     context.flush_progress();
     finish_rar_extract_result(result, sink)
 }
@@ -1488,6 +1498,7 @@ mod tests {
         run_tzap_extract_job_with_password_and_policy, run_zip_create_job_from_sources_with_plan_options,
         run_zip_extract_job,
     };
+    use crate::test_support::TestDir;
 
     #[test]
     fn progress_projection_is_monotonic_bounded_and_terminal_is_immutable() {
@@ -1555,8 +1566,7 @@ mod tests {
     use bzip2::write::BzEncoder;
     use std::fs;
     use std::io::Write as _;
-    use std::path::{Path, PathBuf};
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn progress_coalescer_flushes_entry_and_time_thresholds_without_sleeping() {
@@ -2311,37 +2321,5 @@ mod tests {
                 _ => None,
             })
             .collect()
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
     }
 }

@@ -278,15 +278,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
     /// Creates a planner for one extraction destination.
     #[must_use]
     pub fn new(destination_root: impl Into<PathBuf>, policy: ExtractionPolicy) -> Self {
-        let destination_root = lexically_normalize(&destination_root.into());
-
-        Self {
-            destination_root,
-            policy,
-            seen_paths: HashMap::new(),
-            planned_expanded_bytes: 0,
-            overwrite_resolver: None,
-        }
+        Self::with_overwrite_resolver(destination_root, policy, None)
     }
 
     /// Creates a planner that can resolve [`OverwritePolicy::Ask`] conflicts.
@@ -296,15 +288,20 @@ impl<'a> ExtractionSafetyPlanner<'a> {
         policy: ExtractionPolicy,
         overwrite_resolver: &'a mut dyn OverwriteResolver,
     ) -> Self {
+        Self::with_overwrite_resolver(destination_root, policy, Some(overwrite_resolver))
+    }
+
+    /// Shared constructor: normalizes the destination root and wires up the
+    /// optional overwrite resolver, so both public constructors behave
+    /// identically.
+    fn with_overwrite_resolver(
+        destination_root: impl Into<PathBuf>,
+        policy: ExtractionPolicy,
+        overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
+    ) -> Self {
         let destination_root = lexically_normalize(&destination_root.into());
 
-        Self {
-            destination_root,
-            policy,
-            seen_paths: HashMap::new(),
-            planned_expanded_bytes: 0,
-            overwrite_resolver: Some(overwrite_resolver),
-        }
+        Self { destination_root, policy, seen_paths: HashMap::new(), planned_expanded_bytes: 0, overwrite_resolver }
     }
 
     /// Validates one archive entry before extraction.
@@ -577,7 +574,12 @@ impl<'a> ExtractionSafetyPlanner<'a> {
     }
 }
 
-fn case_collision_key(path: &str) -> String {
+/// Case-folding collision key shared by extraction planning and manifest
+/// planning. The Unicode-aware lowercase mapping matches what
+/// case-insensitive file systems (APFS, NTFS, FAT) compare at a level far
+/// closer than ASCII-only folding, so both planning passes agree on which
+/// names would collide on such systems.
+pub(crate) fn case_collision_key(path: &str) -> String {
     path.chars().flat_map(char::to_lowercase).collect()
 }
 
@@ -772,6 +774,10 @@ fn reject_raw_path_hazards(raw_path: &str) -> Result<(), ExtractionSafetyError> 
 }
 
 fn has_windows_prefix(path: &str) -> bool {
+    // The drive-letter check is deliberately conservative: it rejects any
+    // leading `X:` path component, including ones like `a:b` that are not
+    // real Windows prefixes. Rejecting a few harmless archive paths is fine;
+    // accepting a real Windows prefix is not.
     let bytes = path.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         return true;
@@ -804,6 +810,11 @@ fn archive_path_selected(path: &str, includes: &[String], excludes: &[String]) -
 }
 
 fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
+    // A trailing `/**` matches the directory itself and everything below it:
+    // `a/**` matches `a/`, `a/b`, `a/b/c`. Because the prefix is trimmed to
+    // just `a/`, a pattern like `a/**/**` degrades to the same prefix match
+    // and behaves like `a/**` — matching `a/` and everything below — which is
+    // the conservative interpretation for a redundant glob.
     pattern == path
         || (pattern.ends_with("/**") && path.starts_with(pattern.trim_end_matches("**")))
         || wildcard_matches(pattern.as_bytes(), path.as_bytes())
@@ -939,9 +950,9 @@ mod tests {
         OverwriteResolver, UnsafeFilePolicy, deferred_link_dependency_order,
         next_available_destination_path_with_budget, normalize_archive_path, prepare_destination_root,
     };
+    use crate::test_support::TestDir;
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::PathBuf;
 
     #[test]
     fn deferred_link_order_is_linearized_and_cycles_are_rejected() {
@@ -1291,38 +1302,6 @@ mod tests {
         fn decide(&mut self, conflict: &OverwriteConflict) -> OverwriteDecision {
             assert_eq!(conflict.archive_path, "file.txt");
             self.0
-        }
-    }
-
-    struct TestDir {
-        root: PathBuf,
-    }
-
-    impl TestDir {
-        fn new(name: &str) -> Self {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            let root = std::env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-            fs::create_dir_all(&root).unwrap();
-
-            Self { root }
-        }
-
-        fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-            self.root.join(relative)
-        }
-
-        fn write_file(&self, relative: impl AsRef<Path>, contents: &[u8]) {
-            let path = self.path(relative);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(path, contents).unwrap();
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
         }
     }
 }

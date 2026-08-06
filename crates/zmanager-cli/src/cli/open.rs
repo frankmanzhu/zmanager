@@ -16,7 +16,7 @@ use crate::cli::planning::{
 use crate::cli::usage::{
     LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json,
     print_entries_tree, print_error_line, print_help_stdout, print_manifest, print_success_line, print_warning_stderr,
-    prompt_password, tzap_timestamp_string, usage_failure, wants_help,
+    prompt_password_and_retry, tzap_timestamp_string, usage_failure, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::fs;
@@ -126,7 +126,7 @@ fn run_list_request(request: &ListRequest, global: &GlobalOptions) -> ExitCode {
         print_error_line(global, format_args!("list failed: AAR archives are not encrypted; remove --password-stdin"));
         return ExitCode::from(2);
     }
-    let password = match read_optional_password_stdin(request.password_stdin, "archive", global) {
+    let password = match read_optional_password_stdin(request.password_stdin, global) {
         Ok(password) => password,
         Err(code) => return code,
     };
@@ -322,7 +322,7 @@ pub(crate) fn run_test_request(request: &TestRequest, global: &GlobalOptions) ->
         print_error_line(global, format_args!("test failed: AAR archives are not encrypted; remove --password-stdin"));
         return ExitCode::from(2);
     }
-    let password = match read_optional_password_stdin(request.password_stdin, "archive", global) {
+    let password = match read_optional_password_stdin(request.password_stdin, global) {
         Ok(password) => password,
         Err(code) => return code,
     };
@@ -807,11 +807,12 @@ fn run_zip_test(
                 print_error_line(global, format_args!("zip test failed: password required and prompts are disabled"));
                 return ExitCode::from(2);
             }
-            let password = match prompt_password("ZIP password: ") {
-                Ok(password) => password,
-                Err(code) => return code,
-            };
-            run_zip_test(archive, Some(password.expose_secret()), includes, excludes, global)
+            match prompt_password_and_retry("ZIP password: ", |password| {
+                run_zip_test(archive, Some(password.expose_secret()), includes, excludes, global)
+            }) {
+                Ok(result) => result,
+                Err(code) => code,
+            }
         }
         Err(error) => {
             print_error_line(global, format_args!("zip test failed: {error}"));
@@ -909,7 +910,6 @@ fn run_plan_request(request: &PlanRequest, global: &GlobalOptions) -> ExitCode {
         }
     }
 }
-#[allow(clippy::too_many_lines)]
 fn list_entries_with_password(
     archive: &str,
     password: Option<&str>,
@@ -917,45 +917,11 @@ fn list_entries_with_password(
 ) -> Result<Vec<GenericEntry>, String> {
     if is_zip_family_archive(archive) && !is_split_zip_archive_path(archive) {
         zmanager_core::zip_backend::list_zip(archive)
-            .map(|listing| {
-                listing
-                    .entries
-                    .into_iter()
-                    .map(|entry| GenericEntry {
-                        kind: match entry.kind {
-                            zmanager_core::zip_backend::ZipEntryKind::File => "file",
-                            zmanager_core::zip_backend::ZipEntryKind::Directory => "directory",
-                            zmanager_core::zip_backend::ZipEntryKind::Symlink => "symlink",
-                        }
-                        .to_owned(),
-                        name: entry.name,
-                        size: entry.size,
-                        compressed_size: Some(entry.compressed_size),
-                        ..GenericEntry::default()
-                    })
-                    .collect()
-            })
+            .map(|listing| map_generic_entries(listing.entries, zip_list_entry_to_generic))
             .map_err(|error| error.to_string())
     } else if is_7z_archive(archive) {
         zmanager_core::sevenz_backend::list_7z(archive, password)
-            .map(|listing| {
-                listing
-                    .entries
-                    .into_iter()
-                    .map(|entry| GenericEntry {
-                        kind: match entry.kind {
-                            zmanager_core::sevenz_backend::SevenZEntryKind::File => "file",
-                            zmanager_core::sevenz_backend::SevenZEntryKind::Directory => "directory",
-                            zmanager_core::sevenz_backend::SevenZEntryKind::AntiItem => "anti-item",
-                        }
-                        .to_owned(),
-                        name: entry.name,
-                        size: entry.size,
-                        compressed_size: Some(entry.compressed_size),
-                        ..GenericEntry::default()
-                    })
-                    .collect()
-            })
+            .map(|listing| map_generic_entries(listing.entries, seven_z_list_entry_to_generic))
             .map_err(|error| error.to_string())
     } else if let Some(format) = zmanager_core::raw_stream_backend::detect_raw_stream_format(archive) {
         let name = zmanager_core::raw_stream_backend::output_name_for_raw_stream(archive, format)
@@ -974,79 +940,108 @@ fn list_entries_with_password(
         listing
             .map(|listing| {
                 let encrypted = listing.encrypted;
-                listing
-                    .entries
-                    .into_iter()
-                    .map(|entry| GenericEntry {
-                        kind: match entry.kind {
-                            zmanager_core::tzap_backend::TzapEntryKind::File => "file",
-                            zmanager_core::tzap_backend::TzapEntryKind::Directory => "directory",
-                            zmanager_core::tzap_backend::TzapEntryKind::Symlink => "symlink",
-                            zmanager_core::tzap_backend::TzapEntryKind::Hardlink => "hardlink",
-                            zmanager_core::tzap_backend::TzapEntryKind::CharacterDevice => "character-device",
-                            zmanager_core::tzap_backend::TzapEntryKind::BlockDevice => "block-device",
-                            zmanager_core::tzap_backend::TzapEntryKind::Fifo => "fifo",
-                        }
-                        .to_owned(),
-                        name: entry.path,
-                        size: entry.size,
-                        compressed_size: Some(entry.compressed_size),
-                        mode: Some(entry.mode),
-                        modified: tzap_timestamp_string(entry.mtime, entry.mtime_nanoseconds),
-                        created: entry
-                            .created
-                            .and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
-                        accessed: entry
-                            .accessed
-                            .and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
-                        encrypted: Some(encrypted),
-                        method: Some("Zstd".to_owned()),
-                        solid: Some(true),
-                        link_target: entry.link_target,
-                        attributes: entry.attributes.map(|value| format!("{value:#010X}")),
-                        uid: entry.uid.map(|x| x as u32),
-                        gid: entry.gid.map(|x| x as u32),
-                        owner: entry.uname,
-                        group: entry.gname,
-                        metadata_diagnostics: vec![],
-                    })
-                    .collect()
+                map_generic_entries(listing.entries, |entry| tzap_index_entry_to_generic(entry, encrypted))
             })
             .map_err(|error| error.to_string())
     } else if is_apple_archive(archive) {
         list_apple_archive_cli(archive, password)
     } else if is_rar_archive(archive) && password.is_some() {
         zmanager_core::rar_backend::list_rar_with_password(archive, password)
-            .map(|listing| {
-                listing
-                    .entries
-                    .into_iter()
-                    .map(|entry| GenericEntry {
-                        kind: format!("{:?}", entry.kind).to_lowercase(),
-                        name: entry.path,
-                        size: entry.size,
-                        compressed_size: None,
-                        ..GenericEntry::default()
-                    })
-                    .collect()
-            })
+            .map(|listing| map_generic_entries(listing.entries, rar_list_entry_to_generic))
             .map_err(|error| error.to_string())
     } else {
         zmanager_core::libarchive_backend::list_archive_with_password(archive, password)
-            .map(|listing| {
-                listing
-                    .entries
-                    .into_iter()
-                    .map(|entry| GenericEntry {
-                        kind: format!("{:?}", entry.kind).to_lowercase(),
-                        name: entry.path,
-                        size: u64::try_from(entry.size).unwrap_or(0),
-                        compressed_size: None,
-                        ..GenericEntry::default()
-                    })
-                    .collect()
-            })
+            .map(|listing| map_generic_entries(listing.entries, libarchive_list_entry_to_generic))
             .map_err(|error| error.to_string())
+    }
+}
+
+fn map_generic_entries<Entry>(
+    entries: impl IntoIterator<Item = Entry>,
+    map: impl Fn(Entry) -> GenericEntry,
+) -> Vec<GenericEntry> {
+    entries.into_iter().map(map).collect()
+}
+
+fn zip_list_entry_to_generic(entry: zmanager_core::zip_backend::ZipListEntry) -> GenericEntry {
+    GenericEntry {
+        kind: match entry.kind {
+            zmanager_core::zip_backend::ZipEntryKind::File => "file",
+            zmanager_core::zip_backend::ZipEntryKind::Directory => "directory",
+            zmanager_core::zip_backend::ZipEntryKind::Symlink => "symlink",
+        }
+        .to_owned(),
+        name: entry.name,
+        size: entry.size,
+        compressed_size: Some(entry.compressed_size),
+        ..GenericEntry::default()
+    }
+}
+
+fn seven_z_list_entry_to_generic(entry: zmanager_core::sevenz_backend::SevenZListEntry) -> GenericEntry {
+    GenericEntry {
+        kind: match entry.kind {
+            zmanager_core::sevenz_backend::SevenZEntryKind::File => "file",
+            zmanager_core::sevenz_backend::SevenZEntryKind::Directory => "directory",
+            zmanager_core::sevenz_backend::SevenZEntryKind::AntiItem => "anti-item",
+        }
+        .to_owned(),
+        name: entry.name,
+        size: entry.size,
+        compressed_size: Some(entry.compressed_size),
+        ..GenericEntry::default()
+    }
+}
+
+fn tzap_index_entry_to_generic(entry: zmanager_core::tzap_backend::TzapIndexEntry, encrypted: bool) -> GenericEntry {
+    GenericEntry {
+        kind: match entry.kind {
+            zmanager_core::tzap_backend::TzapEntryKind::File => "file",
+            zmanager_core::tzap_backend::TzapEntryKind::Directory => "directory",
+            zmanager_core::tzap_backend::TzapEntryKind::Symlink => "symlink",
+            zmanager_core::tzap_backend::TzapEntryKind::Hardlink => "hardlink",
+            zmanager_core::tzap_backend::TzapEntryKind::CharacterDevice => "character-device",
+            zmanager_core::tzap_backend::TzapEntryKind::BlockDevice => "block-device",
+            zmanager_core::tzap_backend::TzapEntryKind::Fifo => "fifo",
+        }
+        .to_owned(),
+        name: entry.path,
+        size: entry.size,
+        compressed_size: Some(entry.compressed_size),
+        mode: Some(entry.mode),
+        modified: tzap_timestamp_string(entry.mtime, entry.mtime_nanoseconds),
+        created: entry.created.and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
+        accessed: entry.accessed.and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
+        encrypted: Some(encrypted),
+        method: Some("Zstd".to_owned()),
+        solid: Some(true),
+        link_target: entry.link_target,
+        attributes: entry.attributes.map(|value| format!("{value:#010X}")),
+        uid: entry.uid.map(|x| x as u32),
+        gid: entry.gid.map(|x| x as u32),
+        owner: entry.uname,
+        group: entry.gname,
+        metadata_diagnostics: vec![],
+    }
+}
+
+fn rar_list_entry_to_generic(entry: zmanager_core::rar_backend::RarListEntry) -> GenericEntry {
+    GenericEntry {
+        kind: format!("{:?}", entry.kind).to_lowercase(),
+        name: entry.path,
+        size: entry.size,
+        compressed_size: None,
+        ..GenericEntry::default()
+    }
+}
+
+fn libarchive_list_entry_to_generic(entry: zmanager_core::libarchive_backend::LibarchiveListEntry) -> GenericEntry {
+    GenericEntry {
+        kind: format!("{:?}", entry.kind).to_lowercase(),
+        name: entry.path,
+        size: u64::try_from(entry.size).unwrap_or(0),
+        compressed_size: None,
+        ..GenericEntry::default()
     }
 }
 
@@ -1063,27 +1058,28 @@ pub(crate) fn entry_selected(path: &str, includes: &[String], excludes: &[String
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn list_apple_archive_cli(archive: &str, password: Option<&str>) -> Result<Vec<GenericEntry>, String> {
     zmanager_core::apple_archive_backend::list_apple_archive(archive, password)
-        .map(|listing| {
-            listing
-                .entries
-                .into_iter()
-                .map(|entry| GenericEntry {
-                    kind: match entry.kind {
-                        zmanager_core::apple_archive_backend::AppleArchiveEntryKind::File => "file",
-                        zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Directory => "directory",
-                        zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Symlink => "symlink",
-                        zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Device
-                        | zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Special => "special",
-                    }
-                    .to_owned(),
-                    name: entry.path,
-                    size: entry.size.unwrap_or(0),
-                    compressed_size: None,
-                    ..GenericEntry::default()
-                })
-                .collect()
-        })
+        .map(|listing| map_generic_entries(listing.entries, apple_archive_list_entry_to_generic))
         .map_err(|error| error.to_string())
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn apple_archive_list_entry_to_generic(
+    entry: zmanager_core::apple_archive_backend::AppleArchiveListEntry,
+) -> GenericEntry {
+    GenericEntry {
+        kind: match entry.kind {
+            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::File => "file",
+            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Directory => "directory",
+            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Symlink => "symlink",
+            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Device
+            | zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Special => "special",
+        }
+        .to_owned(),
+        name: entry.path,
+        size: entry.size.unwrap_or(0),
+        compressed_size: None,
+        ..GenericEntry::default()
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]

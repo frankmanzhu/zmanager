@@ -1,9 +1,11 @@
-use std::env;
+mod common;
+
+use common::*;
+
 use std::fs::{self, File};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const PAYLOAD: &[u8] = b"zmanager compatibility payload\n";
 
@@ -18,7 +20,7 @@ fn competitor_zip_family_formats_extract_with_zm() {
     for extension in ["zip", "zipx", "jar", "war", "ipa", "apk", "appx", "xpi"] {
         let archive = temp.path(format!("payload.{extension}"));
         let create =
-            Command::new(&zip).current_dir(&temp.root).arg("-qr").arg(&archive).arg("project").output().unwrap();
+            Command::new(&zip).current_dir(temp.root()).arg("-qr").arg(&archive).arg("project").output().unwrap();
         assert_success(&format!("zip creates .{extension}"), &create);
 
         assert_zm_extracts_payload(&format!("zip-created .{extension}"), &archive, PAYLOAD);
@@ -44,7 +46,7 @@ fn competitor_zipx_advanced_methods_extract_with_zm() {
     ] {
         let archive = temp.path(format!("payload-{label}.zipx"));
         let create = Command::new(&sevenzz)
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .arg("a")
             .arg("-tzip")
             .arg(format!("-mm={method}"))
@@ -71,7 +73,7 @@ fn competitor_zip_sfx_style_exe_extracts_with_zm() {
     create_project_payload(&temp);
     let archive = temp.path("payload.exe");
 
-    let create = Command::new(zip).current_dir(&temp.root).arg("-qr").arg(&archive).arg("project").output().unwrap();
+    let create = Command::new(zip).current_dir(temp.root()).arg("-qr").arg(&archive).arg("project").output().unwrap();
     assert_success("zip creates .exe-shaped archive", &create);
 
     assert_zm_extracts_payload("zip-created .exe-shaped archive", &archive, PAYLOAD);
@@ -88,7 +90,7 @@ fn competitor_rar_formats_extract_with_zm() {
     for (label, switch, filename) in [("rar5", "-ma5", "payload-rar5.rar"), ("rar4", "-ma4", "payload-rar4.rar")] {
         let archive = temp.path(filename);
         let create = Command::new(&rar)
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .arg("a")
             .arg("-idq")
             .arg(switch)
@@ -119,7 +121,7 @@ fn competitor_rar_multipart_formats_extract_with_zm() {
     {
         let archive = temp.path(filename);
         let create = Command::new(&rar)
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .arg("a")
             .arg("-idq")
             .arg(switch)
@@ -158,7 +160,7 @@ fn competitor_rar_passworded_formats_extract_with_zm() {
     ] {
         let archive = temp.path(filename);
         let create = Command::new(&rar)
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .arg("a")
             .arg("-idq")
             .arg("-ma5")
@@ -196,7 +198,7 @@ fn competitor_rar_passworded_links_extract_safely_with_zm() {
 
     let archive = temp.path("payload-rar5-links.rar");
     let create = Command::new(&rar)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("a")
         .arg("-idq")
         .arg("-ma5")
@@ -237,7 +239,7 @@ fn competitor_rar_passworded_file_references_extract_with_zm() {
 
     let archive = temp.path("payload-rar5-file-reference.rar");
     let create = Command::new(&rar)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("a")
         .arg("-idq")
         .arg("-ma5")
@@ -289,7 +291,7 @@ fn competitor_rar_passworded_unsafe_link_is_rejected_by_zm() {
 
     let archive = temp.path("payload-rar5-unsafe-link.rar");
     let create = Command::new(&rar)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("a")
         .arg("-idq")
         .arg("-ma5")
@@ -339,7 +341,7 @@ fn competitor_rar_passworded_unicode_paths_extract_with_zm() {
 
     let archive = temp.path("payload-rar5-unicode.rar");
     let create = Command::new(&rar)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("a")
         .arg("-idq")
         .arg("-ma5")
@@ -383,7 +385,7 @@ fn competitor_rar_passworded_large_dictionary_is_rejected_by_zm() {
 
     let archive = temp.path("payload-rar5-large-dict.rar");
     let create = Command::new(&rar)
-        .current_dir(&temp.root)
+        .current_dir(temp.root())
         .arg("a")
         .arg("-idq")
         .arg("-ma5")
@@ -443,7 +445,7 @@ fn competitor_tar_cpio_pax_formats_extract_with_zm() {
         if let Some(format) = format {
             command.arg("--format").arg(format);
         }
-        let create = command.arg("-C").arg(&temp.root).arg("project").output().unwrap();
+        let create = command.arg("-C").arg(temp.root()).arg("project").output().unwrap();
         assert_success(&format!("bsdtar creates {label}"), &create);
 
         assert_zm_extracts_payload(&format!("bsdtar-created {label}"), &archive, PAYLOAD);
@@ -465,7 +467,7 @@ fn competitor_keka_style_cpgz_and_spk_extract_with_zm() {
         .arg("-cf")
         .arg(&cpio_archive)
         .arg("-C")
-        .arg(&temp.root)
+        .arg(temp.root())
         .arg("project")
         .output()
         .unwrap();
@@ -479,7 +481,7 @@ fn competitor_keka_style_cpgz_and_spk_extract_with_zm() {
 
     let spk_archive = temp.path("payload.spk");
     let create_spk =
-        Command::new(&bsdtar).arg("-cf").arg(&spk_archive).arg("-C").arg(&temp.root).arg("project").output().unwrap();
+        Command::new(&bsdtar).arg("-cf").arg(&spk_archive).arg("-C").arg(temp.root()).arg("project").output().unwrap();
     assert_success("bsdtar creates spk-shaped tar", &create_spk);
     assert_zm_extracts_payload("tar-shaped .spk", &spk_archive, PAYLOAD);
 }
@@ -496,7 +498,7 @@ fn competitor_compressed_tar_filters_extract_with_zm() {
 
     let tar_archive = temp.path("payload.tar");
     let create_tar =
-        Command::new(&bsdtar).arg("-cf").arg(&tar_archive).arg("-C").arg(&temp.root).arg("project").output().unwrap();
+        Command::new(&bsdtar).arg("-cf").arg(&tar_archive).arg("-C").arg(temp.root()).arg("project").output().unwrap();
     assert_success("bsdtar creates source tar", &create_tar);
 
     if create_stdout_archive_with_optional_tool(
@@ -778,7 +780,7 @@ fn competitor_iso_xar_cab_formats_extract_with_zm() {
     if let Some(xar) = find_on_path("xar") {
         let archive = temp.path("payload.xar");
         let create =
-            Command::new(xar).current_dir(&temp.root).arg("-cf").arg(&archive).arg("project").output().unwrap();
+            Command::new(xar).current_dir(temp.root()).arg("-cf").arg(&archive).arg("project").output().unwrap();
         assert_success("xar creates xar", &create);
         assert_zm_extracts_payload("xar-created xar", &archive, PAYLOAD);
     }
@@ -786,7 +788,7 @@ fn competitor_iso_xar_cab_formats_extract_with_zm() {
     if let Some(gcab) = find_on_path("gcab") {
         let archive = temp.path("payload.cab");
         let create = Command::new(gcab)
-            .current_dir(&temp.root)
+            .current_dir(temp.root())
             .arg("-c")
             .arg(&archive)
             .arg("project/file.txt")
@@ -1048,46 +1050,4 @@ fn tree_contains_any_file(root: &Path) -> bool {
     }
 
     false
-}
-
-fn assert_success(label: &str, output: &std::process::Output) {
-    assert!(
-        output.status.success(),
-        "{label} failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn find_on_path(binary: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
-    env::split_paths(&path).map(|dir| dir.join(binary)).find(|candidate| candidate.is_file())
-}
-
-fn zm_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_zm"))
-}
-
-struct TestDir {
-    root: PathBuf,
-}
-
-impl TestDir {
-    fn new(name: &str) -> Self {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = env::temp_dir().join(format!("zmanager-{name}-{}-{now}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-
-        Self { root }
-    }
-
-    fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
-        self.root.join(relative)
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
 }
