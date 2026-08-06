@@ -1,3 +1,4 @@
+use zmanager_core::safety::archive_pattern_matches;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -145,21 +146,4 @@ pub(crate) fn apply_junk_paths(manifest: &mut zmanager_core::manifest::ArchiveMa
     Ok(())
 }
 
-pub(crate) fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
-    pattern == path
-        || (pattern.ends_with("/**") && path.starts_with(pattern.trim_end_matches("**")))
-        || wildcard_matches(pattern.as_bytes(), path.as_bytes())
-}
 
-fn wildcard_matches(pattern: &[u8], value: &[u8]) -> bool {
-    if pattern.is_empty() {
-        return value.is_empty();
-    }
-    if pattern[0] == b'*' {
-        return wildcard_matches(&pattern[1..], value) || (!value.is_empty() && wildcard_matches(pattern, &value[1..]));
-    }
-    if !value.is_empty() && (pattern[0] == b'?' || pattern[0] == value[0]) {
-        return wildcard_matches(&pattern[1..], &value[1..]);
-    }
-    false
-}

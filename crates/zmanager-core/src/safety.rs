@@ -809,7 +809,7 @@ fn archive_path_selected(path: &str, includes: &[String], excludes: &[String]) -
     matches_include && !matches_exclude
 }
 
-fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
+pub fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
     // A trailing `/**` matches the directory itself and everything below it:
     // `a/**` matches `a/`, `a/b`, `a/b/c`. Because the prefix is trimmed to
     // just `a/`, a pattern like `a/**/**` degrades to the same prefix match

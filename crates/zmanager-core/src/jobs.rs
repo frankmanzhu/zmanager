@@ -978,12 +978,8 @@ pub fn run_7z_extract_job_with_password_and_policy(
     token: &CancellationToken,
     sink: &mut dyn JobEventSink,
 ) -> Result<sevenz_backend::SevenZExtractReport, SevenZError> {
-    if token.is_cancelled() {
-        sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-        return Err(SevenZError::Io {
-            path: archive_path.as_ref().to_path_buf(),
-            source: std::io::Error::new(std::io::ErrorKind::Interrupted, "job cancelled"),
-        });
+    if let Some(source) = pre_start_cancelled(token, sink) {
+        return Err(SevenZError::Io { path: archive_path.as_ref().to_path_buf(), source });
     }
 
     sink.emit(JobEvent::Started { kind: JobKind::SevenZExtract, total_bytes: None });
@@ -1012,12 +1008,8 @@ pub fn run_rar_extract_job_with_password_and_policy(
     token: &CancellationToken,
     sink: &mut dyn JobEventSink,
 ) -> Result<rar_backend::RarExtractReport, RarBackendError> {
-    if token.is_cancelled() {
-        sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-        return Err(RarBackendError::Io {
-            path: archive_path.as_ref().to_path_buf(),
-            source: std::io::Error::new(std::io::ErrorKind::Interrupted, "job cancelled"),
-        });
+    if let Some(source) = pre_start_cancelled(token, sink) {
+        return Err(RarBackendError::Io { path: archive_path.as_ref().to_path_buf(), source });
     }
 
     let listing = match rar_backend::list_rar_with_password(&archive_path, password) {
@@ -1066,12 +1058,8 @@ pub fn run_libarchive_extract_job_with_password_and_policy(
     token: &CancellationToken,
     sink: &mut dyn JobEventSink,
 ) -> Result<libarchive_backend::LibarchiveExtractReport, LibarchiveError> {
-    if token.is_cancelled() {
-        sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-        return Err(LibarchiveError::Io {
-            path: archive_path.as_ref().to_path_buf(),
-            source: std::io::Error::new(std::io::ErrorKind::Interrupted, "job cancelled"),
-        });
+    if let Some(source) = pre_start_cancelled(token, sink) {
+        return Err(LibarchiveError::Io { path: archive_path.as_ref().to_path_buf(), source });
     }
 
     sink.emit(JobEvent::Started { kind: JobKind::ArchiveExtract, total_bytes: None });
@@ -1119,14 +1107,10 @@ pub fn run_raw_stream_extract_job_with_policy(
     } else {
         None
     };
-    sink.emit(JobEvent::Started { kind: JobKind::RawStreamExtract, total_bytes });
-    if token.is_cancelled() {
-        sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
-        return Err(RawStreamError::Io {
-            path: archive_path.to_path_buf(),
-            source: std::io::Error::new(std::io::ErrorKind::Interrupted, "job cancelled"),
-        });
+    if let Some(source) = pre_start_cancelled(token, sink) {
+        return Err(RawStreamError::Io { path: archive_path.to_path_buf(), source });
     }
+    sink.emit(JobEvent::Started { kind: JobKind::RawStreamExtract, total_bytes });
 
     let mut context = JobContext::new_with_progress_total(token, sink, total_bytes);
     let progress_path = archive_path.to_string_lossy().into_owned();
@@ -1186,11 +1170,10 @@ pub fn run_tzap_extract_job_with_password_and_policy_and_restore_options(
     token: &CancellationToken,
     sink: &mut dyn JobEventSink,
 ) -> Result<tzap_backend::TzapExtractReport, TzapError> {
-    sink.emit(JobEvent::Started { kind: JobKind::TzapExtract, total_bytes: None });
-    if token.is_cancelled() {
-        sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
+    if pre_start_cancelled(token, sink).is_some() {
         return Err(TzapError::Cancelled);
     }
+    sink.emit(JobEvent::Started { kind: JobKind::TzapExtract, total_bytes: None });
 
     let mut context = JobContext::new(token, sink);
     let result = tzap_backend::extract_tzap_with_optional_password_and_context_fast_with_restore_options(
@@ -1203,6 +1186,19 @@ pub fn run_tzap_extract_job_with_password_and_policy_and_restore_options(
     );
     context.flush_progress();
     finish_tzap_extract_result(result, sink)
+}
+
+/// Standardized pre-start cancellation check (CR-088): emits `Cancelled`
+/// before the job reports `Started` and returns the error to return, or
+/// `None` to proceed. All `run_*_job` entry points use this so event
+/// consumers see one protocol regardless of backend.
+fn pre_start_cancelled(token: &CancellationToken, sink: &mut dyn JobEventSink) -> Option<std::io::Error> {
+    if token.is_cancelled() {
+        sink.emit(JobEvent::Cancelled { message: "job cancelled".to_owned() });
+        Some(std::io::Error::new(std::io::ErrorKind::Interrupted, "job cancelled"))
+    } else {
+        None
+    }
 }
 
 finish_result!(finish_zip_create_result, ZipCreateReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);

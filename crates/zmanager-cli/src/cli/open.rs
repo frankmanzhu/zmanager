@@ -10,9 +10,8 @@ use crate::cli::options::{
     GlobalOptions, parse_archive_format, parse_global_option, read_optional_password_stdin, resolve_input_path,
     take_value, validate_recipient_key_open_option,
 };
-use crate::cli::planning::{
-    append_files_from, append_stdin_paths, apply_manifest_filters, archive_pattern_matches, plan_sources,
-};
+use crate::cli::planning::{append_files_from, append_stdin_paths, apply_manifest_filters, plan_sources};
+use zmanager_core::safety::archive_pattern_matches;
 use crate::cli::usage::{
     LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json,
     print_entries_tree, print_error_line, print_help_stdout, print_manifest, print_success_line, print_warning_stderr,

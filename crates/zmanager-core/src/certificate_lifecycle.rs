@@ -30,12 +30,6 @@ pub const SIGN_DEVICE_REVOKE_PATH_PREFIX: &str = "/v1/devices/";
 pub const LOGIN_ORG_DEVICES_PATH_PREFIX: &str = "/v1/orgs/";
 pub const DEFAULT_RENEWAL_DEVICE_NAME: &str = "ZManager CLI";
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum TzapCertificateLifecycleWireProfile {
-    Spec,
-    LocalStagingServer,
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TzapRenewalPolicy {
     SameKeyRequired,
@@ -150,7 +144,7 @@ pub struct TzapCertificateLifecycleClient<'a, T> {
     sign_base_url: String,
     login_base_url: String,
     transport: &'a T,
-    wire_profile: TzapCertificateLifecycleWireProfile,
+    wire_profile: crate::wire_profile::TzapWireProfile,
     device_name: String,
 }
 
@@ -161,7 +155,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
             sign_base_url,
             login_base_url,
             transport,
-            TzapCertificateLifecycleWireProfile::Spec,
+            crate::wire_profile::TzapWireProfile::Spec,
             DEFAULT_RENEWAL_DEVICE_NAME,
         )
     }
@@ -176,17 +170,17 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
             sign_base_url,
             login_base_url,
             transport,
-            TzapCertificateLifecycleWireProfile::LocalStagingServer,
+            crate::wire_profile::TzapWireProfile::LocalStagingServer,
             DEFAULT_RENEWAL_DEVICE_NAME,
         )
     }
 
     #[must_use]
-    pub fn with_wire_profile(
+    pub(crate) fn with_wire_profile(
         sign_base_url: impl Into<String>,
         login_base_url: impl Into<String>,
         transport: &'a T,
-        wire_profile: TzapCertificateLifecycleWireProfile,
+        wire_profile: crate::wire_profile::TzapWireProfile,
         device_name: impl Into<String>,
     ) -> Self {
         Self {
@@ -360,7 +354,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         csr_der: &[u8],
     ) -> Result<crate::enrollment_client::TzapEnrollmentChallenge, TzapCertificateLifecycleError> {
         let body = match self.wire_profile {
-            TzapCertificateLifecycleWireProfile::Spec => json!({
+            crate::wire_profile::TzapWireProfile::Spec => json!({
                 "operation": RENEW_OPERATION,
                 "csr_der": URL_SAFE_NO_PAD.encode(csr_der),
                 "device_public_key_fingerprint": signing_key.public_key_fingerprint,
@@ -368,7 +362,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
                 "requested_validity_seconds": request.requested_validity_seconds,
                 "renewal_of_certificate_sha256": request.previous_certificate_sha256,
             }),
-            TzapCertificateLifecycleWireProfile::LocalStagingServer => json!({
+            crate::wire_profile::TzapWireProfile::LocalStagingServer => json!({
                 "operation": RENEW_OPERATION,
                 "csr_sha256": csr_fingerprint(csr_der),
                 "device_public_key_fingerprint": signing_key.public_key_fingerprint,
@@ -399,7 +393,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
     ) -> Result<TzapAuthHttpResponse, TzapCertificateLifecycleError> {
         let path = format!("/v1/certificates/{}{}", request.previous_certificate_id, CERTIFICATE_RENEW_PATH_SUFFIX);
         let body = match self.wire_profile {
-            TzapCertificateLifecycleWireProfile::Spec => json!({
+            crate::wire_profile::TzapWireProfile::Spec => json!({
                 "operation": RENEW_OPERATION,
                 "challenge_id": challenge.challenge_id,
                 "csr_der": URL_SAFE_NO_PAD.encode(csr_der),
@@ -407,7 +401,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
                 "renewal_of_certificate_sha256": request.previous_certificate_sha256,
                 "old_certificate_signature": old_certificate_signature,
             }),
-            TzapCertificateLifecycleWireProfile::LocalStagingServer => {
+            crate::wire_profile::TzapWireProfile::LocalStagingServer => {
                 let challenge_signature = sign_new_key_challenge_staging(signing_key, &challenge.payload)?;
                 let org_id = optional_string_from_payload(&challenge.payload, "org_id")?;
                 json!({
@@ -540,17 +534,17 @@ enum OrganizationDeviceLookup {
 }
 
 fn validate_renewal_challenge(
-    wire_profile: TzapCertificateLifecycleWireProfile,
+    wire_profile: crate::wire_profile::TzapWireProfile,
     canonicalization: Option<&str>,
     request: &TzapRenewalRequest,
     payload: &Value,
 ) -> Result<(), TzapCertificateLifecycleError> {
     let object = json_object::<TzapCertificateLifecycleError>(payload, "challenge_payload")?;
     match wire_profile {
-        TzapCertificateLifecycleWireProfile::Spec => {
+        crate::wire_profile::TzapWireProfile::Spec => {
             expect_string(object, "canonicalization", ENROLLMENT_CHALLENGE_CANONICALIZATION)?;
         }
-        TzapCertificateLifecycleWireProfile::LocalStagingServer => {
+        crate::wire_profile::TzapWireProfile::LocalStagingServer => {
             if canonicalization != Some(ENROLLMENT_CHALLENGE_CANONICALIZATION) {
                 return Err(TzapCertificateLifecycleError::RenewalTargetMismatch);
             }
@@ -564,14 +558,14 @@ fn validate_renewal_challenge(
 }
 
 fn sign_old_certificate_challenge(
-    wire_profile: TzapCertificateLifecycleWireProfile,
+    wire_profile: crate::wire_profile::TzapWireProfile,
     previous_signing_key: &TzapDeviceSigningKeyRecord,
     challenge_payload: &Value,
 ) -> Result<String, TzapCertificateLifecycleError> {
     let canonical = match wire_profile {
-        TzapCertificateLifecycleWireProfile::Spec => jcs::canonicalize_json_bytes(challenge_payload)
+        crate::wire_profile::TzapWireProfile::Spec => jcs::canonicalize_json_bytes(challenge_payload)
             .map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?,
-        TzapCertificateLifecycleWireProfile::LocalStagingServer => {
+        crate::wire_profile::TzapWireProfile::LocalStagingServer => {
             canonicalize_local_staging_server_json_bytes(challenge_payload)
                 .map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?
         }

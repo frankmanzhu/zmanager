@@ -36,6 +36,7 @@ mod extract_materialize;
 mod http_client;
 mod json_util;
 mod strings;
+mod wire_profile;
 mod multi_volume;
 mod sevenz_volume;
 mod tar_metadata;

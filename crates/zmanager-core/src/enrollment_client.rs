@@ -109,12 +109,6 @@ pub struct TzapEnrollmentDenial {
     pub support_reference: Option<String>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum TzapEnrollmentWireProfile {
-    Spec,
-    LocalStagingServer,
-}
-
 #[derive(Debug)]
 pub enum TzapEnrollmentError {
     Auth(TzapAuthError),
@@ -216,25 +210,25 @@ impl TzapEnrollmentCertificateValidator for TzapCustomEnrollmentCertificateValid
 pub struct TzapEnrollmentClient<'a, T> {
     sign_base_url: String,
     transport: &'a T,
-    wire_profile: TzapEnrollmentWireProfile,
+    wire_profile: crate::wire_profile::TzapWireProfile,
 }
 
 impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
     #[must_use]
     pub fn new(sign_base_url: impl Into<String>, transport: &'a T) -> Self {
-        Self::with_wire_profile(sign_base_url, transport, TzapEnrollmentWireProfile::Spec)
+        Self::with_wire_profile(sign_base_url, transport, crate::wire_profile::TzapWireProfile::Spec)
     }
 
     #[must_use]
     pub fn local_staging_server(sign_base_url: impl Into<String>, transport: &'a T) -> Self {
-        Self::with_wire_profile(sign_base_url, transport, TzapEnrollmentWireProfile::LocalStagingServer)
+        Self::with_wire_profile(sign_base_url, transport, crate::wire_profile::TzapWireProfile::LocalStagingServer)
     }
 
     #[must_use]
-    pub fn with_wire_profile(
+    pub(crate) fn with_wire_profile(
         sign_base_url: impl Into<String>,
         transport: &'a T,
-        wire_profile: TzapEnrollmentWireProfile,
+        wire_profile: crate::wire_profile::TzapWireProfile,
     ) -> Self {
         Self { sign_base_url: sign_base_url.into(), transport, wire_profile }
     }
@@ -249,7 +243,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
         validate_enrollment_org_context(session, request)?;
         session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
         let body = match self.wire_profile {
-            TzapEnrollmentWireProfile::Spec => json!({
+            crate::wire_profile::TzapWireProfile::Spec => json!({
                 "operation": ENROLL_OPERATION,
                 "csr_der": URL_SAFE_NO_PAD.encode(csr_der),
                 "csr_sha256": crate::device_identity::csr_fingerprint(csr_der),
@@ -258,7 +252,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
                 "requested_validity_seconds": request.requested_validity_seconds,
                 "renewal_of_certificate_sha256": Value::Null,
             }),
-            TzapEnrollmentWireProfile::LocalStagingServer => json!({
+            crate::wire_profile::TzapWireProfile::LocalStagingServer => json!({
                 "operation": ENROLL_OPERATION,
                 "csr_sha256": crate::device_identity::csr_fingerprint(csr_der),
                 "device_public_key_fingerprint": signing_key.public_key_fingerprint,
@@ -287,22 +281,22 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
     ) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
         session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
         let challenge_bytes = match self.wire_profile {
-            TzapEnrollmentWireProfile::Spec => jcs::canonicalize_json_bytes(&challenge.payload)
+            crate::wire_profile::TzapWireProfile::Spec => jcs::canonicalize_json_bytes(&challenge.payload)
                 .map_err(|error| TzapEnrollmentError::Canonicalization(format!("{error:?}")))?,
-            TzapEnrollmentWireProfile::LocalStagingServer => {
+            crate::wire_profile::TzapWireProfile::LocalStagingServer => {
                 canonicalize_local_staging_server_json_bytes(&challenge.payload)?
             }
         };
         let signature = sign_challenge(signing_key, &challenge_bytes)?;
         let body = match self.wire_profile {
-            TzapEnrollmentWireProfile::Spec => json!({
+            crate::wire_profile::TzapWireProfile::Spec => json!({
                 "operation": ENROLL_OPERATION,
                 "challenge_id": challenge.challenge_id,
                 "csr_der": URL_SAFE_NO_PAD.encode(csr_der),
                 "challenge_signature_p1363": URL_SAFE_NO_PAD.encode(signature),
                 "renewal_of_certificate_sha256": Value::Null,
             }),
-            TzapEnrollmentWireProfile::LocalStagingServer => json!({
+            crate::wire_profile::TzapWireProfile::LocalStagingServer => json!({
                 "operation": ENROLL_OPERATION,
                 "challenge_id": challenge.challenge_id,
                 "renewal_of_certificate_sha256": Value::Null,
@@ -452,7 +446,7 @@ fn validate_enrollment_org_context(
 }
 
 fn validate_challenge_payload(
-    wire_profile: TzapEnrollmentWireProfile,
+    wire_profile: crate::wire_profile::TzapWireProfile,
     session: &TzapSessionRecord,
     request: &TzapEnrollmentRequest,
     signing_key: &TzapDeviceSigningKeyRecord,
@@ -461,7 +455,7 @@ fn validate_challenge_payload(
 ) -> Result<(), TzapEnrollmentError> {
     let object = json_object::<TzapEnrollmentError>(&challenge.payload, "challenge_payload")?;
     match wire_profile {
-        TzapEnrollmentWireProfile::Spec => {
+        crate::wire_profile::TzapWireProfile::Spec => {
             expect_string(object, "canonicalization", ENROLLMENT_CHALLENGE_CANONICALIZATION)?;
             expect_string(object, "audience", SESSION_AUDIENCE_SIGN_TZAP)?;
             expect_u64(object, "requested_validity_seconds", request.requested_validity_seconds)?;
@@ -470,7 +464,7 @@ fn validate_challenge_payload(
                 return Err(TzapEnrollmentError::ChallengeExpired);
             }
         }
-        TzapEnrollmentWireProfile::LocalStagingServer => {
+        crate::wire_profile::TzapWireProfile::LocalStagingServer => {
             if challenge.canonicalization.as_deref() != Some(ENROLLMENT_CHALLENGE_CANONICALIZATION) {
                 return Err(TzapEnrollmentError::ChallengeMismatch { field: "canonicalization" });
             }
