@@ -13,9 +13,6 @@ use zmanager_apple_archive::{ArchiveReader, ArchiveWriter};
 
 pub use zmanager_apple_archive::CompressionAlgorithm as AppleArchiveCompression;
 
-#[cfg(unix)]
-const APPLE_ARCHIVE_MODE_MASK: u32 = 0o7777;
-
 /// `.aar` file extension.
 pub const APPLE_ARCHIVE_EXTENSION: &str = "aar";
 
@@ -554,7 +551,7 @@ fn extract_apple_archive_inner(
         }
         found_selected_entry = true;
         let extraction_kind = extraction_kind(&entry)?;
-        if is_archive_root_directory(entry.path(), &extraction_kind) {
+        if crate::extract_materialize::is_archive_root_directory(entry.path(), &extraction_kind) {
             reader.skip_entry_data(&entry)?;
             report.skipped_entries += 1;
             let warning = "skipped archive root directory entry".to_owned();
@@ -861,15 +858,6 @@ fn extraction_kind(entry: &zmanager_apple_archive::Entry) -> Result<ExtractionEn
     }
 }
 
-fn is_archive_root_directory(path: &str, kind: &ExtractionEntryKind) -> bool {
-    matches!(kind, ExtractionEntryKind::Directory) && is_root_entry_path(path)
-}
-
-fn is_root_entry_path(path: &str) -> bool {
-    let trimmed = path.trim_matches('/');
-    trimmed.is_empty() || trimmed == "."
-}
-
 fn apply_deferred_directory_metadata(
     directories: &[(PathBuf, zmanager_apple_archive::EntryMetadata)],
 ) -> Result<(), AppleArchiveError> {
@@ -882,31 +870,8 @@ fn apply_deferred_directory_metadata(
 fn apply_metadata(path: &Path, metadata: zmanager_apple_archive::EntryMetadata) -> Result<(), AppleArchiveError> {
     fs::symlink_metadata(path).map_err(|source| AppleArchiveError::Io { path: path.to_path_buf(), source })?;
 
-    #[cfg(unix)]
-    if let Some(mode) = metadata.mode {
-        use std::os::unix::fs::PermissionsExt;
-
-        fs::set_permissions(path, fs::Permissions::from_mode(mode & APPLE_ARCHIVE_MODE_MASK))
-            .map_err(|source| AppleArchiveError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    #[cfg(not(unix))]
-    if let Some(mode) = metadata.mode {
-        if mode & 0o222 == 0 {
-            if let Ok(fs_metadata) = fs::metadata(path) {
-                let mut perms = fs_metadata.permissions();
-                perms.set_readonly(true);
-                fs::set_permissions(path, perms)
-                    .map_err(|source| AppleArchiveError::Io { path: path.to_path_buf(), source })?;
-            }
-        }
-    }
-
-    if let Some(modified) = metadata.modified {
-        let mtime = system_time_to_filetime(modified);
-        filetime::set_file_mtime(path, mtime)
-            .map_err(|source| AppleArchiveError::Io { path: path.to_path_buf(), source })?;
-    }
+    crate::extract_materialize::apply_metadata(path, metadata.mode, metadata.modified.map(system_time_to_filetime))
+        .map_err(|source| AppleArchiveError::Io { path: path.to_path_buf(), source })?;
 
     zmanager_apple_archive::apply_native_metadata(path, metadata, false)?;
 
@@ -916,12 +881,8 @@ fn apply_metadata(path: &Path, metadata: zmanager_apple_archive::EntryMetadata) 
 /// Uses `set_symlink_file_times` to avoid following the link. Errors are
 /// reported so extraction cannot claim metadata was restored when it was not.
 fn apply_symlink_mtime(path: &Path, modified: Option<SystemTime>) -> Result<(), AppleArchiveError> {
-    if let Some(modified) = modified {
-        let ft = system_time_to_filetime(modified);
-        filetime::set_symlink_file_times(path, ft, ft)
-            .map_err(|source| AppleArchiveError::Io { path: path.to_path_buf(), source })?;
-    }
-    Ok(())
+    crate::extract_materialize::apply_symlink_mtime(path, modified.map(system_time_to_filetime))
+        .map_err(|source| AppleArchiveError::Io { path: path.to_path_buf(), source })
 }
 
 fn system_time_to_filetime(time: SystemTime) -> filetime::FileTime {
@@ -929,17 +890,13 @@ fn system_time_to_filetime(time: SystemTime) -> filetime::FileTime {
 }
 
 fn write_hardlink(source_path: &Path, destination_path: &Path) -> Result<(), AppleArchiveError> {
-    ensure_parent_dir(destination_path)?;
-    fs::hard_link(source_path, destination_path)
+    crate::extract_materialize::write_hardlink(source_path, destination_path)
         .map_err(|source| AppleArchiveError::Io { path: destination_path.to_path_buf(), source })
 }
 
 #[cfg(unix)]
 fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), AppleArchiveError> {
-    use std::os::unix::fs::symlink;
-
-    ensure_parent_dir(destination_path)?;
-    symlink(target, destination_path)
+    crate::extract_materialize::write_symlink(target, destination_path)
         .map_err(|source| AppleArchiveError::Io { path: destination_path.to_path_buf(), source })
 }
 
@@ -949,13 +906,6 @@ fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), AppleArc
         path: destination_path.to_path_buf(),
         source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
     })
-}
-
-fn ensure_parent_dir(path: &Path) -> Result<(), AppleArchiveError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| AppleArchiveError::Io { path: parent.to_path_buf(), source })?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

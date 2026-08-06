@@ -4,7 +4,11 @@
 // documentation is tracked separately from behavioral and structural cleanup.
 #![allow(clippy::missing_errors_doc)]
 
+mod archive_split;
 mod atomic_file;
+mod extract_materialize;
+mod http_client;
+mod json_util;
 mod tar_metadata;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]

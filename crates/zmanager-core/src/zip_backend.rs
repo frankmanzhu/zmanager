@@ -5,7 +5,7 @@ use crate::safety::{
     ExtractionSafetyPlanner, OverwriteResolver,
 };
 use crate::secrets::SecretString;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
@@ -381,8 +381,8 @@ fn split_zip_temp_archive(
     let logical_size = archive_size
         .checked_add(u64::try_from(ZIP_SPLIT_SIGNATURE.len()).unwrap_or(4))
         .ok_or_else(|| unsupported_split_zip("archive is too large to split"))?;
-    let volume_count =
-        split_volume_count(logical_size, volume_size).ok_or_else(|| unsupported_split_zip("too many ZIP volumes"))?;
+    let volume_count = crate::archive_split::split_volume_count(logical_size, volume_size)
+        .ok_or_else(|| unsupported_split_zip("too many ZIP volumes"))?;
     let layout = ZipSplitLayout::new(logical_size, volume_size, &eocd)?;
     let volume_paths = split_zip_volume_paths(destination, volume_count)?;
     let existing_volume_paths = existing_split_zip_volume_paths(destination)?;
@@ -624,11 +624,6 @@ fn split_zip_location(logical_offset: u64, volume_size: u64) -> Result<(u16, u32
     Ok((disk, offset))
 }
 
-fn split_volume_count(archive_size: u64, volume_size: u64) -> Option<usize> {
-    let count = archive_size.max(1).div_ceil(volume_size);
-    usize::try_from(count).ok()
-}
-
 fn split_zip_volume_paths(destination: &Path, count: usize) -> Result<Vec<PathBuf>, ZipBackendError> {
     if count <= 1 {
         return Ok(vec![destination.to_path_buf()]);
@@ -661,32 +656,15 @@ fn ensure_split_destinations_available(
     replace_existing: bool,
 ) -> Result<(), ZipBackendError> {
     ensure_file_destination_available(destination, replace_existing)?;
-    for path in unique_paths(volume_paths, existing_volume_paths) {
+    for path in crate::archive_split::unique_paths(volume_paths, existing_volume_paths) {
         ensure_file_destination_available(path, replace_existing)?;
     }
     Ok(())
 }
 
-fn unique_paths<'a>(left: &'a [PathBuf], right: &'a [PathBuf]) -> Vec<&'a Path> {
-    let mut seen = BTreeSet::new();
-    left.iter()
-        .chain(right.iter())
-        .filter_map(|path| if seen.insert(path.clone()) { Some(path.as_path()) } else { None })
-        .collect()
-}
-
 fn ensure_file_destination_available(path: &Path, replace_existing: bool) -> Result<(), ZipBackendError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
-        }
-        Ok(_) if !replace_existing => {
-            Err(io_error(path, io::ErrorKind::AlreadyExists, format!("destination already exists: {}", path.display())))
-        }
-        Ok(_) => Ok(()),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(ZipBackendError::Io { path: path.to_path_buf(), source }),
-    }
+    crate::archive_split::ensure_file_destination_available(path, replace_existing)
+        .map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })
 }
 
 fn remove_split_destinations_for_replace(
@@ -694,24 +672,8 @@ fn remove_split_destinations_for_replace(
     existing_volume_paths: &[PathBuf],
     replace_existing: bool,
 ) -> Result<(), ZipBackendError> {
-    if !replace_existing {
-        return Ok(());
-    }
-    for path in existing_volume_paths {
-        remove_file_destination_for_replace(path)?;
-    }
-    remove_file_destination_for_replace(destination)
-}
-
-fn remove_file_destination_for_replace(path: &Path) -> Result<(), ZipBackendError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
-        }
-        Ok(_) => fs::remove_file(path).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source }),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(ZipBackendError::Io { path: path.to_path_buf(), source }),
-    }
+    crate::archive_split::remove_split_destinations_for_replace(destination, existing_volume_paths, replace_existing)
+        .map_err(|source| ZipBackendError::Io { path: destination.to_path_buf(), source })
 }
 
 fn existing_split_zip_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, ZipBackendError> {
@@ -870,10 +832,6 @@ fn read_u32(bytes: &[u8]) -> u32 {
 
 fn unsupported_split_zip(reason: impl Into<String>) -> ZipBackendError {
     ZipBackendError::UnsupportedSplitZip { reason: reason.into() }
-}
-
-fn io_error(path: &Path, kind: io::ErrorKind, message: impl Into<String>) -> ZipBackendError {
-    ZipBackendError::Io { path: path.to_path_buf(), source: io::Error::new(kind, message.into()) }
 }
 
 /// Lists ZIP archive entries.
@@ -1399,37 +1357,19 @@ fn apply_zip_metadata(
     unix_mode: Option<u32>,
     modified_time: Option<zip::DateTime>,
 ) -> Result<(), ZipBackendError> {
-    #[cfg(unix)]
-    if let Some(mode) = unix_mode {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(mode & ZIP_MODE_MASK))
-            .map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    #[cfg(not(unix))]
-    if let Some(mode) = unix_mode
-        && mode & 0o222 == 0
-        && let Ok(metadata) = fs::metadata(path)
-    {
-        let mut perms = metadata.permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(path, perms).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    if let Some(dt) = modified_time
-        && let Ok(date) = time::Date::from_calendar_date(
+    let file_time = modified_time.and_then(|dt| {
+        let date = time::Date::from_calendar_date(
             i32::from(dt.year()),
             time::Month::try_from(dt.month()).unwrap_or(time::Month::January),
             dt.day().max(1),
         )
-        && let Ok(time_cmp) = time::Time::from_hms(dt.hour(), dt.minute(), dt.second())
-    {
+        .ok()?;
+        let time_cmp = time::Time::from_hms(dt.hour(), dt.minute(), dt.second()).ok()?;
         let primitive = time::PrimitiveDateTime::new(date, time_cmp);
-        let sys_time = std::time::SystemTime::from(primitive.assume_utc());
-        filetime::set_file_mtime(path, filetime::FileTime::from_system_time(sys_time))
-            .map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })?;
-    }
-    Ok(())
+        Some(filetime::FileTime::from_system_time(std::time::SystemTime::from(primitive.assume_utc())))
+    });
+    crate::archive_split::apply_split_metadata(path, unix_mode, file_time, ZIP_MODE_MASK)
+        .map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })
 }
 
 /// Uses `set_symlink_file_times` to avoid following the link. Errors are

@@ -1,15 +1,17 @@
 //! Certificate renewal, revocation, and local device-retirement flows.
 
 use crate::auth_client::{
-    SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest,
-    TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord,
+    SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpResponse,
+    TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord,
 };
 use crate::enrollment_client::{
     ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator,
     TzapEnrollmentError, TzapEnrollmentRequest, canonicalize_local_staging_server_json_bytes, csr_der_to_pem,
     csr_fingerprint, parse_enrollment_response, requested_validity_days,
 };
+use crate::http_client::{require_success, send_json_request};
 use crate::jcs;
+use crate::json_util::{json_object, optional_string};
 use crate::local_identity_store::{
     TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore,
     TzapLocalIdentityStoreError, TzapOrganizationDeviceRetirement,
@@ -505,8 +507,8 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
             return Err(TzapCertificateLifecycleError::HttpStatus { status_code: response.status_code });
         }
         let value: Value = serde_json::from_slice(&response.body)?;
-        let object = json_object(&value, "$")?;
-        let login_device_id = optional_string(object, "organization_device_id")?
+        let object = json_object::<TzapCertificateLifecycleError>(&value, "$")?;
+        let login_device_id = optional_string::<TzapCertificateLifecycleError>(object, "organization_device_id")?
             .unwrap_or_else(|| route.login_organization_device_id.clone());
         Ok(OrganizationDeviceLookup::Found(login_device_id))
     }
@@ -520,10 +522,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         body: Option<Value>,
     ) -> Result<TzapAuthHttpResponse, TzapCertificateLifecycleError> {
         let response = self.send_raw(method, base_url, path, bearer_token, body)?;
-        if !(200..=299).contains(&response.status_code) {
-            return Err(TzapCertificateLifecycleError::HttpStatus { status_code: response.status_code });
-        }
-        Ok(response)
+        require_success(response, |status_code, _| TzapCertificateLifecycleError::HttpStatus { status_code })
     }
 
     fn send_raw(
@@ -534,12 +533,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         bearer_token: Option<TzapBearerToken>,
         body: Option<Value>,
     ) -> Result<TzapAuthHttpResponse, TzapCertificateLifecycleError> {
-        Ok(self.transport.send(&TzapAuthHttpRequest {
-            method,
-            url: format!("{}{}", trim_trailing_slash(base_url), path),
-            bearer_token,
-            body,
-        })?)
+        Ok(send_json_request(self.transport, method, base_url, path, bearer_token, body)?)
     }
 }
 
@@ -547,8 +541,8 @@ fn optional_string_from_payload(
     payload: &Value,
     field: &'static str,
 ) -> Result<Option<String>, TzapCertificateLifecycleError> {
-    let object = json_object(payload, "challenge_payload")?;
-    optional_string(object, field)
+    let object = json_object::<TzapCertificateLifecycleError>(payload, "challenge_payload")?;
+    optional_string::<TzapCertificateLifecycleError>(object, field)
 }
 
 enum OrganizationDeviceLookup {
@@ -562,7 +556,7 @@ fn validate_renewal_challenge(
     request: &TzapRenewalRequest,
     payload: &Value,
 ) -> Result<(), TzapCertificateLifecycleError> {
-    let object = json_object(payload, "challenge_payload")?;
+    let object = json_object::<TzapCertificateLifecycleError>(payload, "challenge_payload")?;
     match wire_profile {
         TzapCertificateLifecycleWireProfile::Spec => {
             expect_string(object, "canonicalization", ENROLLMENT_CHALLENGE_CANONICALIZATION)?;
@@ -584,15 +578,15 @@ fn parse_renewal_challenge_response(
     bytes: &[u8],
 ) -> Result<crate::enrollment_client::TzapEnrollmentChallenge, TzapCertificateLifecycleError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object(&value, "$")?;
+    let object = json_object::<TzapCertificateLifecycleError>(&value, "$")?;
     Ok(crate::enrollment_client::TzapEnrollmentChallenge {
-        challenge_id: optional_string(object, "challenge_id")?
+        challenge_id: optional_string::<TzapCertificateLifecycleError>(object, "challenge_id")?
             .ok_or(TzapCertificateLifecycleError::InvalidField { field: "challenge_id" })?,
         payload: object
             .get("challenge_payload")
             .ok_or(TzapCertificateLifecycleError::InvalidField { field: "challenge_payload" })?
             .clone(),
-        canonicalization: optional_string(object, "canonicalization")?,
+        canonicalization: optional_string::<TzapCertificateLifecycleError>(object, "canonicalization")?,
     })
 }
 
@@ -631,8 +625,8 @@ fn sign_new_key_challenge_staging(
 
 fn parse_renewal_barriers(bytes: &[u8]) -> Result<(), TzapCertificateLifecycleError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object(&value, "$")?;
-    match optional_string(object, "status")?.as_deref() {
+    let object = json_object::<TzapCertificateLifecycleError>(&value, "$")?;
+    match optional_string::<TzapCertificateLifecycleError>(object, "status")?.as_deref() {
         Some("device_approval_required") => Err(TzapCertificateLifecycleError::RenewalPendingApproval),
         Some("device_linkage_pending") => Err(TzapCertificateLifecycleError::DeviceLinkagePending),
         Some("device_linkage_conflict") => Err(TzapCertificateLifecycleError::DeviceLinkageConflict),
@@ -647,8 +641,8 @@ fn revocation_completion(
         return Ok(TzapRetirementCompletion::Incomplete);
     }
     let value: Value = serde_json::from_slice(&response.body)?;
-    let object = json_object(&value, "$")?;
-    let Some(result) = optional_string(object, "result")? else {
+    let object = json_object::<TzapCertificateLifecycleError>(&value, "$")?;
+    let Some(result) = optional_string::<TzapCertificateLifecycleError>(object, "result")? else {
         // A 2xx without a revocation result is not evidence of completion;
         // treating it as such would mark a possibly-failed revocation as
         // done (e.g. an error JSON the server returned with 200).
@@ -678,8 +672,8 @@ fn mark_certificate_revoked(
 
 fn body_error_code(bytes: &[u8]) -> Result<String, TzapCertificateLifecycleError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object(&value, "$")?;
-    Ok(optional_string(object, "error")?.unwrap_or_default())
+    let object = json_object::<TzapCertificateLifecycleError>(&value, "$")?;
+    Ok(optional_string::<TzapCertificateLifecycleError>(object, "error")?.unwrap_or_default())
 }
 
 fn sha256_identifier(bytes: &[u8]) -> String {
@@ -688,33 +682,12 @@ fn sha256_identifier(bytes: &[u8]) -> String {
     crate::trust::format_sha256_identifier(&digest)
 }
 
-fn json_object<'a>(
-    value: &'a Value,
-    field: &'static str,
-) -> Result<&'a Map<String, Value>, TzapCertificateLifecycleError> {
-    value.as_object().ok_or(TzapCertificateLifecycleError::InvalidField { field })
-}
-
-fn optional_string(
-    object: &Map<String, Value>,
-    field: &'static str,
-) -> Result<Option<String>, TzapCertificateLifecycleError> {
-    match object.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => value
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .map(|value| Some(value.to_owned()))
-            .ok_or(TzapCertificateLifecycleError::InvalidField { field }),
-    }
-}
-
 fn expect_string(
     object: &Map<String, Value>,
     field: &'static str,
     expected: &str,
 ) -> Result<(), TzapCertificateLifecycleError> {
-    match optional_string(object, field)?.as_deref() {
+    match optional_string::<TzapCertificateLifecycleError>(object, field)?.as_deref() {
         Some(actual) if actual == expected => Ok(()),
         _ => Err(TzapCertificateLifecycleError::RenewalTargetMismatch),
     }
@@ -725,12 +698,8 @@ fn expect_optional_string(
     field: &'static str,
     expected: Option<&str>,
 ) -> Result<(), TzapCertificateLifecycleError> {
-    let actual = optional_string(object, field)?;
+    let actual = optional_string::<TzapCertificateLifecycleError>(object, field)?;
     if actual.as_deref() == expected { Ok(()) } else { Err(TzapCertificateLifecycleError::RenewalTargetMismatch) }
-}
-
-fn trim_trailing_slash(value: &str) -> &str {
-    value.trim_end_matches('/')
 }
 
 #[cfg(test)]

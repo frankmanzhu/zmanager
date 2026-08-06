@@ -1,3 +1,4 @@
+use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::{JobCancelled, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
@@ -10,8 +11,6 @@ use std::io::{self, Read, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::{Archive, Builder, EntryType, Header};
-
-const TAR_MODE_MASK: u32 = 0o7777;
 
 /// Options for `.tar.zst` creation.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -352,7 +351,7 @@ fn extract_tar_zst_inner(
         let archive_entry_path = entry_path_string(&entry)?;
         let entry_size = entry.header().size().unwrap_or(0);
         let kind = extraction_kind(&mut entry, &archive_entry_path)?;
-        if is_archive_root_directory(&archive_entry_path, &kind) {
+        if crate::extract_materialize::is_archive_root_directory(&archive_entry_path, &kind) {
             report.skipped_entries += 1;
             let warning = "skipped archive root directory entry".to_owned();
             report.warnings.push(warning.clone());
@@ -414,12 +413,6 @@ fn extract_tar_zst_inner(
 struct TarEntryMetadata {
     mode: Option<u32>,
     mtime: Option<crate::tar_metadata::TarTimestamp>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct DeferredHardlink {
-    source_path: PathBuf,
-    destination_path: PathBuf,
 }
 
 #[derive(Clone, Copy)]
@@ -537,19 +530,11 @@ fn materialize_deferred_hardlinks(
     hardlinks: &[DeferredHardlink],
     report: &mut TarZstdExtractReport,
 ) -> Result<(), TarZstdError> {
-    let paths = hardlinks
-        .iter()
-        .map(|hardlink| (hardlink.source_path.clone(), hardlink.destination_path.clone()))
-        .collect::<Vec<_>>();
-    let order = crate::safety::deferred_link_dependency_order(&paths).map_err(|source| TarZstdError::Io {
+    crate::extract_materialize::materialize_deferred_hardlinks(hardlinks).map_err(|source| TarZstdError::Io {
         path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()),
         source,
     })?;
-    for index in order {
-        let hardlink = &hardlinks[index];
-        write_hardlink(&hardlink.source_path, &hardlink.destination_path)?;
-        report.written_entries += 1;
-    }
+    report.written_entries += hardlinks.len();
     Ok(())
 }
 
@@ -638,56 +623,27 @@ fn apply_deferred_directory_metadata(directories: &[(PathBuf, TarEntryMetadata)]
 }
 
 fn apply_metadata(path: &Path, metadata: TarEntryMetadata) -> Result<(), TarZstdError> {
-    #[cfg(unix)]
-    if let Some(mode) = metadata.mode {
-        use std::os::unix::fs::PermissionsExt;
-
-        fs::set_permissions(path, fs::Permissions::from_mode(mode & TAR_MODE_MASK))
-            .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    #[cfg(not(unix))]
-    if let Some(mode) = metadata.mode
-        && mode & 0o222 == 0
-        && let Ok(fs_metadata) = fs::metadata(path)
-    {
-        let mut perms = fs_metadata.permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(path, perms).map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    if let Some(mtime) = metadata.mtime {
-        let mtime = filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds);
-        filetime::set_file_mtime(path, mtime)
-            .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    Ok(())
+    crate::extract_materialize::apply_metadata(
+        path,
+        metadata.mode,
+        metadata.mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)),
+    )
+    .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })
 }
 
 /// Uses `set_symlink_file_times` to avoid following the link. Errors are
 /// reported so extraction cannot claim metadata was restored when it was not.
 fn apply_symlink_mtime(path: &Path, mtime: Option<crate::tar_metadata::TarTimestamp>) -> Result<(), TarZstdError> {
-    if let Some(mtime) = mtime {
-        let ft = filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds);
-        filetime::set_symlink_file_times(path, ft, ft)
-            .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })?;
-    }
-    Ok(())
-}
-
-fn write_hardlink(source_path: &Path, destination_path: &Path) -> Result<(), TarZstdError> {
-    ensure_parent_dir(destination_path)?;
-    fs::hard_link(source_path, destination_path)
-        .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })
+    crate::extract_materialize::apply_symlink_mtime(
+        path,
+        mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)),
+    )
+    .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })
 }
 
 #[cfg(unix)]
 fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), TarZstdError> {
-    use std::os::unix::fs::symlink;
-
-    ensure_parent_dir(destination_path)?;
-    symlink(target, destination_path)
+    crate::extract_materialize::write_symlink(target, destination_path)
         .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })
 }
 
@@ -697,14 +653,6 @@ fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), TarZstdE
         path: destination_path.to_path_buf(),
         source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
     })
-}
-
-fn ensure_parent_dir(path: &Path) -> Result<(), TarZstdError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| TarZstdError::Io { path: parent.to_path_buf(), source })?;
-    }
-
-    Ok(())
 }
 
 fn append_manifest_entry<W: io::Write>(
@@ -823,7 +771,7 @@ fn append_symlink<W: io::Write>(
     header.set_entry_type(EntryType::Symlink);
     header.set_size(0);
     if preserve_metadata && let Some(mode) = entry.permissions.unix_mode {
-        header.set_mode(mode & TAR_MODE_MASK);
+        header.set_mode(mode & crate::extract_materialize::MODE_MASK);
     }
     if preserve_metadata && let Some(modified) = entry.modified.and_then(system_time_to_unix_seconds) {
         header.set_mtime(modified);
@@ -841,15 +789,6 @@ fn entry_path_string<R: Read>(entry: &tar::Entry<'_, R>) -> Result<String, TarZs
     let path = entry.path().map_err(|source| TarZstdError::Io { path: PathBuf::from("<tar-entry>"), source })?;
 
     Ok(path.to_string_lossy().into_owned())
-}
-
-fn is_archive_root_directory(path: &str, kind: &ExtractionEntryKind) -> bool {
-    matches!(kind, ExtractionEntryKind::Directory) && is_root_entry_path(path)
-}
-
-fn is_root_entry_path(path: &str) -> bool {
-    let trimmed = path.trim_matches('/');
-    trimmed.is_empty() || trimmed == "."
 }
 
 fn extraction_kind<R: Read>(

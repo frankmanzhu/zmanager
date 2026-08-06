@@ -10,7 +10,7 @@ use sevenz_rust2::{Archive, ArchiveEntry, ArchiveReader, ArchiveWriter, EncoderM
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
@@ -415,7 +415,7 @@ fn split_7z_temp_archive(
     let archive_size = fs::metadata(archive_path)
         .map_err(|source| SevenZError::Io { path: archive_path.to_path_buf(), source })?
         .len();
-    let volume_count = split_volume_count(archive_size, volume_size)
+    let volume_count = crate::archive_split::split_volume_count(archive_size, volume_size)
         .ok_or_else(|| io_error(destination, io::ErrorKind::InvalidInput, "too many 7z volumes"))?;
     let volume_paths = sevenz_volume_paths(destination, volume_count)?;
 
@@ -452,11 +452,6 @@ fn split_7z_temp_archive(
     Ok(created_volume_count)
 }
 
-fn split_volume_count(archive_size: u64, volume_size: u64) -> Option<usize> {
-    let count = archive_size.max(1).div_ceil(volume_size);
-    usize::try_from(count).ok()
-}
-
 fn sevenz_volume_paths(destination: &Path, count: usize) -> Result<Vec<PathBuf>, SevenZError> {
     let mut paths = Vec::with_capacity(count);
     for index in 1..=count {
@@ -480,32 +475,15 @@ fn ensure_split_destinations_available(
     replace_existing: bool,
 ) -> Result<(), SevenZError> {
     ensure_file_destination_available(destination, replace_existing)?;
-    for path in unique_paths(volume_paths, existing_volume_paths) {
+    for path in crate::archive_split::unique_paths(volume_paths, existing_volume_paths) {
         ensure_file_destination_available(path, replace_existing)?;
     }
     Ok(())
 }
 
-fn unique_paths<'a>(left: &'a [PathBuf], right: &'a [PathBuf]) -> Vec<&'a Path> {
-    let mut seen = BTreeSet::new();
-    left.iter()
-        .chain(right.iter())
-        .filter_map(|path| if seen.insert(path.clone()) { Some(path.as_path()) } else { None })
-        .collect()
-}
-
 fn ensure_file_destination_available(path: &Path, replace_existing: bool) -> Result<(), SevenZError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
-        }
-        Ok(_) if !replace_existing => {
-            Err(io_error(path, io::ErrorKind::AlreadyExists, format!("destination already exists: {}", path.display())))
-        }
-        Ok(_) => Ok(()),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(SevenZError::Io { path: path.to_path_buf(), source }),
-    }
+    crate::archive_split::ensure_file_destination_available(path, replace_existing)
+        .map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })
 }
 
 fn remove_split_destinations_for_replace(
@@ -513,25 +491,8 @@ fn remove_split_destinations_for_replace(
     existing_volume_paths: &[PathBuf],
     replace_existing: bool,
 ) -> Result<(), SevenZError> {
-    if !replace_existing {
-        return Ok(());
-    }
-
-    for path in existing_volume_paths {
-        remove_file_destination_for_replace(path)?;
-    }
-    remove_file_destination_for_replace(destination)
-}
-
-fn remove_file_destination_for_replace(path: &Path) -> Result<(), SevenZError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
-        }
-        Ok(_) => fs::remove_file(path).map_err(|source| SevenZError::Io { path: path.to_path_buf(), source }),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(SevenZError::Io { path: path.to_path_buf(), source }),
-    }
+    crate::archive_split::remove_split_destinations_for_replace(destination, existing_volume_paths, replace_existing)
+        .map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })
 }
 
 fn existing_7z_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, SevenZError> {
@@ -1215,28 +1176,9 @@ fn apply_sevenz_metadata(
     unix_mode: Option<u32>,
     modified_time: Option<std::time::SystemTime>,
 ) -> Result<(), SevenZError> {
-    #[cfg(unix)]
-    if let Some(mode) = unix_mode {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(mode & SEVENZ_MODE_MASK))
-            .map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    #[cfg(not(unix))]
-    if let Some(mode) = unix_mode
-        && mode & 0o222 == 0
-        && let Ok(metadata) = fs::metadata(path)
-    {
-        let mut perms = metadata.permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(path, perms).map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    if let Some(sys_time) = modified_time {
-        filetime::set_file_mtime(path, filetime::FileTime::from_system_time(sys_time))
-            .map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })?;
-    }
-    Ok(())
+    let file_time = modified_time.map(filetime::FileTime::from_system_time);
+    crate::archive_split::apply_split_metadata(path, unix_mode, file_time, SEVENZ_MODE_MASK)
+        .map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })
 }
 
 fn apply_deferred_sevenz_directory_metadata(

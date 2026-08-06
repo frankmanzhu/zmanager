@@ -1,5 +1,6 @@
 //! Auth-client primitives for TZAP hosted Auth launch and bootstrap flows.
 
+use crate::http_client::{require_success, send_json_request, trim_trailing_slash};
 use crate::trust;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngCore;
@@ -441,16 +442,15 @@ pub fn fetch_current_user(
     session: &TzapSessionRecord,
 ) -> Result<TzapCurrentUser, TzapAuthError> {
     session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
-    let request = TzapAuthHttpRequest {
-        method: TzapAuthHttpMethod::Get,
-        url: format!("{}{}", trim_trailing_slash(sign_base_url), CURRENT_USER_PATH),
-        bearer_token: Some(session.access_token.clone()),
-        body: None,
-    };
-    let response = transport.send(&request)?;
-    if !(200..=299).contains(&response.status_code) {
-        return Err(TzapAuthError::HttpStatus { status_code: response.status_code });
-    }
+    let response = send_json_request(
+        transport,
+        TzapAuthHttpMethod::Get,
+        sign_base_url,
+        CURRENT_USER_PATH,
+        Some(session.access_token.clone()),
+        None,
+    )?;
+    let response = require_success(response, |status_code, _| TzapAuthError::HttpStatus { status_code })?;
     TzapCurrentUser::from_json_bytes(&response.body)
 }
 
@@ -755,10 +755,6 @@ fn required_u64_field(
 ) -> Result<u64, TzapAuthError> {
     let value = required_field(object, path, field)?;
     value.as_u64().ok_or(TzapAuthError::InvalidString { path, field })
-}
-
-fn trim_trailing_slash(value: &str) -> &str {
-    value.trim_end_matches('/')
 }
 
 fn encode_query_pairs(pairs: &[(&str, &str)]) -> String {

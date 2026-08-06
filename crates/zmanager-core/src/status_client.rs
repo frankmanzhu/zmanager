@@ -1,11 +1,11 @@
 //! Public TZAP trust distribution, status, bulk-status, and CRL client helpers.
 
-use crate::auth_client::{
-    TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport,
-};
+use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpResponse, TzapAuthHttpTransport};
 use crate::document_verification::{
     TzapDocumentVerificationResult, TzapOfflineVerificationOptions, verify_tzap_document_envelope_offline,
 };
+use crate::http_client::{require_success, send_json_request};
+use crate::json_util::{json_object, required_string};
 use crate::trust::{self, TzapCertificateStatus, TzapTrustAnchorType, TzapVerificationState};
 use openssl::x509::{X509, X509Crl};
 use serde_json::{Map, Value, json};
@@ -113,16 +113,8 @@ impl<'a, T: TzapAuthHttpTransport> TzapStatusClient<'a, T> {
         path: &str,
         body: Option<Value>,
     ) -> Result<TzapAuthHttpResponse, TzapStatusClientError> {
-        let response = self.transport.send(&TzapAuthHttpRequest {
-            method,
-            url: format!("{}{}", trim_trailing_slash(&self.sign_base_url), path),
-            bearer_token: None,
-            body,
-        })?;
-        if !(200..=299).contains(&response.status_code) {
-            return Err(TzapStatusClientError::HttpStatus { status_code: response.status_code });
-        }
-        Ok(response)
+        let response = send_json_request(self.transport, method, &self.sign_base_url, path, None, body)?;
+        require_success(response, |status_code, _| TzapStatusClientError::HttpStatus { status_code })
     }
 }
 
@@ -227,8 +219,8 @@ impl TzapStatusResponse {
     }
 
     pub fn from_json_value(value: &Value) -> Result<Self, TzapStatusClientError> {
-        let object = object(value)?;
-        let status = TzapCertificateStatus::parse(required_string(object, "status")?)
+        let object = json_object::<TzapStatusClientError>(value, "object")?;
+        let status = TzapCertificateStatus::parse(&required_string::<TzapStatusClientError>(object, "status")?)
             .ok_or(TzapStatusClientError::InvalidField { field: "status" })?;
         let query = parse_query_echo(object)?;
         let response = Self {
@@ -522,7 +514,7 @@ fn parse_bulk_status_response(
     lookups: &[TzapBulkStatusLookup],
 ) -> Result<Vec<TzapBulkStatusItem>, TzapStatusClientError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let root_object = object(&value)?;
+    let root_object = json_object::<TzapStatusClientError>(&value, "object")?;
     let results = root_object
         .get("results")
         .and_then(Value::as_array)
@@ -534,8 +526,8 @@ fn parse_bulk_status_response(
         .iter()
         .zip(lookups)
         .map(|(item, lookup)| {
-            let item_object = object(item)?;
-            let lookup_id = required_string(item_object, "lookup_id")?;
+            let item_object = json_object::<TzapStatusClientError>(item, "object")?;
+            let lookup_id = required_string::<TzapStatusClientError>(item_object, "lookup_id")?;
             if lookup_id != lookup.lookup_id {
                 return Err(TzapStatusClientError::InvalidField { field: "lookup_id" });
             }
@@ -552,7 +544,7 @@ fn parse_bulk_status_response(
 
 fn parse_crl_manifest(bytes: &[u8]) -> Result<Vec<TzapCrlManifestEntry>, TzapStatusClientError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let root_object = object(&value)?;
+    let root_object = json_object::<TzapStatusClientError>(&value, "object")?;
     let entries = root_object
         .get("crls")
         .and_then(Value::as_array)
@@ -560,13 +552,16 @@ fn parse_crl_manifest(bytes: &[u8]) -> Result<Vec<TzapCrlManifestEntry>, TzapSta
     entries
         .iter()
         .map(|entry| {
-            let entry_object = object(entry)?;
+            let entry_object = json_object::<TzapStatusClientError>(entry, "object")?;
             let parsed = TzapCrlManifestEntry {
-                crl_scope: required_string(entry_object, "crl_scope")?.to_owned(),
-                crl_url: required_string(entry_object, "crl_url")?.to_owned(),
-                issuer_certificate_sha256: required_string(entry_object, "issuer_certificate_sha256")?.to_owned(),
-                crl_sha256: required_string(entry_object, "crl_sha256")?.to_owned(),
-                crl_number: required_string(entry_object, "crl_number")?.to_owned(),
+                crl_scope: required_string::<TzapStatusClientError>(entry_object, "crl_scope")?,
+                crl_url: required_string::<TzapStatusClientError>(entry_object, "crl_url")?,
+                issuer_certificate_sha256: required_string::<TzapStatusClientError>(
+                    entry_object,
+                    "issuer_certificate_sha256",
+                )?,
+                crl_sha256: required_string::<TzapStatusClientError>(entry_object, "crl_sha256")?,
+                crl_number: required_string::<TzapStatusClientError>(entry_object, "crl_number")?,
                 this_update_unix_seconds: required_unix_or_rfc3339(
                     entry_object,
                     "this_update_unix_seconds",
@@ -606,24 +601,12 @@ fn parse_query_echo(response_object: &Map<String, Value>) -> Result<TzapStatusQu
     let Some(value) = response_object.get("query") else {
         return Ok(TzapStatusQueryEcho::default());
     };
-    let query = object(value)?;
+    let query = json_object::<TzapStatusClientError>(value, "object")?;
     Ok(TzapStatusQueryEcho {
         certificate_sha256: optional_string(query, "certificate_sha256")?,
         issuer_certificate_sha256: optional_string(query, "issuer_certificate_sha256")?,
         serial_number: optional_string(query, "serial_number")?,
     })
-}
-
-fn object(value: &Value) -> Result<&Map<String, Value>, TzapStatusClientError> {
-    value.as_object().ok_or(TzapStatusClientError::InvalidField { field: "object" })
-}
-
-fn required_string<'a>(object: &'a Map<String, Value>, field: &'static str) -> Result<&'a str, TzapStatusClientError> {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or(TzapStatusClientError::InvalidField { field })
 }
 
 fn optional_string(object: &Map<String, Value>, field: &'static str) -> Result<Option<String>, TzapStatusClientError> {
@@ -682,10 +665,6 @@ fn require_some<T>(value: Option<&T>, field: &'static str) -> Result<(), TzapSta
 
 fn is_printable_ascii(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
-}
-
-fn trim_trailing_slash(value: &str) -> &str {
-    value.trim_end_matches('/')
 }
 
 fn sha256_identifier(bytes: &[u8]) -> String {

@@ -1,3 +1,4 @@
+use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::{JobCancelled, JobContext};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
@@ -11,8 +12,6 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zmanager_libarchive::{FileType, ReadArchive};
-
-const LIBARCHIVE_MODE_MASK: u32 = 0o7777;
 
 const NUMBERED_VOLUME_EXTENSION_WIDTH: usize = 3;
 const NUMBERED_VOLUME_ARCHIVE_SUFFIXES: &[&str] = &[".7z", ".zip"];
@@ -811,12 +810,6 @@ struct LibarchiveEntryMetadata {
     modified: Option<SystemTime>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct DeferredHardlink {
-    source_path: PathBuf,
-    destination_path: PathBuf,
-}
-
 impl OwnedEntry {
     fn from_entry(entry: &zmanager_libarchive::Entry) -> Result<Self, LibarchiveError> {
         let path = entry.pathname().ok_or(LibarchiveError::MissingPath)?;
@@ -833,13 +826,9 @@ impl OwnedEntry {
     }
 
     fn is_archive_root_directory(&self) -> bool {
-        matches!(self.kind, LibarchiveEntryKind::Directory) && is_root_entry_path(&self.path)
+        matches!(self.kind, LibarchiveEntryKind::Directory)
+            && crate::extract_materialize::is_root_entry_path(&self.path)
     }
-}
-
-fn is_root_entry_path(path: &str) -> bool {
-    let trimmed = path.trim_matches('/');
-    trimmed.is_empty() || trimmed == "."
 }
 
 fn nonnegative_size(size: i64) -> Option<u64> {
@@ -847,7 +836,7 @@ fn nonnegative_size(size: i64) -> Option<u64> {
 }
 
 fn archive_entry_mode(mode: u32, kind: LibarchiveEntryKind) -> Option<u32> {
-    let permissions = mode & LIBARCHIVE_MODE_MASK;
+    let permissions = mode & crate::extract_materialize::MODE_MASK;
     // Some formats without POSIX modes (notably 7z) are synthesized by
     // libarchive as 0644 for every entry. Treat an unsearchable directory mode
     // as absent rather than making the extracted tree inaccessible.
@@ -986,19 +975,11 @@ fn materialize_deferred_hardlinks(
     hardlinks: &[DeferredHardlink],
     report: &mut LibarchiveExtractReport,
 ) -> Result<(), LibarchiveError> {
-    let paths = hardlinks
-        .iter()
-        .map(|hardlink| (hardlink.source_path.clone(), hardlink.destination_path.clone()))
-        .collect::<Vec<_>>();
-    let order = crate::safety::deferred_link_dependency_order(&paths).map_err(|source| LibarchiveError::Io {
+    crate::extract_materialize::materialize_deferred_hardlinks(hardlinks).map_err(|source| LibarchiveError::Io {
         path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()),
         source,
     })?;
-    for index in order {
-        let hardlink = &hardlinks[index];
-        write_hardlink(&hardlink.source_path, &hardlink.destination_path)?;
-        report.written_entries += 1;
-    }
+    report.written_entries += hardlinks.len();
     Ok(())
 }
 
@@ -1053,41 +1034,19 @@ fn apply_deferred_directory_metadata(
 }
 
 fn apply_metadata(path: &Path, metadata: LibarchiveEntryMetadata) -> Result<(), LibarchiveError> {
-    #[cfg(unix)]
-    if let Some(mode) = metadata.mode {
-        use std::os::unix::fs::PermissionsExt;
-
-        fs::set_permissions(path, fs::Permissions::from_mode(mode & LIBARCHIVE_MODE_MASK))
-            .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    #[cfg(not(unix))]
-    if let Some(mode) = metadata.mode
-        && mode & 0o222 == 0
-        && let Ok(fs_metadata) = fs::metadata(path)
-    {
-        let mut perms = fs_metadata.permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(path, perms).map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    if let Some(modified) = metadata.modified {
-        filetime::set_file_mtime(path, filetime::FileTime::from_system_time(modified))
-            .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })?;
-    }
-
-    Ok(())
+    crate::extract_materialize::apply_metadata(
+        path,
+        metadata.mode,
+        metadata.modified.map(filetime::FileTime::from_system_time),
+    )
+    .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
 }
 
 /// Uses `set_symlink_file_times` to avoid following the link. Errors are
 /// reported so extraction cannot claim metadata was restored when it was not.
 fn apply_symlink_mtime(path: &Path, modified: Option<SystemTime>) -> Result<(), LibarchiveError> {
-    if let Some(modified) = modified {
-        let ft = filetime::FileTime::from_system_time(modified);
-        filetime::set_symlink_file_times(path, ft, ft)
-            .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })?;
-    }
-    Ok(())
+    crate::extract_materialize::apply_symlink_mtime(path, modified.map(filetime::FileTime::from_system_time))
+        .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
 }
 
 fn copy_file_entry_to_writer<W: Write>(
@@ -1112,22 +1071,9 @@ fn copy_file_entry_to_writer<W: Write>(
     Ok(written_bytes)
 }
 
-fn write_hardlink(source_path: &Path, destination_path: &Path) -> Result<(), LibarchiveError> {
-    if let Some(parent) = destination_path.parent() {
-        fs::create_dir_all(parent).map_err(|source| LibarchiveError::Io { path: parent.to_path_buf(), source })?;
-    }
-    fs::hard_link(source_path, destination_path)
-        .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })
-}
-
 #[cfg(unix)]
 fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), LibarchiveError> {
-    use std::os::unix::fs::symlink;
-
-    if let Some(parent) = destination_path.parent() {
-        fs::create_dir_all(parent).map_err(|source| LibarchiveError::Io { path: parent.to_path_buf(), source })?;
-    }
-    symlink(target, destination_path)
+    crate::extract_materialize::write_symlink(target, destination_path)
         .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })
 }
 

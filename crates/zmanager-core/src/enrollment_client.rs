@@ -1,10 +1,12 @@
 //! Client-side TZAP certificate enrollment flow.
 
 use crate::auth_client::{
-    SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpTransport,
-    TzapBearerToken, TzapSessionRecord,
+    SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpTransport, TzapBearerToken,
+    TzapSessionRecord,
 };
+use crate::http_client::{http_error_body, require_success, send_json_request};
 use crate::jcs;
+use crate::json_util::{json_object, optional_string, optional_u64, required_field, required_string, required_u64};
 use crate::local_identity_store::{
     TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore,
     TzapLocalIdentityStoreError, TzapSignDeviceRouting,
@@ -308,8 +310,8 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
                 "csr_pem": csr_der_to_pem(csr_der),
                 "device_name": DEFAULT_ENROLLMENT_DEVICE_NAME,
                 "device_public_key_fingerprint": signing_key.public_key_fingerprint,
-                "org_id": optional_string(json_object(&challenge.payload, "challenge_payload")?, "org_id")?,
-                "requested_validity_days": required_u64(json_object(&challenge.payload, "challenge_payload")?, "requested_validity_days")?,
+                "org_id": optional_string::<TzapEnrollmentError>(json_object::<TzapEnrollmentError>(&challenge.payload, "challenge_payload")?, "org_id")?,
+                "requested_validity_days": required_u64::<TzapEnrollmentError>(json_object::<TzapEnrollmentError>(&challenge.payload, "challenge_payload")?, "requested_validity_days")?,
             }),
         };
         let response = self.send_json(
@@ -352,19 +354,11 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
         bearer_token: Option<TzapBearerToken>,
         body: Option<Value>,
     ) -> Result<crate::auth_client::TzapAuthHttpResponse, TzapEnrollmentError> {
-        let response = self.transport.send(&TzapAuthHttpRequest {
-            method,
-            url: format!("{}{}", trim_trailing_slash(&self.sign_base_url), path),
-            bearer_token,
-            body,
-        })?;
-        if !(200..=299).contains(&response.status_code) {
-            return Err(TzapEnrollmentError::HttpStatus {
-                status_code: response.status_code,
-                body: http_error_body(&response.body),
-            });
-        }
-        Ok(response)
+        let response = send_json_request(self.transport, method, &self.sign_base_url, path, bearer_token, body)?;
+        require_success(response, |status_code, response| TzapEnrollmentError::HttpStatus {
+            status_code,
+            body: http_error_body(&response.body),
+        })
     }
 }
 
@@ -464,13 +458,13 @@ fn validate_challenge_payload(
     csr_der: &[u8],
     challenge: &TzapEnrollmentChallenge,
 ) -> Result<(), TzapEnrollmentError> {
-    let object = json_object(&challenge.payload, "challenge_payload")?;
+    let object = json_object::<TzapEnrollmentError>(&challenge.payload, "challenge_payload")?;
     match wire_profile {
         TzapEnrollmentWireProfile::Spec => {
             expect_string(object, "canonicalization", ENROLLMENT_CHALLENGE_CANONICALIZATION)?;
             expect_string(object, "audience", SESSION_AUDIENCE_SIGN_TZAP)?;
             expect_u64(object, "requested_validity_seconds", request.requested_validity_seconds)?;
-            let expires_at = required_u64(object, "expires_at_unix_seconds")?;
+            let expires_at = required_u64::<TzapEnrollmentError>(object, "expires_at_unix_seconds")?;
             if request.now_unix_seconds >= expires_at {
                 return Err(TzapEnrollmentError::ChallengeExpired);
             }
@@ -485,7 +479,7 @@ fn validate_challenge_payload(
                 "requested_validity_days",
                 requested_validity_days(request.requested_validity_seconds)?,
             )?;
-            let _ = required_string(object, "expires_at")?;
+            let _ = required_string::<TzapEnrollmentError>(object, "expires_at")?;
         }
     }
     expect_string(object, "operation", ENROLL_OPERATION)?;
@@ -514,17 +508,17 @@ fn p256_private_key_from_secret(private_key_der: &SecretBytes) -> Result<PKey<Pr
 
 fn parse_challenge_response(bytes: &[u8]) -> Result<TzapEnrollmentChallenge, TzapEnrollmentError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object(&value, "$")?;
+    let object = json_object::<TzapEnrollmentError>(&value, "$")?;
     Ok(TzapEnrollmentChallenge {
-        challenge_id: required_string(object, "challenge_id")?,
-        payload: required_field(object, "challenge_payload")?.clone(),
-        canonicalization: optional_string(object, "canonicalization")?,
+        challenge_id: required_string::<TzapEnrollmentError>(object, "challenge_id")?,
+        payload: required_field::<TzapEnrollmentError>(object, "challenge_payload")?.clone(),
+        canonicalization: optional_string::<TzapEnrollmentError>(object, "canonicalization")?,
     })
 }
 
 pub(crate) fn parse_enrollment_response(bytes: &[u8]) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object(&value, "$")?;
+    let object = json_object::<TzapEnrollmentError>(&value, "$")?;
     if let Some(denial) = object.get("denial") {
         return Err(TzapEnrollmentError::Denied(parse_denial(denial)?));
     }
@@ -536,22 +530,25 @@ pub(crate) fn parse_enrollment_response(bytes: &[u8]) -> Result<TzapEnrollmentCe
 
 fn parse_certificate_list_response(bytes: &[u8]) -> Result<Vec<TzapEnrollmentCertificatePayload>, TzapEnrollmentError> {
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = json_object(&value, "$")?;
-    let certificates = required_field(object, "certificates")?
+    let object = json_object::<TzapEnrollmentError>(&value, "$")?;
+    let certificates = required_field::<TzapEnrollmentError>(object, "certificates")?
         .as_array()
         .ok_or(TzapEnrollmentError::InvalidField { field: "certificates" })?;
     certificates.iter().map(parse_certificate_payload).collect::<Result<Vec<_>, _>>()
 }
 
 fn parse_certificate_payload(value: &Value) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
-    let object = json_object(value, "certificate")?;
+    let object = json_object::<TzapEnrollmentError>(value, "certificate")?;
     if object.contains_key("certificate_pem") {
         return parse_pem_certificate_payload(object);
     }
     Ok(TzapEnrollmentCertificatePayload {
-        certificate_id: required_string(object, "certificate_id")?,
-        leaf_certificate_der: decode_base64url(required_string(object, "leaf_certificate_der")?)?,
-        intermediate_chain_der: required_field(object, "intermediate_chain_der")?
+        certificate_id: required_string::<TzapEnrollmentError>(object, "certificate_id")?,
+        leaf_certificate_der: decode_base64url(required_string::<TzapEnrollmentError>(
+            object,
+            "leaf_certificate_der",
+        )?)?,
+        intermediate_chain_der: required_field::<TzapEnrollmentError>(object, "intermediate_chain_der")?
             .as_array()
             .ok_or(TzapEnrollmentError::InvalidField { field: "intermediate_chain_der" })?
             .iter()
@@ -563,22 +560,23 @@ fn parse_certificate_payload(value: &Value) -> Result<TzapEnrollmentCertificateP
                 decode_base64url(encoded)
             })
             .collect::<Result<Vec<_>, _>>()?,
-        issuer_certificate_sha256: required_string(object, "issuer_certificate_sha256")?,
-        issuer_key_identifier: required_string(object, "issuer_key_identifier")?,
-        serial_number: required_string(object, "serial_number")?,
-        certificate_sha256: required_string(object, "certificate_sha256")?,
-        not_before_unix_seconds: required_u64(object, "not_before_unix_seconds")?,
-        not_after_unix_seconds: required_u64(object, "not_after_unix_seconds")?,
-        sign_device_id: required_string(object, "sign_device_id")?,
-        login_organization_device_id: optional_string(object, "login_organization_device_id")?,
+        issuer_certificate_sha256: required_string::<TzapEnrollmentError>(object, "issuer_certificate_sha256")?,
+        issuer_key_identifier: required_string::<TzapEnrollmentError>(object, "issuer_key_identifier")?,
+        serial_number: required_string::<TzapEnrollmentError>(object, "serial_number")?,
+        certificate_sha256: required_string::<TzapEnrollmentError>(object, "certificate_sha256")?,
+        not_before_unix_seconds: required_u64::<TzapEnrollmentError>(object, "not_before_unix_seconds")?,
+        not_after_unix_seconds: required_u64::<TzapEnrollmentError>(object, "not_after_unix_seconds")?,
+        sign_device_id: required_string::<TzapEnrollmentError>(object, "sign_device_id")?,
+        login_organization_device_id: optional_string::<TzapEnrollmentError>(object, "login_organization_device_id")?,
     })
 }
 
 fn parse_pem_certificate_payload(
     object: &Map<String, Value>,
 ) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
-    let leaf_certificate_der = certificate_pem_to_der(&required_string(object, "certificate_pem")?, "certificate_pem")?;
-    let intermediate_chain_der = required_field(object, "chain_pem")?
+    let leaf_certificate_der =
+        certificate_pem_to_der(&required_string::<TzapEnrollmentError>(object, "certificate_pem")?, "certificate_pem")?;
+    let intermediate_chain_der = required_field::<TzapEnrollmentError>(object, "chain_pem")?
         .as_array()
         .ok_or(TzapEnrollmentError::InvalidField { field: "chain_pem" })?
         .iter()
@@ -589,29 +587,29 @@ fn parse_pem_certificate_payload(
         .collect::<Result<Vec<_>, _>>()?;
     let (not_before_unix_seconds, not_after_unix_seconds) = certificate_validity_unix_seconds(&leaf_certificate_der)?;
     Ok(TzapEnrollmentCertificatePayload {
-        certificate_id: required_string(object, "certificate_id")?,
+        certificate_id: required_string::<TzapEnrollmentError>(object, "certificate_id")?,
         leaf_certificate_der,
         intermediate_chain_der,
-        issuer_certificate_sha256: required_string(object, "issuer_certificate_sha256")?,
-        issuer_key_identifier: required_string(object, "issuer_key_identifier")?,
-        serial_number: required_string(object, "serial_number")?,
-        certificate_sha256: required_string(object, "certificate_sha256")?,
+        issuer_certificate_sha256: required_string::<TzapEnrollmentError>(object, "issuer_certificate_sha256")?,
+        issuer_key_identifier: required_string::<TzapEnrollmentError>(object, "issuer_key_identifier")?,
+        serial_number: required_string::<TzapEnrollmentError>(object, "serial_number")?,
+        certificate_sha256: required_string::<TzapEnrollmentError>(object, "certificate_sha256")?,
         not_before_unix_seconds,
         not_after_unix_seconds,
-        sign_device_id: required_string(object, "sign_device_id")?,
-        login_organization_device_id: optional_string(object, "login_organization_device_id")?,
+        sign_device_id: required_string::<TzapEnrollmentError>(object, "sign_device_id")?,
+        login_organization_device_id: optional_string::<TzapEnrollmentError>(object, "login_organization_device_id")?,
     })
 }
 
 fn parse_denial(value: &Value) -> Result<TzapEnrollmentDenial, TzapEnrollmentError> {
-    let object = json_object(value, "denial")?;
-    let reason = required_string(object, "reason")?;
+    let object = json_object::<TzapEnrollmentError>(value, "denial")?;
+    let reason = required_string::<TzapEnrollmentError>(object, "reason")?;
     let kind = TzapEnrollmentDenialKind::from_wire_value(&reason)
         .ok_or(TzapEnrollmentError::InvalidField { field: "denial.reason" })?;
     Ok(TzapEnrollmentDenial {
         kind,
-        retry_after_unix_seconds: optional_u64(object, "retry_after")?,
-        support_reference: optional_string(object, "support_reference")?,
+        retry_after_unix_seconds: optional_u64::<TzapEnrollmentError>(object, "retry_after")?,
+        support_reference: optional_string::<TzapEnrollmentError>(object, "support_reference")?,
     })
 }
 
@@ -740,46 +738,8 @@ fn local_staging_canonical_integer(digits: &str) -> String {
     if zero_count == 0 { digits.to_owned() } else { format!("{trimmed}e+{zero_count}") }
 }
 
-fn json_object<'a>(value: &'a Value, field: &'static str) -> Result<&'a Map<String, Value>, TzapEnrollmentError> {
-    value.as_object().ok_or(TzapEnrollmentError::InvalidField { field })
-}
-
-fn required_field<'a>(object: &'a Map<String, Value>, field: &'static str) -> Result<&'a Value, TzapEnrollmentError> {
-    object.get(field).ok_or(TzapEnrollmentError::InvalidField { field })
-}
-
-fn required_string(object: &Map<String, Value>, field: &'static str) -> Result<String, TzapEnrollmentError> {
-    required_field(object, field)?
-        .as_str()
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or(TzapEnrollmentError::InvalidField { field })
-}
-
-fn optional_string(object: &Map<String, Value>, field: &'static str) -> Result<Option<String>, TzapEnrollmentError> {
-    match object.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => value
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .map(|value| Some(value.to_owned()))
-            .ok_or(TzapEnrollmentError::InvalidField { field }),
-    }
-}
-
-fn required_u64(object: &Map<String, Value>, field: &'static str) -> Result<u64, TzapEnrollmentError> {
-    required_field(object, field)?.as_u64().ok_or(TzapEnrollmentError::InvalidField { field })
-}
-
-fn optional_u64(object: &Map<String, Value>, field: &'static str) -> Result<Option<u64>, TzapEnrollmentError> {
-    match object.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => value.as_u64().map(Some).ok_or(TzapEnrollmentError::InvalidField { field }),
-    }
-}
-
 fn expect_string(object: &Map<String, Value>, field: &'static str, expected: &str) -> Result<(), TzapEnrollmentError> {
-    let actual = required_string(object, field)?;
+    let actual = required_string::<TzapEnrollmentError>(object, field)?;
     if actual == expected { Ok(()) } else { Err(TzapEnrollmentError::ChallengeMismatch { field }) }
 }
 
@@ -788,12 +748,12 @@ fn expect_optional_string(
     field: &'static str,
     expected: Option<&str>,
 ) -> Result<(), TzapEnrollmentError> {
-    let actual = optional_string(object, field)?;
+    let actual = optional_string::<TzapEnrollmentError>(object, field)?;
     if actual.as_deref() == expected { Ok(()) } else { Err(TzapEnrollmentError::ChallengeMismatch { field }) }
 }
 
 fn expect_u64(object: &Map<String, Value>, field: &'static str, expected: u64) -> Result<(), TzapEnrollmentError> {
-    let actual = required_u64(object, field)?;
+    let actual = required_u64::<TzapEnrollmentError>(object, field)?;
     if actual == expected { Ok(()) } else { Err(TzapEnrollmentError::ChallengeMismatch { field }) }
 }
 
@@ -802,15 +762,6 @@ fn expect_null(object: &Map<String, Value>, field: &'static str) -> Result<(), T
         Some(Value::Null) => Ok(()),
         _ => Err(TzapEnrollmentError::ChallengeMismatch { field }),
     }
-}
-
-fn trim_trailing_slash(value: &str) -> &str {
-    value.trim_end_matches('/')
-}
-
-fn http_error_body(bytes: &[u8]) -> Option<String> {
-    let value = String::from_utf8_lossy(bytes).trim().to_owned();
-    if value.is_empty() { None } else { Some(value) }
 }
 
 #[cfg(test)]
