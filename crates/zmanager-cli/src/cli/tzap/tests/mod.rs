@@ -1,4 +1,3 @@
-
 use super::support::rfc3339_utc_to_unix_seconds;
 
 #[test]

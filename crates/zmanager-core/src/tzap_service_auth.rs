@@ -1,7 +1,12 @@
-//! Hosted-auth session storage and pending-handoff persistence (CR-136).
+//! Hosted-auth session storage and pending-handoff persistence (CR-136,
+//! CR-113).
 //!
-//! Extracted from the tzap JSON service; the service imports these
-//! `pub(crate)` items for its `tzap_auth_*_json` endpoints.
+//! Single implementation of the on-disk TZAP auth state: the session file,
+//! the pending-handoff file (including the login metadata the callback
+//! handoff-code exchange needs), and the state-directory default. Both the
+//! JSON service (`tzap_service`) and the CLI (`zmanager-cli`) use these; the
+//! CLI's former `FileTzapSessionStore` and its pending-auth helpers were
+//! merged here so there is one storage path.
 
 use crate::atomic_file::write_atomic_secret_file;
 use crate::auth_client::TzapSessionStore;
@@ -12,15 +17,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(crate) const AUTH_PENDING_FILE: &str = "auth-pending.json";
+pub const AUTH_PENDING_FILE: &str = "auth-pending.json";
 const AUTH_SESSION_FILE: &str = "auth-session.json";
 
-pub(crate) struct TzapFfiSessionStore {
+pub struct TzapFfiSessionStore {
     path: PathBuf,
 }
 
 impl TzapFfiSessionStore {
-    pub(crate) fn new(state_dir: &Path) -> Self {
+    #[must_use]
+    pub fn new(state_dir: &Path) -> Self {
         Self { path: state_dir.join(AUTH_SESSION_FILE) }
     }
 }
@@ -59,7 +65,7 @@ impl TzapSessionStore for TzapFfiSessionStore {
     }
 }
 
-pub(crate) fn parse_auth_environment(value: &str) -> Result<crate::auth_client::TzapHostedAuthEnvironment, String> {
+pub fn parse_auth_environment(value: &str) -> Result<crate::auth_client::TzapHostedAuthEnvironment, String> {
     match value {
         "local" => Ok(crate::auth_client::TzapHostedAuthEnvironment::Local),
         "staging" => Ok(crate::auth_client::TzapHostedAuthEnvironment::Staging),
@@ -68,15 +74,21 @@ pub(crate) fn parse_auth_environment(value: &str) -> Result<crate::auth_client::
     }
 }
 
-pub(crate) fn default_tzap_state_dir() -> PathBuf {
-    std::env::var_os("ZMANAGER_TZAP_STATE_DIR").map_or_else(
-        || {
-            std::env::var_os("HOME").map_or_else(
-                || PathBuf::from(".").join(".zmanager").join("tzap"),
-                |home| PathBuf::from(home).join(".zmanager").join("tzap"),
-            )
-        },
-        PathBuf::from,
+/// Default TZAP state directory (CR-113: the CLI's `ZM_TZAP_STATE_DIR` is
+/// honored first, then the legacy `ZMANAGER_TZAP_STATE_DIR`, then the home
+/// fallback, so both CLI and FFI consumers keep working).
+#[must_use]
+pub fn default_tzap_state_dir() -> PathBuf {
+    for variable in ["ZM_TZAP_STATE_DIR", "ZMANAGER_TZAP_STATE_DIR"] {
+        if let Some(path) = std::env::var_os(variable)
+            && !path.is_empty()
+        {
+            return PathBuf::from(path);
+        }
+    }
+    std::env::var_os("HOME").map_or_else(
+        || PathBuf::from(".").join(".zmanager").join("tzap"),
+        |home| PathBuf::from(home).join(".zmanager").join("tzap"),
     )
 }
 
@@ -99,9 +111,13 @@ fn write_secret_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
     write_atomic_secret_file(path, &bytes)
 }
 
-pub(crate) fn save_pending_auth(
+/// Persists the pending handoff; the login metadata (`client_id`,
+/// `auth_base_url`) lets the callback exchange a handoff code without the
+/// caller repeating the login options (CR-113: adopted from the CLI).
+pub fn save_pending_auth(
     state_dir: &Path,
     pending: &crate::auth_client::TzapPendingAuthState,
+    config: &crate::auth_client::TzapHostedAuthLaunchConfig,
 ) -> std::io::Result<()> {
     write_secret_json_file(
         &state_dir.join(AUTH_PENDING_FILE),
@@ -111,11 +127,30 @@ pub(crate) fn save_pending_auth(
             "redirect_uri": pending.redirect_uri,
             "pkce_verifier": pending.pkce.verifier,
             "created_at_unix_seconds": pending.created_at_unix_seconds,
+            "client_id": config.client_id,
+            "auth_base_url": config.hosted_auth_base_url,
         }),
     )
 }
 
-pub(crate) fn load_pending_auth(state_dir: &Path) -> Result<crate::auth_client::TzapPendingAuthState, String> {
+#[derive(Debug, Default)]
+pub struct TzapPendingAuthMetadata {
+    pub client_id: Option<String>,
+    pub auth_base_url: Option<String>,
+}
+
+#[must_use]
+pub fn load_pending_auth_metadata(state_dir: &Path) -> TzapPendingAuthMetadata {
+    let Some(value) = read_json_file(&state_dir.join(AUTH_PENDING_FILE)) else {
+        return TzapPendingAuthMetadata::default();
+    };
+    TzapPendingAuthMetadata {
+        client_id: request_string(&value, "client_id").ok().flatten(),
+        auth_base_url: request_string(&value, "auth_base_url").ok().flatten(),
+    }
+}
+
+pub fn load_pending_auth(state_dir: &Path) -> Result<crate::auth_client::TzapPendingAuthState, String> {
     let value = read_json_file(&state_dir.join(AUTH_PENDING_FILE))
         .ok_or_else(|| "no pending hosted-auth handoff".to_owned())?;
     let verifier = required_request_string(&value, "pkce_verifier")?;

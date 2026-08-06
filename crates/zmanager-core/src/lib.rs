@@ -48,7 +48,7 @@ mod temp_names;
 #[cfg(test)]
 mod test_support;
 mod tzap;
-mod tzap_service_auth;
+pub mod tzap_service_auth;
 mod wire_profile;
 mod zip_split;
 

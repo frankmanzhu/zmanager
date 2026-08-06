@@ -304,3 +304,24 @@ pub fn certificate_sha256_identifier_for_der(der: &[u8]) -> String {
     digest.copy_from_slice(&Sha256::digest(der));
     format_certificate_sha256(&digest)
 }
+
+/// Reads trusted-root certificate files (PEM or DER) and collects their
+/// SHA-256 identifiers (CR-113: shared by the CLI and the tzap JSON service;
+/// the service adopted the CLI's file-loading behavior).
+pub fn load_custom_root_certificate_files(
+    paths: &[std::path::PathBuf],
+    custom_roots: &mut Vec<String>,
+) -> Result<Vec<Vec<u8>>, String> {
+    paths
+        .iter()
+        .map(|path| {
+            let bytes = std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+            let der = certificate_pem_or_der_to_der(&bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+            let fingerprint = certificate_sha256_identifier_for_der(&der);
+            if !custom_roots.iter().any(|root| root == &fingerprint) {
+                custom_roots.push(fingerprint);
+            }
+            Ok(der)
+        })
+        .collect()
+}

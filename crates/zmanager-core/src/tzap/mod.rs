@@ -35,7 +35,7 @@ pub use x509::{
     inspect_tzap_x509_public_no_key_signer, inspect_tzap_x509_signer,
     test_tzap_with_optional_password_filter_and_x509_trust, test_tzap_with_password_filter,
     test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust,
-    verify_tzap_x509_public_no_key,
+    tzap_x509_signing_options_from_inventory, verify_tzap_x509_public_no_key,
 };
 
 pub(crate) const TZAP_EXTENSION: &str = "tzap";

@@ -4,9 +4,13 @@ use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{
     CONTACT_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help,
 };
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zmanager_core::local_identity_store::TzapLocalIdentityStore as _;
+use zmanager_core::tzap_service::{
+    tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json,
+    tzap_recipient_key_generate_json,
+};
 
 pub(crate) fn contact_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) || args.is_empty() {
@@ -51,43 +55,28 @@ pub(crate) fn contact_keygen_command(args: &[String], mut global: GlobalOptions)
         }
     }
 
-    let material = match zmanager_core::device_identity::generate_recipient_encryption_key() {
-        Ok(material) => material,
-        Err(error) => {
-            print_stable_tzap_error("contact_keygen", &error.to_string(), &global);
-            return ExitCode::FAILURE;
+    let request = service_request(
+        &context,
+        json!({
+            "label": label,
+            "created_at_unix_seconds": current_unix_seconds(),
+        }),
+    );
+    match service_envelope(&tzap_recipient_key_generate_json(&request.to_string())) {
+        Ok(response) => {
+            let key_id = response["recipient_key"]["key_id"].as_str().unwrap_or_default();
+            if global.json {
+                println!("{{\"generated\":true,\"recipient_key_id\":\"{}\"}}", json_escape(key_id));
+            } else {
+                print_success_line(&global, format_args!("generated recipient key {key_id}"));
+            }
+            ExitCode::SUCCESS
         }
-    };
-    let key_id = material.public_key_fingerprint.clone();
-    let record = zmanager_core::local_identity_store::TzapRecipientEncryptionKeyRecord {
-        key_id: key_id.clone(),
-        algorithm: material.algorithm.to_owned(),
-        public_key_fingerprint: material.public_key_fingerprint,
-        public_key_der: material.public_key_spki_der,
-        private_key_der: material.private_key_der,
-        created_at_unix_seconds: current_unix_seconds(),
-        label: Some(label),
-    };
-    let mut store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    let mut inventory = match store.load_inventory(&context.account_key) {
-        Ok(inventory) => inventory,
-        Err(error) => {
-            print_stable_tzap_error("contact_keygen", &error.to_string(), &global);
-            return ExitCode::FAILURE;
+        Err(message) => {
+            print_stable_tzap_error("contact_keygen", &message, &global);
+            ExitCode::FAILURE
         }
-    };
-    inventory.recipient_encryption_keys.push(record);
-    if let Err(error) = store.save_inventory(&context.account_key, inventory) {
-        print_stable_tzap_error("contact_keygen", &error.to_string(), &global);
-        return ExitCode::FAILURE;
     }
-
-    if global.json {
-        println!("{{\"generated\":true,\"recipient_key_id\":\"{}\"}}", json_escape(&key_id));
-    } else {
-        print_success_line(&global, format_args!("generated recipient key {key_id}"));
-    }
-    ExitCode::SUCCESS
 }
 
 pub(super) fn contact_list_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
@@ -95,29 +84,25 @@ pub(super) fn contact_list_command(args: &[String], mut global: GlobalOptions) -
         Ok(context) => context,
         Err(code) => return code,
     };
-    let store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    match store.load_inventory(&context.account_key) {
-        Ok(inventory) => {
+    let request = service_request(&context, json!({}));
+    match service_envelope(&tzap_contact_list_json(&request.to_string())) {
+        Ok(response) => {
+            let contacts: &[Value] = response["contacts"].as_array().map_or(&[], |array| array.as_slice());
             if global.json {
-                print!("{{\"contacts\":[");
-                for (index, contact) in inventory.contacts.iter().enumerate() {
-                    if index > 0 {
-                        print!(",");
-                    }
-                    print_contact_json(contact);
-                }
-                println!("]}}");
-            } else if inventory.contacts.is_empty() {
+                println!("{{\"contacts\":{}}}", serde_json::to_string(contacts).unwrap_or_else(|_| "[]".to_owned()));
+            } else if contacts.is_empty() {
                 println!("no contacts");
             } else {
-                for contact in inventory.contacts {
-                    println!("{} {}", contact.contact_id, contact.display_name);
+                for contact in contacts {
+                    let contact_id = contact["contact_id"].as_str().unwrap_or_default();
+                    let display_name = contact["display_name"].as_str().unwrap_or_default();
+                    println!("{contact_id} {display_name}");
                 }
             }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_error_line(&global, format_args!("contact list failed: {error}"));
+        Err(message) => {
+            print_error_line(&global, format_args!("contact list failed: {message}"));
             ExitCode::FAILURE
         }
     }
@@ -152,17 +137,10 @@ pub(super) fn contact_remove_command(args: &[String], mut global: GlobalOptions)
     let Some(contact_id) = contact_id else {
         return command_usage_error("contact", "missing contact id", &global);
     };
-    let mut store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    match store.load_inventory(&context.account_key) {
-        Ok(mut inventory) => {
-            let before = inventory.contacts.len();
-            inventory.contacts.retain(|contact| contact.contact_id != contact_id);
-            if let Err(error) = store.save_inventory(&context.account_key, inventory) {
-                print_error_line(&global, format_args!("contact remove failed: {error}"));
-                return ExitCode::FAILURE;
-            }
-            let removed =
-                before > store.load_inventory(&context.account_key).map_or(0, |inventory| inventory.contacts.len());
+    let request = service_request(&context, json!({"contact_id": contact_id.clone()}));
+    match service_envelope(&tzap_contact_remove_json(&request.to_string())) {
+        Ok(response) => {
+            let removed = response["removed"].as_bool().unwrap_or(false);
             if global.json {
                 println!("{{\"removed\":{removed}}}");
             } else if removed {
@@ -172,8 +150,8 @@ pub(super) fn contact_remove_command(args: &[String], mut global: GlobalOptions)
             }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_error_line(&global, format_args!("contact remove failed: {error}"));
+        Err(message) => {
+            print_error_line(&global, format_args!("contact remove failed: {message}"));
             ExitCode::FAILURE
         }
     }
@@ -236,39 +214,31 @@ pub(super) fn contact_import_command(args: &[String], mut global: GlobalOptions)
             return ExitCode::FAILURE;
         }
     };
-    let custom_root_certificates_der = match load_custom_root_certificates(&custom_root_cert_paths, &mut custom_roots) {
-        Ok(certificates) => certificates,
-        Err(error) => {
-            print_error_line(&global, format_args!("contact import failed: {error}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let options = zmanager_core::contact_card::TzapContactCardImportOptions {
-        verifier_time_unix_seconds: current_unix_seconds().cast_signed(),
-        official_root_pins: &zmanager_core::trust::OFFICIAL_TZAP_ROOT_PINS,
-        official_root_certificates_der: Vec::new(),
-        custom_trust_root_sha256: custom_roots,
-        custom_trust_root_certificates_der: custom_root_certificates_der,
-        certificate_profile_options: zmanager_core::trust::TzapCertificateProfileOptions::default(),
-    };
-    let mut store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    match zmanager_core::contact_card::import_tzap_contact_card(
-        &mut store,
-        &context.account_key,
-        &card,
-        &options,
-        accepted.then(current_unix_seconds),
-    ) {
-        Ok(contact) => {
+    let custom_root_cert_paths =
+        custom_root_cert_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
+    let request = service_request(
+        &context,
+        json!({
+            "verifier_time_unix_seconds": current_unix_seconds().cast_signed(),
+            "custom_trust_root_sha256": custom_roots,
+            "custom_trust_root_cert_paths": custom_root_cert_paths,
+            "accept": accepted,
+            "accepted_at_unix_seconds": accepted.then(current_unix_seconds),
+            "contact_card": card,
+        }),
+    );
+    match service_envelope(&tzap_contact_import_json(&request.to_string())) {
+        Ok(response) => {
+            let display_name = response["contact"]["display_name"].as_str().unwrap_or_default();
             if global.json {
-                print_contact_json_line(&contact);
+                println!("{{\"contact\":{}}}", response["contact"]);
             } else {
-                print_success_line(&global, format_args!("imported contact {}", contact.display_name));
+                print_success_line(&global, format_args!("imported contact {display_name}"));
             }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_stable_tzap_error("contact_import", &error.to_string(), &global);
+        Err(message) => {
+            print_stable_tzap_error("contact_import", &message, &global);
             ExitCode::FAILURE
         }
     }
@@ -342,19 +312,26 @@ pub(super) fn contact_export_command(args: &[String], mut global: GlobalOptions)
     let Some(output) = output else {
         return command_usage_error("contact", "missing --output", &global);
     };
-    let store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    let request = zmanager_core::contact_card::TzapContactCardExportRequest {
-        account_key: context.account_key,
-        recipient_key_id,
-        certificate_id,
-        display_name,
-        device_label,
-        created_at_unix_seconds: current_unix_seconds(),
-        expires_at_unix_seconds: None,
-    };
-    match zmanager_core::contact_card::export_tzap_contact_card(&store, &request) {
-        Ok(card) => {
-            if let Err(error) = write_json_file(&output, &card) {
+    let request = service_request(
+        &context,
+        json!({
+            "recipient_key_id": recipient_key_id,
+            "certificate_id": certificate_id,
+            "display_name": display_name,
+            "device_label": device_label,
+            "created_at_unix_seconds": current_unix_seconds(),
+        }),
+    );
+    match service_envelope(&tzap_contact_export_json(&request.to_string())) {
+        Ok(response) => {
+            let card = match response.get("contact_card") {
+                Some(card) => card,
+                None => {
+                    print_stable_tzap_error("contact_export", "service response is missing the contact card", &global);
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(error) = write_json_file(&output, card) {
                 print_error_line(&global, format_args!("contact export failed: {error}"));
                 return ExitCode::FAILURE;
             }
@@ -365,8 +342,8 @@ pub(super) fn contact_export_command(args: &[String], mut global: GlobalOptions)
             }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_stable_tzap_error("contact_export", &error.to_string(), &global);
+        Err(message) => {
+            print_stable_tzap_error("contact_export", &message, &global);
             ExitCode::FAILURE
         }
     }

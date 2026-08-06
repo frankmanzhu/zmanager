@@ -1,15 +1,13 @@
 use super::support::*;
 use super::*;
-use crate::cli::app::ProgressReporter;
-use crate::cli::format::{TZAP_DEFAULT_RECOVERY_PERCENTAGE, TZAP_SINGLE_VOLUME_LOSS_TOLERANCE};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
-use crate::cli::planning::plan_sources;
 use crate::cli::usage::{
-    SHARE_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help,
+    SHARE_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help,
 };
+use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zmanager_core::jobs::{CancellationToken, JobContext};
+use zmanager_core::tzap_service::tzap_share_create_json;
 
 pub(crate) fn share_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     if wants_help(args) {
@@ -71,76 +69,42 @@ pub(crate) fn share_command(args: &[String], mut global: GlobalOptions) -> ExitC
     let Some(certificate_id) = certificate_id else {
         return command_usage_error("share", "missing --certificate-id", &global);
     };
-    let store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    let x509_signing =
-        match local_tzap_x509_signing_options(&store, &context.account_key, &certificate_id, current_unix_seconds()) {
-            Ok(signing) => signing,
-            Err(error) => {
-                print_stable_tzap_error("share", &error, &global);
-                return ExitCode::FAILURE;
-            }
-        };
-    let recipients = match zmanager_core::contact_card::accepted_contact_recipients(
-        &store,
-        &context.account_key,
-        &contact_ids,
-        current_unix_seconds(),
-    ) {
-        Ok(recipients) => recipients,
-        Err(error) => {
-            print_stable_tzap_error("share", &error.to_string(), &global);
-            return ExitCode::FAILURE;
-        }
-    };
-    let recipient_warning_count = recipients.iter().filter(|recipient| recipient.missing_status_caveat).count();
-    let recipient_public_keys = recipients.into_iter().map(|recipient| recipient.recipient_public_key_der).collect();
-    let manifest = match plan_sources(&sources, false, false, false) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            print_error_line(&global, format_args!("share failed: {error}"));
-            return ExitCode::FAILURE;
-        }
-    };
     if archive.exists() && !force {
         print_error_line(&global, format_args!("share failed: destination exists: {}", archive.display()));
         return ExitCode::FAILURE;
     }
-    let token = CancellationToken::new();
-    let mut progress = ProgressReporter::from_global(Some(&global));
-    let options = zmanager_core::tzap_backend::TzapCreateOptions {
-        key_source: zmanager_core::tzap_backend::TzapKeySource::RecipientPublicKeys(recipient_public_keys),
-        level: 3,
-        preserve_metadata: true,
-        replace_existing: force,
-        volume_size: None,
-        recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
-        volume_loss_tolerance: TZAP_SINGLE_VOLUME_LOSS_TOLERANCE,
-        x509_signing: Some(x509_signing),
-    };
-    let result = {
-        let mut sink = |event| progress.emit(event);
-        let mut job_context = JobContext::new_with_progress_total(&token, &mut sink, Some(manifest.total_bytes));
-        let result = zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(
-            &manifest,
-            &archive,
-            &options,
-            &mut job_context,
-        );
-        job_context.flush_progress();
-        result
-    };
-    match result {
-        Ok(report) => {
+    let request = service_request(
+        &context,
+        json!({
+            "destination": archive.display().to_string(),
+            "sources": sources.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+            "contact_ids": contact_ids,
+            "replace_existing": force,
+            "certificate_id": certificate_id,
+        }),
+    );
+    match service_envelope(&tzap_share_create_json(&request.to_string())) {
+        Ok(response) => {
+            let entries = response["entries"].as_u64().unwrap_or(0);
+            let bytes = response["bytes"].as_u64().unwrap_or(0);
+            let recipients = response["recipients"].as_u64().unwrap_or(0);
+            let recipient_warning_count = response["recipient_status_caveats"].as_u64().unwrap_or(0);
             if global.json {
-                println!(
-                    "{{\"archive\":\"{}\",\"format\":\"tzap\",\"entries\":{},\"bytes\":{},\"recipients\":{},\"recipient_status_caveats\":{},\"signed\":true,\"certificate_id\":\"{}\"}}",
-                    json_escape(&archive.display().to_string()),
-                    report.written_entries,
-                    report.written_bytes,
-                    contact_ids.len(),
-                    recipient_warning_count,
-                    json_escape(&certificate_id)
-                );
+                let mut output = json!({
+                    "archive": archive.display().to_string(),
+                    "format": "tzap",
+                    "entries": entries,
+                    "bytes": bytes,
+                    "recipients": recipients,
+                    "recipient_status_caveats": recipient_warning_count,
+                });
+                if let Some(signed) = response.get("signed") {
+                    output["signed"] = signed.clone();
+                    if let Some(certificate_id) = response.get("certificate_id") {
+                        output["certificate_id"] = certificate_id.clone();
+                    }
+                }
+                println!("{output}");
             } else {
                 if recipient_warning_count > 0 {
                     print_error_line(
@@ -152,8 +116,8 @@ pub(crate) fn share_command(args: &[String], mut global: GlobalOptions) -> ExitC
             }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_error_line(&global, format_args!("share failed: {error}"));
+        Err(message) => {
+            print_error_line(&global, format_args!("share failed: {message}"));
             ExitCode::FAILURE
         }
     }

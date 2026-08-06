@@ -1,10 +1,11 @@
-use super::hosted::*;
 use super::support::*;
 use super::*;
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{DEVICE_HELP, command_usage_error, print_help_stdout, print_success_line, wants_help};
 use serde_json::json;
 use std::process::ExitCode;
+use zmanager_core::auth_client::TzapSessionStore as _;
+use zmanager_core::tzap_service::tzap_device_retire_json;
 
 pub(crate) fn device_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) || args.is_empty() {
@@ -23,16 +24,21 @@ pub(super) fn device_retire_command(args: &[String], mut global: GlobalOptions) 
         Ok(context) => context,
         Err(code) => return code,
     };
-    run_local_cert_operation("device_retire", &context, &global, |store, session, options| {
-        zmanager_core::local_tzap_service::retire_local_device(store, session, options).map(|report| {
-            json!({
-                "ok": true,
-                "operation": "device_retire",
-                "completion": retirement_completion_label(report.completion),
-                "attempted_sign_device_ids": report.attempted_sign_device_ids,
-            })
-        })
-    })
+    let request = service_request(&context, json!({}));
+    match service_envelope(&tzap_device_retire_json(&request.to_string())) {
+        Ok(response) => {
+            if global.json {
+                println!("{response}");
+            } else {
+                print_success_line(&global, format_args!("device_retire complete"));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            print_stable_tzap_error("device_retire", &message, &global);
+            ExitCode::FAILURE
+        }
+    }
 }
 
 pub(super) fn device_revoke_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
@@ -73,7 +79,7 @@ pub(super) fn device_revoke_command(args: &[String], mut global: GlobalOptions) 
         return command_usage_error("device", "missing --device-id", &global);
     };
     let sign_base_url = service_base_url.unwrap_or_else(|| zmanager_core::auth_client::SIGN_TZAP_BASE_URL.to_owned());
-    let session_store = FileTzapSessionStore::new(&context.state_dir);
+    let session_store = zmanager_core::tzap_service_auth::TzapFfiSessionStore::new(&context.state_dir);
     let Some(session) = session_store.load_session(&context.account_key) else {
         print_stable_tzap_error("device_revoke", MISSING_TZAP_SESSION, &global);
         return ExitCode::FAILURE;

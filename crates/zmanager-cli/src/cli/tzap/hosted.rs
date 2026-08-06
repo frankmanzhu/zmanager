@@ -5,6 +5,7 @@ use crate::cli::usage::{command_usage_error, print_error_line, print_success_lin
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use zmanager_core::auth_client::TzapSessionStore as _;
 use zmanager_core::local_identity_store::TzapLocalIdentityStore as _;
 
 #[derive(Debug)]
@@ -144,20 +145,22 @@ where
             global,
         );
     }
-    let session_store = FileTzapSessionStore::new(&options.context.state_dir);
+    let session_store = zmanager_core::tzap_service_auth::TzapFfiSessionStore::new(&options.context.state_dir);
     let Some(session) = session_store.load_session(&options.context.account_key) else {
         print_stable_tzap_error(operation, MISSING_TZAP_SESSION, global);
         return ExitCode::FAILURE;
     };
     let mut trusted_root_sha256 = Vec::new();
-    let trusted_root_der =
-        match load_custom_root_certificates(&options.trusted_root_cert_paths, &mut trusted_root_sha256) {
-            Ok(roots) => roots,
-            Err(error) => {
-                print_error_line(global, format_args!("{error_prefix}{error}"));
-                return ExitCode::FAILURE;
-            }
-        };
+    let trusted_root_der = match zmanager_core::trust::load_custom_root_certificate_files(
+        &options.trusted_root_cert_paths,
+        &mut trusted_root_sha256,
+    ) {
+        Ok(roots) => roots,
+        Err(error) => {
+            print_error_line(global, format_args!("{error_prefix}{error}"));
+            return ExitCode::FAILURE;
+        }
+    };
     let mut identity_store =
         zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&options.context.state_dir);
     match run(service_base_url, &session, &mut identity_store, trusted_root_sha256, trusted_root_der) {
@@ -426,44 +429,5 @@ impl CliTrustedEnrollmentCertificateValidator {
             )));
         }
         Ok(validation)
-    }
-}
-
-pub(super) fn run_local_cert_operation<F>(
-    operation: &str,
-    context: &TzapCliContext,
-    global: &GlobalOptions,
-    action: F,
-) -> ExitCode
-where
-    F: FnOnce(
-        &mut zmanager_core::local_identity_store::FileTzapLocalIdentityStore,
-        &zmanager_core::auth_client::TzapSessionRecord,
-        &zmanager_core::local_tzap_service::TzapLocalServiceOptions,
-    ) -> Result<serde_json::Value, zmanager_core::local_tzap_service::TzapLocalServiceError>,
-{
-    let session_store = FileTzapSessionStore::new(&context.state_dir);
-    let Some(session) = session_store.load_session(&context.account_key) else {
-        print_stable_tzap_error(operation, MISSING_TZAP_SESSION, global);
-        return ExitCode::FAILURE;
-    };
-    let mut identity_store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    let options = zmanager_core::local_tzap_service::TzapLocalServiceOptions {
-        account_key: context.account_key.clone(),
-        now_unix_seconds: current_unix_seconds(),
-    };
-    match action(&mut identity_store, &session, &options) {
-        Ok(value) => {
-            if global.json {
-                println!("{value}");
-            } else {
-                print_success_line(global, format_args!("{operation} complete"));
-            }
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            print_stable_tzap_error(operation, &error.to_string(), global);
-            ExitCode::FAILURE
-        }
     }
 }

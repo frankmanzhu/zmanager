@@ -2,55 +2,12 @@ use super::*;
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{command_usage_error, json_escape, json_optional_string, print_error_line};
 use serde_json::{Value, json};
-use std::env;
 use std::fs;
 use std::io;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub(super) fn local_tzap_x509_signing_options(
-    store: &impl zmanager_core::local_identity_store::TzapLocalIdentityStore,
-    account_key: &str,
-    certificate_id: &str,
-    now_unix_seconds: u64,
-) -> Result<zmanager_core::tzap_backend::TzapX509SigningOptions, String> {
-    let inventory = store.load_inventory(account_key).map_err(|error| error.to_string())?;
-    let certificate = inventory
-        .enrolled_certificates
-        .iter()
-        .find(|record| record.certificate_id == certificate_id)
-        .ok_or_else(|| format!("certificate not found: {certificate_id}"))?;
-    if certificate.state != zmanager_core::local_identity_store::TzapLocalCertificateState::Active {
-        return Err(format!("certificate is not active: {}", certificate.state.as_str()));
-    }
-    if now_unix_seconds < certificate.not_before_unix_seconds {
-        return Err("certificate is not yet valid".to_owned());
-    }
-    if now_unix_seconds >= certificate.not_after_unix_seconds {
-        return Err("certificate is expired".to_owned());
-    }
-    if inventory.emergency_blocklist.blocked_issuer_sha256.contains(&certificate.issuer_certificate_sha256) {
-        return Err("certificate issuer is locally blocked".to_owned());
-    }
-    if inventory.certificate_status_cache.iter().any(|status| {
-        status.certificate_sha256 == certificate.certificate_sha256
-            && status.status != zmanager_core::trust::TzapCertificateStatus::Valid
-    }) {
-        return Err("certificate status blocks signing".to_owned());
-    }
-    let signing_key = inventory
-        .device_signing_keys
-        .iter()
-        .find(|key| key.key_id == certificate.signing_key_id)
-        .ok_or_else(|| "certificate signing key is missing".to_owned())?;
-    Ok(zmanager_core::tzap_backend::TzapX509SigningOptions::InMemory {
-        signing_certificate: certificate.leaf_certificate_der.clone(),
-        signing_private_key: signing_key.private_key_der.clone(),
-        signing_chain: certificate.intermediate_chain_der.clone(),
-    })
-}
 pub(super) fn parse_tzap_context_args(
     args: &[String],
     global: &mut GlobalOptions,
@@ -188,15 +145,9 @@ pub(super) fn retirement_completion_label(
 }
 
 pub(super) fn default_tzap_state_dir() -> PathBuf {
-    if let Some(path) = env::var_os(DEFAULT_TZAP_STATE_DIR_ENV)
-        && !path.is_empty()
-    {
-        return PathBuf::from(path);
-    }
-    env::var_os("HOME").map_or_else(
-        || PathBuf::from(".").join(DEFAULT_TZAP_STATE_HOME_CHILD),
-        |home| PathBuf::from(home).join(DEFAULT_TZAP_STATE_HOME_CHILD),
-    )
+    // CR-113: single state-directory default shared with the tzap JSON
+    // service (honors `ZM_TZAP_STATE_DIR`, then `ZMANAGER_TZAP_STATE_DIR`).
+    zmanager_core::tzap_service_auth::default_tzap_state_dir()
 }
 
 pub(super) fn current_unix_seconds() -> u64 {
@@ -218,30 +169,6 @@ pub(super) fn read_json_argument(path: &str) -> Result<Value, String> {
     serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 
-pub(super) fn load_custom_root_certificates(
-    paths: &[PathBuf],
-    custom_roots: &mut Vec<String>,
-) -> Result<Vec<Vec<u8>>, String> {
-    paths
-        .iter()
-        .map(|path| {
-            let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
-            let der = zmanager_core::trust::certificate_pem_or_der_to_der(&bytes)
-                .map_err(|error| format!("{}: {error}", path.display()))?;
-            let fingerprint = zmanager_core::trust::certificate_sha256_identifier_for_der(&der);
-            if !custom_roots.iter().any(|root| root == &fingerprint) {
-                custom_roots.push(fingerprint);
-            }
-            Ok(der)
-        })
-        .collect()
-}
-
-pub(super) fn read_json_file(path: &Path) -> Option<Value> {
-    let bytes = fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
 pub(super) fn write_json_file(path: &Path, value: &Value) -> io::Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -250,82 +177,6 @@ pub(super) fn write_json_file(path: &Path, value: &Value) -> io::Result<()> {
     }
     let bytes = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
     fs::write(path, bytes)
-}
-
-pub(super) fn write_secret_json_file(path: &Path, value: &Value) -> io::Result<()> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)?;
-    }
-    let bytes = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
-    write_secret_file(path, &bytes)
-}
-
-#[cfg(unix)]
-pub(super) fn write_secret_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-
-    let mut file = fs::OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(path)?;
-    file.write_all(bytes)?;
-    let mut permissions = file.metadata()?.permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-pub(super) fn write_secret_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    fs::write(path, bytes)
-}
-
-pub(super) fn save_pending_auth(
-    state_dir: &Path,
-    pending: &zmanager_core::auth_client::TzapPendingAuthState,
-    config: &zmanager_core::auth_client::TzapHostedAuthLaunchConfig,
-) -> io::Result<()> {
-    write_secret_json_file(
-        &state_dir.join(AUTH_PENDING_FILE),
-        &json!({
-            "state": pending.state,
-            "provider_id": pending.provider_id,
-            "redirect_uri": pending.redirect_uri,
-            "pkce_verifier": pending.pkce.verifier,
-            "created_at_unix_seconds": pending.created_at_unix_seconds,
-            "client_id": config.client_id,
-            "auth_base_url": config.hosted_auth_base_url,
-        }),
-    )
-}
-
-#[derive(Debug, Default)]
-pub(super) struct PendingAuthMetadata {
-    pub(super) client_id: Option<String>,
-    pub(super) auth_base_url: Option<String>,
-}
-
-pub(super) fn load_pending_auth_metadata(state_dir: &Path) -> PendingAuthMetadata {
-    let Some(value) = read_json_file(&state_dir.join(AUTH_PENDING_FILE)) else {
-        return PendingAuthMetadata::default();
-    };
-    PendingAuthMetadata {
-        client_id: json_optional_string_field(&value, "client_id").ok().flatten(),
-        auth_base_url: json_optional_string_field(&value, "auth_base_url").ok().flatten(),
-    }
-}
-
-pub(super) fn load_pending_auth(state_dir: &Path) -> Result<zmanager_core::auth_client::TzapPendingAuthState, String> {
-    let value = read_json_file(&state_dir.join(AUTH_PENDING_FILE))
-        .ok_or_else(|| "no pending hosted-auth handoff".to_owned())?;
-    let verifier = json_string_field(&value, "pkce_verifier")?;
-    let pkce = zmanager_core::auth_client::TzapPkcePair::from_verifier(&verifier).map_err(|error| error.to_string())?;
-    Ok(zmanager_core::auth_client::TzapPendingAuthState {
-        state: json_string_field(&value, "state")?,
-        provider_id: json_string_field(&value, "provider_id")?,
-        redirect_uri: json_string_field(&value, "redirect_uri")?,
-        pkce,
-        created_at_unix_seconds: json_u64_field(&value, "created_at_unix_seconds")?,
-    })
 }
 
 pub(super) fn callback_url_parameter(callback_url: &str, key: &str) -> Option<String> {
@@ -539,35 +390,6 @@ pub(super) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-pub(super) fn session_to_json(session: &zmanager_core::auth_client::TzapSessionRecord, include_token: bool) -> Value {
-    let mut value = json!({
-        "audience": session.audience,
-        "expires_at_unix_seconds": session.expires_at_unix_seconds,
-        "identity_assurance": session.identity_assurance.as_str(),
-        "selected_org_id": session.selected_org_id,
-        "login_session_id": session.login_session_id,
-    });
-    if include_token {
-        value["access_token"] = json!(session.access_token.expose());
-    }
-    value
-}
-
-pub(super) fn session_from_json(value: &Value) -> Result<zmanager_core::auth_client::TzapSessionRecord, String> {
-    let assurance = json_string_field(value, "identity_assurance")?;
-    let identity_assurance = zmanager_core::trust::TzapIdentityAssurance::parse(&assurance)
-        .ok_or_else(|| "invalid identity assurance".to_owned())?;
-    Ok(zmanager_core::auth_client::TzapSessionRecord {
-        audience: json_string_field(value, "audience")?,
-        access_token: zmanager_core::auth_client::TzapBearerToken::new(json_string_field(value, "access_token")?)
-            .map_err(|error| error.to_string())?,
-        expires_at_unix_seconds: json_u64_field(value, "expires_at_unix_seconds")?,
-        identity_assurance,
-        selected_org_id: json_optional_string_field(value, "selected_org_id")?,
-        login_session_id: json_optional_string_field(value, "login_session_id")?,
-    })
-}
-
 pub(super) fn json_string_field(value: &Value, field: &'static str) -> Result<String, String> {
     value
         .get(field)
@@ -576,72 +398,58 @@ pub(super) fn json_string_field(value: &Value, field: &'static str) -> Result<St
         .ok_or_else(|| format!("missing or invalid field: {field}"))
 }
 
-pub(super) fn json_optional_string_field(value: &Value, field: &'static str) -> Result<Option<String>, String> {
-    match value.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        _ => Err(format!("missing or invalid field: {field}")),
+/// Builds a `tzap_service` JSON request carrying the CLI context (CR-113:
+/// the CLI delegates to the same `core::tzap_service` endpoints the FFI
+/// calls, so the hosted-TZAP operations have one implementation path).
+pub(super) fn service_request(context: &TzapCliContext, extra: Value) -> Value {
+    let mut request = json!({
+        "state_dir": context.state_dir.display().to_string(),
+        "account_key": context.account_key,
+    });
+    if let Some(object) = extra.as_object() {
+        for (key, value) in object {
+            request[key] = value.clone();
+        }
+    }
+    request
+}
+
+/// Parses a `tzap_service` response envelope, returning the payload on
+/// `ok: true` and the error message otherwise.
+pub(super) fn service_envelope(response: &str) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(response).map_err(|error| format!("invalid service response: {error}"))?;
+    if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        Ok(value)
+    } else {
+        Err(value
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| "service request failed".to_owned()))
     }
 }
 
-pub(super) fn json_u64_field(value: &Value, field: &'static str) -> Result<u64, String> {
-    value.get(field).and_then(Value::as_u64).ok_or_else(|| format!("missing or invalid field: {field}"))
-}
-
-pub(super) fn print_session_summary(session: &zmanager_core::auth_client::TzapSessionRecord, global: &GlobalOptions) {
-    let expired = session.is_expired_at(current_unix_seconds());
+/// Renders the session summary from the service envelope (CR-113: the CLI
+/// keeps its output shape but the session content comes from the service).
+pub(super) fn print_session_summary_json(session: &Value, global: &GlobalOptions) {
+    let audience = session["audience"].as_str().unwrap_or_default();
+    let expires_at_unix_seconds = session["expires_at_unix_seconds"].as_u64().unwrap_or(0);
+    let expired = session["expired"].as_bool().unwrap_or(false);
+    let identity_assurance = session["identity_assurance"].as_str().unwrap_or_default();
+    let selected_org_id = session["selected_org_id"].as_str();
+    let login_session_id = session["login_session_id"].as_str();
     if global.json {
         println!(
             "{{\"authenticated\":true,\"audience\":\"{}\",\"expires_at_unix_seconds\":{},\"expired\":{},\"identity_assurance\":\"{}\",\"selected_org_id\":{},\"login_session_id\":{}}}",
-            json_escape(&session.audience),
-            session.expires_at_unix_seconds,
+            json_escape(audience),
+            expires_at_unix_seconds,
             expired,
-            json_escape(session.identity_assurance.as_str()),
-            json_optional_string(session.selected_org_id.as_deref()),
-            json_optional_string(session.login_session_id.as_deref())
+            json_escape(identity_assurance),
+            json_optional_string(selected_org_id),
+            json_optional_string(login_session_id)
         );
     } else {
         let status = if expired { "expired" } else { "active" };
-        println!("{status} session for {} ({})", session.audience, session.identity_assurance.as_str());
+        println!("{status} session for {audience} ({identity_assurance})");
     }
-}
-
-pub(super) fn print_verification_result(
-    result: &zmanager_core::document_verification::TzapDocumentVerificationResult,
-    global: &GlobalOptions,
-) {
-    if global.json {
-        println!(
-            "{{\"state\":\"{}\",\"trust_anchor_type\":\"{}\",\"reason\":{},\"root_certificate_sha256\":{}}}",
-            json_escape(result.state.as_str()),
-            json_escape(result.trust_anchor_type.as_str()),
-            json_optional_string(result.reason.as_deref()),
-            json_optional_string(result.root_certificate_sha256.as_deref())
-        );
-    } else {
-        println!("{} ({})", result.state.as_str(), result.trust_anchor_type.as_str());
-        if let Some(reason) = &result.reason {
-            println!("{reason}");
-        }
-    }
-}
-
-pub(super) fn print_contact_json(contact: &zmanager_core::local_identity_store::TzapContactRecord) {
-    print!(
-        "{{\"contact_id\":\"{}\",\"display_name\":\"{}\",\"signing_certificate_sha256\":\"{}\",\"recipient_public_key_fingerprint\":\"{}\",\"trust_anchor_type\":\"{}\",\"verification_state\":\"{}\",\"missing_status_caveat\":{},\"accepted_at_unix_seconds\":{}}}",
-        json_escape(&contact.contact_id),
-        json_escape(&contact.display_name),
-        json_escape(&contact.signing_certificate_sha256),
-        json_escape(&contact.recipient_public_key_fingerprint),
-        contact.trust_anchor_type.as_str(),
-        contact.verification_state.as_str(),
-        contact.missing_status_caveat,
-        contact.accepted_at_unix_seconds
-    );
-}
-
-pub(super) fn print_contact_json_line(contact: &zmanager_core::local_identity_store::TzapContactRecord) {
-    print!("{{\"contact\":");
-    print_contact_json(contact);
-    println!("}}");
 }

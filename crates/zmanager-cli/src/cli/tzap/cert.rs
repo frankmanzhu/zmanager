@@ -2,10 +2,14 @@ use super::auth::*;
 use super::hosted::*;
 use super::support::*;
 use crate::cli::options::GlobalOptions;
-use crate::cli::usage::{CERT_HELP, ME_HELP, command_usage_error, print_error_line, print_help_stdout, wants_help};
-use serde_json::json;
+use crate::cli::usage::{
+    CERT_HELP, ME_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help,
+};
+use serde_json::{Value, json};
 use std::process::ExitCode;
-use zmanager_core::local_identity_store::TzapLocalIdentityStore as _;
+use zmanager_core::tzap_service::{
+    tzap_cert_enroll_json, tzap_cert_renew_json, tzap_cert_revoke_json, tzap_certificate_inventory_json,
+};
 
 pub(crate) fn me_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) {
@@ -36,15 +40,8 @@ pub(super) fn cert_enroll_command(args: &[String], mut global: GlobalOptions) ->
     if options.service_base_url.is_some() {
         return run_hosted_cert_enroll(&options, &global);
     }
-    run_local_cert_operation("cert_enroll", &options.context, &global, |store, session, options| {
-        zmanager_core::local_tzap_service::enroll_local_certificate(store, session, options).map(|certificate| {
-            json!({
-                "ok": true,
-                "operation": "cert_enroll",
-                "certificate": certificate_summary_value(&certificate),
-            })
-        })
-    })
+    let request = service_request(&options.context, json!({}));
+    run_local_tzap_service_command("cert_enroll", &tzap_cert_enroll_json(&request.to_string()), &global)
 }
 
 pub(super) fn cert_renew_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
@@ -55,18 +52,9 @@ pub(super) fn cert_renew_command(args: &[String], mut global: GlobalOptions) -> 
     if options.service_base_url.is_some() {
         return run_hosted_cert_renew(&options, &global);
     }
-    let certificate_id = options.certificate_id.as_deref().unwrap_or_default();
-    run_local_cert_operation("cert_renew", &options.context, &global, |store, session, local_options| {
-        zmanager_core::local_tzap_service::renew_local_certificate(store, session, local_options, certificate_id).map(
-            |certificate| {
-                json!({
-                    "ok": true,
-                    "operation": "cert_renew",
-                    "certificate": certificate_summary_value(&certificate),
-                })
-            },
-        )
-    })
+    let request =
+        service_request(&options.context, json!({"certificate_id": options.certificate_id.unwrap_or_default()}));
+    run_local_tzap_service_command("cert_renew", &tzap_cert_renew_json(&request.to_string()), &global)
 }
 
 pub(super) fn cert_revoke_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
@@ -74,17 +62,8 @@ pub(super) fn cert_revoke_command(args: &[String], mut global: GlobalOptions) ->
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
-    run_local_cert_operation("cert_revoke", &context, &global, |store, session, options| {
-        zmanager_core::local_tzap_service::revoke_local_certificate(store, session, options, &certificate_id).map(
-            |completion| {
-                json!({
-                    "ok": true,
-                    "operation": "cert_revoke",
-                    "completion": retirement_completion_label(completion),
-                })
-            },
-        )
-    })
+    let request = service_request(&context, json!({"certificate_id": certificate_id}));
+    run_local_tzap_service_command("cert_revoke", &tzap_cert_revoke_json(&request.to_string()), &global)
 }
 
 pub(super) fn cert_list_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
@@ -92,29 +71,46 @@ pub(super) fn cert_list_command(args: &[String], mut global: GlobalOptions) -> E
         Ok(context) => context,
         Err(code) => return code,
     };
-    let store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&context.state_dir);
-    match store.load_inventory(&context.account_key) {
-        Ok(inventory) => {
+    let request = service_request(&context, json!({}));
+    let response = match service_envelope(&tzap_certificate_inventory_json(&request.to_string())) {
+        Ok(value) => value,
+        Err(message) => {
+            print_error_line(&global, format_args!("cert list failed: {message}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let certificates: &[Value] = response["inventory"]["certificates"].as_array().map_or(&[], |array| array.as_slice());
+    if global.json {
+        println!("{{\"certificates\":{}}}", serde_json::to_string(certificates).unwrap_or_else(|_| "[]".to_owned()));
+    } else if certificates.is_empty() {
+        println!("no local certificates");
+    } else {
+        for certificate in certificates {
+            let certificate_id = certificate["certificate_id"].as_str().unwrap_or_default();
+            let state = certificate["state"].as_str().unwrap_or_default();
+            let sha256 = certificate["certificate_sha256"].as_str().unwrap_or_default();
+            println!("{certificate_id} {state} {sha256}");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Runs a local tzap JSON service operation that requires a session and
+/// renders the service envelope unchanged (CR-113: the CLI delegates the
+/// local cert operations to `tzap_service`; the envelopes match the CLI's
+/// prior output shapes).
+fn run_local_tzap_service_command(operation: &str, response: &str, global: &GlobalOptions) -> ExitCode {
+    match service_envelope(response) {
+        Ok(value) => {
             if global.json {
-                print!("{{\"certificates\":[");
-                for (index, cert) in inventory.enrolled_certificates.iter().enumerate() {
-                    if index > 0 {
-                        print!(",");
-                    }
-                    print!("{}", certificate_summary_value(cert));
-                }
-                println!("]}}");
-            } else if inventory.enrolled_certificates.is_empty() {
-                println!("no local certificates");
+                println!("{value}");
             } else {
-                for cert in inventory.enrolled_certificates {
-                    println!("{} {} {}", cert.certificate_id, cert.state.as_str(), cert.certificate_sha256);
-                }
+                print_success_line(global, format_args!("{operation} complete"));
             }
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_error_line(&global, format_args!("cert list failed: {error}"));
+        Err(message) => {
+            print_stable_tzap_error(operation, &message, global);
             ExitCode::FAILURE
         }
     }

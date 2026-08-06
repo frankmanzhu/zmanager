@@ -4,8 +4,13 @@ use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{
     AUTH_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help,
 };
+use serde_json::{Value, json};
 use std::fs;
 use std::process::ExitCode;
+use zmanager_core::tzap_service::{
+    tzap_auth_account_url_json, tzap_auth_callback_json, tzap_auth_forget_json, tzap_auth_login_json,
+    tzap_auth_status_json,
+};
 
 pub(crate) fn auth_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) || args.is_empty() {
@@ -91,37 +96,38 @@ pub(super) fn auth_login_command(args: &[String], mut global: GlobalOptions) -> 
         }
     }
 
-    let mut tracker = zmanager_core::auth_client::TzapOAuthStateTracker::new();
-    let pending = tracker.begin(endpoints.provider_id.clone(), endpoints.redirect_uri.clone(), current_unix_seconds());
-    let mut config = zmanager_core::auth_client::TzapHostedAuthLaunchConfig::for_environment(
-        endpoints.environment,
-        endpoints.client_id,
-        endpoints.redirect_uri,
+    let request = service_request(
+        &context,
+        json!({
+            "environment": match endpoints.environment {
+                zmanager_core::auth_client::TzapHostedAuthEnvironment::Local => "local",
+                zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging => "staging",
+                zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod => "prod",
+            },
+            "client_id": endpoints.client_id,
+            "redirect_uri": endpoints.redirect_uri,
+            "provider_id": endpoints.provider_id,
+            "auth_base_url": endpoints.auth_base_url,
+            "account_base_url": endpoints.account_base_url,
+            "org_id": endpoints.org_id,
+        }),
     );
-    if let Some(auth_base_url) = endpoints.auth_base_url {
-        config.hosted_auth_base_url = auth_base_url;
-    }
-    if let Some(account_base_url) = endpoints.account_base_url {
-        config.hosted_account_base_url = account_base_url;
-    }
-    config.selected_org_id = endpoints.org_id;
-    if let Err(error) = save_pending_auth(&context.state_dir, &pending, &config) {
-        print_error_line(&global, format_args!("auth login failed: {error}"));
-        return ExitCode::FAILURE;
-    }
-    let url = match config.launch_url(&pending) {
-        Ok(url) => url,
-        Err(error) => {
-            print_error_line(&global, format_args!("auth login failed: {error}"));
+    let response = match service_envelope(&tzap_auth_login_json(&request.to_string())) {
+        Ok(value) => value,
+        Err(message) => {
+            print_error_line(&global, format_args!("auth login failed: {message}"));
             return ExitCode::FAILURE;
         }
     };
+    let url = response["launch_url"].as_str().unwrap_or_default().to_owned();
+    let state = response["state"].as_str().unwrap_or_default().to_owned();
+    let expires_at_unix_seconds = response["expires_at_unix_seconds"].as_u64().unwrap_or(0);
     if global.json {
         println!(
             "{{\"status\":\"pending\",\"launch_url\":\"{}\",\"state\":\"{}\",\"expires_at_unix_seconds\":{}}}",
             json_escape(&url),
-            json_escape(&pending.state),
-            pending.created_at_unix_seconds.saturating_add(zmanager_core::auth_client::AUTH_HANDOFF_LIFETIME_SECONDS)
+            json_escape(&state),
+            expires_at_unix_seconds
         );
     } else if print_url {
         println!("{url}");
@@ -224,14 +230,14 @@ pub(super) fn auth_callback_command(args: &[String], mut global: GlobalOptions) 
             }
         }
     }
-    let pending = match load_pending_auth(&context.state_dir) {
+    let pending = match zmanager_core::tzap_service_auth::load_pending_auth(&context.state_dir) {
         Ok(pending) => pending,
         Err(error) => {
             print_error_line(&global, format_args!("auth callback failed: {error}"));
             return ExitCode::FAILURE;
         }
     };
-    let pending_metadata = load_pending_auth_metadata(&context.state_dir);
+    let pending_metadata = zmanager_core::tzap_service_auth::load_pending_auth_metadata(&context.state_dir);
     if state.is_none() {
         state = callback_url.as_deref().and_then(|url| callback_url_parameter(url, "state"));
     }
@@ -243,6 +249,9 @@ pub(super) fn auth_callback_command(args: &[String], mut global: GlobalOptions) 
     };
     let redirect_uri = redirect_uri.unwrap_or_else(|| pending.redirect_uri.clone());
     let pkce_verifier = pending.pkce.verifier.clone();
+    // The handoff-code exchange is a CLI convenience pre-step that produces
+    // the relay body the JSON service's callback consumes (the FFI
+    // consumers perform this exchange themselves).
     let relay_body = if let Some(relay_body_path) = relay_body_path {
         match read_bytes_argument(&relay_body_path) {
             Ok(bytes) => bytes,
@@ -274,33 +283,30 @@ pub(super) fn auth_callback_command(args: &[String], mut global: GlobalOptions) 
     } else {
         return command_usage_error("auth", "missing --relay-body or handoff code", &global);
     };
-    let mut tracker = zmanager_core::auth_client::TzapOAuthStateTracker::new();
-    if let Err(error) = tracker.insert_pending(pending) {
-        print_error_line(&global, format_args!("auth callback failed: {error}"));
-        return ExitCode::FAILURE;
-    }
-    let callback = zmanager_core::auth_client::TzapHostedAuthCallback {
-        state,
-        redirect_uri,
-        pkce_verifier,
-        callback_url,
-        relay_body,
+    let request = service_request(
+        &context,
+        json!({
+            "state": state,
+            "redirect_uri": redirect_uri,
+            "callback_url": callback_url,
+            "relay_body": String::from_utf8_lossy(&relay_body),
+        }),
+    );
+    let response = match service_envelope(&tzap_auth_callback_json(&request.to_string())) {
+        Ok(value) => value,
+        Err(message) => {
+            print_stable_tzap_error("auth_callback", &message, &global);
+            return ExitCode::FAILURE;
+        }
     };
-    let mut session_store = FileTzapSessionStore::new(&context.state_dir);
-    match zmanager_core::auth_client::complete_hosted_auth_handoff(
-        &mut tracker,
-        &mut session_store,
-        &context.account_key,
-        &callback,
-        current_unix_seconds(),
-    ) {
-        Ok(session) => {
-            let _ = fs::remove_file(context.state_dir.join(AUTH_PENDING_FILE));
-            print_session_summary(&session, &global);
+    let _ = fs::remove_file(context.state_dir.join(AUTH_PENDING_FILE));
+    match response.get("session") {
+        Some(session) => {
+            print_session_summary_json(session, &global);
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            print_stable_tzap_error("auth_callback", &error.to_string(), &global);
+        None => {
+            print_stable_tzap_error("auth_callback", "service response is missing the session", &global);
             ExitCode::FAILURE
         }
     }
@@ -311,17 +317,27 @@ pub(super) fn auth_status_command(args: &[String], mut global: GlobalOptions) ->
         Ok(context) => context,
         Err(code) => return code,
     };
-    let store = FileTzapSessionStore::new(&context.state_dir);
-    if let Some(session) = store.load_session(&context.account_key) {
-        print_session_summary(&session, &global);
-        ExitCode::SUCCESS
-    } else {
-        if global.json {
-            println!("{{\"authenticated\":false}}");
-        } else {
-            println!("not signed in");
+    let request = service_request(&context, json!({}));
+    let response = match service_envelope(&tzap_auth_status_json(&request.to_string())) {
+        Ok(value) => value,
+        Err(message) => {
+            print_error_line(&global, format_args!("auth status failed: {message}"));
+            return ExitCode::FAILURE;
         }
-        ExitCode::SUCCESS
+    };
+    match response.get("session") {
+        Some(session) => {
+            print_session_summary_json(session, &global);
+            ExitCode::SUCCESS
+        }
+        None => {
+            if global.json {
+                println!("{{\"authenticated\":false}}");
+            } else {
+                println!("not signed in");
+            }
+            ExitCode::SUCCESS
+        }
     }
 }
 
@@ -330,16 +346,24 @@ pub(super) fn auth_forget_command(args: &[String], mut global: GlobalOptions) ->
         Ok(context) => context,
         Err(code) => return code,
     };
-    let mut store = FileTzapSessionStore::new(&context.state_dir);
-    if let Err(error) = store.clear_session(&context.account_key) {
-        print_stable_tzap_error("auth_forget", &error.to_string(), &global);
-        return ExitCode::FAILURE;
-    }
-    let _ = fs::remove_file(context.state_dir.join(AUTH_PENDING_FILE));
-    if global.json {
-        println!("{{\"forgotten\":true}}");
+    let request = service_request(&context, json!({}));
+    let response = match service_envelope(&tzap_auth_forget_json(&request.to_string())) {
+        Ok(value) => value,
+        Err(message) => {
+            print_stable_tzap_error("auth_forget", &message, &global);
+            return ExitCode::FAILURE;
+        }
+    };
+    if response.get("forgotten").and_then(Value::as_bool).unwrap_or(false) {
+        if global.json {
+            println!("{{\"forgotten\":true}}");
+        } else {
+            print_success_line(&global, format_args!("local auth material forgotten"));
+        }
+    } else if global.json {
+        println!("{{\"forgotten\":false}}");
     } else {
-        print_success_line(&global, format_args!("local auth material forgotten"));
+        println!("no local auth material to forget");
     }
     ExitCode::SUCCESS
 }
@@ -382,17 +406,27 @@ pub(super) fn auth_account_command(args: &[String], mut global: GlobalOptions) -
             }
         }
     }
-    let mut config = zmanager_core::auth_client::TzapHostedAuthLaunchConfig::for_environment(
-        endpoints.environment,
-        endpoints.client_id,
-        endpoints.redirect_uri,
-    );
-    if let Some(account_base_url) = endpoints.account_base_url {
-        config.hosted_account_base_url = account_base_url;
-    }
-    let url = config.account_url();
+    let request = json!({
+        "environment": match endpoints.environment {
+            zmanager_core::auth_client::TzapHostedAuthEnvironment::Local => "local",
+            zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging => "staging",
+            zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod => "prod",
+        },
+        "client_id": endpoints.client_id,
+        "redirect_uri": endpoints.redirect_uri,
+        "account_base_url": endpoints.account_base_url,
+        "org_id": endpoints.org_id,
+    });
+    let response = match service_envelope(&tzap_auth_account_url_json(&request.to_string())) {
+        Ok(value) => value,
+        Err(message) => {
+            print_error_line(&global, format_args!("auth account failed: {message}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    let url = response["account_url"].as_str().unwrap_or_default();
     if global.json {
-        println!("{{\"account_url\":\"{}\"}}", json_escape(&url));
+        println!("{{\"account_url\":\"{}\"}}", json_escape(url));
     } else {
         println!("{url}");
     }

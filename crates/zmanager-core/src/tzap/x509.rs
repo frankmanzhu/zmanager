@@ -95,6 +95,53 @@ impl TzapX509TrustOptions {
     }
 }
 
+/// Resolves the in-memory X.509 signing material for a locally enrolled
+/// certificate (CR-113: moved from the CLI so the tzap JSON service's share
+/// endpoint uses the same battle-tested resolution rules).
+pub fn tzap_x509_signing_options_from_inventory(
+    store: &impl crate::local_identity_store::TzapLocalIdentityStore,
+    account_key: &str,
+    certificate_id: &str,
+    now_unix_seconds: u64,
+) -> Result<TzapX509SigningOptions, String> {
+    use crate::local_identity_store::TzapLocalCertificateState;
+    use crate::trust::TzapCertificateStatus;
+
+    let inventory = store.load_inventory(account_key).map_err(|error| error.to_string())?;
+    let certificate = inventory
+        .enrolled_certificates
+        .iter()
+        .find(|record| record.certificate_id == certificate_id)
+        .ok_or_else(|| format!("certificate not found: {certificate_id}"))?;
+    if certificate.state != TzapLocalCertificateState::Active {
+        return Err(format!("certificate is not active: {}", certificate.state.as_str()));
+    }
+    if now_unix_seconds < certificate.not_before_unix_seconds {
+        return Err("certificate is not yet valid".to_owned());
+    }
+    if now_unix_seconds >= certificate.not_after_unix_seconds {
+        return Err("certificate is expired".to_owned());
+    }
+    if inventory.emergency_blocklist.blocked_issuer_sha256.contains(&certificate.issuer_certificate_sha256) {
+        return Err("certificate issuer is locally blocked".to_owned());
+    }
+    if inventory.certificate_status_cache.iter().any(|status| {
+        status.certificate_sha256 == certificate.certificate_sha256 && status.status != TzapCertificateStatus::Valid
+    }) {
+        return Err("certificate status blocks signing".to_owned());
+    }
+    let signing_key = inventory
+        .device_signing_keys
+        .iter()
+        .find(|key| key.key_id == certificate.signing_key_id)
+        .ok_or_else(|| "certificate signing key is missing".to_owned())?;
+    Ok(TzapX509SigningOptions::InMemory {
+        signing_certificate: certificate.leaf_certificate_der.clone(),
+        signing_private_key: signing_key.private_key_der.clone(),
+        signing_chain: certificate.intermediate_chain_der.clone(),
+    })
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TzapX509VerificationReport {
     /// Verified archive root commitment.
