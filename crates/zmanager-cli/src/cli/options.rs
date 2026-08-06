@@ -1,11 +1,11 @@
 use crate::cli::app::ArchiveFormat;
 use crate::cli::create::prompt_password_from_stdin;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use crate::cli::format::APPLE_ARCHIVE_FORMAT_ALIASES;
+use crate::cli::format::{APPLE_ARCHIVE_FORMAT_ALIASES, is_apple_archive};
 use crate::cli::format::{
     FORMAT_SEVEN_Z, FORMAT_ZIP, SEVEN_Z_EXTENSIONS, SIZE_UNIT_GIB, SIZE_UNIT_KIB, SIZE_UNIT_MIB, SIZE_UNIT_TIB,
-    TAR_ZST_FORMAT_ALIASES, TGZ_FORMAT_ALIASES, TZAP_FORMAT_ALIASES, is_apple_archive, is_tar_zst_archive,
-    is_tgz_archive, is_tzap_archive, is_zip_family_archive, path_has_known_extension,
+    TAR_ZST_FORMAT_ALIASES, TGZ_FORMAT_ALIASES, TZAP_FORMAT_ALIASES, is_tar_zst_archive, is_tgz_archive,
+    is_tzap_archive, is_zip_family_archive, path_has_known_extension,
 };
 use crate::cli::usage::usage_failure;
 use crate::output::OutputMode;

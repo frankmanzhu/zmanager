@@ -40,7 +40,7 @@ pub(crate) fn portable_file_metadata(path: &Path) -> Result<CapturedPortableFile
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::MetadataExt as _;
-            Some(ArchiveTimestamp::new(metadata.ctime(), metadata.ctime_nsec() as u32))
+            Some(ArchiveTimestamp::new(metadata.ctime(), u32::try_from(metadata.ctime_nsec()).unwrap_or(0)))
         }
         #[cfg(not(target_os = "linux"))]
         {

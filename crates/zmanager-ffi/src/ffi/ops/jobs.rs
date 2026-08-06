@@ -21,10 +21,12 @@ use zmanager_core::tar_zst_backend::TarZstdCreateOptions;
 use zmanager_core::tzap_backend::{self, TzapCreateOptions, TzapKeySource, TzapTestReport, TzapX509SigningOptions};
 use zmanager_core::zip_backend::{self, ZipCreateOptions, ZipTestReport};
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
     ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error,
-    hint, map_7z_error, map_apple_archive_error, map_archive_browser_error, map_libarchive_error, map_rar_error,
-    map_raw_stream_error, map_tar_zst_error, map_tzap_error, map_zip_error,
+    hint, map_7z_error, map_archive_browser_error, map_libarchive_error, map_rar_error, map_raw_stream_error,
+    map_tar_zst_error, map_tzap_error, map_zip_error,
 };
 use crate::ffi::event::{cancelled_event, completed_event_from_summary, failed_event, mobile_event_from_core_event};
 use crate::ffi::ops::archive::{selected_path_matches, testArchive};

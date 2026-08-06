@@ -602,16 +602,6 @@ fn extract_apple_archive_stdout(
     )
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn extract_apple_archive_stdout(
-    _archive: &str,
-    _include: &[String],
-    _exclude: &[String],
-    _password: Option<&str>,
-    _global: &GlobalOptions,
-) -> ExitCode {
-    unreachable!()
-}
 struct CliExtractReport {
     written_entries: usize,
     skipped_entries: usize,
@@ -947,17 +937,6 @@ fn run_apple_archive_extract_with_policy(
             },
         },
     )
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn run_apple_archive_extract_with_policy(
-    _archive: impl AsRef<std::path::Path>,
-    _destination: impl AsRef<std::path::Path>,
-    _policy: zmanager_core::safety::ExtractionPolicy,
-    _password: Option<&str>,
-    _global: &GlobalOptions,
-) -> ExitCode {
-    unreachable!()
 }
 
 fn run_tzap_extract_with_policy(

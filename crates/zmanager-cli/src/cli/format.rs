@@ -38,7 +38,8 @@ pub(crate) use zmanager_core::archive_format::{
 };
 
 pub(crate) const ZIP_CREATE_EXTENSIONS: &[&str] = &[".zip"];
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+// Placeholder extensions for the libarchive fallback handler, which accepts
+// formats the other backends cannot parse (DEB, RAR, raw streams, ...).
 const LIBARCHIVE_FALLBACK_EXTENSIONS: &[&str] = &["fallback"];
 
 #[derive(Clone, Copy)]
