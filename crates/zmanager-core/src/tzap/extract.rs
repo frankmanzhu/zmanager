@@ -2,7 +2,7 @@
 //! [`TzapExtractionState`] state machine shared by the fast and restore-based
 //! paths, and the streaming and deferred-metadata helpers they use.
 
-use super::TzapError;
+use super::{TzapError, io_error};
 use crate::atomic_file::AtomicOutputFile;
 use crate::jobs::JobContext;
 use crate::safety::{
@@ -11,12 +11,14 @@ use crate::safety::{
 };
 use crate::secrets::SecretBytes;
 use crate::tzap::metadata::{metadata_diagnostic_labels, write_hardlink, write_symlink};
+const TZAP_TEMP_EXTRACT_PREFIX: &str = ".zmanager-tzap-extract";
+const TZAP_TEMP_EXTRACT_ATTEMPTS: u32 = 100;
 use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_recipient_key};
-use crate::tzap::write::{TemporaryTzapExtractionRoot, archive_member_path_under_root, commit_extracted_file};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tzap_core::reader::{ArchiveEntry, ExtractedArchiveMember};
 use tzap_core::{
     ArchiveTimestamp, ExtractError, FormatError, MetadataDiagnostic, OpenedArchive, RestorePolicy as CoreRestorePolicy,
@@ -1278,5 +1280,76 @@ mod tests {
         let time = archive_timestamp_file_time(ArchiveTimestamp::new(-1, 500_000_000)).unwrap();
 
         assert_eq!(time, filetime::FileTime::from_unix_time(-2, 500_000_000));
+    }
+}
+
+pub(crate) fn commit_extracted_file(
+    source_path: &Path,
+    destination_path: &Path,
+    replace_existing: bool,
+) -> Result<(), TzapError> {
+    if let Some(parent) = destination_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })?;
+    }
+
+    if replace_existing {
+        crate::safety::remove_destination_for_replace(destination_path)
+            .map_err(|source| TzapError::Io { path: destination_path.to_path_buf(), source })?;
+        fs::rename(source_path, destination_path)
+            .map_err(|source| TzapError::Io { path: destination_path.to_path_buf(), source })?;
+    } else {
+        fs::hard_link(source_path, destination_path)
+            .map_err(|source| TzapError::Io { path: destination_path.to_path_buf(), source })?;
+    }
+    Ok(())
+}
+
+pub(crate) fn archive_member_path_under_root(root: &Path, entry_path: &str) -> Result<PathBuf, TzapError> {
+    let mut path = root.to_path_buf();
+    for component in entry_path.split('/') {
+        if component.is_empty() || component == "." || component == ".." {
+            return Err(TzapError::Format(FormatError::UnsafeArchivePath));
+        }
+        path.push(component);
+    }
+    Ok(path)
+}
+
+pub(crate) struct TemporaryTzapExtractionRoot {
+    path: PathBuf,
+}
+
+impl TemporaryTzapExtractionRoot {
+    pub(crate) fn new(destination_path: &Path) -> Result<Self, TzapError> {
+        let parent = destination_path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
+        let destination_name = destination_path.file_name().and_then(|name| name.to_str()).unwrap_or("entry");
+
+        for attempt in 0..TZAP_TEMP_EXTRACT_ATTEMPTS {
+            let path = parent
+                .join(format!("{TZAP_TEMP_EXTRACT_PREFIX}-{destination_name}-{}-{now}-{attempt}", std::process::id()));
+            match fs::create_dir(&path) {
+                Ok(()) => return Ok(Self { path }),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(source) => {
+                    return Err(TzapError::Io { path, source });
+                }
+            }
+        }
+
+        Err(io_error(parent, io::ErrorKind::AlreadyExists, "could not allocate temporary TZAP extraction root"))
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TemporaryTzapExtractionRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
     }
 }

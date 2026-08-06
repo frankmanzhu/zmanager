@@ -19,7 +19,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tzap_core::format::{
     AeadAlgo, FormatError, READER_MAX_ARGON2ID_M_COST_KIB, READER_MAX_ARGON2ID_PARALLELISM, READER_MAX_ARGON2ID_T_COST,
 };
@@ -36,8 +35,6 @@ const DEFAULT_ARGON2_M_COST_KIB: u32 = 262_144;
 const DEFAULT_ARGON2_PARALLELISM: u32 = 4;
 const DEFAULT_ARGON2_SALT_LEN: usize = 16;
 
-const TZAP_TEMP_EXTRACT_PREFIX: &str = ".zmanager-tzap-extract";
-const TZAP_TEMP_EXTRACT_ATTEMPTS: u32 = 100;
 const TZAP_PLACEHOLDER_MASTER_KEY: [u8; 32] = [0; 32];
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -124,49 +121,7 @@ pub fn create_tzap_from_manifest_with_context(
     }
 
     let (master_key, kdf_params) = create_key_material(&options.key_source)?;
-    let recipient_records = match &options.key_source {
-        TzapKeySource::RecipientCertificate(recipient_certificate) => {
-            validate_recipient_wrap_create_options(options)?;
-            Some(vec![build_recipient_wrap_record_from_certificate_path(
-                recipient_certificate,
-                &master_key,
-                &mut writer_options,
-            )?])
-        }
-        TzapKeySource::RecipientCertificates(recipient_certificates) => {
-            validate_recipient_wrap_create_options(options)?;
-            if recipient_certificates.is_empty() {
-                return Err(TzapError::KeyWrap("at least one recipient certificate is required".to_owned()));
-            }
-            let archive_identity = recipient_wrap_archive_identity_for_writer(&mut writer_options);
-            Some(
-                recipient_certificates
-                    .iter()
-                    .map(|path| {
-                        let certificate = load_single_x509_certificate_file("recipient certificate", path)?;
-                        build_recipient_wrap_record_from_certificate_der(&certificate, &master_key, &archive_identity)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-        }
-        TzapKeySource::RecipientPublicKeys(recipient_public_keys) => {
-            validate_recipient_wrap_create_options(options)?;
-            if recipient_public_keys.is_empty() {
-                return Err(TzapError::KeyWrap("at least one recipient public key is required".to_owned()));
-            }
-            let archive_identity = recipient_wrap_archive_identity_for_writer(&mut writer_options);
-            Some(
-                recipient_public_keys
-                    .iter()
-                    .map(|public_key_der| {
-                        let certificate = synthetic_recipient_certificate_der(public_key_der)?;
-                        build_recipient_wrap_record_from_certificate_der(&certificate, &master_key, &archive_identity)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-        }
-        TzapKeySource::Passphrase(_) | TzapKeySource::NoPassword => None,
-    };
+    let recipient_records = build_recipient_records(options, &master_key, &mut writer_options)?;
     let destination = destination.as_ref();
     let mut sink = TzapArchiveFileSink::new(destination, options.replace_existing, context.cancellation_token())?;
     let x509_signer = options.x509_signing.as_ref().map(load_x509_signer).transpose()?;
@@ -256,6 +211,58 @@ pub fn create_tzap_from_manifest_with_context(
         volume_size: options.volume_size,
         volume_count,
         warnings,
+    })
+}
+
+/// Builds the recipient-wrap records for the key source, or `None` for
+/// passphrase/no-password archives (CR-143).
+fn build_recipient_records(
+    options: &TzapCreateOptions,
+    master_key: &MasterKey,
+    writer_options: &mut WriterOptions,
+) -> Result<Option<Vec<tzap_core::wire::RecipientRecordV1>>, TzapError> {
+    Ok(match &options.key_source {
+        TzapKeySource::RecipientCertificate(recipient_certificate) => {
+            validate_recipient_wrap_create_options(options)?;
+            Some(vec![build_recipient_wrap_record_from_certificate_path(
+                recipient_certificate,
+                master_key,
+                writer_options,
+            )?])
+        }
+        TzapKeySource::RecipientCertificates(recipient_certificates) => {
+            validate_recipient_wrap_create_options(options)?;
+            if recipient_certificates.is_empty() {
+                return Err(TzapError::KeyWrap("at least one recipient certificate is required".to_owned()));
+            }
+            let archive_identity = recipient_wrap_archive_identity_for_writer(writer_options);
+            Some(
+                recipient_certificates
+                    .iter()
+                    .map(|path| {
+                        let certificate = load_single_x509_certificate_file("recipient certificate", path)?;
+                        build_recipient_wrap_record_from_certificate_der(&certificate, master_key, &archive_identity)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        }
+        TzapKeySource::RecipientPublicKeys(recipient_public_keys) => {
+            validate_recipient_wrap_create_options(options)?;
+            if recipient_public_keys.is_empty() {
+                return Err(TzapError::KeyWrap("at least one recipient public key is required".to_owned()));
+            }
+            let archive_identity = recipient_wrap_archive_identity_for_writer(writer_options);
+            Some(
+                recipient_public_keys
+                    .iter()
+                    .map(|public_key_der| {
+                        let certificate = synthetic_recipient_certificate_der(public_key_der)?;
+                        build_recipient_wrap_record_from_certificate_der(&certificate, master_key, &archive_identity)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        }
+        TzapKeySource::Passphrase(_) | TzapKeySource::NoPassword => None,
     })
 }
 
@@ -462,77 +469,6 @@ fn collect_archive_sources(
     }
 
     Ok((files, warnings))
-}
-
-pub(crate) fn commit_extracted_file(
-    source_path: &Path,
-    destination_path: &Path,
-    replace_existing: bool,
-) -> Result<(), TzapError> {
-    if let Some(parent) = destination_path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent).map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })?;
-    }
-
-    if replace_existing {
-        crate::safety::remove_destination_for_replace(destination_path)
-            .map_err(|source| TzapError::Io { path: destination_path.to_path_buf(), source })?;
-        fs::rename(source_path, destination_path)
-            .map_err(|source| TzapError::Io { path: destination_path.to_path_buf(), source })?;
-    } else {
-        fs::hard_link(source_path, destination_path)
-            .map_err(|source| TzapError::Io { path: destination_path.to_path_buf(), source })?;
-    }
-    Ok(())
-}
-
-pub(crate) fn archive_member_path_under_root(root: &Path, entry_path: &str) -> Result<PathBuf, TzapError> {
-    let mut path = root.to_path_buf();
-    for component in entry_path.split('/') {
-        if component.is_empty() || component == "." || component == ".." {
-            return Err(TzapError::Format(FormatError::UnsafeArchivePath));
-        }
-        path.push(component);
-    }
-    Ok(path)
-}
-
-pub(crate) struct TemporaryTzapExtractionRoot {
-    path: PathBuf,
-}
-
-impl TemporaryTzapExtractionRoot {
-    pub(crate) fn new(destination_path: &Path) -> Result<Self, TzapError> {
-        let parent = destination_path.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent).map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })?;
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
-        let destination_name = destination_path.file_name().and_then(|name| name.to_str()).unwrap_or("entry");
-
-        for attempt in 0..TZAP_TEMP_EXTRACT_ATTEMPTS {
-            let path = parent
-                .join(format!("{TZAP_TEMP_EXTRACT_PREFIX}-{destination_name}-{}-{now}-{attempt}", std::process::id()));
-            match fs::create_dir(&path) {
-                Ok(()) => return Ok(Self { path }),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(source) => {
-                    return Err(TzapError::Io { path, source });
-                }
-            }
-        }
-
-        Err(io_error(parent, io::ErrorKind::AlreadyExists, "could not allocate temporary TZAP extraction root"))
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TemporaryTzapExtractionRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
 }
 
 fn create_kdf_params() -> KdfParams {
