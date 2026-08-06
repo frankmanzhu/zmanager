@@ -294,7 +294,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
     /// Shared constructor: normalizes the destination root and wires up the
     /// optional overwrite resolver, so both public constructors behave
     /// identically.
-    fn with_overwrite_resolver(
+    pub fn with_overwrite_resolver(
         destination_root: impl Into<PathBuf>,
         policy: ExtractionPolicy,
         overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,

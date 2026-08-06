@@ -13,8 +13,8 @@
 use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
-    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
-    ExtractionSafetyPlanner, OverwriteResolver,
+    ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
+    OverwriteResolver,
 };
 use crate::secrets::SecretString;
 use crate::zip_split::{MIN_ZIP_VOLUME_SIZE_BYTES, split_zip_temp_archive};
@@ -507,19 +507,13 @@ fn extract_zip_inner(
         File::open(archive_path).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = ZipArchive::new(file)?;
     let password = password_bytes(password);
-    let mut planner = match overwrite_resolver {
-        Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(&destination_root, policy, resolver),
-        None => ExtractionSafetyPlanner::new(&destination_root, policy),
-    };
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report =
         ZipExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut deferred_directories: Vec<(PathBuf, Option<u32>, Option<zip::DateTime>)> = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
     for index in 0..archive.len() {
-        if let Some(context) = context.as_deref_mut() {
-            context.check_cancelled()?;
-        }
         let mut file =
             archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(map_zip_error)?;
         let entry_size = file.size();
@@ -532,40 +526,31 @@ fn extract_zip_inner(
             uncompressed_size: Some(entry_size),
             compressed_size: Some(file.compressed_size()),
         };
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_started(&entry.archive_path, Some(entry_size));
-            context.check_cancelled()?;
-        }
 
-        let processed = match planner.validate_entry(&entry)? {
-            ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => write_zip_entry(
-                &mut file,
-                &entry,
-                ZipEntryWriteContext {
-                    destination_path: &destination_path,
-                    replace_existing,
-                    link_target_path: link_target_path.as_deref(),
-                    report: &mut report,
-                    job_context: context.as_deref_mut(),
-                    unix_mode,
-                    modified_time,
-                    deferred_directories: &mut deferred_directories,
-                    io_buffer: &mut io_buffer,
-                },
-            )?,
-            ExtractionDecision::Skip { reason, .. } => {
-                report.skipped_entries += 1;
-                let warning = format!("skipped {}: {reason}", entry.archive_path);
-                report.warnings.push(warning.clone());
-                if let Some(context) = context.as_deref_mut() {
-                    context.warning(warning);
-                }
-                0
-            }
-        };
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_finished(&entry.archive_path, processed);
-        }
+        crate::extract_loop::process_extraction_entry(
+            &mut report,
+            context.as_deref_mut(),
+            &mut planner,
+            &entry,
+            &mut |action, report, context| match action {
+                crate::extract_loop::EntryAction::Skip => Ok(0),
+                crate::extract_loop::EntryAction::Write(decision) => write_zip_entry(
+                    &mut file,
+                    &entry,
+                    ZipEntryWriteContext {
+                        destination_path: decision.destination_path,
+                        replace_existing: decision.replace_existing,
+                        link_target_path: decision.link_target_path,
+                        report,
+                        job_context: context,
+                        unix_mode,
+                        modified_time,
+                        deferred_directories: &mut deferred_directories,
+                        io_buffer: &mut io_buffer,
+                    },
+                ),
+            },
+        )?;
     }
 
     apply_deferred_zip_directory_metadata(&deferred_directories)?;
@@ -808,20 +793,18 @@ fn write_zip_entry<R: Read>(
             Ok(0)
         }
         ExtractionEntryKind::File => {
-            let mut destination = crate::atomic_file::AtomicOutputFile::create(destination_path)
-                .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })?;
-            let output = destination
-                .file_mut()
-                .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })?;
-            let copied = if let Some(context) = job_context {
-                copy_with_progress(file, output, &entry.archive_path, destination_path, context, io_buffer)?
-            } else {
-                io::copy(file, output)
-                    .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })?
-            };
-            destination
-                .commit_with_replace(replace_existing)
-                .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })?;
+            let copied = crate::extract_loop::copy_file_entry(
+                destination_path,
+                replace_existing,
+                Some(&entry.archive_path),
+                job_context,
+                io_buffer,
+                |buf| {
+                    file.read(buf)
+                        .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })
+                },
+                |source, path| ZipBackendError::Io { path: path.to_path_buf(), source },
+            )?;
             apply_zip_metadata(destination_path, unix_mode, modified_time)?;
             report.written_entries += 1;
             report.written_bytes += copied;
@@ -829,12 +812,11 @@ fn write_zip_entry<R: Read>(
         }
         ExtractionEntryKind::Symlink { ref target } => {
             if crate::safety::should_skip_symlink_materialization(&entry.kind) {
-                report.skipped_entries += 1;
-                let warning = crate::safety::unsupported_symlink_warning(&entry.archive_path);
-                report.warnings.push(warning.clone());
-                if let Some(context) = job_context {
-                    context.warning(warning);
-                }
+                crate::extract_loop::skip_entry(
+                    report,
+                    job_context,
+                    crate::safety::unsupported_symlink_warning(&entry.archive_path),
+                );
             } else {
                 crate::extract_materialize::write_symlink(target, destination_path)
                     .map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })?;
@@ -846,18 +828,18 @@ fn write_zip_entry<R: Read>(
         ExtractionEntryKind::Hardlink { .. } => {
             let source_path = link_target_path.ok_or_else(|| ZipBackendError::Io {
                 path: destination_path.to_path_buf(),
-                source: io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "hardlink target was not resolved by extraction safety planning",
-                ),
+                source: crate::extract_loop::unresolved_hardlink_target(),
             })?;
             write_hardlink(source_path, destination_path)?;
             report.written_entries += 1;
             Ok(0)
         }
         ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
-            report.skipped_entries += 1;
-            report.warnings.push(format!("skipped unsupported ZIP entry kind for {}", entry.archive_path));
+            crate::extract_loop::skip_entry(
+                report,
+                job_context,
+                format!("skipped unsupported ZIP entry kind for {}", entry.archive_path),
+            );
             Ok(0)
         }
     }
@@ -906,12 +888,17 @@ fn apply_symlink_mtime(path: &Path, modified_time: Option<zip::DateTime>) -> Res
 fn apply_deferred_zip_directory_metadata(
     directories: &[(PathBuf, Option<u32>, Option<zip::DateTime>)],
 ) -> Result<(), ZipBackendError> {
-    for (path, unix_mode, modified_time) in directories.iter().rev() {
-        apply_zip_metadata(path, *unix_mode, *modified_time)?;
-    }
-    Ok(())
+    crate::extract_loop::apply_deferred_directory_metadata(
+        directories,
+        |(path, unix_mode, modified_time): &(PathBuf, Option<u32>, Option<zip::DateTime>)| {
+            apply_zip_metadata(path, *unix_mode, *modified_time)
+        },
+    )
 }
 
+/// Streams an entry from the source file into the archive writer with
+/// cancellation and progress reporting (create path; the extraction path uses
+/// the shared [`crate::extract_loop::copy_file_entry`]).
 fn copy_with_progress<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
@@ -1192,6 +1179,28 @@ mod tests {
         let error = extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap_err();
 
         assert!(matches!(error, ZipBackendError::Safety(ExtractionSafetyError::ParentTraversal { .. })));
+    }
+
+    #[test]
+    fn extraction_skips_archive_root_directory_entries() {
+        // The root-directory skip was unified across backends (CR-118): the
+        // zip backend used to materialize "." as the destination root and
+        // apply the archive root's metadata to it.
+        let temp = TestDir::new("extracts_zip_with_root_directory");
+        let archive = temp.path("archive.zip");
+        let file = File::create(&archive).unwrap();
+        let mut writer = ZipWriter::new(file);
+        writer.add_directory(".", SimpleFileOptions::default()).unwrap();
+        writer.start_file("payload/file.txt", SimpleFileOptions::default()).unwrap();
+        writer.write_all(b"payload").unwrap();
+        writer.finish().unwrap();
+
+        let report = extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+
+        assert_eq!(report.written_entries, 1);
+        assert_eq!(report.skipped_entries, 1);
+        assert_eq!(fs::read(temp.path("out/payload/file.txt")).unwrap(), b"payload");
+        assert!(report.warnings.iter().any(|warning| warning == "skipped archive root directory entry"));
     }
 
     #[test]

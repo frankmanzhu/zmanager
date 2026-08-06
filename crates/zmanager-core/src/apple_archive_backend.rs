@@ -1,8 +1,8 @@
 use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
-    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
-    ExtractionSafetyPlanner, OverwriteResolver,
+    ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
+    OverwriteResolver,
 };
 use std::fmt;
 use std::fs::{self, File};
@@ -514,19 +514,13 @@ fn extract_apple_archive_inner(
     let destination_root = crate::safety::prepare_destination_root(destination)
         .map_err(|source| AppleArchiveError::Io { path: destination.to_path_buf(), source })?;
     let mut reader = open_apple_archive_reader(archive_path, password)?;
-    let mut planner = match overwrite_resolver {
-        Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(&destination_root, policy, resolver),
-        None => ExtractionSafetyPlanner::new(&destination_root, policy),
-    };
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report =
         AppleArchiveExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut found_selected_entry = selected_entry.is_none();
     let mut deferred_directories = Vec::new();
 
     while let Some(entry) = reader.next_entry()? {
-        if let Some(context) = context.as_deref_mut() {
-            context.check_cancelled()?;
-        }
         if let Some(selected_entry) = selected_entry
             && entry.path() != selected_entry
         {
@@ -534,58 +528,34 @@ fn extract_apple_archive_inner(
             continue;
         }
         found_selected_entry = true;
-        let extraction_kind = extraction_kind(&entry)?;
-        if crate::extract_materialize::is_archive_root_directory(entry.path(), &extraction_kind) {
-            reader.skip_entry_data(&entry)?;
-            report.skipped_entries += 1;
-            let warning = "skipped archive root directory entry".to_owned();
-            report.warnings.push(warning.clone());
-            if let Some(context) = context.as_deref_mut() {
-                context.warning(warning);
-            }
-            continue;
-        }
         let safety_entry = ExtractionEntry {
             archive_path: entry.path().to_owned(),
-            kind: extraction_kind,
+            kind: extraction_kind(&entry)?,
             uncompressed_size: entry.size(),
             compressed_size: None,
         };
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_started(&safety_entry.archive_path, entry.size());
-            context.check_cancelled()?;
-        }
 
-        let processed = match planner.validate_entry(&safety_entry)? {
-            ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => {
-                materialize_entry(
+        crate::extract_loop::process_extraction_entry(
+            &mut report,
+            context.as_deref_mut(),
+            &mut planner,
+            &safety_entry,
+            &mut |action, report, context| match action {
+                crate::extract_loop::EntryAction::Skip => {
+                    reader.skip_entry_data(&entry)?;
+                    Ok(0)
+                }
+                crate::extract_loop::EntryAction::Write(decision) => materialize_entry(
                     &mut reader,
                     &entry,
                     &safety_entry,
-                    &WriteDecision {
-                        destination_path: &destination_path,
-                        replace_existing,
-                        link_target_path: link_target_path.as_deref(),
-                    },
-                    context.as_deref_mut(),
+                    &decision,
+                    context,
                     &mut deferred_directories,
-                    &mut report,
-                )?
-            }
-            ExtractionDecision::Skip { reason, .. } => {
-                reader.skip_entry_data(&entry)?;
-                report.skipped_entries += 1;
-                let warning = format!("skipped {}: {reason}", safety_entry.archive_path);
-                report.warnings.push(warning.clone());
-                if let Some(context) = context.as_deref_mut() {
-                    context.warning(warning);
-                }
-                0
-            }
-        };
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_finished(&safety_entry.archive_path, processed);
-        }
+                    report,
+                ),
+            },
+        )?;
     }
 
     if !found_selected_entry && let Some(path) = selected_entry {
@@ -596,29 +566,22 @@ fn extract_apple_archive_inner(
     Ok(report)
 }
 
-struct WriteDecision<'a> {
-    destination_path: &'a Path,
-    replace_existing: bool,
-    link_target_path: Option<&'a Path>,
-}
-
 fn materialize_entry(
     reader: &mut ArchiveReader,
     entry: &zmanager_apple_archive::Entry,
     safety_entry: &ExtractionEntry,
-    decision: &WriteDecision<'_>,
+    decision: &crate::extract_loop::WriteDecision<'_>,
     mut context: Option<&mut JobContext<'_>>,
     deferred_directories: &mut Vec<(PathBuf, zmanager_apple_archive::EntryMetadata)>,
     report: &mut AppleArchiveExtractReport,
 ) -> Result<u64, AppleArchiveError> {
     if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
         reader.skip_entry_data(entry)?;
-        report.skipped_entries += 1;
-        let warning = crate::safety::unsupported_symlink_warning(&safety_entry.archive_path);
-        report.warnings.push(warning.clone());
-        if let Some(context) = context.as_deref_mut() {
-            context.warning(warning);
-        }
+        crate::extract_loop::skip_entry(
+            report,
+            context,
+            crate::safety::unsupported_symlink_warning(&safety_entry.archive_path),
+        );
         return Ok(0);
     }
 
@@ -647,22 +610,18 @@ fn materialize_entry(
             reader.skip_entry_data(entry)?;
             let source_path = decision.link_target_path.ok_or_else(|| AppleArchiveError::Io {
                 path: decision.destination_path.to_path_buf(),
-                source: io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "hardlink target was not resolved by extraction safety planning",
-                ),
+                source: crate::extract_loop::unresolved_hardlink_target(),
             })?;
             write_hardlink(source_path, decision.destination_path)?;
             0
         }
         ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
             reader.skip_entry_data(entry)?;
-            report.skipped_entries += 1;
-            let warning = format!("skipped unsupported special entry {}", safety_entry.archive_path);
-            report.warnings.push(warning.clone());
-            if let Some(context) = context {
-                context.warning(warning);
-            }
+            crate::extract_loop::skip_entry(
+                report,
+                context,
+                format!("skipped unsupported special entry {}", safety_entry.archive_path),
+            );
             return Ok(0);
         }
     };
@@ -676,7 +635,7 @@ fn write_file_entry(
     reader: &mut ArchiveReader,
     entry: &zmanager_apple_archive::Entry,
     safety_entry: &ExtractionEntry,
-    decision: &WriteDecision<'_>,
+    decision: &crate::extract_loop::WriteDecision<'_>,
     mut context: Option<&mut JobContext<'_>>,
 ) -> Result<u64, AppleArchiveError> {
     ensure_file_entry_has_data(entry)?;
@@ -845,10 +804,9 @@ fn extraction_kind(entry: &zmanager_apple_archive::Entry) -> Result<ExtractionEn
 fn apply_deferred_directory_metadata(
     directories: &[(PathBuf, zmanager_apple_archive::EntryMetadata)],
 ) -> Result<(), AppleArchiveError> {
-    for (path, metadata) in directories.iter().rev() {
-        apply_metadata(path, *metadata)?;
-    }
-    Ok(())
+    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, metadata)| {
+        apply_metadata(path, *metadata)
+    })
 }
 
 fn apply_metadata(path: &Path, metadata: zmanager_apple_archive::EntryMetadata) -> Result<(), AppleArchiveError> {

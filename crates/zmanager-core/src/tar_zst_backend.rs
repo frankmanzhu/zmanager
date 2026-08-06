@@ -2,12 +2,12 @@ use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{
-    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
-    ExtractionSafetyPlanner, OverwriteResolver,
+    ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
+    OverwriteResolver,
 };
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Read, Write as _};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use tar::{Archive, Builder, EntryType, Header};
 
@@ -319,10 +319,7 @@ fn extract_tar_zst_inner(
     let decoder = zstd::stream::read::Decoder::new(file)
         .map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = Archive::new(decoder);
-    let mut planner = match overwrite_resolver {
-        Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(&destination_root, policy, resolver),
-        None => ExtractionSafetyPlanner::new(&destination_root, policy),
-    };
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report =
         TarZstdExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut deferred_directories = Vec::new();
@@ -331,62 +328,39 @@ fn extract_tar_zst_inner(
 
     for entry in archive.entries().map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })? {
         let mut entry = entry.map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
-        if let Some(context) = context.as_deref_mut() {
-            context.check_cancelled()?;
-        }
         let archive_entry_path = entry_path_string(&entry)?;
         let entry_size = entry.header().size().unwrap_or(0);
         let kind = extraction_kind(&mut entry, &archive_entry_path)?;
-        if crate::extract_materialize::is_archive_root_directory(&archive_entry_path, &kind) {
-            report.skipped_entries += 1;
-            let warning = "skipped archive root directory entry".to_owned();
-            report.warnings.push(warning.clone());
-            if let Some(context) = context.as_deref_mut() {
-                context.warning(warning);
-            }
-            continue;
-        }
         let safety_entry = ExtractionEntry {
             archive_path: archive_entry_path,
             kind,
             uncompressed_size: Some(entry_size),
             compressed_size: None,
         };
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_started(&safety_entry.archive_path, Some(entry_size));
-            context.check_cancelled()?;
-        }
 
-        let processed = match planner.validate_entry(&safety_entry)? {
-            ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => {
-                materialize_tar_write_decision(
+        crate::extract_loop::process_extraction_entry(
+            &mut report,
+            context.as_deref_mut(),
+            &mut planner,
+            &safety_entry,
+            &mut |action, report, context| match action {
+                crate::extract_loop::EntryAction::Skip => Ok(0),
+                crate::extract_loop::EntryAction::Write(decision) => materialize_tar_write_decision(
                     &mut entry,
                     TarWriteDecision {
                         safety_entry: &safety_entry,
-                        destination_path: &destination_path,
-                        replace_existing,
-                        link_target_path: link_target_path.as_deref(),
+                        destination_path: decision.destination_path,
+                        replace_existing: decision.replace_existing,
+                        link_target_path: decision.link_target_path,
                     },
-                    context.as_deref_mut(),
+                    context,
                     &mut deferred_directories,
                     &mut deferred_hardlinks,
-                    &mut report,
+                    report,
                     &mut io_buffer,
-                )?
-            }
-            ExtractionDecision::Skip { reason, .. } => {
-                report.skipped_entries += 1;
-                let warning = format!("skipped {}: {reason}", safety_entry.archive_path);
-                report.warnings.push(warning.clone());
-                if let Some(context) = context.as_deref_mut() {
-                    context.warning(warning);
-                }
-                0
-            }
-        };
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_finished(&safety_entry.archive_path, processed);
-        }
+                ),
+            },
+        )?;
     }
 
     materialize_deferred_hardlinks(&deferred_hardlinks, &mut report)?;
@@ -412,7 +386,7 @@ struct TarWriteDecision<'a> {
 fn materialize_tar_write_decision<R: Read>(
     entry: &mut tar::Entry<'_, R>,
     decision: TarWriteDecision<'_>,
-    mut context: Option<&mut JobContext<'_>>,
+    context: Option<&mut JobContext<'_>>,
     deferred_directories: &mut Vec<(PathBuf, TarEntryMetadata)>,
     deferred_hardlinks: &mut Vec<DeferredHardlink>,
     report: &mut TarZstdExtractReport,
@@ -421,12 +395,11 @@ fn materialize_tar_write_decision<R: Read>(
     let TarWriteDecision { safety_entry, destination_path, replace_existing, link_target_path } = decision;
 
     if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
-        report.skipped_entries += 1;
-        let warning = crate::safety::unsupported_symlink_warning(&safety_entry.archive_path);
-        report.warnings.push(warning.clone());
-        if let Some(context) = context.as_deref_mut() {
-            context.warning(warning);
-        }
+        crate::extract_loop::skip_entry(
+            report,
+            context,
+            crate::safety::unsupported_symlink_warning(&safety_entry.archive_path),
+        );
         return Ok(0);
     }
 
@@ -491,10 +464,7 @@ fn materialize_tar_entry<R: Read>(
         ExtractionEntryKind::Hardlink { .. } => {
             let source_path = link_target_path.ok_or_else(|| TarZstdError::Io {
                 path: destination_path.to_path_buf(),
-                source: io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "hardlink target was not resolved by extraction safety planning",
-                ),
+                source: crate::extract_loop::unresolved_hardlink_target(),
             })?;
             deferred_hardlinks.push(DeferredHardlink {
                 source_path: source_path.to_path_buf(),
@@ -530,38 +500,18 @@ fn copy_tar_file_entry<R: Read>(
     destination_path: &Path,
     replace_existing: bool,
     metadata: TarEntryMetadata,
-    mut context: Option<&mut JobContext<'_>>,
+    context: Option<&mut JobContext<'_>>,
     io_buffer: &mut [u8],
 ) -> Result<u64, TarZstdError> {
-    let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path)
-        .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
-    let mut written_bytes = 0_u64;
-
-    loop {
-        if let Some(context) = context.as_deref_mut() {
-            context.check_cancelled()?;
-        }
-        let read = entry
-            .read(io_buffer)
-            .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
-        if read == 0 {
-            break;
-        }
-        output
-            .file_mut()
-            .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?
-            .write_all(&io_buffer[..read])
-            .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
-        let read = read as u64;
-        written_bytes += read;
-        if let Some(context) = context.as_deref_mut() {
-            context.bytes_processed(Some(archive_path), read);
-        }
-    }
-
-    output
-        .commit_with_replace(replace_existing)
-        .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
+    let written_bytes = crate::extract_loop::copy_file_entry(
+        destination_path,
+        replace_existing,
+        Some(archive_path),
+        context,
+        io_buffer,
+        |buf| entry.read(buf).map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source }),
+        |source, path| TarZstdError::Io { path: path.to_path_buf(), source },
+    )?;
     apply_metadata(destination_path, metadata)?;
 
     Ok(written_bytes)
@@ -601,11 +551,9 @@ fn tar_entry_metadata<R: Read>(
 }
 
 fn apply_deferred_directory_metadata(directories: &[(PathBuf, TarEntryMetadata)]) -> Result<(), TarZstdError> {
-    for (path, metadata) in directories.iter().rev() {
-        apply_metadata(path, *metadata)?;
-    }
-
-    Ok(())
+    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, metadata)| {
+        apply_metadata(path, *metadata)
+    })
 }
 
 fn apply_metadata(path: &Path, metadata: TarEntryMetadata) -> Result<(), TarZstdError> {

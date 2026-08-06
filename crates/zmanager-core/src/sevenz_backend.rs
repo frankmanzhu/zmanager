@@ -554,17 +554,48 @@ fn extract_7z_inner(
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
     let result = reader.for_each_entries(|entry, entry_reader| {
-        match extract_entry(
-            entry,
-            entry_reader,
-            &decisions,
-            &modes,
-            &mut deferred_directories,
+        let path = entry.name().to_owned();
+        if entry.is_anti_item() {
+            if let Err(error) = drain_reader(entry_reader, &path) {
+                return Err(callback_failed_with(&mut callback_error, error));
+            }
+            crate::extract_loop::skip_entry(&mut report, context.as_deref_mut(), format!("skipped anti-item {path}"));
+            return Ok(true);
+        }
+
+        let safety_entry = ExtractionEntry {
+            archive_path: path,
+            kind: extraction_kind(entry),
+            uncompressed_size: Some(entry.size()),
+            compressed_size: (entry.compressed_size > 0).then_some(entry.compressed_size),
+        };
+        let decision = match decisions.get(entry.name()) {
+            Some(decision) => decision.clone(),
+            None => return Err(callback_failed_with(&mut callback_error, missing_extraction_decision(entry.name()))),
+        };
+        match crate::extract_loop::process_planned_entry(
             &mut report,
             context.as_deref_mut(),
-            &mut io_buffer,
+            &safety_entry,
+            decision,
+            &mut |action, report, context| match action {
+                crate::extract_loop::EntryAction::Skip => {
+                    drain_reader(entry_reader, entry.name())?;
+                    Ok(0)
+                }
+                crate::extract_loop::EntryAction::Write(decision) => write_sevenz_entry(
+                    entry,
+                    entry_reader,
+                    &decision,
+                    modes.get(entry.name()).copied().flatten(),
+                    &mut deferred_directories,
+                    report,
+                    context,
+                    &mut io_buffer,
+                ),
+            },
         ) {
-            Ok(()) => Ok(true),
+            Ok(_) => Ok(true),
             Err(error) => Err(callback_failed_with(&mut callback_error, error)),
         }
     });
@@ -877,10 +908,9 @@ fn apply_sevenz_metadata(
 fn apply_deferred_sevenz_directory_metadata(
     directories: &[(PathBuf, Option<u32>, Option<std::time::SystemTime>)],
 ) -> Result<(), SevenZError> {
-    for (path, unix_mode, modified_time) in directories.iter().rev() {
-        apply_sevenz_metadata(path, *unix_mode, *modified_time)?;
-    }
-    Ok(())
+    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, unix_mode, modified_time)| {
+        apply_sevenz_metadata(path, *unix_mode, *modified_time)
+    })
 }
 
 type SevenZExtractionDecisions = HashMap<String, ExtractionDecision>;
@@ -892,10 +922,7 @@ fn plan_extraction(
     policy: ExtractionPolicy,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
 ) -> Result<(SevenZExtractionDecisions, SevenZUnixModes), SevenZError> {
-    let mut planner = match overwrite_resolver {
-        Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(destination, policy, resolver),
-        None => ExtractionSafetyPlanner::new(destination, policy),
-    };
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(destination, policy, overwrite_resolver);
     let mut decisions = HashMap::with_capacity(entries.len());
     let mut modes = HashMap::with_capacity(entries.len());
 
@@ -920,125 +947,55 @@ fn plan_extraction(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn extract_entry(
+fn write_sevenz_entry(
     entry: &ArchiveEntry,
     reader: &mut dyn Read,
-    decisions: &SevenZExtractionDecisions,
-    modes: &SevenZUnixModes,
+    decision: &crate::extract_loop::WriteDecision<'_>,
+    unix_mode: Option<u32>,
     deferred_directories: &mut Vec<(PathBuf, Option<u32>, Option<std::time::SystemTime>)>,
     report: &mut SevenZExtractReport,
-    mut context: Option<&mut JobContext<'_>>,
+    context: Option<&mut JobContext<'_>>,
     io_buffer: &mut [u8],
-) -> Result<(), SevenZError> {
-    let path = entry.name().to_owned();
-    if let Some(context) = context.as_deref_mut() {
-        context.entry_started(&path, Some(entry.size()));
+) -> Result<u64, SevenZError> {
+    if decision.replace_existing && entry.is_directory() {
+        crate::safety::remove_destination_for_replace(decision.destination_path)
+            .map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })?;
     }
-    let mut processed_bytes = 0_u64;
-
-    if entry.is_anti_item() {
-        drain_reader(reader, entry.name())?;
-        report.skipped_entries += 1;
-        report.warnings.push(format!("skipped anti-item {}", entry.name()));
-        if let Some(context) = context {
-            context.warning(format!("skipped anti-item {path}"));
-            context.entry_finished(&path, 0);
-        }
-        return Ok(());
-    }
-
-    let decision = decisions.get(entry.name()).ok_or_else(|| missing_extraction_decision(entry.name()))?;
-    let unix_mode = modes.get(entry.name()).copied().flatten();
-
-    let modified_time = if entry.has_last_modified_date {
-        let nt = entry.last_modified_date();
-        Some(std::time::SystemTime::from(nt))
+    if entry.is_directory() {
+        fs::create_dir_all(decision.destination_path)
+            .map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })?;
+        deferred_directories.push((decision.destination_path.to_path_buf(), unix_mode, sevenz_modified_time(entry)));
+        report.written_entries += 1;
+        Ok(0)
     } else {
-        None
-    };
-
-    match decision {
-        ExtractionDecision::Write { destination_path, replace_existing, .. } => {
-            if *replace_existing && entry.is_directory() {
-                crate::safety::remove_destination_for_replace(destination_path)
-                    .map_err(|source| SevenZError::Io { path: destination_path.clone(), source })?;
-            }
-            if entry.is_directory() {
-                fs::create_dir_all(destination_path)
-                    .map_err(|source| SevenZError::Io { path: destination_path.clone(), source })?;
-                deferred_directories.push((destination_path.clone(), unix_mode, modified_time));
-                report.written_entries += 1;
-            } else {
-                let written_bytes = write_file_entry(
-                    reader,
-                    destination_path,
-                    *replace_existing,
-                    Some(&path),
-                    context.as_deref_mut(),
-                    io_buffer,
-                )?;
-                apply_sevenz_metadata(destination_path, unix_mode, modified_time)?;
-                report.written_entries += 1;
-                report.written_bytes += written_bytes;
-                processed_bytes = written_bytes;
-            }
-        }
-        ExtractionDecision::Skip { reason, .. } => {
-            drain_reader(reader, entry.name())?;
-            report.skipped_entries += 1;
-            report.warnings.push(format!("skipped {}: {reason}", entry.name()));
-        }
+        let written_bytes = crate::extract_loop::copy_file_entry(
+            decision.destination_path,
+            decision.replace_existing,
+            Some(entry.name()),
+            context,
+            io_buffer,
+            |buf| {
+                reader
+                    .read(buf)
+                    .map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })
+            },
+            |source, path| SevenZError::Io { path: path.to_path_buf(), source },
+        )?;
+        apply_sevenz_metadata(decision.destination_path, unix_mode, sevenz_modified_time(entry))?;
+        report.written_entries += 1;
+        report.written_bytes += written_bytes;
+        Ok(written_bytes)
     }
+}
 
-    if let Some(context) = context {
-        context.entry_finished(&path, processed_bytes);
-    }
-
-    Ok(())
+fn sevenz_modified_time(entry: &ArchiveEntry) -> Option<std::time::SystemTime> {
+    if entry.has_last_modified_date { Some(std::time::SystemTime::from(entry.last_modified_date())) } else { None }
 }
 
 fn missing_extraction_decision(archive_path: &str) -> SevenZError {
     SevenZError::SevenZ(sevenz_rust2::Error::Other(Cow::Owned(format!(
         "missing extraction decision for {archive_path}"
     ))))
-}
-
-fn write_file_entry(
-    reader: &mut dyn Read,
-    destination_path: &Path,
-    replace_existing: bool,
-    path: Option<&str>,
-    mut context: Option<&mut JobContext<'_>>,
-    io_buffer: &mut [u8],
-) -> Result<u64, SevenZError> {
-    let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path)
-        .map_err(|source| SevenZError::Io { path: destination_path.to_path_buf(), source })?;
-    let mut copied = 0_u64;
-    loop {
-        if let Some(context) = context.as_deref_mut() {
-            context.check_cancelled()?;
-        }
-        let read = reader
-            .read(&mut *io_buffer)
-            .map_err(|source| SevenZError::Io { path: destination_path.to_path_buf(), source })?;
-        if read == 0 {
-            break;
-        }
-        output
-            .file_mut()
-            .map_err(|source| SevenZError::Io { path: destination_path.to_path_buf(), source })?
-            .write_all(&io_buffer[..read])
-            .map_err(|source| SevenZError::Io { path: destination_path.to_path_buf(), source })?;
-        let read = read as u64;
-        copied += read;
-        if let Some(context) = context.as_deref_mut() {
-            context.bytes_processed(path, read);
-        }
-    }
-    output
-        .commit_with_replace(replace_existing)
-        .map_err(|source| SevenZError::Io { path: destination_path.to_path_buf(), source })?;
-    Ok(copied)
 }
 
 fn drain_reader(reader: &mut dyn Read, archive_path: &str) -> Result<(), SevenZError> {
@@ -1074,6 +1031,37 @@ mod tests {
     use crate::test_support::TestDir;
     use std::fs::{self, File};
     use std::time::SystemTime;
+
+    #[test]
+    fn policy_skips_are_reported_to_job_context() {
+        use crate::jobs::{CancellationToken, JobContext, JobEvent};
+
+        // Regression for CR-121: the 7z backend's inline skip-warning block
+        // used to omit the `context.warning` call the other four backends
+        // make, so policy skips vanished from the job context.
+        let temp = TestDir::new("sevenz_policy_skip_warning_context");
+        temp.write_file("project/keep.txt", b"keep");
+        temp.write_file("project/excluded.txt", b"exclude");
+        let archive = temp.path("archive.7z");
+        create_7z_from_path(temp.path("project"), &archive, &SevenZCreateOptions::default()).unwrap();
+
+        let policy =
+            ExtractionPolicy { exclude_patterns: vec!["**/excluded.txt".to_owned()], ..ExtractionPolicy::default() };
+        let token = CancellationToken::new();
+        let mut warnings = Vec::new();
+        let mut sink = |event: JobEvent| {
+            if let JobEvent::Warning { message } = event {
+                warnings.push(message);
+            }
+        };
+        let mut context = JobContext::new(&token, &mut sink);
+        let report = super::extract_7z_with_context(&archive, temp.path("out"), None, policy, &mut context).unwrap();
+
+        assert!(report.written_entries >= 1);
+        assert_eq!(report.skipped_entries, 1);
+        assert!(report.warnings.iter().any(|warning| warning.contains("excluded.txt")));
+        assert!(warnings.iter().any(|warning| warning.contains("excluded.txt")));
+    }
 
     #[test]
     fn extraction_kind_never_materializes_link_entries() {

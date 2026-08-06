@@ -1,8 +1,8 @@
 use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::{JobCancelled, JobContext};
 use crate::safety::{
-    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
-    ExtractionSafetyPlanner, OverwriteResolver,
+    ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
+    OverwriteResolver,
 };
 use std::fmt;
 use std::fs::{self, File};
@@ -415,10 +415,7 @@ fn extract_archive_inner(
         .map_err(|source| LibarchiveError::Io { path: destination.to_path_buf(), source })?;
 
     let mut archive = open_archive(archive_path.as_ref(), password)?;
-    let mut planner = match overwrite_resolver {
-        Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(&destination_root, policy, resolver),
-        None => ExtractionSafetyPlanner::new(&destination_root, policy),
-    };
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report =
         LibarchiveExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut found_selected_entry = selected_entry.is_none();
@@ -427,9 +424,6 @@ fn extract_archive_inner(
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
     while let Some(entry) = archive.next_entry()? {
-        if let Some(context) = context.as_deref_mut() {
-            context.check_cancelled()?;
-        }
         let owned_entry = OwnedEntry::from_entry(&entry)?;
         if let Some(selected_entry) = selected_entry
             && owned_entry.path != selected_entry
@@ -438,19 +432,6 @@ fn extract_archive_inner(
             continue;
         }
         found_selected_entry = true;
-        if owned_entry.is_archive_root_directory() {
-            archive.skip_data()?;
-            report.skipped_entries += 1;
-            report.warnings.push("skipped archive root directory entry".to_owned());
-            if let Some(context) = context.as_deref_mut() {
-                context.warning("skipped archive root directory entry");
-                context.entry_finished(&owned_entry.path, 0);
-            }
-            continue;
-        }
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_started(&owned_entry.path, nonnegative_size(owned_entry.size));
-        }
         let safety_entry = ExtractionEntry {
             archive_path: owned_entry.path.clone(),
             kind: owned_entry.extraction_kind.clone(),
@@ -458,32 +439,30 @@ fn extract_archive_inner(
             compressed_size: None,
         };
 
-        let processed = match planner.validate_entry(&safety_entry)? {
-            ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => write_entry(
-                &mut archive,
-                &owned_entry,
-                &destination_path,
-                replace_existing,
-                link_target_path.as_deref(),
-                &mut report,
-                context.as_deref_mut(),
-                &mut deferred_directories,
-                &mut deferred_hardlinks,
-                &mut io_buffer,
-            )?,
-            ExtractionDecision::Skip { reason, .. } => {
-                archive.skip_data()?;
-                report.skipped_entries += 1;
-                report.warnings.push(format!("skipped {}: {reason}", owned_entry.path));
-                if let Some(context) = context.as_deref_mut() {
-                    context.warning(format!("skipped {}: {reason}", owned_entry.path));
+        crate::extract_loop::process_extraction_entry(
+            &mut report,
+            context.as_deref_mut(),
+            &mut planner,
+            &safety_entry,
+            &mut |action, report, context| match action {
+                crate::extract_loop::EntryAction::Skip => {
+                    archive.skip_data()?;
+                    Ok(0)
                 }
-                0
-            }
-        };
-        if let Some(context) = context.as_deref_mut() {
-            context.entry_finished(&owned_entry.path, processed);
-        }
+                crate::extract_loop::EntryAction::Write(decision) => write_entry(
+                    &mut archive,
+                    &owned_entry,
+                    decision.destination_path,
+                    decision.replace_existing,
+                    decision.link_target_path,
+                    report,
+                    context,
+                    &mut deferred_directories,
+                    &mut deferred_hardlinks,
+                    &mut io_buffer,
+                ),
+            },
+        )?;
     }
 
     if !found_selected_entry && let Some(path) = selected_entry {
@@ -627,11 +606,6 @@ impl OwnedEntry {
             metadata: LibarchiveEntryMetadata { mode: archive_entry_mode(entry.mode(), kind), modified: entry.mtime() },
         })
     }
-
-    fn is_archive_root_directory(&self) -> bool {
-        matches!(self.kind, LibarchiveEntryKind::Directory)
-            && crate::extract_materialize::is_root_entry_path(&self.path)
-    }
 }
 
 fn nonnegative_size(size: i64) -> Option<u64> {
@@ -694,7 +668,7 @@ fn write_entry(
     replace_existing: bool,
     link_target_path: Option<&Path>,
     report: &mut LibarchiveExtractReport,
-    mut context: Option<&mut JobContext<'_>>,
+    context: Option<&mut JobContext<'_>>,
     deferred_directories: &mut Vec<(PathBuf, LibarchiveEntryMetadata)>,
     deferred_hardlinks: &mut Vec<DeferredHardlink>,
     io_buffer: &mut [u8],
@@ -730,11 +704,11 @@ fn write_entry(
         ExtractionEntryKind::Symlink { target } => {
             archive.skip_data()?;
             if crate::safety::should_skip_symlink_materialization(&entry.extraction_kind) {
-                report.skipped_entries += 1;
-                report.warnings.push(crate::safety::unsupported_symlink_warning(&entry.path));
-                if let Some(context) = context.as_deref_mut() {
-                    context.warning(crate::safety::unsupported_symlink_warning(&entry.path));
-                }
+                crate::extract_loop::skip_entry(
+                    report,
+                    context,
+                    crate::safety::unsupported_symlink_warning(&entry.path),
+                );
                 Ok(0)
             } else {
                 write_symlink(target, destination_path)?;
@@ -743,18 +717,11 @@ fn write_entry(
                 Ok(0)
             }
         }
-        ExtractionEntryKind::Hardlink { target } => {
+        ExtractionEntryKind::Hardlink { .. } => {
             archive.skip_data()?;
             let source_path = link_target_path.ok_or_else(|| LibarchiveError::Io {
                 path: destination_path.to_path_buf(),
-                source: io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "hardlink target for {} -> {} was not resolved by extraction safety planning",
-                        entry.path,
-                        target.display()
-                    ),
-                ),
+                source: crate::extract_loop::unresolved_hardlink_target(),
             })?;
             deferred_hardlinks.push(DeferredHardlink {
                 source_path: source_path.to_path_buf(),
@@ -764,11 +731,11 @@ fn write_entry(
         }
         ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
             archive.skip_data()?;
-            report.skipped_entries += 1;
-            report.warnings.push(format!("skipped unsupported special entry {}", entry.path));
-            if let Some(context) = context {
-                context.warning(format!("skipped unsupported special entry {}", entry.path));
-            }
+            crate::extract_loop::skip_entry(
+                report,
+                context,
+                format!("skipped unsupported special entry {}", entry.path),
+            );
             Ok(0)
         }
     }
@@ -792,36 +759,18 @@ fn write_file_entry(
     destination_path: &Path,
     replace_existing: bool,
     metadata: LibarchiveEntryMetadata,
-    mut context: Option<&mut JobContext<'_>>,
+    context: Option<&mut JobContext<'_>>,
     buffer: &mut [u8],
 ) -> Result<u64, LibarchiveError> {
-    let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path)
-        .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
-    let mut written_bytes = 0_u64;
-
-    loop {
-        if let Some(context) = context.as_deref_mut() {
-            context.check_cancelled()?;
-        }
-        let read = archive.read_data(&mut *buffer)?;
-        if read == 0 {
-            break;
-        }
-        output
-            .file_mut()
-            .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?
-            .write_all(&buffer[..read])
-            .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
-        let read = read as u64;
-        written_bytes += read;
-        if let Some(context) = context.as_deref_mut() {
-            context.bytes_processed(Some(archive_path), read);
-        }
-    }
-
-    output
-        .commit_with_replace(replace_existing)
-        .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
+    let written_bytes = crate::extract_loop::copy_file_entry(
+        destination_path,
+        replace_existing,
+        Some(archive_path),
+        context,
+        buffer,
+        |buf| archive.read_data(buf).map_err(LibarchiveError::Archive),
+        |source, path| LibarchiveError::Io { path: path.to_path_buf(), source },
+    )?;
     apply_metadata(destination_path, metadata)?;
 
     Ok(written_bytes)
@@ -830,10 +779,9 @@ fn write_file_entry(
 fn apply_deferred_directory_metadata(
     directories: &[(PathBuf, LibarchiveEntryMetadata)],
 ) -> Result<(), LibarchiveError> {
-    for (path, metadata) in directories.iter().rev() {
-        apply_metadata(path, *metadata)?;
-    }
-    Ok(())
+    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, metadata)| {
+        apply_metadata(path, *metadata)
+    })
 }
 
 fn apply_metadata(path: &Path, metadata: LibarchiveEntryMetadata) -> Result<(), LibarchiveError> {
