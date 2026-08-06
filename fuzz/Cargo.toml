@@ -6,6 +6,14 @@ publish = false
 
 [workspace]
 
+# Resolve the tzap crates from the sibling snapshot (same `[patch.crates-io]`
+# as the workspace root), so the fuzz targets exercise the same tzap code the
+# rest of zmanager builds against instead of the crates.io release.
+[patch.crates-io]
+tzap-core = { path = "../../tzap/crates/tzap-core" }
+tzap-plugin-keywrap = { path = "../../tzap/crates/tzap-plugin-keywrap" }
+tzap-plugin-signing = { path = "../../tzap/crates/tzap-plugin-signing" }
+
 [package.metadata]
 cargo-fuzz = true
 
