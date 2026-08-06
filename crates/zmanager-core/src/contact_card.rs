@@ -186,9 +186,9 @@ pub fn verify_tzap_contact_card_with_missing_status_caveat(
         return Err(TzapContactCardError::InvalidField { field: "expires_at_unix_seconds" });
     }
 
-    let signature = decode_base64url(json_string(object, "signature")?, "signature")?;
+    let signature = decode_base64url(&json_string(object, "signature")?, "signature")?;
     let leaf_der =
-        decode_base64url(json_string(payload_object, "signing_certificate_der")?, "signing_certificate_der")?;
+        decode_base64url(&json_string(payload_object, "signing_certificate_der")?, "signing_certificate_der")?;
     let intermediate_chain_der = decode_der_array(json_field(payload_object, "intermediate_chain_der")?)?;
     let chain_der = contact_chain_der(&leaf_der, &intermediate_chain_der);
     let validation = validate_contact_card_chain(&chain_der, options)?;
@@ -197,7 +197,7 @@ pub fn verify_tzap_contact_card_with_missing_status_caveat(
         return Err(TzapContactCardError::InvalidField { field: "signing_certificate_sha256" });
     }
     let recipient_public_key =
-        decode_base64url(json_string(payload_object, "recipient_public_key")?, "recipient_public_key")?;
+        decode_base64url(&json_string(payload_object, "recipient_public_key")?, "recipient_public_key")?;
     let recipient_public_key_fingerprint = trust::certificate_sha256_identifier_for_der(&recipient_public_key);
     if recipient_public_key_fingerprint != json_string(payload_object, "recipient_key_fingerprint")? {
         return Err(TzapContactCardError::InvalidField { field: "recipient_key_fingerprint" });
@@ -299,7 +299,7 @@ pub fn accepted_contact_recipients(
                 return Err(TzapContactCardError::InvalidField { field: "expires_at_unix_seconds" });
             }
             let recipient_public_key_der =
-                decode_base64url(json_string(payload_object, "recipient_public_key")?, "recipient_public_key")?;
+                decode_base64url(&json_string(payload_object, "recipient_public_key")?, "recipient_public_key")?;
             Ok(TzapAcceptedContactRecipient {
                 contact_id: contact.contact_id.clone(),
                 recipient_public_key_der,
@@ -464,13 +464,13 @@ fn decode_der_array(value: &Value) -> Result<Vec<Vec<u8>>, TzapContactCardError>
             value
                 .as_str()
                 .ok_or(TzapContactCardError::InvalidField { field: "intermediate_chain_der" })
-                .and_then(|encoded| decode_base64url(encoded.to_owned(), "intermediate_chain_der"))
+                .and_then(|encoded| decode_base64url(encoded, "intermediate_chain_der"))
         })
         .collect()
 }
 
-fn decode_base64url(value: String, field: &'static str) -> Result<Vec<u8>, TzapContactCardError> {
-    crate::trust::decode_base64url_no_padding(&value).map_err(|_| TzapContactCardError::InvalidField { field })
+fn decode_base64url(value: &str, field: &'static str) -> Result<Vec<u8>, TzapContactCardError> {
+    crate::trust::decode_base64url_no_padding(value).map_err(|_| TzapContactCardError::InvalidField { field })
 }
 
 #[cfg(test)]

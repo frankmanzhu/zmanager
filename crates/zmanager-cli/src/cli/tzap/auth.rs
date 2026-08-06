@@ -1,5 +1,9 @@
-use super::support::*;
-use super::*;
+use super::support::{
+    callback_url_parameter, exchange_handoff_code, parse_environment_option, parse_tzap_context_args,
+    parse_tzap_context_option, print_session_summary_json, print_stable_tzap_error, read_bytes_argument,
+    service_envelope, service_request,
+};
+use super::{AUTH_PENDING_FILE, AuthEndpointOptions, DEFAULT_TZAP_CLIENT_ID, TzapCliContext};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{
     AUTH_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help,
@@ -300,15 +304,12 @@ pub(super) fn auth_callback_command(args: &[String], mut global: GlobalOptions) 
         }
     };
     let _ = fs::remove_file(context.state_dir.join(AUTH_PENDING_FILE));
-    match response.get("session") {
-        Some(session) => {
-            print_session_summary_json(session, &global);
-            ExitCode::SUCCESS
-        }
-        None => {
-            print_stable_tzap_error("auth_callback", "service response is missing the session", &global);
-            ExitCode::FAILURE
-        }
+    if let Some(session) = response.get("session") {
+        print_session_summary_json(session, &global);
+        ExitCode::SUCCESS
+    } else {
+        print_stable_tzap_error("auth_callback", "service response is missing the session", &global);
+        ExitCode::FAILURE
     }
 }
 
@@ -325,19 +326,16 @@ pub(super) fn auth_status_command(args: &[String], mut global: GlobalOptions) ->
             return ExitCode::FAILURE;
         }
     };
-    match response.get("session") {
-        Some(session) => {
-            print_session_summary_json(session, &global);
-            ExitCode::SUCCESS
+    if let Some(session) = response.get("session") {
+        print_session_summary_json(session, &global);
+        ExitCode::SUCCESS
+    } else {
+        if global.json {
+            println!("{{\"authenticated\":false}}");
+        } else {
+            println!("not signed in");
         }
-        None => {
-            if global.json {
-                println!("{{\"authenticated\":false}}");
-            } else {
-                println!("not signed in");
-            }
-            ExitCode::SUCCESS
-        }
+        ExitCode::SUCCESS
     }
 }
 

@@ -104,7 +104,7 @@ fn find_single_libarchive_dir(vendor_root: &Path) -> Option<PathBuf> {
     let mut matches = Vec::new();
     for entry in std::fs::read_dir(vendor_root).ok()? {
         let entry = entry.ok()?;
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }
         if entry.file_name().to_str().is_some_and(|name| name.starts_with("libarchive-")) {

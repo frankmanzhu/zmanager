@@ -472,7 +472,7 @@ pub fn list_7z(path: impl AsRef<Path>, password: Option<&str>) -> Result<SevenZL
             created: entry.has_creation_date.then(|| std::time::SystemTime::from(entry.creation_date())),
             accessed: entry.has_access_date.then(|| std::time::SystemTime::from(entry.access_date())),
             mode: sevenz_unix_mode(entry),
-            crc: entry.has_crc.then_some(entry.crc as u32),
+            crc: if entry.has_crc { u32::try_from(entry.crc).ok() } else { None },
             attributes: entry.has_windows_attributes.then_some(entry.windows_attributes()),
         })
         .collect();

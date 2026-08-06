@@ -12,7 +12,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Number of volumes needed for `archive_size` bytes at `volume_size` each.
-#[must_use]
+pub(crate) fn split_volume_count(archive_size: u64, volume_size: u64) -> Option<usize> {
+    let count = archive_size.max(1).div_ceil(volume_size);
+    usize::try_from(count).ok()
+}
+
 /// Collects sibling paths in `directory` whose names `matcher` recognizes,
 /// ordered by the parsed part number. Shared by the zip and 7z volume splits
 /// (CR-122): both previously shipped their own `read_dir` + map skeletons.
@@ -36,11 +40,6 @@ pub(crate) fn existing_volume_paths(
         }
     }
     Ok(paths.into_values().collect())
-}
-
-pub(crate) fn split_volume_count(archive_size: u64, volume_size: u64) -> Option<usize> {
-    let count = archive_size.max(1).div_ceil(volume_size);
-    usize::try_from(count).ok()
 }
 
 /// Deduplicated paths from two volume-path lists, preserving order.

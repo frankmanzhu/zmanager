@@ -439,12 +439,12 @@ fn run_zip_create_backend(
         volume_size: request.volume_size,
     };
     run_create_backend(
-        &manifest,
+        manifest,
         progress,
         token,
         |context| {
             zmanager_core::zip_backend::create_zip_from_manifest_with_context(
-                &manifest,
+                manifest,
                 create_destination,
                 &options,
                 context,
@@ -470,7 +470,7 @@ fn run_zip_create_backend(
             volume_count: report.volume_count,
         },
     )
-    .map_err(|error| fail_create(progress, global, temp, split_output, error))
+    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -489,14 +489,12 @@ fn run_tar_zst_create_backend(
         ..zmanager_core::tar_zst_backend::TarZstdCreateOptions::default()
     };
     run_create_backend(
-        &manifest,
+        manifest,
         progress,
         token,
         |context| {
-            zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(
-                &manifest, &temp, &options, context,
-            )
-            .map_err(|error| error.to_string())
+            zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(manifest, temp, &options, context)
+                .map_err(|error| error.to_string())
         },
         |report| CreateOutcome {
             summary: format!(
@@ -518,7 +516,7 @@ fn run_tar_zst_create_backend(
             volume_count: 1,
         },
     )
-    .map_err(|error| fail_create(progress, global, temp, split_output, error))
+    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -538,11 +536,11 @@ fn run_tgz_create_backend(
         replace_existing: backend_replace_existing,
     };
     run_create_backend(
-        &manifest,
+        manifest,
         progress,
         token,
         |context| {
-            zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(&manifest, &temp, &options, context)
+            zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(manifest, temp, &options, context)
                 .map_err(|error| error.to_string())
         },
         |report| CreateOutcome {
@@ -564,7 +562,7 @@ fn run_tgz_create_backend(
             volume_count: 1,
         },
     )
-    .map_err(|error| fail_create(progress, global, temp, split_output, error))
+    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -617,12 +615,12 @@ fn run_tzap_create_backend(
         x509_signing,
     };
     run_create_backend(
-        &manifest,
+        manifest,
         progress,
         token,
         |context| {
             zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(
-                &manifest,
+                manifest,
                 create_destination,
                 &options,
                 context,
@@ -649,7 +647,7 @@ fn run_tzap_create_backend(
             volume_count: report.volume_count,
         },
     )
-    .map_err(|error| fail_create(progress, global, temp, split_output, error))
+    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -678,12 +676,12 @@ fn run_apple_archive_create_backend(
         ..zmanager_core::apple_archive_backend::AppleArchiveCreateOptions::default()
     };
     run_create_backend(
-        &manifest,
+        manifest,
         progress,
         token,
         |context| {
             zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(
-                &manifest, &temp, &options, context,
+                manifest, temp, &options, context,
             )
             .map_err(|error| error.to_string())
         },
@@ -706,7 +704,7 @@ fn run_apple_archive_create_backend(
             volume_count: 1,
         },
     )
-    .map_err(|error| fail_create(progress, global, temp, split_output, error))
+    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -733,11 +731,11 @@ fn run_seven_z_create_backend(
         ..zmanager_core::sevenz_backend::SevenZCreateOptions::default()
     };
     run_create_backend(
-        &manifest,
+        manifest,
         progress,
         token,
         |_context| {
-            zmanager_core::sevenz_backend::create_7z_from_manifest(&manifest, create_destination, &options)
+            zmanager_core::sevenz_backend::create_7z_from_manifest(manifest, create_destination, &options)
                 .map_err(|error| error.to_string())
         },
         |report| CreateOutcome {
@@ -761,7 +759,7 @@ fn run_seven_z_create_backend(
             volume_count: report.volume_count,
         },
     )
-    .map_err(|error| fail_create(progress, global, temp, split_output, error))
+    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
 }
 
 /// Shared create-failure path: cleans up the temp archive and reports the
@@ -771,12 +769,12 @@ fn fail_create(
     global: &GlobalOptions,
     temp: &Path,
     split_output: bool,
-    error: String,
+    error: &str,
 ) -> ExitCode {
     if !split_output {
         let _ = fs::remove_file(temp);
     }
-    progress.emit(JobEvent::Failed { message: error.clone() });
+    progress.emit(JobEvent::Failed { message: error.to_string() });
     print_error_line(global, format_args!("create failed: {error}"));
     ExitCode::FAILURE
 }

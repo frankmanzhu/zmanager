@@ -223,7 +223,7 @@ mod fixture_tests {
 
 /// Full-scale benchmark. Ignored by default — run with `--ignored`.
 #[test]
-#[ignore]
+#[ignore = "full-scale benchmark; run with --ignored"]
 fn plan_benchmark_100k_entries() {
     let fixture = BenchmarkFixture::create().expect("failed to create benchmark fixture");
 

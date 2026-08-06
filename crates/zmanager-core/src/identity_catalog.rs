@@ -660,8 +660,9 @@ mod tests {
         assert_eq!(store.load_catalog("default").unwrap(), Some(next));
         #[cfg(unix)]
         {
-            let path = root.join(format!("default{PUBLIC_CATALOG_FILE_SUFFIX}"));
             use std::os::unix::fs::PermissionsExt;
+
+            let path = root.join(format!("default{PUBLIC_CATALOG_FILE_SUFFIX}"));
             assert_eq!(std::fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         let _ = std::fs::remove_dir_all(root);

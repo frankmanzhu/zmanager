@@ -191,6 +191,7 @@ type SecretRefMap = HashMap<String, TzapSecretRef>;
 ///
 /// Returns the catalog, the signing-key references, and the recipient-key
 /// references, all keyed by legacy record id.
+#[allow(clippy::too_many_lines)]
 fn build_catalog_from_legacy(
     inventory: &TzapLocalIdentityInventory,
     now_unix_seconds: u64,
@@ -573,6 +574,7 @@ pub(crate) fn store_inventory_as_catalog(
 
 /// Loads a legacy-shaped inventory from the catalog, hydrating private key
 /// material from the secret store.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn load_inventory_from_catalog(
     catalog_store: &impl TzapIdentityCatalogStore,
     secret_store: &impl TzapSecretMaterialStore,
@@ -614,7 +616,7 @@ pub(crate) fn load_inventory_from_catalog(
                         .as_deref()
                         .map(str::parse)
                         .transpose()
-                        .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "assurance_level" })?
+                        .map_err(|()| TzapIdentityCatalogError::InvalidCatalog { field: "assurance_level" })?
                         .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "assurance_level" })?,
                     policy_oid: identity
                         .policy_oid
@@ -652,11 +654,11 @@ pub(crate) fn load_inventory_from_catalog(
             trust_anchor_type: contact
                 .trust_source
                 .parse()
-                .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "contacts.trust_source" })?,
+                .map_err(|()| TzapIdentityCatalogError::InvalidCatalog { field: "contacts.trust_source" })?,
             verification_state: contact
                 .verification_state
                 .parse()
-                .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "contacts.verification_state" })?,
+                .map_err(|()| TzapIdentityCatalogError::InvalidCatalog { field: "contacts.verification_state" })?,
             missing_status_caveat: contact.missing_status_caveat,
             contact_card_payload: contact.contact_card_payload.clone(),
             accepted_at_unix_seconds: contact.accepted_at_unix_seconds,
@@ -669,7 +671,7 @@ pub(crate) fn load_inventory_from_catalog(
             status: record
                 .status
                 .parse()
-                .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "status_cache.status" })?,
+                .map_err(|()| TzapIdentityCatalogError::InvalidCatalog { field: "status_cache.status" })?,
             this_update_unix_seconds: record
                 .this_update
                 .parse()

@@ -19,6 +19,10 @@ use tar::EntryType;
 use zip::{ZipArchive, ZipReadOptions};
 
 const PREVIEW_TEMP_PREFIX: &str = "zmanager-preview";
+// Suffixes that identify a solid-compressed tar stream when listing through
+// libarchive. The path is lowercased before matching, so these are
+// effectively case-insensitive.
+const SOLID_TAR_SUFFIXES: &[&str] = &[".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.br"];
 
 /// Portable archive entry type for the browser UI.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -608,8 +612,8 @@ fn list_tar_zst_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserErr
                 solid: Some(true),
                 link_target: entry.link_name().ok().flatten().map(|p| p.to_string_lossy().into_owned()),
                 attributes: None,
-                uid: header.uid().ok().map(|u| u as u32),
-                gid: header.gid().ok().map(|g| g as u32),
+                uid: header.uid().ok().and_then(|uid| u32::try_from(uid).ok()),
+                gid: header.gid().ok().and_then(|gid| u32::try_from(gid).ok()),
                 owner: header.username().ok().flatten().map(std::borrow::ToOwned::to_owned),
                 group: header.groupname().ok().flatten().map(std::borrow::ToOwned::to_owned),
             })
@@ -622,16 +626,10 @@ fn list_tar_zst_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserErr
 fn list_libarchive_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = libarchive_backend::list_archive(path)?;
     let path_str = path.to_string_lossy().to_lowercase();
-    let solid = if path_str.ends_with(".tar.gz")
-        || path_str.ends_with(".tgz")
-        || path_str.ends_with(".tar.bz2")
-        || path_str.ends_with(".tbz2")
-        || path_str.ends_with(".tar.xz")
-        || path_str.ends_with(".txz")
-        || path_str.ends_with(".tar.br")
-    {
+    let has_suffix = |suffix: &str| path_str.ends_with(suffix);
+    let solid = if SOLID_TAR_SUFFIXES.iter().any(|suffix| has_suffix(suffix)) {
         Some(true)
-    } else if path_str.ends_with(".tar") {
+    } else if has_suffix(".tar") {
         Some(false)
     } else {
         None
@@ -776,8 +774,8 @@ fn tzap_browser_entry(
         solid: Some(true),
         link_target: entry.link_target.clone(),
         attributes: entry.attributes.map(|attr| format!("{attr:#010X}")),
-        uid: entry.uid.map(|uid| uid as u32),
-        gid: entry.gid.map(|gid| gid as u32),
+        uid: entry.uid.and_then(|uid| u32::try_from(uid).ok()),
+        gid: entry.gid.and_then(|gid| u32::try_from(gid).ok()),
         owner: entry.uname.clone(),
         group: entry.gname.clone(),
     }

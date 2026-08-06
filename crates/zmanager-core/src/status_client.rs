@@ -467,7 +467,7 @@ fn parse_bulk_status_response(
                 .get("status_response")
                 .ok_or(TzapStatusClientError::InvalidField { field: "status_response" })?;
             Ok(TzapBulkStatusItem {
-                lookup_id: lookup_id.to_owned(),
+                lookup_id: lookup_id.clone(),
                 response: TzapStatusResponse::from_json_value(response_value)?,
             })
         })

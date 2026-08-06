@@ -33,7 +33,7 @@ pub(crate) struct CapturedPortableFileMetadata {
 pub(crate) fn portable_file_metadata(path: &Path) -> Result<CapturedPortableFileMetadata, TzapError> {
     let metadata = fs::symlink_metadata(path).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
     let source_os = source_os_label().to_owned();
-    let created = metadata.created().ok().and_then(system_time_to_archive_timestamp).or_else(|| {
+    let created = metadata.created().ok().and_then(system_time_to_archive_timestamp).or({
         // std cannot expose the birth time on musl targets (statx/STATX_BTIME
         // is unsupported there), so fall back to ctime from the standard stat
         // fields as an approximation of creation time.
@@ -99,7 +99,7 @@ fn resolve_posix_name<Structure>(
     let res = call(structure.as_mut_ptr(), buffer.as_mut_ptr().cast::<libc::c_char>(), buffer.len(), &raw mut result);
     if res == 0 && !result.is_null() {
         let structure = unsafe { structure.assume_init() };
-        let name = name_field(&structure);
+        let name = name_field(&raw const structure);
         if !name.is_null() {
             let cstr = unsafe { CStr::from_ptr(name) };
             let bytes = cstr.to_bytes();

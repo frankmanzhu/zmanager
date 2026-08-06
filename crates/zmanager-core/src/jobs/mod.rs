@@ -28,7 +28,7 @@ pub use progress::{
     PROGRESS_RECENT_PATH_LIMIT,
 };
 #[cfg(test)]
-pub(crate) use progress::{PROGRESS_ENTRY_STEP, PROGRESS_INTERVAL, PROGRESS_MIN_BYTE_STEP};
+pub(crate) use progress::{PROGRESS_ENTRY_STEP, PROGRESS_MIN_BYTE_STEP};
 pub(crate) use progress::{ProgressBatch, ProgressCoalescer};
 
 use self::progress::path_identity;

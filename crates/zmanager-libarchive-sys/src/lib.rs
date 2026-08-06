@@ -3,6 +3,9 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(dead_code)]
+// Generated bindings below are bindgen output (or checked-in copies of it):
+// clippy has nothing to say about code that regeneration overwrites.
+#![allow(clippy::all, clippy::pedantic)]
 
 //! Narrow raw FFI declarations for the libarchive APIs used by `ZManager`.
 //!

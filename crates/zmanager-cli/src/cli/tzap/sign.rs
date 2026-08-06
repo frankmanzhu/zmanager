@@ -1,5 +1,8 @@
-use super::support::*;
-use super::*;
+use super::TzapCliContext;
+use super::support::{
+    current_unix_seconds, parse_tzap_context_option, print_stable_tzap_error, read_json_argument, service_envelope,
+    service_request, write_json_file,
+};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{
     SIGN_HELP, VERIFY_HELP, command_usage_error, json_escape, json_optional_string, print_error_line,
@@ -87,12 +90,9 @@ pub(crate) fn sign_command(args: &[String], mut global: GlobalOptions) -> ExitCo
     );
     match service_envelope(&zmanager_core::tzap_service::tzap_document_sign_json(&request.to_string())) {
         Ok(response) => {
-            let envelope = match response.get("envelope") {
-                Some(envelope) => envelope,
-                None => {
-                    print_stable_tzap_error("sign", "service response is missing the envelope", &global);
-                    return ExitCode::FAILURE;
-                }
+            let Some(envelope) = response.get("envelope") else {
+                print_stable_tzap_error("sign", "service response is missing the envelope", &global);
+                return ExitCode::FAILURE;
             };
             if let Err(error) = write_json_file(&output, envelope) {
                 print_error_line(&global, format_args!("sign failed: {error}"));
@@ -112,6 +112,7 @@ pub(crate) fn sign_command(args: &[String], mut global: GlobalOptions) -> ExitCo
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn verify_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     if wants_help(args) {
         print_help_stdout(VERIFY_HELP, &global);

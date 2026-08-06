@@ -752,7 +752,11 @@ fn append_manifest_entry(
     Ok(())
 }
 
+// The `Option` here is deliberate: the non-macos variant below cannot read
+// flags, and callers distinguish "no flags read" (`None`) from "flags are
+// zero" (`Some(0)`).
 #[cfg(target_os = "macos")]
+#[allow(clippy::unnecessary_wraps)]
 fn apple_file_flags(metadata: &fs::Metadata) -> Option<u32> {
     use std::os::macos::fs::MetadataExt as _;
 

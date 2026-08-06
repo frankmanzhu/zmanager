@@ -3,7 +3,7 @@
 //! This module is ported from the legacy `zmanager_ffi_*` C-ABI facade.
 //! Each endpoint parses a JSON request, orchestrates `zmanager-core`, and
 //! returns a JSON response envelope. The wire contracts are the same as the
-//! legacy facade; the FFI crate declares them as UniFFI functions.
+//! legacy facade; the FFI crate declares them as `UniFFI` functions.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -397,7 +397,8 @@ pub fn create_tzap_self_signed_identity(
 ) -> String {
     let identity_path = PathBuf::from(identity_path);
     let public_certificate_path = public_certificate_path.map(PathBuf::from);
-    let json = match create_self_signed_tzap_identity(
+
+    match create_self_signed_tzap_identity(
         &identity_path,
         public_certificate_path.as_deref(),
         common_name,
@@ -415,8 +416,7 @@ pub fn create_tzap_self_signed_identity(
         })
         .to_string(),
         Err(message) => ffi_error_json(&message),
-    };
-    json
+    }
 }
 
 fn tzap_public_metadata_json(summary: &crate::tzap_backend::TzapPublicMetadataSummary) -> Value {
@@ -517,6 +517,7 @@ fn ffi_error_json(message: &str) -> String {
 }
 /// Verifies the X.509 `RootAuth` signer of a `.tzap` archive with an optional
 /// password and explicit trust sources, returning a JSON response envelope.
+#[must_use]
 pub fn verify_tzap_x509(
     archive_path: &str,
     password: Option<&str>,
@@ -551,6 +552,7 @@ pub fn verify_tzap_x509(
 
 /// Verifies the X.509 `RootAuth` signer of a `.tzap` archive without the
 /// archive key, using explicit trust sources.
+#[must_use]
 pub fn verify_tzap_x509_public_no_key(
     archive_path: &str,
     trusted_ca_certs: &[String],
@@ -574,6 +576,7 @@ pub fn verify_tzap_x509_public_no_key(
 
 /// Inspects the X.509 `RootAuth` signer of a `.tzap` archive with an optional
 /// password, returning a JSON response envelope.
+#[must_use]
 pub fn inspect_tzap_x509_signer(archive_path: &str, password: Option<&str>) -> String {
     match crate::tzap_backend::inspect_tzap_x509_signer(PathBuf::from(archive_path), password) {
         Ok(report) => json!({
@@ -588,6 +591,7 @@ pub fn inspect_tzap_x509_signer(archive_path: &str, password: Option<&str>) -> S
 
 /// Inspects the X.509 `RootAuth` signer of a `.tzap` archive without the
 /// archive key, returning a JSON response envelope.
+#[must_use]
 pub fn inspect_tzap_x509_public_no_key_signer(archive_path: &str) -> String {
     match crate::tzap_backend::inspect_tzap_x509_public_no_key_signer(PathBuf::from(archive_path)) {
         Ok(report) => json!({
@@ -604,6 +608,7 @@ pub fn inspect_tzap_x509_public_no_key_signer(archive_path: &str) -> String {
 ///
 /// The response envelope is `{ok, metadata, signature}` where `signature`
 /// carries the X.509 `RootAuth` status when the archive is signed.
+#[must_use]
 pub fn tzap_public_metadata_summary(archive_path: &str) -> String {
     let archive_path = PathBuf::from(archive_path);
     match crate::tzap_backend::summarize_tzap_public_metadata(&archive_path) {
@@ -669,6 +674,7 @@ fn custom_trust_roots_from_request(request: &Value) -> Result<(Vec<String>, Vec<
     Ok((custom_trust_root_sha256, custom_trust_root_certificates_der))
 }
 
+#[must_use]
 pub fn tzap_auth_login_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -713,6 +719,7 @@ pub fn tzap_auth_login_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_auth_callback_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -748,6 +755,7 @@ pub fn tzap_auth_callback_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_auth_status_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -767,6 +775,7 @@ pub fn tzap_auth_status_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_auth_forget_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -780,6 +789,7 @@ pub fn tzap_auth_forget_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_auth_account_url_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let environment = request
@@ -804,6 +814,7 @@ pub fn tzap_auth_account_url_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_certificate_inventory_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -816,6 +827,7 @@ pub fn tzap_certificate_inventory_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_cert_enroll_json(request_json: &str) -> String {
     run_local_tzap_service(request_json, |store, session, options, _| {
         crate::local_tzap_service::enroll_local_certificate(store, session, options)
@@ -830,6 +842,7 @@ pub fn tzap_cert_enroll_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_cert_renew_json(request_json: &str) -> String {
     run_local_tzap_service(request_json, |store, session, options, request| {
         let certificate_id = required_request_string(request, "certificate_id")?;
@@ -845,6 +858,7 @@ pub fn tzap_cert_renew_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_cert_revoke_json(request_json: &str) -> String {
     run_local_tzap_service(request_json, |store, session, options, request| {
         let certificate_id = required_request_string(request, "certificate_id")?;
@@ -860,6 +874,7 @@ pub fn tzap_cert_revoke_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_device_retire_json(request_json: &str) -> String {
     run_local_tzap_service(request_json, |store, session, options, _| {
         crate::local_tzap_service::retire_local_device(store, session, options)
@@ -875,6 +890,7 @@ pub fn tzap_device_retire_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_document_sign_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -896,6 +912,7 @@ pub fn tzap_document_sign_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_document_verify_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let envelope = request.get("envelope").ok_or_else(|| "missing or invalid field: envelope".to_owned())?;
@@ -930,6 +947,7 @@ pub fn tzap_document_verify_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_recipient_key_generate_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -957,6 +975,7 @@ pub fn tzap_recipient_key_generate_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_recipient_key_remove_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -974,6 +993,7 @@ pub fn tzap_recipient_key_remove_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_contact_export_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -997,6 +1017,7 @@ pub fn tzap_contact_export_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_contact_import_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -1033,6 +1054,7 @@ pub fn tzap_contact_import_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_contact_list_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -1049,6 +1071,7 @@ pub fn tzap_contact_list_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_contact_remove_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -1066,6 +1089,7 @@ pub fn tzap_contact_remove_json(request_json: &str) -> String {
     })
 }
 
+#[must_use]
 pub fn tzap_share_create_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -1087,7 +1111,7 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
                     certificate_id,
                     now_unix_seconds,
                 )
-                .map_err(|error| error.to_string())?,
+                .map_err(|error| error.clone())?,
             ),
             None => None,
         };

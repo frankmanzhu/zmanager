@@ -1,5 +1,8 @@
-use super::support::*;
-use super::*;
+use super::TzapCliContext;
+use super::support::{
+    current_unix_seconds, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error,
+    read_json_argument, service_envelope, service_request, write_json_file,
+};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{
     CONTACT_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help,
@@ -324,12 +327,9 @@ pub(super) fn contact_export_command(args: &[String], mut global: GlobalOptions)
     );
     match service_envelope(&tzap_contact_export_json(&request.to_string())) {
         Ok(response) => {
-            let card = match response.get("contact_card") {
-                Some(card) => card,
-                None => {
-                    print_stable_tzap_error("contact_export", "service response is missing the contact card", &global);
-                    return ExitCode::FAILURE;
-                }
+            let Some(card) = response.get("contact_card") else {
+                print_stable_tzap_error("contact_export", "service response is missing the contact card", &global);
+                return ExitCode::FAILURE;
             };
             if let Err(error) = write_json_file(&output, card) {
                 print_error_line(&global, format_args!("contact export failed: {error}"));

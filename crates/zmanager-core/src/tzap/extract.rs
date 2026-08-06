@@ -12,6 +12,9 @@ use crate::safety::{
 use crate::tzap::metadata::{metadata_diagnostic_labels, write_hardlink, write_symlink};
 const TZAP_TEMP_EXTRACT_PREFIX: &str = ".zmanager-tzap-extract";
 const TZAP_TEMP_EXTRACT_ATTEMPTS: u32 = 100;
+// Batch restore runs single-threaded; the jobs parameter is the plugin's
+// parallelism (minimum 1).
+const EXTRACT_SELECTED_JOBS: usize = 1;
 use crate::tzap::open::open_tzap_archive_with_key_options;
 use std::collections::BTreeMap;
 use std::fs;
@@ -667,9 +670,6 @@ fn extract_opened_tzap_with_core_restore(
         return Ok(report);
     }
 
-    // Batch restore runs single-threaded; the jobs parameter is the plugin's
-    // parallelism (minimum 1).
-    const EXTRACT_SELECTED_JOBS: usize = 1;
     let restored = opened.extract_selected_files_to(
         &selected,
         destination_root,
@@ -939,39 +939,6 @@ fn extraction_kind_from_tzap_entry(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        TzapRestoreOptions, TzapRestorePolicy, archive_timestamp_file_time, process_is_elevated,
-        should_restore_tzap_metadata,
-    };
-    use tzap_core::ArchiveTimestamp;
-
-    #[test]
-    fn content_restore_policy_excludes_non_payload_metadata() {
-        assert!(!should_restore_tzap_metadata(TzapRestoreOptions {
-            policy: TzapRestorePolicy::Content,
-            allow_degraded: false,
-            ..Default::default()
-        }));
-        assert!(should_restore_tzap_metadata(TzapRestoreOptions::default()));
-    }
-
-    #[test]
-    fn system_restore_authorization_matches_process_elevation() {
-        let options =
-            TzapRestoreOptions { policy: TzapRestorePolicy::System, ..Default::default() }.core_options(false);
-        assert_eq!(options.system_authorized, process_is_elevated());
-    }
-
-    #[test]
-    fn converts_negative_archive_timestamp_to_filesystem_time() {
-        let time = archive_timestamp_file_time(ArchiveTimestamp::new(-1, 500_000_000)).unwrap();
-
-        assert_eq!(time, filetime::FileTime::from_unix_time(-2, 500_000_000));
-    }
-}
-
 pub(crate) fn commit_extracted_file(
     source_path: &Path,
     destination_path: &Path,
@@ -1040,5 +1007,38 @@ impl TemporaryTzapExtractionRoot {
 impl Drop for TemporaryTzapExtractionRoot {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        TzapRestoreOptions, TzapRestorePolicy, archive_timestamp_file_time, process_is_elevated,
+        should_restore_tzap_metadata,
+    };
+    use tzap_core::ArchiveTimestamp;
+
+    #[test]
+    fn content_restore_policy_excludes_non_payload_metadata() {
+        assert!(!should_restore_tzap_metadata(TzapRestoreOptions {
+            policy: TzapRestorePolicy::Content,
+            allow_degraded: false,
+            ..Default::default()
+        }));
+        assert!(should_restore_tzap_metadata(TzapRestoreOptions::default()));
+    }
+
+    #[test]
+    fn system_restore_authorization_matches_process_elevation() {
+        let options =
+            TzapRestoreOptions { policy: TzapRestorePolicy::System, ..Default::default() }.core_options(false);
+        assert_eq!(options.system_authorized, process_is_elevated());
+    }
+
+    #[test]
+    fn converts_negative_archive_timestamp_to_filesystem_time() {
+        let time = archive_timestamp_file_time(ArchiveTimestamp::new(-1, 500_000_000)).unwrap();
+
+        assert_eq!(time, filetime::FileTime::from_unix_time(-2, 500_000_000));
     }
 }

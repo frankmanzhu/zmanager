@@ -1,5 +1,5 @@
-use super::support::*;
-use super::*;
+use super::TzapCliContext;
+use super::support::{parse_tzap_context_option, service_envelope, service_request};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{
     SHARE_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help,
@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use zmanager_core::tzap_service::tzap_share_create_json;
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn share_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     if wants_help(args) {
         print_help_stdout(SHARE_HELP, &global);

@@ -311,7 +311,7 @@ impl ReadArchive {
         let _locale = locale::Utf8LocaleGuard::new();
         let mut entry = ptr::null_mut();
         let status = unsafe { sys::archive_read_next_header(self.as_ptr(), std::ptr::addr_of_mut!(entry)) };
-        if status == sys::ARCHIVE_EOF.try_into().unwrap() {
+        if status == ARCHIVE_EOF_STATUS {
             return Ok(None);
         }
         self.check_status(status)?;
@@ -410,15 +410,20 @@ type LaModeT = u16;
 #[cfg(not(windows))]
 type LaModeT = sys::mode_t;
 
+// `ARCHIVE_EOF` is a positive `int` in libarchive's headers but the bindings
+// spell it `u32`; the `c_int` status values compare against it directly.
+#[allow(clippy::cast_possible_wrap)]
+const ARCHIVE_EOF_STATUS: c_int = sys::ARCHIVE_EOF as c_int;
+
 fn file_type(value: LaModeT) -> FileType {
-    match value & 0o170000 {
-        0o100000 => FileType::RegularFile,
-        0o040000 => FileType::Directory,
-        0o120000 => FileType::SymbolicLink,
-        0o060000 => FileType::BlockDevice,
-        0o020000 => FileType::CharacterDevice,
-        0o010000 => FileType::Fifo,
-        0o140000 => FileType::Socket,
+    match value & 0o170_000 {
+        0o100_000 => FileType::RegularFile,
+        0o040_000 => FileType::Directory,
+        0o120_000 => FileType::SymbolicLink,
+        0o060_000 => FileType::BlockDevice,
+        0o020_000 => FileType::CharacterDevice,
+        0o010_000 => FileType::Fifo,
+        0o140_000 => FileType::Socket,
         _ => FileType::Unknown,
     }
 }

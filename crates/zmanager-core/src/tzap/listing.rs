@@ -216,8 +216,6 @@ fn map_index_entries(
     kdf_algo: KdfAlgo,
 ) -> TzapIndexListing {
     let total_uncompressed_size: u64 = indexed.iter().map(|entry| entry.file_data_size).sum();
-    let total_ratio =
-        if total_uncompressed_size > 0 { observed_archive_bytes as f64 / total_uncompressed_size as f64 } else { 1.0 };
 
     let mut entries = Vec::with_capacity(indexed.len());
     for entry in indexed {
@@ -228,14 +226,22 @@ fn map_index_entries(
             tzap_core::tar_model::TarEntryKind::CharacterDevice => TzapEntryKind::CharacterDevice,
             tzap_core::tar_model::TarEntryKind::BlockDevice => TzapEntryKind::BlockDevice,
             tzap_core::tar_model::TarEntryKind::Fifo => TzapEntryKind::Fifo,
-            _ => TzapEntryKind::File,
+            tzap_core::tar_model::TarEntryKind::Regular => TzapEntryKind::File,
         };
         entries.push(TzapIndexEntry {
             path: entry.path,
             kind,
             size: entry.file_data_size,
             compressed_size: if entry.file_data_size > 0 {
-                ((entry.file_data_size as f64) * total_ratio) as u64
+                // Ratio-based estimate; u128 keeps the multiplication exact
+                // (an entry larger than `total_uncompressed_size` would
+                // overflow u64). `entry.file_data_size > 0` implies the total
+                // is non-zero, so this division never divides by zero.
+                u64::try_from(
+                    u128::from(entry.file_data_size) * u128::from(observed_archive_bytes)
+                        / u128::from(total_uncompressed_size),
+                )
+                .unwrap_or(u64::MAX)
             } else {
                 0
             },

@@ -76,8 +76,7 @@ impl std::error::Error for TarGzError {
         match self {
             Self::Plan(err) => Some(err),
             Self::Io { source, .. } => Some(source),
-            Self::Cancelled => None,
-            Self::InvalidLevel { .. } => None,
+            Self::Cancelled | Self::InvalidLevel { .. } => None,
         }
     }
 }

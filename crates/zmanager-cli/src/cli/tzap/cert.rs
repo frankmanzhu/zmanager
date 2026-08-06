@@ -1,6 +1,10 @@
-use super::auth::*;
-use super::hosted::*;
-use super::support::*;
+use super::auth::auth_status_command;
+use super::hosted::{
+    parse_cert_enroll_args, parse_hosted_cert_renew_args, run_hosted_cert_enroll, run_hosted_cert_renew,
+};
+use super::support::{
+    parse_cert_id_operation_args, parse_tzap_context_args, print_stable_tzap_error, service_envelope, service_request,
+};
 use crate::cli::options::GlobalOptions;
 use crate::cli::usage::{
     CERT_HELP, ME_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help,

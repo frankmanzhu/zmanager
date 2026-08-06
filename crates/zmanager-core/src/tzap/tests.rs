@@ -575,6 +575,7 @@ fn list_tzap_with_optional_password_includes_precise_portable_metadata() {
 
 #[cfg(unix)]
 #[test]
+#[allow(clippy::too_many_lines)]
 fn fast_extract_restores_portable_mode_and_precise_mtime() {
     use std::os::unix::fs::MetadataExt;
 
@@ -1435,6 +1436,7 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn preserves_all_metadata_in_tzap_round_trip() {
     use crate::archive_browser::list_entries;
 
@@ -1637,11 +1639,9 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         assert_eq!(file_entry.mode, Some(0o640), "file mode");
 
         // uid / gid
-        let file_uid = file_entry.uid.expect("uid");
-        let file_gid = file_entry.gid.expect("gid");
         let source_file_metadata = fs::symlink_metadata(&file_path).unwrap();
-        assert_eq!(file_uid, source_file_metadata.uid());
-        assert_eq!(file_gid, source_file_metadata.gid());
+        assert_eq!(file_entry.uid, Some(source_file_metadata.uid()));
+        assert_eq!(file_entry.gid, Some(source_file_metadata.gid()));
 
         // owner / group — name resolution
         assert!(file_entry.owner.is_some(), "owner name should be resolved from uid");

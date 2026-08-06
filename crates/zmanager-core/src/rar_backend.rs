@@ -518,13 +518,13 @@ fn plan_entry(
         RarEntryKind::Special => {
             // Planning skips special entries; if a future planner change lets
             // one through, fail the entry instead of panicking the process.
-            return Err(RarBackendError::Io {
+            Err(RarBackendError::Io {
                 path: destination_path.clone(),
                 source: io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("unsupported RAR special entry: {}", entry.path),
                 ),
-            });
+            })
         }
     }
 }

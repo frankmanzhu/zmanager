@@ -8,7 +8,6 @@ const EXPECTED_LIBARCHIVE_VERSION_TEXT: &str = "3.8.9";
 const EXPECTED_LIBARCHIVE_VERSION_NUMBER: u32 = 3_008_009;
 const EXPECTED_SOURCE_DIR: &str = "libarchive-3.8.9";
 const PUBLISH_SOURCE_PATH: &str = "vendor/libarchive/libarchive-3.8.9";
-const WORKSPACE_SOURCE_PATH: &str = "../../vendor/libarchive/libarchive-3.8.9";
 const PUBLISH_SOURCE_ROOT: &str = "vendor/libarchive";
 const WORKSPACE_SOURCE_ROOT: &str = "../../vendor/libarchive";
 
@@ -18,7 +17,7 @@ fn manifest_dir() -> &'static str {
 
 fn assert_has_libarchive_files(source_root: &Path) {
     let source_dir = source_root.join(EXPECTED_SOURCE_DIR);
-    assert!(source_dir.is_dir(), "expected versioned vendored source directory: {}", source_dir.display(),);
+    assert!(source_dir.is_dir(), "expected versioned vendored source directory: {}", source_dir.display());
     assert!(source_dir.join("NEWS").is_file(), "expected NEWS in versioned libarchive source");
     assert!(source_dir.join("CMakeLists.txt").is_file(), "expected CMakeLists.txt in versioned libarchive source");
 }

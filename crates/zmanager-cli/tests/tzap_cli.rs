@@ -253,7 +253,7 @@ fn verify_accepts_custom_trust_root_certificate_file() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|byte| byte.as_u64().unwrap() as u8)
+        .map(|byte| u8::try_from(byte.as_u64().unwrap()).unwrap())
         .collect();
     let root_path = temp.path("root.der");
     fs::write(&root_path, root_der).unwrap();

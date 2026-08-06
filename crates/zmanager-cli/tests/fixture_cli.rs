@@ -898,6 +898,7 @@ fn zm_create_tzap_without_password_uses_unencrypted_mode() {
 
 #[cfg(unix)]
 #[test]
+#[allow(clippy::too_many_lines)]
 fn zm_extract_tzap_honors_metadata_restore_policy() {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _, symlink};
 

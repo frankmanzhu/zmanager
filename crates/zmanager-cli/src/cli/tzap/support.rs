@@ -1,4 +1,4 @@
-use super::*;
+use super::{AUTH_SESSION_EXCHANGE_PATH, TzapCliContext};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{command_usage_error, json_escape, json_optional_string, print_error_line};
 use serde_json::{Value, json};
@@ -372,8 +372,13 @@ pub(super) fn rfc3339_utc_to_unix_seconds(value: &str) -> Result<u64, String> {
 }
 
 pub(super) fn days_in_month(year: i64, month: i64) -> i64 {
-    let leap_february = i64::from(month == 2 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0));
-    [31, 28 + leap_february, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month as usize - 1]
+    match month {
+        2 => 28 + i64::from((year % 4 == 0 && year % 100 != 0) || year % 400 == 0),
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        // Callers validate `month` is in 1..=12 before calling.
+        _ => panic!("invalid month {month}: expected 1-12"),
+    }
 }
 
 pub(super) fn parse_i64_part(value: Option<&str>, field: &str) -> Result<i64, String> {
@@ -406,9 +411,9 @@ pub(super) fn service_request(context: &TzapCliContext, extra: Value) -> Value {
         "state_dir": context.state_dir.display().to_string(),
         "account_key": context.account_key,
     });
-    if let Some(object) = extra.as_object() {
-        for (key, value) in object {
-            request[key] = value.clone();
+    if let Value::Object(extra) = extra {
+        for (key, value) in extra {
+            request[key] = value;
         }
     }
     request
@@ -424,8 +429,7 @@ pub(super) fn service_envelope(response: &str) -> Result<Value, String> {
         Err(value
             .get("message")
             .and_then(Value::as_str)
-            .map(str::to_owned)
-            .unwrap_or_else(|| "service request failed".to_owned()))
+            .map_or_else(|| "service request failed".to_owned(), str::to_owned))
     }
 }
 

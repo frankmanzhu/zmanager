@@ -572,7 +572,7 @@ fn parse_certificate_payload(value: &Value) -> Result<TzapEnrollmentCertificateP
     }
     Ok(TzapEnrollmentCertificatePayload {
         certificate_id: required_string::<TzapEnrollmentError>(object, "certificate_id")?,
-        leaf_certificate_der: decode_base64url(required_string::<TzapEnrollmentError>(
+        leaf_certificate_der: decode_base64url(&required_string::<TzapEnrollmentError>(
             object,
             "leaf_certificate_der",
         )?)?,
@@ -581,10 +581,8 @@ fn parse_certificate_payload(value: &Value) -> Result<TzapEnrollmentCertificateP
             .ok_or(TzapEnrollmentError::InvalidField { field: "intermediate_chain_der" })?
             .iter()
             .map(|value| {
-                let encoded = value
-                    .as_str()
-                    .ok_or(TzapEnrollmentError::InvalidField { field: "intermediate_chain_der" })?
-                    .to_owned();
+                let encoded =
+                    value.as_str().ok_or(TzapEnrollmentError::InvalidField { field: "intermediate_chain_der" })?;
                 decode_base64url(encoded)
             })
             .collect::<Result<Vec<_>, _>>()?,
@@ -641,8 +639,8 @@ fn parse_denial(value: &Value) -> Result<TzapEnrollmentDenial, TzapEnrollmentErr
     })
 }
 
-pub(crate) fn decode_base64url(value: String) -> Result<Vec<u8>, TzapEnrollmentError> {
-    crate::trust::decode_base64url_no_padding(&value)
+pub(crate) fn decode_base64url(value: &str) -> Result<Vec<u8>, TzapEnrollmentError> {
+    crate::trust::decode_base64url_no_padding(value)
         .map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })
 }
 

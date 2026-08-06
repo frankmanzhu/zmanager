@@ -1,5 +1,8 @@
-use super::support::*;
-use super::*;
+use super::support::{
+    CliHttpJsonTransport, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error,
+    retirement_completion_label, service_envelope, service_request,
+};
+use super::{MISSING_TZAP_SESSION, TzapCliContext};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{DEVICE_HELP, command_usage_error, print_help_stdout, print_success_line, wants_help};
 use serde_json::json;

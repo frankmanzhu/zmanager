@@ -171,13 +171,12 @@ impl Drop for TemporaryFile {
 /// two concurrent writers can never clobber each other's temporary file.
 pub(crate) fn write_atomic_secret_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write as _;
+    #[cfg(unix)]
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 
     let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("secret");
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
-
-    #[cfg(unix)]
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 
     for attempt in 0..MAX_TEMP_ATTEMPTS {
         let temporary = parent.join(format!("{file_name}.tmp-{}-{now}-{attempt}", std::process::id()));

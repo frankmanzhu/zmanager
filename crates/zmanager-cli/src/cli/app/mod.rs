@@ -130,7 +130,7 @@ impl ProgressReporter {
                 self.last_reported_bytes = 0;
                 match total_bytes {
                     Some(total_bytes) => {
-                        self.emit_line(format_args!("{} started ({total_bytes} bytes)", progress_job_label(kind)))
+                        self.emit_line(format_args!("{} started ({total_bytes} bytes)", progress_job_label(kind)));
                     }
                     None => {
                         self.emit_line(format_args!("{} started", progress_job_label(kind)));
