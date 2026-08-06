@@ -14,7 +14,7 @@ use crate::cli::planning::{append_files_from, append_stdin_paths, apply_manifest
 use crate::cli::usage::{
     LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json,
     print_entries_tree, print_error_line, print_help_stdout, print_manifest, print_success_line, print_warning_stderr,
-    prompt_password_and_retry, tzap_timestamp_string, usage_failure, wants_help,
+    retry_password_required, tzap_timestamp_string, usage_failure, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::fs;
@@ -791,16 +791,13 @@ fn run_zip_test(
             ExitCode::SUCCESS
         }
         Err(zmanager_core::zip_backend::ZipBackendError::PasswordRequired) if password.is_none() => {
-            if global.no_password_prompt {
-                print_error_line(global, format_args!("zip test failed: password required and prompts are disabled"));
-                return ExitCode::from(2);
-            }
-            match prompt_password_and_retry("ZIP password: ", |password| {
-                run_zip_test(archive, Some(password.expose_secret()), includes, excludes, global)
-            }) {
-                Ok(result) => result,
-                Err(code) => code,
-            }
+            retry_password_required(
+                global,
+                "zip test failed: ",
+                Some("ZIP password: "),
+                |message| print_error_line(global, format_args!("{message}")),
+                |password| run_zip_test(archive, Some(password.expose_secret()), includes, excludes, global),
+            )
         }
         Err(error) => {
             print_error_line(global, format_args!("zip test failed: {error}"));

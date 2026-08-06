@@ -1187,6 +1187,33 @@ pub(crate) fn prompt_password_and_retry<T>(prompt: &str, retry: impl FnOnce(Secr
     prompt_password(prompt).map(retry)
 }
 
+/// Handles a `PasswordRequired` backend error when no password was supplied:
+/// fails with `error_prefix` when prompts are disabled or unavailable, or
+/// prompts for a password and re-runs `retry` with it.
+///
+/// `report_failure` receives the final error message so callers keep their
+/// own error channel (progress events, styled stderr lines).
+pub(crate) fn retry_password_required(
+    global: &GlobalOptions,
+    error_prefix: &str,
+    prompt_label: Option<&str>,
+    mut report_failure: impl FnMut(&str),
+    retry: impl FnOnce(SecretString) -> ExitCode,
+) -> ExitCode {
+    if global.no_password_prompt {
+        report_failure(&format!("{error_prefix}password required and prompts are disabled"));
+        return ExitCode::from(2);
+    }
+    let Some(prompt_label) = prompt_label else {
+        report_failure(&format!("{error_prefix}password required but no prompt is available"));
+        return ExitCode::from(2);
+    };
+    match prompt_password_and_retry(prompt_label, retry) {
+        Ok(result) => result,
+        Err(code) => code,
+    }
+}
+
 pub(crate) fn normalize_prompted_password(mut password: String, bytes_read: usize) -> Option<String> {
     if bytes_read == 0 {
         return None;

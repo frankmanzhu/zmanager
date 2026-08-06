@@ -37,6 +37,7 @@ pub mod crl;
 mod extract_materialize;
 mod gitignore;
 mod http_client;
+mod identity_migration;
 mod json_util;
 mod multi_volume;
 mod sevenz_volume;
@@ -46,6 +47,7 @@ mod temp_names;
 #[cfg(test)]
 mod test_support;
 mod tzap;
+mod tzap_service_auth;
 mod wire_profile;
 mod zip_split;
 
