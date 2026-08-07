@@ -1,0 +1,83 @@
+name: Update Homebrew tap
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v2.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Validate tag format
+        run: |
+          TAG="${{ inputs.tag }}"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag '$TAG' does not look like a semver tag (expected e.g. v2.0.0)"
+            exit 1
+          fi
+
+      - name: Download and extract package-metadata from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag }}"
+
+          # The release workflow uploads package-metadata.tar.gz which contains
+          # the pre-generated Homebrew formula at homebrew/Formula/zmanager.rb
+          gh release download "$TAG" \
+            --repo tzap-org/zmanager \
+            --pattern "package-metadata.tar.gz" \
+            --output package-metadata.tar.gz
+
+          tar -xzf package-metadata.tar.gz
+
+          FORMULA="homebrew/Formula/zmanager.rb"
+
+          if [ ! -f "$FORMULA" ]; then
+            echo "::error::Formula not found at '$FORMULA' in package-metadata.tar.gz"
+            exit 1
+          fi
+
+          echo "Formula extracted from release:"
+          cat "$FORMULA"
+
+      - name: Push updated formula to homebrew-zmanager
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          TAG="${{ inputs.tag }}"
+
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not configured"
+            exit 1
+          fi
+
+          git clone \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/tzap-org/homebrew-zmanager.git" \
+            tap
+
+          mkdir -p tap/Formula
+          cp homebrew/Formula/zmanager.rb tap/Formula/zmanager.rb
+          cd tap
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add Formula/zmanager.rb
+
+          if git diff --cached --quiet; then
+            echo "Formula already up to date."
+            exit 0
+          fi
+
+          git commit -m "zmanager ${TAG}"
+          git push origin main

@@ -1,7 +1,11 @@
 [package]
 name = "zmanager-ffi"
 version.workspace = true
-edition = "2024"
+description = "UniFFI-based FFI bindings for ZManager, exposing the core archive engine to Swift, Kotlin, and Python."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -12,7 +16,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 uniffi = { version = "0.29", features = ["cli"] }
-zmanager-core = { path = "../zmanager-core" }
+zmanager-core = { path = "../zmanager-core", version = "2.0.0" }
 
 [build-dependencies]
 uniffi = { version = "0.29", features = ["build"] }
