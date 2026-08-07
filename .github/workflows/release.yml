@@ -20,13 +20,6 @@ env:
   MACOSX_DEPLOYMENT_TARGET: "11.0"
 
 jobs:
-  # Keeps the checked-in UniFFI bindings (crates/zmanager-ffi/bindings/) fresh
-  # on main at each release. Runs independently: the bindings do not affect
-  # the CLI release artifacts.
-  regenerate-uniffi:
-    name: Regenerate UniFFI bindings
-    uses: ./.github/workflows/regenerate-uniffi-bindings.yml
-
   package:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
