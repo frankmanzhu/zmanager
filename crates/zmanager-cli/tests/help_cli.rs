@@ -645,12 +645,9 @@ fn package_channel_metadata_uses_release_checksums() {
 fn release_validation_artifacts_are_declared() {
     assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.0");
 
-    for required in [
-        "*.deps.txt",
-        "package-metadata.tar.gz",
-        "SHA256SUMS",
-        "sha256sum package-metadata.tar.gz >> SHA256SUMS",
-    ] {
+    for required in
+        ["*.deps.txt", "package-metadata.tar.gz", "SHA256SUMS", "sha256sum package-metadata.tar.gz >> SHA256SUMS"]
+    {
         assert_contains(RELEASE_WORKFLOW, required);
     }
 
@@ -661,8 +658,6 @@ fn release_validation_artifacts_are_declared() {
     for required in ["dumpbin /dependents", "zm-$TargetTriple.deps.txt"] {
         assert_contains(CI_WINDOWS_PS1, required);
     }
-
-
 }
 
 #[test]
