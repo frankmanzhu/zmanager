@@ -35,6 +35,20 @@ jobs:
           git clone https://github.com/tzap-org/tzap.git ../tzap
           git -C ../tzap checkout "$TZAP_REV" || git -C ../tzap checkout main
 
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            libacl1-dev \
+            libbz2-dev \
+            liblz4-dev \
+            liblzma-dev \
+            libssl-dev \
+            libxml2-dev \
+            libzstd-dev \
+            zlib1g-dev
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal
