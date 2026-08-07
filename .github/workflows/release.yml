@@ -9,6 +9,9 @@ on:
       tag:
         description: "Existing tag to release, for example v0.1.0"
         required: true
+      notes:
+        description: "Release notes (markdown). Leave blank to auto-generate from commits."
+        required: false
 
 permissions:
   contents: write
@@ -158,11 +161,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+          CUSTOM_NOTES: ${{ github.event.inputs.notes }}
         run: |
-          NOTES_FILE="docs/release-notes/${TAG_NAME#v}.md"
-          if [ ! -f "$NOTES_FILE" ]; then
-            echo "release notes file not found: $NOTES_FILE" >&2
-            exit 1
+          if [ -n "$CUSTOM_NOTES" ]; then
+            NOTES_ARGS=(--notes "$CUSTOM_NOTES")
+          else
+            NOTES_ARGS=(--generate-notes)
           fi
           gh release create "$TAG_NAME" \
             release-artifacts/*.tar.gz \
@@ -171,4 +175,4 @@ jobs:
             release-artifacts/SHA256SUMS \
             --verify-tag \
             --title "$TAG_NAME" \
-            --notes-file "$NOTES_FILE"
+            "${NOTES_ARGS[@]}"

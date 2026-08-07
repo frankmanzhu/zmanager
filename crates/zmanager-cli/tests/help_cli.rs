@@ -17,7 +17,6 @@ const RELEASE_DOC: &str = include_str!("../../../RELEASE.md");
 const CI_WORKFLOW: &str = include_str!("../../../.github/workflows/ci.yml");
 const RELEASE_WORKFLOW: &str = include_str!("../../../.github/workflows/release.yml");
 const PACKAGE_PREVIEW_WORKFLOW: &str = include_str!("../../../.github/workflows/package-preview.yml");
-const RELEASE_NOTES_2_0_0: &str = include_str!("../../../docs/release-notes/2.0.0.md");
 const LIBARCHIVE_SYS_BUILD_RS: &str = include_str!("../../../crates/zmanager-libarchive-sys/build.rs");
 const PACKAGE_RELEASE_SH: &str = include_str!("../../../scripts/package-release.sh");
 const PACKAGE_METADATA_SH: &str = include_str!("../../../scripts/generate-package-metadata.sh");
@@ -651,7 +650,6 @@ fn release_validation_artifacts_are_declared() {
         "package-metadata.tar.gz",
         "SHA256SUMS",
         "sha256sum package-metadata.tar.gz >> SHA256SUMS",
-        "--notes-file",
     ] {
         assert_contains(RELEASE_WORKFLOW, required);
     }
@@ -664,16 +662,7 @@ fn release_validation_artifacts_are_declared() {
         assert_contains(CI_WINDOWS_PS1, required);
     }
 
-    assert_contains(RELEASE_NOTES_2_0_0, "ZManager CLI 2.0.0 Release Notes");
-    for required in [
-        "Known Backend Limits",
-        "SHA256SUMS",
-        "zm-aarch64-apple-darwin.tar.gz",
-        "zm-x86_64-unknown-linux-musl.tar.gz",
-        "zm-x86_64-pc-windows-msvc.zip",
-    ] {
-        assert_contains(RELEASE_NOTES_2_0_0, required);
-    }
+
 }
 
 #[test]
