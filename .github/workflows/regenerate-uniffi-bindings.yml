@@ -3,16 +3,14 @@ name: Regenerate UniFFI bindings
 # Regenerates the checked-in Kotlin and Swift UniFFI bindings in
 # crates/zmanager-ffi/bindings/ from the UDL and auto-commits them.
 #
-# Triggers:
-#   - workflow_call: called by release.yml so bindings are kept fresh at each
-#     release (zmanager-mobile consumes these files as the source of truth)
-#   - workflow_dispatch: manual regeneration
+# Must be run manually BEFORE tagging a release, so that the tag commit
+# includes up-to-date bindings that match the native library being released.
+# (zmanager-mobile consumes these files from main as its source of truth.)
 #
 # Bindings always track the main branch (the UDL there is canonical). The
-# workflow only triggers on workflow_call / workflow_dispatch — never on push —
-# so the auto-commit cannot re-trigger it.
+# workflow only triggers on workflow_dispatch — never on push — so the
+# auto-commit cannot re-trigger it.
 on:
-  workflow_call:
   workflow_dispatch:
 
 permissions:
