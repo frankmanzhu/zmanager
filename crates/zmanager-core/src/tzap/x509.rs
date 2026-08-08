@@ -934,8 +934,8 @@ pub(crate) fn inspect_x509_root_auth_footer(
     // All crypto is delegated to the plugin's trust-less assertion-1 check
     // (scheme-aware: RSA-PKCS1 / ECDSA / RSA-PSS). This wrapper only adds the
     // display fields derived from the embedded leaf certificate.
-    let report = verify_root_auth_signature(footer, archive_root)
-        .map_err(|error| TzapError::X509RootAuth(error.to_string()))?;
+    let report =
+        verify_root_auth_signature(footer, archive_root).map_err(|error| TzapError::X509RootAuth(error.to_string()))?;
     let leaf_certificate =
         X509::from_der(&footer.signer_identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
     Ok(TzapX509SignerInspection {

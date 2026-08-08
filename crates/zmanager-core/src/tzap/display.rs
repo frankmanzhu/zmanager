@@ -105,9 +105,8 @@ fn aggregate_public_footer_status(
 
     let all_signed = volumes.iter().all(|volume| matches!(volume.status, TzapPublicSignatureStatus::Signed { .. }));
     let all_unsigned = volumes.iter().all(|volume| matches!(volume.status, TzapPublicSignatureStatus::Unsigned));
-    let all_not_authentic = volumes
-        .iter()
-        .all(|volume| matches!(volume.status, TzapPublicSignatureStatus::NotAuthentic { .. }));
+    let all_not_authentic =
+        volumes.iter().all(|volume| matches!(volume.status, TzapPublicSignatureStatus::NotAuthentic { .. }));
 
     if all_signed {
         let first = &volumes[0];
@@ -163,10 +162,9 @@ fn map_footer_read_error(error: &FormatError) -> Option<TzapPublicSignatureStatu
 /// per-volume status.
 fn inspect_volume_footer(file: &mut File) -> PerVolumeSignatureStatus {
     match public_no_key_inspect_footer(file, ReaderOptions::default()) {
-        Ok(PublicNoKeyFooterStatus::Unsigned) => PerVolumeSignatureStatus {
-            status: TzapPublicSignatureStatus::Unsigned,
-            footer_bytes: None,
-        },
+        Ok(PublicNoKeyFooterStatus::Unsigned) => {
+            PerVolumeSignatureStatus { status: TzapPublicSignatureStatus::Unsigned, footer_bytes: None }
+        }
         Ok(PublicNoKeyFooterStatus::Signed(inspection)) => {
             let footer = &inspection.root_auth_footer;
             let status = if footer.authenticator_id != X509_AUTHENTICATOR_ID {
@@ -192,9 +190,8 @@ fn inspect_volume_footer(file: &mut File) -> PerVolumeSignatureStatus {
             PerVolumeSignatureStatus { status, footer_bytes: Some(inspection.root_auth_footer_bytes) }
         }
         Err(error) => PerVolumeSignatureStatus {
-            status: map_footer_read_error(&error).unwrap_or_else(|| {
-                TzapPublicSignatureStatus::Unavailable { reason: error.to_string() }
-            }),
+            status: map_footer_read_error(&error)
+                .unwrap_or_else(|| TzapPublicSignatureStatus::Unavailable { reason: error.to_string() }),
             footer_bytes: None,
         },
     }
@@ -294,11 +291,11 @@ pub fn summarize_tzap_public_display(archive_path: &Path) -> Result<TzapPublicDi
     first_volume_file
         .seek(SeekFrom::Start(0))
         .map_err(|source| TzapError::Io { path: first_volume_path.clone(), source })?;
-    let signature =
-        match inspect_tzap_public_footer_signature_from(archive_path, &volume_paths, &mut first_volume_file) {
-            Ok(status) => status,
-            Err(error) => TzapPublicSignatureStatus::Unavailable { reason: error.to_string() },
-        };
+    let signature = match inspect_tzap_public_footer_signature_from(archive_path, &volume_paths, &mut first_volume_file)
+    {
+        Ok(status) => status,
+        Err(error) => TzapPublicSignatureStatus::Unavailable { reason: error.to_string() },
+    };
     Ok(TzapPublicDisplaySummary { metadata, signature })
 }
 
@@ -306,14 +303,13 @@ pub fn summarize_tzap_public_display(archive_path: &Path) -> Result<TzapPublicDi
 mod tests {
     use tzap_core::format::FormatError;
 
-    use super::{PerVolumeSignatureStatus, TzapPublicSignatureStatus, aggregate_public_footer_status, map_footer_read_error};
+    use super::{
+        PerVolumeSignatureStatus, TzapPublicSignatureStatus, aggregate_public_footer_status, map_footer_read_error,
+    };
     use crate::tzap::x509::TzapX509SignerInspection;
 
     fn signed_per_volume(footer_bytes: Option<Vec<u8>>) -> PerVolumeSignatureStatus {
-        PerVolumeSignatureStatus {
-            status: TzapPublicSignatureStatus::Signed { signer: test_signer() },
-            footer_bytes,
-        }
+        PerVolumeSignatureStatus { status: TzapPublicSignatureStatus::Signed { signer: test_signer() }, footer_bytes }
     }
 
     fn test_signer() -> TzapX509SignerInspection {
@@ -356,8 +352,11 @@ mod tests {
     #[test]
     fn aggregate_status_rule_table() {
         // Identical signed footers verify.
-        let status =
-            aggregate_public_footer_status(&[signed_per_volume(Some(vec![1])), signed_per_volume(Some(vec![1]))], &[], 2);
+        let status = aggregate_public_footer_status(
+            &[signed_per_volume(Some(vec![1])), signed_per_volume(Some(vec![1]))],
+            &[],
+            2,
+        );
         assert!(matches!(status, TzapPublicSignatureStatus::Signed { .. }), "got {status:?}");
 
         // Any per-volume unavailable dominates.

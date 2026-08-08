@@ -44,11 +44,6 @@ pub use x509::{
     tzap_x509_signing_options_from_inventory, verify_tzap_x509_public_no_key,
 };
 
-pub(crate) const TZAP_EXTENSION: &str = "tzap";
-pub(crate) const TZAP_EXTENSION_SUFFIX: &str = ".tzap";
-pub(crate) const TZAP_VOLUME_MARKER: &str = ".vol";
-pub(crate) const TZAP_VOLUME_INDEX_WIDTH: usize = 3;
-
 /// `.tzap` backend error.
 #[derive(Debug)]
 pub enum TzapError {

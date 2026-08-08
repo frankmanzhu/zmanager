@@ -2,7 +2,7 @@
 //! naming, the regular-file source adapter, write progress reporting, and the
 //! file sink that commits volumes and the bootstrap sidecar.
 
-use super::{TZAP_EXTENSION_SUFFIX, TZAP_VOLUME_INDEX_WIDTH, TZAP_VOLUME_MARKER, TzapError, io_error};
+use super::{TzapError, io_error};
 use crate::atomic_file::AtomicOutputFile;
 use crate::jobs::{CancellationToken, JobCancelled, JobContext, JobPhase, ProgressBatch, ProgressCoalescer};
 use crate::manifest::{ArchiveManifest, ManifestFileType};
@@ -25,6 +25,7 @@ use tzap_core::format::{
 use tzap_core::{
     ArchiveTimestamp, ArchiveWriteError, ArchiveWritePhase, ArchiveWriteProgressSink, ArchiveWriteSink, KdfParams,
     MasterKey, PortableFileMetadata, RegularFileSource, RootAuthSigningRequest, SourceEntryKind, WriterOptions,
+    volume_file::{discover_sibling_volume_paths, multi_volume_base_name, volume_output_path},
     write_archive_sources_to_sink_ordered_parallel_with_recipient_wrap_records_and_progress,
     write_archive_sources_to_sink_with_progress,
 };
@@ -271,22 +272,7 @@ fn tzap_output_volume_paths(destination: &Path, count: usize) -> Vec<PathBuf> {
         return vec![destination.to_path_buf()];
     }
 
-    (0..count).map(|index| tzap_output_volume_path(destination, index)).collect()
-}
-
-pub(crate) fn tzap_output_volume_path(destination: &Path, zero_based_index: usize) -> PathBuf {
-    let Some(file_name) = destination.file_name().and_then(|name| name.to_str()) else {
-        let mut path = destination.as_os_str().to_os_string();
-        path.push(format!("{TZAP_VOLUME_MARKER}{zero_based_index:0TZAP_VOLUME_INDEX_WIDTH$}{TZAP_EXTENSION_SUFFIX}"));
-        return PathBuf::from(path);
-    };
-    let base_name = tzap_multi_volume_base_name(file_name);
-    let volume_file_name =
-        format!("{base_name}{TZAP_VOLUME_MARKER}{zero_based_index:0TZAP_VOLUME_INDEX_WIDTH$}{TZAP_EXTENSION_SUFFIX}");
-    match destination.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-        Some(parent) => parent.join(volume_file_name),
-        None => PathBuf::from(volume_file_name),
-    }
+    (0..count).map(|index| volume_output_path(destination, index)).collect()
 }
 
 fn ensure_tzap_destinations_available(
@@ -355,55 +341,10 @@ fn existing_tzap_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, TzapEr
     let Some(destination_file_name) = destination.file_name().and_then(|name| name.to_str()) else {
         return Ok(Vec::new());
     };
-    let destination_base_name = tzap_multi_volume_base_name(destination_file_name);
+    let destination_base_name = multi_volume_base_name(destination_file_name);
 
-    let mut paths = Vec::new();
-    for entry in fs::read_dir(parent).map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })? {
-        let entry = entry.map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })?;
-        let file_name = entry.file_name();
-        let Some(file_name) = file_name.to_str() else {
-            continue;
-        };
-        if let Some(pattern) = parse_tzap_volume_file_name(file_name)
-            && pattern.base == destination_base_name
-        {
-            paths.push((pattern.volume_index, entry.path()));
-        }
-    }
-    paths.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-    Ok(paths.into_iter().map(|(_, path)| path).collect())
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) struct TzapVolumeFileName {
-    pub(crate) base: String,
-    pub(crate) volume_index: usize,
-}
-
-pub(crate) fn parse_tzap_volume_file_name(file_name: &str) -> Option<TzapVolumeFileName> {
-    let stem = strip_ascii_case_insensitive_suffix(file_name, TZAP_EXTENSION_SUFFIX)?;
-    let (base, digits) = stem.rsplit_once(TZAP_VOLUME_MARKER)?;
-    if base.is_empty() || digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-
-    Some(TzapVolumeFileName { base: base.to_owned(), volume_index: digits.parse().ok()? })
-}
-
-pub(crate) fn tzap_multi_volume_base_name(file_name: &str) -> String {
-    strip_ascii_case_insensitive_suffix(file_name, TZAP_EXTENSION_SUFFIX).unwrap_or(file_name).to_owned()
-}
-
-fn strip_ascii_case_insensitive_suffix<'a>(value: &'a str, suffix: &str) -> Option<&'a str> {
-    if value.len() < suffix.len() {
-        return None;
-    }
-    let prefix_len = value.len() - suffix.len();
-    let candidate = value.get(prefix_len..)?;
-    if !candidate.eq_ignore_ascii_case(suffix) {
-        return None;
-    }
-    value.get(..prefix_len)
+    discover_sibling_volume_paths(parent, &destination_base_name)
+        .map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })
 }
 
 fn collect_archive_sources(
@@ -780,7 +721,7 @@ fn tzap_bootstrap_sidecar_path(destination: &Path) -> PathBuf {
     let Some(file_name) = destination.file_name().and_then(|name| name.to_str()) else {
         return destination.with_extension("sidecar");
     };
-    let base_name = tzap_multi_volume_base_name(file_name);
+    let base_name = multi_volume_base_name(file_name);
     let sidecar_file_name = format!("{base_name}.sidecar");
     match destination.parent().filter(|parent| !parent.as_os_str().is_empty()) {
         Some(parent) => parent.join(sidecar_file_name),

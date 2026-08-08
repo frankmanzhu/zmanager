@@ -305,9 +305,7 @@ use tzap_core::{
     KdfParams, MasterKey, RegularFile, RootAuthWriterConfig, WriterOptions, write_archive_with_kdf,
     write_archive_with_root_auth,
 };
-use tzap_plugin_signing::x509_chain::{
-    X509RootAuthSigner, X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT,
-};
+use tzap_plugin_signing::x509_chain::{X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT, X509RootAuthSigner};
 
 #[test]
 fn selected_extract_uses_seekable_core_for_numbered_volumes() {
