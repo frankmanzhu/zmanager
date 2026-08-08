@@ -164,12 +164,33 @@ pub(crate) fn read_tzap_input_volume_bytes(archive_path: &Path) -> Result<Vec<Ve
 /// metadata cannot be read.
 pub fn summarize_tzap_public_metadata(archive_path: impl AsRef<Path>) -> Result<TzapPublicMetadataSummary, TzapError> {
     let requested_path = archive_path.as_ref();
-    let discovered_volume_paths = discover_tzap_input_volume_paths(requested_path);
-    let first_volume_path = discovered_volume_paths
+    let volume_paths = discover_tzap_input_volume_paths(requested_path);
+    let first_volume_path = volume_paths
         .iter()
         .find(|path| path.exists())
         .ok_or_else(|| io_error(requested_path, io::ErrorKind::NotFound, "no TZAP input volumes found"))?;
-    let first_header = read_public_tzap_header(first_volume_path)?;
+    let mut first_volume_file =
+        File::open(first_volume_path).map_err(|source| TzapError::Io { path: first_volume_path.clone(), source })?;
+    summarize_tzap_public_metadata_from(requested_path, &volume_paths, &mut first_volume_file)
+}
+
+/// Summarizes public metadata from an already-opened first volume.
+///
+/// Caller contract: `volume_paths` is the output of
+/// [`discover_tzap_input_volume_paths`] for `requested_path`, and
+/// `first_volume_file` is a handle to the first existing path in it (the
+/// caller must have opened it — the first volume's header is read through
+/// this handle so a single open serves the whole summary).
+pub(crate) fn summarize_tzap_public_metadata_from(
+    requested_path: &Path,
+    volume_paths: &[PathBuf],
+    first_volume_file: &mut File,
+) -> Result<TzapPublicMetadataSummary, TzapError> {
+    let first_volume_path = volume_paths
+        .iter()
+        .find(|path| path.exists())
+        .expect("caller contract: first_volume_file is a handle to the first existing volume path");
+    let first_header = read_public_tzap_header_from(first_volume_file, first_volume_path)?;
     let expected_volume_count = usize::try_from(first_header.volume_header.stripe_width)
         .map_err(|_| TzapError::Format(FormatError::InvalidArchive("TZAP volume count overflow")))?;
     let expected_paths = expected_tzap_input_volume_paths(requested_path, first_volume_path, expected_volume_count);
@@ -186,7 +207,14 @@ pub fn summarize_tzap_public_metadata(archive_path: impl AsRef<Path>) -> Result<
 
         let metadata =
             fs::metadata(volume_path).map_err(|source| TzapError::Io { path: volume_path.clone(), source })?;
-        let header = read_public_tzap_header(volume_path)?;
+        // The first volume's header was already read through the caller's
+        // handle; its self cross-check trivially passes, while the
+        // volume-index check below still runs.
+        let header = if expected_index == 0 {
+            &first_header
+        } else {
+            &read_public_tzap_header(volume_path)?
+        };
         validate_public_tzap_volume_header(&first_header.volume_header, &header.volume_header)?;
 
         let index = usize::try_from(header.volume_header.volume_index)
@@ -308,6 +336,13 @@ pub(crate) fn discover_tzap_input_volume_paths(archive_path: &Path) -> Vec<PathB
     vec![archive_path.to_path_buf()]
 }
 
+/// Returns whether the path resolves to at least one existing TZAP input
+/// volume under the same discovery rules the archive open path uses.
+#[must_use]
+pub fn has_existing_tzap_input_volume(path: &Path) -> bool {
+    discover_tzap_input_volume_paths(path).iter().any(|candidate| candidate.exists())
+}
+
 pub(crate) fn tzap_destination_path_from_volume_path(path: &Path) -> Option<PathBuf> {
     let file_name = path.file_name()?.to_str()?;
     let pattern = parse_tzap_volume_file_name(file_name)?;
@@ -353,8 +388,8 @@ fn discover_tzap_volume_paths_by_base(parent: &Path, base_name: &str) -> Vec<Pat
 
 #[derive(Debug, Clone)]
 pub(crate) struct PublicTzapHeader {
-    volume_header: VolumeHeader,
-    crypto_header: CryptoHeaderFixed,
+    pub(crate) volume_header: VolumeHeader,
+    pub(crate) crypto_header: CryptoHeaderFixed,
 }
 
 pub(crate) fn expected_tzap_input_volume_paths(
@@ -384,7 +419,18 @@ pub(crate) fn expected_tzap_input_volume_paths(
 }
 
 pub(crate) fn read_public_tzap_header(path: &Path) -> Result<PublicTzapHeader, TzapError> {
-    let (volume_header, crypto_header_bytes) = read_tzap_crypto_header_bytes(path)?;
+    let mut file = File::open(path).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
+    read_public_tzap_header_from(&mut file, path)
+}
+
+/// Reads the public headers through an already-opened handle.
+///
+/// `path` is used only for error reporting.
+pub(crate) fn read_public_tzap_header_from(
+    file: &mut File,
+    path: &Path,
+) -> Result<PublicTzapHeader, TzapError> {
+    let (volume_header, crypto_header_bytes) = read_tzap_crypto_header_bytes_from(file, path)?;
     let fixed_bytes = crypto_header_bytes.get(..CRYPTO_HEADER_FIXED_LEN).ok_or(FormatError::InvalidLength {
         structure: "CryptoHeaderFixed",
         expected: CRYPTO_HEADER_FIXED_LEN,
@@ -402,6 +448,16 @@ pub(crate) fn read_public_tzap_header(path: &Path) -> Result<PublicTzapHeader, T
 
 pub(crate) fn read_tzap_crypto_header_bytes(path: &Path) -> Result<(VolumeHeader, Vec<u8>), TzapError> {
     let mut file = File::open(path).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
+    read_tzap_crypto_header_bytes_from(&mut file, path)
+}
+
+/// Reads the volume and crypto headers through an already-opened handle.
+///
+/// `path` is used only for error reporting.
+pub(crate) fn read_tzap_crypto_header_bytes_from(
+    file: &mut File,
+    path: &Path,
+) -> Result<(VolumeHeader, Vec<u8>), TzapError> {
     let mut header_bytes = [0u8; VOLUME_HEADER_LEN];
     file.read_exact(&mut header_bytes).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
     let volume_header = VolumeHeader::parse(&header_bytes)?;

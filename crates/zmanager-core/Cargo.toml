@@ -59,5 +59,8 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Threading",
 ] }
 
+[dev-dependencies]
+crc32c = "0.6"
+
 [lints]
 workspace = true

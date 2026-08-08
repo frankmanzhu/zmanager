@@ -16,7 +16,7 @@ use zmanager_core::tzap_backend::TzapError;
 use zmanager_core::zip_backend::ZipBackendError;
 
 use crate::ffi::types::{BridgeError, BridgeSeverity, ZmanagerGuiError};
-use crate::ffi::util::ensure_existing_file_path;
+use crate::ffi::util::ensure_existing_tzap_archive_path;
 
 pub(crate) const ERROR_INVALID_REQUEST: &str = "invalid_request";
 pub(crate) const ERROR_NOT_FOUND: &str = "not_found";
@@ -45,7 +45,7 @@ pub(crate) fn return_tzap_error(error: ZmanagerGuiError) -> String {
 /// The service endpoints are declared without `[Throws]`, so callers must
 /// return the envelope as the function value instead of continuing with it.
 pub(crate) fn existing_archive_path_or_tzap_error(value: String) -> Result<String, String> {
-    ensure_existing_file_path(value, "archivePath").map_err(return_tzap_error)
+    ensure_existing_tzap_archive_path(value, "archivePath").map_err(return_tzap_error)
 }
 
 pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerGuiError {

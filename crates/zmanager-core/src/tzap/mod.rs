@@ -32,7 +32,8 @@ pub use listing::{
 };
 pub use open::is_tzap_archive_path;
 pub use open::{
-    TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, summarize_tzap_public_metadata,
+    TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume,
+    summarize_tzap_public_metadata,
 };
 pub use write::{TzapCreateOptions, TzapCreateReport, TzapKeySource, create_tzap_from_manifest_with_context};
 pub use x509::{

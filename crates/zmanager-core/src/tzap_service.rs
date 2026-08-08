@@ -661,9 +661,11 @@ pub fn tzap_public_metadata_summary(archive_path: &str) -> String {
 /// inspection without trust validation; `verified`/`unverified` from
 /// [`tzap_public_metadata_summary`] do not appear here). Footer inspection is
 /// assertion 1 only (the embedded certificate's key really signed the footer);
-/// archive contents are never read, so the summary is bounded regardless of
-/// archive size. Content integrity and trust-chain validation remain the
-/// explicit `verify_tzap_x509_public_no_key` surface.
+/// archive contents are never read, so a `signed` payload is explicitly marked
+/// `verification_scope: "footer-only"` and `content_verified: false` — the
+/// summary is bounded regardless of archive size. Content integrity and
+/// trust-chain validation remain the explicit `verify_tzap_x509_public_no_key`
+/// surface.
 #[must_use]
 pub fn tzap_public_metadata_display_summary(archive_path: &str) -> String {
     let archive_path = PathBuf::from(archive_path);
@@ -672,18 +674,9 @@ pub fn tzap_public_metadata_display_summary(archive_path: &str) -> String {
             let signature = match &summary.signature {
                 TzapPublicSignatureStatus::Signed { signer } => json!({
                     "status": "signed",
-                    "root_auth": {
-                        "signature_verified": true,
-                        "trust_validated": false,
-                        "subject": signer.subject,
-                        "issuer": signer.issuer,
-                        "serial_number": signer.serial_number_hex,
-                        "certificate_sha256": hex_lower(&signer.certificate_sha256),
-                        "signed_at_unix_seconds": signer.signed_at_unix_seconds,
-                        "verified_chain_subjects": [],
-                        "trust_anchor_subject": Value::Null,
-                        "total_data_block_count": signer.total_data_block_count,
-                    },
+                    "verification_scope": "footer-only",
+                    "content_verified": false,
+                    "root_auth": tzap_x509_signer_inspection_json(signer),
                 }),
                 TzapPublicSignatureStatus::Unsigned => json!({
                     "status": "unsigned",

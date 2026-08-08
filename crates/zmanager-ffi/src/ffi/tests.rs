@@ -10,6 +10,10 @@ use zmanager_core::jobs::{CancellationToken, JobEvent as CoreJobEvent, JobKind a
 use zmanager_core::manifest::{PlanOptions, plan_archive};
 use zmanager_core::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
 
+use tzap_core::format::FormatError;
+use tzap_core::{MasterKey, RegularFile, RootAuthWriterConfig, WriterOptions, write_archive_with_root_auth};
+use tzap_plugin_signing::x509_chain::X509RootAuthSigner;
+
 static JOB_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
@@ -689,6 +693,183 @@ fn tzap_public_metadata_display_summary_reports_unsigned_archive() {
     assert!(result.contains("\"ok\":true"), "got: {result}");
     assert!(result.contains("\"status\":\"unsigned\""), "got: {result}");
     assert!(result.contains("\"key_derivation\":\"none\""), "got: {result}");
+}
+
+// X.509 fixtures for the signed display-summary tests: a self-signed RSA-2048
+// leaf with the `digitalSignature` key usage and a 100-year validity, so the
+// fixtures stay usable without regeneration. To regenerate:
+//
+//   openssl req -x509 -newkey rsa:2048 -keyout ffi_signer.key -out ffi_signer.pem \
+//     -days 36500 -nodes -subj "/CN=ZManager FFI Test Signer" \
+//     -addext "keyUsage=critical,digitalSignature"
+const TEST_LEAF_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIDOTCCAiGgAwIBAgIUKpN56sqVOMaPXsi55AM0RNv2od8wDQYJKoZIhvcNAQEL
+BQAwIzEhMB8GA1UEAwwYWk1hbmFnZXIgRkZJIFRlc3QgU2lnbmVyMCAXDTI2MDgw
+ODEyNTMzNloYDzIxMjYwNzE1MTI1MzM2WjAjMSEwHwYDVQQDDBhaTWFuYWdlciBG
+RkkgVGVzdCBTaWduZXIwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC7
+Dlev5I2sPsnEIx5QlgRH/F6UnLSPTqMxvNZUz9r95DiHB5K3Rec/vWDgR7OuZ3Kn
+oeoYBpKWI9aSiMJKtSndFPfBPr8LOCkfcXW5oYp+Ru5VGOsHrDGzphM7Gp80PRGs
+qYPLiH4Vdr9jT6NTqLQu+RmhmB/odV23SUhhYfsMpbqAxOr6H+pTr0BImbtaUmZN
+2nwLsdU0vn63KifJXyZ3cnLVZ+H/Mc/gPo0icET1pRRMzYE2jTFMvEEjTWfS/rkb
+vudLqMJMi0ouRSo6yvfw7jRpGTmrO+K8TLxX1duzpbFBkDgsO+ZOwwpQhlnbX5Eq
+mLdS3oa29tAbKkB3iTpBAgMBAAGjYzBhMB0GA1UdDgQWBBRCSGa9lfCggdmisR/N
+REo9GuZnDjAfBgNVHSMEGDAWgBRCSGa9lfCggdmisR/NREo9GuZnDjAPBgNVHRMB
+Af8EBTADAQH/MA4GA1UdDwEB/wQEAwIHgDANBgkqhkiG9w0BAQsFAAOCAQEAdYKi
+/AMDB1opwH7MoaFVPAgs32Q3fddYX9qVq91orG61EuXk1bdl+ByGKT0A07I1YsfF
+yS1IWF/IMcvCy9/vOlOWEfN95szohp1qS3+wZEu6+rmjTBIys7ExzSMx1iZknuoy
+3X+eRiY66pNtRWod0ffm86SW3O+UGoDHsffJwtRQs5swnFGKVeaP70BOgsu4riG3
+5VzgF/6RF7Qv29U27W36u0NNCoe4nRahWZhGI6iE+ZtJA0U9FhYr8Mdr17iN1lUO
+M1+kurEbOjjg6QKMUdlrlhj8k4FM5uHoHRpnS2Qlwx89VntwsWkjQq33OwJ9LJ9G
+ZZxolvHTPjCTdshjwQ==
+-----END CERTIFICATE-----";
+const TEST_LEAF_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7Dlev5I2sPsnE
+Ix5QlgRH/F6UnLSPTqMxvNZUz9r95DiHB5K3Rec/vWDgR7OuZ3KnoeoYBpKWI9aS
+iMJKtSndFPfBPr8LOCkfcXW5oYp+Ru5VGOsHrDGzphM7Gp80PRGsqYPLiH4Vdr9j
+T6NTqLQu+RmhmB/odV23SUhhYfsMpbqAxOr6H+pTr0BImbtaUmZN2nwLsdU0vn63
+KifJXyZ3cnLVZ+H/Mc/gPo0icET1pRRMzYE2jTFMvEEjTWfS/rkbvudLqMJMi0ou
+RSo6yvfw7jRpGTmrO+K8TLxX1duzpbFBkDgsO+ZOwwpQhlnbX5EqmLdS3oa29tAb
+KkB3iTpBAgMBAAECggEAF6DnrbXSuZPS295NyYMxtkAoWGB1JHccAT/n2R3KfXDT
+PSdVPqZrYC9Vae9UwK6bmpZG4lMOOD39sFPrKxG4YI9x/mylKE8nTqv/4XuI6Yuf
+NounwLfdLWLIohoqSyh9r5BYMCElQCPYaDyalopEfHyF4tY7DZupw2nT5U1Br6aW
+N7K1Idef3KlolvGx7GJ0LVHzx1rVcm6WwLq3QxaTkFRGS6wKDm9EZYRgMyDHQfAs
+E35Hllcxbgw6taGSPa9OCFF4jp5ym3+nOpPl3yuAZTa1B0qPo84Rhr/gFpls9Moe
+72HuYSi3/ll4zNpU2tF/hS+f44QY3z+NBxReGzibuQKBgQDr/eJjpeqJGZaXAvQY
+0O8CGWBUMe1jsgl1WICE6ET1AQaRi5RXBgcuB23lvR+cazm17Fy2E+zd+r3Jyn4z
+v/M2fWgatO9w1mooZwZBQFA/Uyy4tTzrei421w/gzCvUFPKDolSwnVQkXA+7ccou
+NUCjWkjEToQFITryrLyCHhfXrQKBgQDK6lODRsOq+Hfl0yTfp4rdA7jpbBAWnkY7
+aNpXSv1CdTxgsdunOQN1F4T6OWOSVLkUM58ZUlErILZoEzUZqGdoeApMYJOle3Cw
+5oVa9dRN8GVHAk+HR86AAVWxtPZJDB7I81VD5RYDsHKsY1im/36Etu9jb1llevDn
+2TnlBDYPZQKBgGcB1JVmUG8zahXURjOmzwx9gxx9Bn9jsNk1njNlJuRCZFmXMVKi
+4PNobsG+wVOHQhN0bitTmypxTfIMnvV7rW91YcF2hKUeEgw8m/BTYDOj3HtrMIIg
+PJfXW6jltaPG2Ow4KPtGUPnl7UAGNRfiSqqCuAxnsRyEGrTeTRIGjKWpAoGBAJxX
+pZbtLA+MN90lLTEBxxV5K7z13QOAWX6m0CwYBEBzUdzyzNnwLMDIKVYeZ6C0lJGD
+IJ+C9DU1lDVmLzCgt2QfsVedxcTn8jDqvG8UH8sZYP8wQZRq+ClaXet5EZXAt+t+
+yQBx/t9C0WgPd5vcGWAqDxJfFdMBwaHxlhDliL2dAoGBAI5T5py8nbfR6Ma88p7i
+jVNycLtmEw9Zf4El3KhVrKJkmC7cbDoJ4D5Q9Mv8qHmcXeG+RfAIGpe8XUtYZCYH
+XzuI4HQvxWLbhYYyE57ijUfokL0DQHo08feGLtPki+AdJZ5pqIzVoQebz88KFpoS
+VfwBjNLu/eSndu5yGiwpZ+3g
+-----END PRIVATE KEY-----";
+
+/// Writes a stripe-N archive whose volumes carry an X.509 `RootAuth` footer
+/// produced by the fixture signer.
+fn write_x509_signed_archive(stripe_width: u32) -> tzap_core::writer::WrittenArchive {
+    let signer = X509RootAuthSigner::from_pem_or_der(
+        TEST_LEAF_CERT_PEM.as_bytes(),
+        TEST_LEAF_KEY_PEM.as_bytes(),
+        Vec::new(),
+        1_700_000_000,
+    )
+    .unwrap();
+    write_archive_with_root_auth(
+        &[RegularFile::new("payload.txt", b"signed payload")],
+        &MasterKey::from_raw_key(&[7u8; 32]).unwrap(),
+        WriterOptions { stripe_width, volume_loss_tolerance: 0, ..WriterOptions::default() },
+        signer.root_auth_writer_config().unwrap(),
+        |request| {
+            signer
+                .authenticator_value_for_request(request)
+                .map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn tzap_public_metadata_display_summary_reports_signed_x509_footer() {
+    let temp = TestDir::new("tzap-display-signed");
+    let archive = temp.path("signed.tzap");
+    fs::write(&archive, write_x509_signed_archive(1).bytes).unwrap();
+
+    let result = tzapPublicMetadataDisplaySummary(archive.to_string_lossy().to_string());
+    assert!(result.contains("\"ok\":true"), "got: {result}");
+    assert!(result.contains("\"status\":\"signed\""), "got: {result}");
+    assert!(result.contains("\"verification_scope\":\"footer-only\""), "got: {result}");
+    assert!(result.contains("\"content_verified\":false"), "got: {result}");
+    assert!(result.contains("\"status\":\"root_auth_signer_inspected\""), "got: {result}");
+    assert!(result.contains("\"subject\":\"CN=ZManager FFI Test Signer\""), "got: {result}");
+    assert!(result.contains("\"signature_verified\":true"), "got: {result}");
+    assert!(result.contains("\"trust_validated\":false"), "got: {result}");
+}
+
+#[test]
+fn tzap_public_metadata_display_summary_reports_not_authentic_for_tampered_signature() {
+    let temp = TestDir::new("tzap-display-not-authentic");
+    let archive = temp.path("tampered.tzap");
+    let signer = X509RootAuthSigner::from_pem_or_der(
+        TEST_LEAF_CERT_PEM.as_bytes(),
+        TEST_LEAF_KEY_PEM.as_bytes(),
+        Vec::new(),
+        1_700_000_000,
+    )
+    .unwrap();
+    // A real signature with one flipped byte in the signature region: the
+    // footer parses but the signature no longer verifies.
+    let written = write_archive_with_root_auth(
+        &[RegularFile::new("payload.txt", b"tampered payload")],
+        &MasterKey::from_raw_key(&[7u8; 32]).unwrap(),
+        WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
+        signer.root_auth_writer_config().unwrap(),
+        |request| {
+            let mut value = signer
+                .authenticator_value_for_request(request)
+                .map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))?;
+            let last = value.len() - 1;
+            value[last] ^= 0x01;
+            Ok(value)
+        },
+    )
+    .unwrap();
+    fs::write(&archive, written.bytes).unwrap();
+
+    let result = tzapPublicMetadataDisplaySummary(archive.to_string_lossy().to_string());
+    assert!(result.contains("\"ok\":true"), "got: {result}");
+    assert!(result.contains("\"status\":\"not_authentic\""), "got: {result}");
+    assert!(result.contains("\"message\":\"X.509 RootAuth signature failed\""), "got: {result}");
+}
+
+#[test]
+fn tzap_public_metadata_display_summary_reports_unavailable_for_non_x509_footer() {
+    let temp = TestDir::new("tzap-display-non-x509");
+    let archive = temp.path("signed.tzap");
+    let written = write_archive_with_root_auth(
+        &[RegularFile::new("plain.txt", b"generic signing profile")],
+        &MasterKey::from_raw_key(&[7u8; 32]).unwrap(),
+        WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
+        RootAuthWriterConfig {
+            authenticator_id: 0x7777,
+            signer_identity_type: 1,
+            signer_identity: b"test signer",
+            authenticator_value_length: 32,
+        },
+        |request| Ok(request.archive_root.to_vec()),
+    )
+    .unwrap();
+    fs::write(&archive, written.bytes).unwrap();
+
+    let result = tzapPublicMetadataDisplaySummary(archive.to_string_lossy().to_string());
+    assert!(result.contains("\"ok\":true"), "got: {result}");
+    assert!(result.contains("\"status\":\"unavailable\""), "got: {result}");
+    assert!(result.contains("non-X.509 root-auth profile"), "got: {result}");
+}
+
+#[test]
+fn tzap_public_metadata_display_summary_accepts_multi_volume_base_path() {
+    let temp = TestDir::new("tzap-display-multi-volume");
+    let written = write_x509_signed_archive(4);
+    for (index, volume) in written.volumes.iter().enumerate() {
+        fs::write(temp.path(&format!("sample.vol{index:03}.tzap")), volume).unwrap();
+    }
+
+    // The volume set exists only under numbered sibling names; the
+    // non-existent base path must still resolve to the set and verify every
+    // volume's footer.
+    let result = tzapPublicMetadataDisplaySummary(temp.path("sample.tzap").to_string_lossy().to_string());
+    assert!(result.contains("\"ok\":true"), "got: {result}");
+    assert!(result.contains("\"status\":\"signed\""), "got: {result}");
+    assert!(result.contains("\"expected_volume_count\":4"), "got: {result}");
+    assert!(result.contains("\"present_volume_count\":4"), "got: {result}");
+    assert!(result.contains("\"subject\":\"CN=ZManager FFI Test Signer\""), "got: {result}");
 }
 
 #[test]

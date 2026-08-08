@@ -20,3 +20,7 @@ zmanager-core = { path = "../zmanager-core", version = "2.0.0" }
 
 [build-dependencies]
 uniffi = { version = "0.29", features = ["build"] }
+
+[dev-dependencies]
+tzap-core = "0.2.1"
+tzap-plugin-signing = "0.2.2"
