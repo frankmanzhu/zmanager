@@ -635,9 +635,60 @@ fn tzap_service_endpoints_return_validation_error_instead_of_continuing() {
     // service as the archive path, which then reported its own secondary
     // error. The caller must see the validation message instead.
     let result = tzapPublicMetadataSummary(temp.path("missing.tzap").to_string_lossy().to_string());
-
     assert!(result.contains("archivePath does not exist"), "expected the validation error envelope, got: {result}");
     assert!(result.starts_with("{\"ok\":false"));
+
+    let display = tzapPublicMetadataDisplaySummary(temp.path("missing.tzap").to_string_lossy().to_string());
+    assert!(display.contains("archivePath does not exist"), "expected the validation error envelope, got: {display}");
+    assert!(display.starts_with("{\"ok\":false"));
+}
+
+#[test]
+fn tzap_public_metadata_display_summary_reports_unsigned_archive() {
+    use zmanager_core::jobs::JobContext;
+    use zmanager_core::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
+    use zmanager_core::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
+
+    let temp = TestDir::new("tzap-display-summary");
+    let source = temp.path("payload.txt");
+    let archive = temp.path("unsigned.tzap");
+    fs::write(&source, b"display payload").unwrap();
+
+    let manifest = ArchiveManifest {
+        root: temp.path("."),
+        entries: vec![ManifestEntry {
+            archive_path: "payload.txt".to_owned(),
+            source_path: source,
+            file_type: ManifestFileType::File,
+            size: b"display payload".len() as u64,
+            modified: None,
+            permissions: PermissionSnapshot { readonly: false, unix_mode: Some(0o644) },
+            symlink_target: None,
+        }],
+        total_bytes: b"display payload".len() as u64,
+        excluded_entries: Vec::new(),
+        excluded_bytes: 0,
+        warnings: Vec::new(),
+    };
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::NoPassword,
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: None,
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: None,
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+    create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
+
+    let result = tzapPublicMetadataDisplaySummary(archive.to_string_lossy().to_string());
+    assert!(result.contains("\"ok\":true"), "got: {result}");
+    assert!(result.contains("\"status\":\"unsigned\""), "got: {result}");
+    assert!(result.contains("\"key_derivation\":\"none\""), "got: {result}");
 }
 
 #[test]

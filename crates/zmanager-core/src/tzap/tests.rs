@@ -1192,6 +1192,37 @@ fn public_display_summary_reports_unavailable_for_non_x509_footer() {
 }
 
 #[test]
+fn public_display_summary_reports_unavailable_for_unsupported_signer_identity_type() {
+    let temp = TestDir::new("tzap_display_identity_type");
+    let archive = temp.path("signed.tzap");
+    let written = write_archive_with_root_auth(
+        &[RegularFile::new("plain.txt", b"unsupported identity profile")],
+        &crate::tzap::write::placeholder_master_key().unwrap(),
+        WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
+        RootAuthWriterConfig {
+            authenticator_id: X509_AUTHENTICATOR_ID,
+            // X.509 authenticator with a signer identity type the X.509
+            // profile does not define; a validly signed footer must be
+            // reported unavailable (not an X.509 profile), never not-authentic
+            // (implying forgery). `DER_CERT` is type 2; use a type outside
+            // the profile.
+            signer_identity_type: 3,
+            signer_identity: b"not a der certificate",
+            authenticator_value_length: 32,
+        },
+        |request| Ok(request.archive_root.to_vec()),
+    )
+    .unwrap();
+    fs::write(&archive, written.bytes).unwrap();
+
+    let summary = summarize_tzap_public_display(&archive).unwrap();
+    let TzapPublicSignatureStatus::Unavailable { reason } = &summary.signature else {
+        panic!("expected unavailable status, got {:?}", summary.signature);
+    };
+    assert!(reason.contains("identity type"), "expected identity-type reason, got {reason:?}");
+}
+
+#[test]
 fn public_display_summary_reports_unavailable_for_corrupt_terminal() {
     let temp = TestDir::new("tzap_display_corrupt");
     let archive = temp.path("corrupt.tzap");
@@ -1204,10 +1235,11 @@ fn public_display_summary_reports_unavailable_for_corrupt_terminal() {
     // length; `cmra_image_length` is only the unsharded image and would cap
     // the corruption short of the last shards on small fixtures.
     let locator = CriticalRecoveryLocator::parse(&bytes[bytes.len() - CRITICAL_RECOVERY_LOCATOR_LEN..]).unwrap();
+    let locator_offset = usize::try_from(locator.cmra_offset).expect("CMRA offset fits usize");
     let kill_shards = usize::from(locator.cmra_parity_shard_count) + 1;
-    let start = locator.cmra_offset as usize + CRITICAL_METADATA_RECOVERY_HEADER_LEN;
-    let end = (start + kill_shards * locator.cmra_shard_size as usize)
-        .min(locator.cmra_offset as usize + locator.cmra_length as usize);
+    let start = locator_offset + CRITICAL_METADATA_RECOVERY_HEADER_LEN;
+    let end =
+        (start + kill_shards * locator.cmra_shard_size as usize).min(locator_offset + locator.cmra_length as usize);
     for byte in &mut bytes[start..end] {
         *byte ^= 0x55;
     }

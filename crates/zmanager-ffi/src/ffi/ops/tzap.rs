@@ -12,6 +12,18 @@ pub fn tzapPublicMetadataSummary(archive_path: String) -> String {
     zmanager_core::tzap_service::tzap_public_metadata_summary(&archive_path)
 }
 
+/// Bounded display summary: header/trailer metadata plus a footer-only
+/// signature status. Never reads archive contents, so it is safe for
+/// QuickLook/Spotlight-style surfaces regardless of archive size.
+#[allow(non_snake_case)]
+pub fn tzapPublicMetadataDisplaySummary(archive_path: String) -> String {
+    let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
+        Ok(path) => path,
+        Err(envelope) => return envelope,
+    };
+    zmanager_core::tzap_service::tzap_public_metadata_display_summary(&archive_path)
+}
+
 #[allow(non_snake_case)]
 pub fn verifyTzapX509(
     archive_path: String,

@@ -785,6 +785,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -829,6 +831,8 @@ fun uniffi_zmanager_ffi_checksum_func_startcreate(
 fun uniffi_zmanager_ffi_checksum_func_startextract(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_testarchive(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzappublicmetadatasummary(
 ): Short
@@ -948,6 +952,8 @@ fun uniffi_zmanager_ffi_fn_func_startcreate(`request`: RustBuffer.ByValue,uniffi
 fun uniffi_zmanager_ffi_fn_func_startextract(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_testarchive(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_tzappublicmetadatadisplaysummary(`archivePath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzappublicmetadatasummary(`archivePath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1162,6 +1168,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_testarchive() != 25757.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary() != 19687.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzappublicmetadatasummary() != 16201.toShort()) {
@@ -3725,6 +3734,15 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     uniffiRustCallWithError(ZmanagerGuiException) { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_testarchive(
         FfiConverterTypeTestArchiveRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+ fun `tzapPublicMetadataDisplaySummary`(`archivePath`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzappublicmetadatadisplaysummary(
+        FfiConverterString.lower(`archivePath`),_status)
 }
     )
     }

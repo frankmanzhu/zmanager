@@ -13,7 +13,7 @@ use std::io;
 use std::path::Path;
 
 use tzap_core::{PublicNoKeyFooterStatus, ReaderOptions, public_no_key_inspect_footer};
-use tzap_plugin_signing::x509_chain::X509_AUTHENTICATOR_ID;
+use tzap_plugin_signing::x509_chain::{X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT};
 
 use super::open::{TzapPublicMetadataSummary, discover_tzap_input_volume_paths, summarize_tzap_public_metadata};
 use super::x509::{TzapX509SignerInspection, inspect_x509_root_auth_footer};
@@ -77,6 +77,14 @@ pub fn inspect_tzap_public_footer_signature(archive_path: &Path) -> Result<TzapP
                     reason: format!(
                         "signed with a non-X.509 root-auth profile (authenticator id {})",
                         footer.authenticator_id
+                    ),
+                });
+            }
+            if footer.signer_identity_type != X509_SIGNER_IDENTITY_TYPE_DER_CERT {
+                return Ok(TzapPublicSignatureStatus::Unavailable {
+                    reason: format!(
+                        "signed with an unsupported X.509 signer identity type ({})",
+                        footer.signer_identity_type
                     ),
                 });
             }

@@ -654,12 +654,16 @@ pub fn tzap_public_metadata_summary(archive_path: &str) -> String {
 
 /// Returns a bounded display summary for a `.tzap` archive as a JSON string.
 ///
-/// The response envelope is `{ok, metadata, signature}` — the same shape as
-/// [`tzap_public_metadata_summary`] — but `signature.status` is derived from
-/// footer inspection only (assertion 1: the embedded certificate's key really
-/// signed the footer). Archive contents are never read, so the summary is
-/// bounded regardless of archive size; content integrity and trust-chain
-/// validation remain the explicit `verify_tzap_x509_public_no_key` surface.
+/// The response envelope is `{ok, metadata, signature}` — the same envelope as
+/// [`tzap_public_metadata_summary`] — but `signature` carries a different,
+/// footer-derived vocabulary: `status` is `signed`, `unsigned`,
+/// `not_authentic`, or `unavailable` (a `signed` payload embeds the signer
+/// inspection without trust validation; `verified`/`unverified` from
+/// [`tzap_public_metadata_summary`] do not appear here). Footer inspection is
+/// assertion 1 only (the embedded certificate's key really signed the footer);
+/// archive contents are never read, so the summary is bounded regardless of
+/// archive size. Content integrity and trust-chain validation remain the
+/// explicit `verify_tzap_x509_public_no_key` surface.
 #[must_use]
 pub fn tzap_public_metadata_display_summary(archive_path: &str) -> String {
     let archive_path = PathBuf::from(archive_path);
