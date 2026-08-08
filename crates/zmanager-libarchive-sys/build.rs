@@ -523,7 +523,9 @@ fn generate_bindings() {
         .clang_arg("-fsigned-char")
         .allowlist_function("archive_.*")
         .allowlist_type("archive_.*|la_.*|__LA_.*")
-        .allowlist_var("ARCHIVE_.*|AE_.*|__LA_.*");
+        .allowlist_var("ARCHIVE_.*|AE_.*|__LA_.*")
+        .blocklist_type("_IO_.*")
+        .blocklist_type("FILE");
 
     if env::var_os("ZMANAGER_LIBARCHIVE_SYSTEM").is_some() {
         if let Some(root) = env::var_os("LIBARCHIVE_DIR") {
