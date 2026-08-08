@@ -2,12 +2,13 @@
 //! private module internals live inside the module they belong to.
 
 use super::{
-    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapRestoreOptions, TzapRestorePolicy,
-    TzapX509SigningOptions, TzapX509TrustOptions, copy_tzap_file_to_writer, copy_tzap_files_to_writer,
-    create_tzap_from_manifest_with_context, extract_tzap, extract_tzap_file_to_destination,
+    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapPublicSignatureStatus,
+    TzapRestoreOptions, TzapRestorePolicy, TzapX509SigningOptions, TzapX509TrustOptions, copy_tzap_file_to_writer,
+    copy_tzap_files_to_writer, create_tzap_from_manifest_with_context, extract_tzap, extract_tzap_file_to_destination,
     list_tzap_index_with_optional_password, list_tzap_with_optional_password, list_tzap_with_password,
-    list_tzap_with_recipient_key, summarize_tzap_public_metadata, test_tzap_with_password_filter_and_x509_trust,
-    test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
+    list_tzap_with_recipient_key, summarize_tzap_public_display, summarize_tzap_public_metadata,
+    test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust,
+    verify_tzap_x509_public_no_key,
 };
 use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
@@ -298,7 +299,13 @@ fn security_descriptor_component(descriptor: &[u8], offset_field: usize, acl: bo
     descriptor.get(offset..offset.checked_add(length)?)
 }
 
-use tzap_core::{KdfParams, MasterKey, RegularFile, WriterOptions, write_archive_with_kdf};
+use tzap_core::format::{CRITICAL_METADATA_RECOVERY_HEADER_LEN, CRITICAL_RECOVERY_LOCATOR_LEN};
+use tzap_core::wire::CriticalRecoveryLocator;
+use tzap_core::{
+    KdfParams, MasterKey, RegularFile, RootAuthWriterConfig, WriterOptions, write_archive_with_kdf,
+    write_archive_with_root_auth,
+};
+use tzap_plugin_signing::x509_chain::{X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT};
 
 #[test]
 fn selected_extract_uses_seekable_core_for_numbered_volumes() {
@@ -1068,6 +1075,150 @@ fn create_and_test_tzap_with_x509_root_auth() {
     assert_eq!(public_report.subject, "CN=ZManager Test Signer");
     assert_eq!(public_report.trust_anchor_subject.as_deref(), Some("CN=ZManager Test Root CA"));
     assert_eq!(public_report.diagnostics.first().map(String::as_str), Some("public_data_block_commitment_verified"));
+}
+
+#[test]
+fn public_display_summary_reports_signed_authentic_footer() {
+    let temp = TestDir::new("tzap_display_signed");
+    let source = temp.path("payload.txt");
+    let archive = temp.path("signed.tzap");
+    fs::write(&source, b"signed display payload").unwrap();
+
+    let (root_cert, root_key) = test_ca_cert("ZManager Display Root CA");
+    let (signer_cert, signer_key) = test_leaf_cert("ZManager Display Signer", root_cert.as_ref(), root_key.as_ref());
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::Passphrase(SecretString::from("secret")),
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: None,
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: Some(TzapX509SigningOptions::InMemory {
+            signing_certificate: signer_cert.to_pem().unwrap(),
+            signing_private_key: SecretBytes::from(signer_key.private_key_to_pem_pkcs8().unwrap()),
+            signing_chain: Vec::new(),
+        }),
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+    create_tzap_from_manifest_with_context(
+        &single_file_manifest(&temp, source, b"signed display payload".len() as u64),
+        &archive,
+        &options,
+        &mut context,
+    )
+    .unwrap();
+
+    let summary = summarize_tzap_public_display(&archive).unwrap();
+    assert_eq!(summary.metadata.present_volume_count, 1);
+    let TzapPublicSignatureStatus::Signed { signer } = &summary.signature else {
+        panic!("expected signed status, got {:?}", summary.signature);
+    };
+    assert_eq!(signer.subject, "CN=ZManager Display Signer");
+    assert_eq!(signer.issuer, "CN=ZManager Display Root CA");
+    assert!(signer.total_data_block_count >= 1);
+    assert_eq!(signer.archive_root.len(), 32);
+}
+
+#[test]
+fn public_display_summary_reports_unsigned_archive() {
+    let temp = TestDir::new("tzap_display_unsigned");
+    let archive = temp.path("unsigned.tzap");
+    let written = create_test_tzap_archive(&[RegularFile::new("plain.txt", b"no signature")]);
+    fs::write(&archive, &written.volumes[0]).unwrap();
+
+    let summary = summarize_tzap_public_display(&archive).unwrap();
+    assert_eq!(summary.signature, TzapPublicSignatureStatus::Unsigned);
+}
+
+#[test]
+fn public_display_summary_reports_not_authentic_for_forged_footer() {
+    let temp = TestDir::new("tzap_display_forged");
+    let archive = temp.path("forged.tzap");
+    let (root_cert, root_key) = test_ca_cert("ZManager Forged Root CA");
+    let (signer_cert, _signer_key) = test_leaf_cert("ZManager Forged Signer", root_cert.as_ref(), root_key.as_ref());
+    let written = write_archive_with_root_auth(
+        &[RegularFile::new("forged.txt", b"forged payload")],
+        &crate::tzap::write::placeholder_master_key().unwrap(),
+        WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
+        RootAuthWriterConfig {
+            authenticator_id: X509_AUTHENTICATOR_ID,
+            signer_identity_type: X509_SIGNER_IDENTITY_TYPE_DER_CERT,
+            signer_identity: &signer_cert.to_der().unwrap(),
+            authenticator_value_length: 256,
+        },
+        // A signature no real key ever produced; inspection must report the
+        // footer not authentic rather than treat it as signed.
+        |_| Ok(vec![0u8; 256]),
+    )
+    .unwrap();
+    fs::write(&archive, written.bytes).unwrap();
+
+    let summary = summarize_tzap_public_display(&archive).unwrap();
+    assert!(
+        matches!(summary.signature, TzapPublicSignatureStatus::NotAuthentic { .. }),
+        "expected not-authentic status, got {:?}",
+        summary.signature
+    );
+}
+
+#[test]
+fn public_display_summary_reports_unavailable_for_non_x509_footer() {
+    let temp = TestDir::new("tzap_display_non_x509");
+    let archive = temp.path("signed.tzap");
+    let written = write_archive_with_root_auth(
+        &[RegularFile::new("plain.txt", b"generic signing profile")],
+        &crate::tzap::write::placeholder_master_key().unwrap(),
+        WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
+        RootAuthWriterConfig {
+            authenticator_id: 0x7777,
+            signer_identity_type: 1,
+            signer_identity: b"test signer",
+            authenticator_value_length: 32,
+        },
+        |request| Ok(request.archive_root.to_vec()),
+    )
+    .unwrap();
+    fs::write(&archive, written.bytes).unwrap();
+
+    let summary = summarize_tzap_public_display(&archive).unwrap();
+    assert!(
+        matches!(summary.signature, TzapPublicSignatureStatus::Unavailable { .. }),
+        "expected unavailable status, got {:?}",
+        summary.signature
+    );
+}
+
+#[test]
+fn public_display_summary_reports_unavailable_for_corrupt_terminal() {
+    let temp = TestDir::new("tzap_display_corrupt");
+    let archive = temp.path("corrupt.tzap");
+    let written = create_test_tzap_archive(&[RegularFile::new("plain.txt", b"corrupt terminal")]);
+    let mut bytes = written.volumes[0].clone();
+    // Destroy the CMRA image body beyond GF16 repair capacity (parity + 1
+    // shards), mirroring the tzap-core tampered-terminal fixture. The header,
+    // boundary magic, and locators stay intact so every recovery path is
+    // attempted — and must fail. `cmra_length` is the serialized shard region
+    // length; `cmra_image_length` is only the unsharded image and would cap
+    // the corruption short of the last shards on small fixtures.
+    let locator = CriticalRecoveryLocator::parse(&bytes[bytes.len() - CRITICAL_RECOVERY_LOCATOR_LEN..]).unwrap();
+    let kill_shards = usize::from(locator.cmra_parity_shard_count) + 1;
+    let start = locator.cmra_offset as usize + CRITICAL_METADATA_RECOVERY_HEADER_LEN;
+    let end = (start + kill_shards * locator.cmra_shard_size as usize)
+        .min(locator.cmra_offset as usize + locator.cmra_length as usize);
+    for byte in &mut bytes[start..end] {
+        *byte ^= 0x55;
+    }
+    fs::write(&archive, bytes).unwrap();
+
+    let summary = summarize_tzap_public_display(&archive).unwrap();
+    assert!(
+        matches!(summary.signature, TzapPublicSignatureStatus::Unavailable { .. }),
+        "expected unavailable status, got {:?}",
+        summary.signature
+    );
 }
 
 #[test]

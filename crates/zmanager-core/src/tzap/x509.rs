@@ -932,7 +932,7 @@ fn inspect_opened_x509_signer(opened: &OpenedArchive) -> Result<TzapX509SignerIn
     Ok(inspection)
 }
 
-fn inspect_x509_root_auth_footer(
+pub(crate) fn inspect_x509_root_auth_footer(
     footer: &RootAuthFooterV1,
     archive_root: &[u8; 32],
 ) -> Result<TzapX509SignerInspection, TzapError> {

@@ -33,7 +33,7 @@ use crate::local_identity_store::{
 };
 use crate::manifest::PlanOptions;
 use crate::secrets::SecretString;
-use crate::tzap_backend::{TzapCreateOptions, TzapKeySource, TzapX509TrustOptions};
+use crate::tzap_backend::{TzapCreateOptions, TzapKeySource, TzapPublicSignatureStatus, TzapX509TrustOptions};
 use crate::x509_format::{hex_lower, x509_name_to_string};
 
 const TZAP_DEFAULT_COMPRESSION_LEVEL: i32 = 3;
@@ -644,6 +644,58 @@ pub fn tzap_public_metadata_summary(archive_path: &str) -> String {
             json!({
                 "ok": true,
                 "metadata": tzap_public_metadata_json(&summary),
+                "signature": signature,
+            })
+            .to_string()
+        }
+        Err(error) => ffi_error_json(&error.to_string()),
+    }
+}
+
+/// Returns a bounded display summary for a `.tzap` archive as a JSON string.
+///
+/// The response envelope is `{ok, metadata, signature}` — the same shape as
+/// [`tzap_public_metadata_summary`] — but `signature.status` is derived from
+/// footer inspection only (assertion 1: the embedded certificate's key really
+/// signed the footer). Archive contents are never read, so the summary is
+/// bounded regardless of archive size; content integrity and trust-chain
+/// validation remain the explicit `verify_tzap_x509_public_no_key` surface.
+#[must_use]
+pub fn tzap_public_metadata_display_summary(archive_path: &str) -> String {
+    let archive_path = PathBuf::from(archive_path);
+    match crate::tzap_backend::summarize_tzap_public_display(&archive_path) {
+        Ok(summary) => {
+            let signature = match &summary.signature {
+                TzapPublicSignatureStatus::Signed { signer } => json!({
+                    "status": "signed",
+                    "root_auth": {
+                        "signature_verified": true,
+                        "trust_validated": false,
+                        "subject": signer.subject,
+                        "issuer": signer.issuer,
+                        "serial_number": signer.serial_number_hex,
+                        "certificate_sha256": hex_lower(&signer.certificate_sha256),
+                        "signed_at_unix_seconds": signer.signed_at_unix_seconds,
+                        "verified_chain_subjects": [],
+                        "trust_anchor_subject": Value::Null,
+                        "total_data_block_count": signer.total_data_block_count,
+                    },
+                }),
+                TzapPublicSignatureStatus::Unsigned => json!({
+                    "status": "unsigned",
+                }),
+                TzapPublicSignatureStatus::NotAuthentic { reason } => json!({
+                    "status": "not_authentic",
+                    "message": reason,
+                }),
+                TzapPublicSignatureStatus::Unavailable { reason } => json!({
+                    "status": "unavailable",
+                    "message": reason,
+                }),
+            };
+            json!({
+                "ok": true,
+                "metadata": tzap_public_metadata_json(&summary.metadata),
                 "signature": signature,
             })
             .to_string()

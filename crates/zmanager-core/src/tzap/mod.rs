@@ -4,6 +4,7 @@
 //! `tzap_backend.rs`. The historical `crate::tzap_backend::...` paths are
 //! preserved by the re-export facade in `tzap_backend.rs`.
 
+mod display;
 mod extract;
 mod listing;
 mod metadata;
@@ -14,6 +15,10 @@ mod x509;
 #[cfg(test)]
 mod tests;
 
+pub use display::{
+    TzapPublicDisplaySummary, TzapPublicSignatureStatus, inspect_tzap_public_footer_signature,
+    summarize_tzap_public_display,
+};
 pub use extract::{
     TzapExtractKeySource, TzapExtractReport, TzapExtractRequest, TzapFileExtractReport, TzapRestoreOptions,
     TzapRestorePolicy, copy_tzap_file_to_writer, copy_tzap_files_to_writer, extract_tzap,
