@@ -112,7 +112,7 @@ pub(crate) fn write_symlink(target: &Path, destination_path: &Path) -> io::Resul
 
 /// Reports that symlink extraction is unsupported on this platform.
 #[cfg(not(unix))]
-pub(crate) fn write_symlink(_target: &Path, destination_path: &Path) -> io::Result<()> {
+pub(crate) fn write_symlink(_target: &Path, _destination_path: &Path) -> io::Result<()> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"))
 }
 
