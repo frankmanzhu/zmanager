@@ -32,7 +32,7 @@ sevenz-rust2 = { version = "0.21.0", default-features = false, features = ["aes2
 tar = "0.4.45"
 tzap-core = "0.2.1"
 tzap-plugin-keywrap = "0.2.1"
-tzap-plugin-signing = "0.2.1"
+tzap-plugin-signing = "0.2.2"
 zip = "8.6.0"
 zeroize = "1.8.2"
 zmanager-libarchive = { path = "../zmanager-libarchive", version = "2.0.0" }
