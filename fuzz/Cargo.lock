@@ -2519,14 +2519,14 @@ checksum = "3be3d40e40a133f9c916ee3f9f4fa2d9d63435b5fbe1bfc6d9dae0aa0ada1513"
 
 [[package]]
 name = "zmanager-apple-archive"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "zmanager-core"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "base64",
  "brotli",
@@ -2572,7 +2572,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-libarchive"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "libc",
  "zmanager-libarchive-sys",
@@ -2580,7 +2580,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-libarchive-sys"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "bindgen 0.70.1",
  "cmake",
@@ -2593,7 +2593,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-unrar"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "cc",
  "zeroize",
