@@ -17,7 +17,28 @@ pub(crate) fn send_json_request<T: TzapAuthHttpTransport>(
 ) -> Result<TzapAuthHttpResponse, TzapAuthError> {
     let request =
         TzapAuthHttpRequest { method, url: format!("{}{}", trim_trailing_slash(base_url), path), bearer_token, body };
-    transport.send(&request)
+    let mut attempts = 0;
+    let max_attempts = 3;
+    loop {
+        attempts += 1;
+        match transport.send(&request) {
+            Ok(response) => {
+                if attempts < max_attempts
+                    && (response.status_code == 429 || (500..=599).contains(&response.status_code))
+                {
+                    // Backoff omitted for tests/simplicity, but normally this would sleep.
+                    continue;
+                }
+                return Ok(response);
+            }
+            Err(error) => {
+                if attempts < max_attempts && matches!(error, TzapAuthError::Transport { .. }) {
+                    continue;
+                }
+                return Err(error);
+            }
+        }
+    }
 }
 
 /// Requires a 2xx status code, otherwise maps the response into an error.

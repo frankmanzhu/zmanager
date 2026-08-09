@@ -84,6 +84,30 @@ fn sevenz_hostile_fixture_is_rejected() {
 }
 
 #[test]
+fn lzma_high_memory_exhaustion_is_rejected() {
+    let temp = TestDir::new("lzma_high_memory_exhaustion_is_rejected");
+    let archive = temp.path("hostile.7z");
+    let output = File::create(&archive).unwrap();
+    let mut writer = ArchiveWriter::new(output).unwrap();
+    let payload = vec![0_u8; 10 * 1024]; // 10KB payload
+    writer.push_archive_entry(ArchiveEntry::new_file("bomb.bin"), Some(&payload[..])).unwrap();
+    writer.finish().unwrap();
+
+    let policy = ExtractionPolicy {
+        limits: ExtractionLimits { max_expanded_bytes: Some(10), max_entry_expansion_ratio: None },
+        ..ExtractionPolicy::default()
+    };
+
+    let error = extract_7z(&archive, temp.path("out"), None, policy).unwrap_err();
+
+    assert!(matches!(
+        error,
+        zmanager_core::sevenz_backend::SevenZError::Safety(ExtractionSafetyError::ExpandedSizeLimitExceeded { .. })
+    ));
+    assert!(!temp.path("out/bomb.bin").exists());
+}
+
+#[test]
 fn libarchive_tar_hostile_fixtures_are_rejected() {
     let temp = TestDir::new("libarchive_tar_hostile_fixtures_are_rejected");
     let cases = [

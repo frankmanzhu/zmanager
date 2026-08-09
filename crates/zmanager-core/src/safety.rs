@@ -623,6 +623,10 @@ pub enum ExtractionSafetyError {
     WindowsPrefix { path: String },
     /// Archive path attempts to traverse above destination.
     ParentTraversal { path: String },
+    /// Archive path exceeds the maximum allowed length.
+    PathTooLong { path: String },
+    /// Archive path contains a Windows reserved device name.
+    WindowsReservedName { path: String, component: String },
     /// Normalized destination escapes the extraction root.
     DestinationEscape { archive_path: String, destination_root: PathBuf, destination_path: PathBuf },
     /// Entry collides with a previous archive path.
@@ -674,6 +678,12 @@ impl fmt::Display for ExtractionSafetyError {
             }
             Self::ParentTraversal { path } => {
                 write!(f, "archive path attempts parent traversal: {path}")
+            }
+            Self::PathTooLong { path } => {
+                write!(f, "archive path is too long: {path}")
+            }
+            Self::WindowsReservedName { path, component } => {
+                write!(f, "archive path contains a Windows reserved device name ({component}): {path}")
             }
             Self::DestinationEscape { archive_path, destination_root, destination_path } => write!(
                 f,
@@ -740,6 +750,41 @@ pub fn normalize_archive_path(raw_path: &str) -> Result<String, ExtractionSafety
     let mut parts = Vec::new();
 
     for part in slash_path.split('/') {
+        if part.len() > 255 {
+            return Err(ExtractionSafetyError::PathTooLong { path: raw_path.to_owned() });
+        }
+        let upper = part.to_ascii_uppercase();
+        let stem = upper.split('.').next().unwrap_or(&upper);
+        if matches!(
+            stem,
+            "CON"
+                | "PRN"
+                | "AUX"
+                | "NUL"
+                | "COM1"
+                | "COM2"
+                | "COM3"
+                | "COM4"
+                | "COM5"
+                | "COM6"
+                | "COM7"
+                | "COM8"
+                | "COM9"
+                | "LPT1"
+                | "LPT2"
+                | "LPT3"
+                | "LPT4"
+                | "LPT5"
+                | "LPT6"
+                | "LPT7"
+                | "LPT8"
+                | "LPT9"
+        ) {
+            return Err(ExtractionSafetyError::WindowsReservedName {
+                path: raw_path.to_owned(),
+                component: part.to_owned(),
+            });
+        }
         match part {
             "" | "." => {}
             ".." => {
@@ -1021,6 +1066,23 @@ mod tests {
 
         assert!(matches!(drive_error, ExtractionSafetyError::WindowsPrefix { .. }));
         assert!(matches!(unc_error, ExtractionSafetyError::WindowsPrefix { .. }));
+    }
+
+    #[test]
+    fn rejects_windows_reserved_device_names() {
+        let error = normalize_archive_path("dir/CON").unwrap_err();
+        assert!(matches!(error, ExtractionSafetyError::WindowsReservedName { .. }));
+
+        let error_ext = normalize_archive_path("dir/prn.txt").unwrap_err();
+        assert!(matches!(error_ext, ExtractionSafetyError::WindowsReservedName { .. }));
+    }
+
+    #[test]
+    fn rejects_excessively_long_paths() {
+        let long_name = "a".repeat(256);
+        let path = format!("dir/{long_name}");
+        let error = normalize_archive_path(&path).unwrap_err();
+        assert!(matches!(error, ExtractionSafetyError::PathTooLong { .. }));
     }
 
     #[test]

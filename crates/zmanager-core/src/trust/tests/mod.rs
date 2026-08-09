@@ -435,6 +435,32 @@ fn certificate_profile_rejects_aki_ski_mismatch_and_chain_order() {
     ));
 }
 
+#[test]
+fn certificate_profile_rejects_expired_certificates() {
+    let fixture = certificate_fixture(ChainConfig::default());
+    let pins = current_pin_set(&fixture.root_pin);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+
+    let mut options = TzapCertificateProfileOptions { validation_time_unix_seconds: Some(now), ..Default::default() };
+
+    // Valid currently
+    assert!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &options).is_ok());
+
+    // Expired root/chain (1 day in the past, not yet valid)
+    options.validation_time_unix_seconds = Some(now - 86400);
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &options),
+        Err(TzapCertificateProfileError::Expired { .. })
+    ));
+
+    // Expired leaf/chain (100 days in the future, past expiration)
+    options.validation_time_unix_seconds = Some(now + 100 * 86400);
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &options),
+        Err(TzapCertificateProfileError::Expired { .. })
+    ));
+}
+
 const TEST_ORG_POLICY_OID: &str = "2.25.123456789012345678901234567890123456";
 const TEST_OTHER_POLICY_OID: &str = "2.25.999999999999999999999999999999999999";
 
