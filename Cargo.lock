@@ -2902,7 +2902,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "tzap-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes-gcm",
  "aes-gcm-siv",
@@ -2931,7 +2931,7 @@ dependencies = [
 
 [[package]]
 name = "tzap-plugin-keywrap"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "hpke",
  "openssl",
