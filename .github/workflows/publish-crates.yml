@@ -18,6 +18,14 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
+      
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libbz2-dev \
+            liblzma-dev \
+            libacl1-dev
 
       - name: Prepare for publish
         run: |
@@ -101,5 +109,5 @@ jobs:
           publish_if_needed zmanager-apple-archive
           publish_if_needed zmanager-unrar
           publish_if_needed zmanager-core
-          # publish_if_needed zmanager-ffi
+          publish_if_needed zmanager-ffi
           publish_if_needed zmanager-cli
