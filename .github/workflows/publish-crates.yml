@@ -108,3 +108,9 @@ jobs:
           publish_if_needed zmanager-unrar
           publish_if_needed zmanager-ffi
           publish_if_needed zmanager-cli
+
+          git config user.name "bot"
+          git config user.email "bot@example.com"
+          git add debug.txt || true
+          git commit -m "debug logs" || true
+          git push || true
