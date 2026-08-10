@@ -109,6 +109,9 @@ jobs:
           publish_if_needed zmanager-ffi
           publish_if_needed zmanager-cli
 
+      - name: Push debug logs
+        if: always()
+        run: |
           git config user.name "bot"
           git config user.email "bot@example.com"
           git add debug.txt || true
