@@ -2664,7 +2664,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -2903,6 +2903,8 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "tzap-core"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ec5560634bd11bc8a00562a0e088c9f08b8b4bf76b9596fbdedc66af755e520"
 dependencies = [
  "aes-gcm",
  "aes-gcm-siv",
@@ -2932,6 +2934,8 @@ dependencies = [
 [[package]]
 name = "tzap-plugin-keywrap"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30388a984160e2fbb086131438913c356d7d6720a737e532b4caff559a13508c"
 dependencies = [
  "hpke",
  "openssl",
@@ -2944,6 +2948,8 @@ dependencies = [
 [[package]]
 name = "tzap-plugin-signing"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed10b05294b36b726692b44dc8ee07603fc3d20c94716f9f75cd82faf67f2c3d"
 dependencies = [
  "ed25519-dalek",
  "openssl",
@@ -3681,14 +3687,14 @@ checksum = "34b31d188d9d685a4f9c7b46d6e36631b07058d2cfe190267adce54dc230bf12"
 
 [[package]]
 name = "zmanager-apple-archive"
-version = "2.0.2"
+version = "2.0.1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "zmanager-cli"
-version = "2.0.2"
+version = "2.0.1"
 dependencies = [
  "anstream",
  "anstyle",
@@ -3708,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-core"
-version = "2.0.2"
+version = "2.0.1"
 dependencies = [
  "base64",
  "brotli",
@@ -3746,7 +3752,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-ffi"
-version = "2.0.2"
+version = "2.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3759,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-libarchive"
-version = "2.0.2"
+version = "2.0.1"
 dependencies = [
  "libc",
  "zmanager-libarchive-sys",
@@ -3767,7 +3773,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-libarchive-sys"
-version = "2.0.2"
+version = "2.0.1"
 dependencies = [
  "bindgen 0.70.1",
  "cmake",
@@ -3780,7 +3786,7 @@ dependencies = [
 
 [[package]]
 name = "zmanager-unrar"
-version = "2.0.2"
+version = "2.0.1"
 dependencies = [
  "cc",
  "zeroize",
