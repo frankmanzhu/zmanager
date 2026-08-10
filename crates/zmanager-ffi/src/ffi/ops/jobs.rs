@@ -927,7 +927,9 @@ fn safety_error_destination_path(error: &ExtractionSafetyError) -> Option<PathBu
         | ExtractionSafetyError::UnsafeFileType { .. }
         | ExtractionSafetyError::LinkTargetEscapes { .. }
         | ExtractionSafetyError::ExpandedSizeLimitExceeded { .. }
-        | ExtractionSafetyError::ExpansionRatioLimitExceeded { .. } => None,
+        | ExtractionSafetyError::ExpansionRatioLimitExceeded { .. }
+        | ExtractionSafetyError::PathTooLong { .. }
+        | ExtractionSafetyError::WindowsReservedName { .. } => None,
     }
 }
 

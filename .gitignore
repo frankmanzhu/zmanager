@@ -2,6 +2,11 @@
 /target/
 /fuzz/target/
 
+# Swift Package Manager build outputs
+.build/
+build/
+.swiftpm/
+
 # cargo-fuzz generated data
 /fuzz/artifacts/
 /fuzz/corpus/

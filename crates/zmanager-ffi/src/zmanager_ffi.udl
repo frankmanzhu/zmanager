@@ -25,6 +25,7 @@ namespace zmanager {
     // TZAP service endpoints. Each returns a JSON response envelope
     // documented by the zmanager-core `tzap_service` module.
     string tzapPublicMetadataSummary(string archive_path);
+    string tzapPublicMetadataDisplaySummary(string archive_path);
     string verifyTzapX509(string archive_path, string? password, sequence<string> trusted_ca_certs, boolean trusted_system_roots);
     string verifyTzapX509PublicNoKey(string archive_path, sequence<string> trusted_ca_certs, boolean trusted_system_roots);
     string inspectTzapX509Signer(string archive_path, string? password);

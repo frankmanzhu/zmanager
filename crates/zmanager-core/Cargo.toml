@@ -30,18 +30,18 @@ time = { version = "0.3.47", features = ["parsing"] }
 x509-parser = "0.18.1"
 sevenz-rust2 = { version = "0.21.0", default-features = false, features = ["aes256", "compress", "util"] }
 tar = "0.4.45"
-tzap-core = "0.2.1"
-tzap-plugin-keywrap = "0.2.1"
-tzap-plugin-signing = "0.2.1"
+tzap-core = "0.2.2"
+tzap-plugin-keywrap = "0.2.2"
+tzap-plugin-signing = "0.2.2"
 zip = "8.6.0"
 zeroize = "1.8.2"
-zmanager-libarchive = { path = "../zmanager-libarchive", version = "2.0.0" }
-zmanager-unrar = { path = "../zmanager-unrar", version = "2.0.0" }
+zmanager-libarchive = { workspace = true }
+zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-zmanager-apple-archive = { path = "../zmanager-apple-archive", version = "2.0.0" }
+zmanager-apple-archive = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -58,6 +58,9 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Ioctl",
     "Win32_System_Threading",
 ] }
+
+[dev-dependencies]
+crc32c = "0.6"
 
 [lints]
 workspace = true

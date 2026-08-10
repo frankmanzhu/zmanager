@@ -55,6 +55,8 @@ pub struct TzapCertificateProfileOptions {
     pub approved_org_intermediate_policy_oids: Vec<String>,
     /// Approved leaf policy OIDs beyond the default TZAP leaf policy.
     pub approved_leaf_policy_oids: Vec<String>,
+    /// Optional unix timestamp to validate certificate expiration against.
+    pub validation_time_unix_seconds: Option<u64>,
 }
 
 impl Default for TzapCertificateProfileOptions {
@@ -62,6 +64,7 @@ impl Default for TzapCertificateProfileOptions {
         Self {
             approved_org_intermediate_policy_oids: Vec::new(),
             approved_leaf_policy_oids: vec![TZAP_OID_LEAF_POLICY.to_owned()],
+            validation_time_unix_seconds: None,
         }
     }
 }
@@ -103,6 +106,7 @@ pub enum TzapCertificateProfileError {
     MalformedMetadata { reason: &'static str },
     UnknownMetadataField { field: String },
     MetadataPolicyMismatch { policy_oid: String },
+    Expired { index: usize },
 }
 
 impl fmt::Display for TzapCertificateProfileError {
@@ -145,7 +149,10 @@ impl fmt::Display for TzapCertificateProfileError {
                 write!(f, "TZAP metadata extension has unknown v1 field {field}")
             }
             Self::MetadataPolicyMismatch { policy_oid } => {
-                write!(f, "TZAP metadata policy OID is not in leaf policies: {policy_oid}")
+                write!(f, "TZAP certificate metadata policy OID does not match extension ({policy_oid})")
+            }
+            Self::Expired { index } => {
+                write!(f, "certificate at chain index {index} is expired or not yet valid at validation time")
             }
         }
     }
@@ -215,10 +222,10 @@ fn validate_tzap_certificate_chain_der(
         None => None,
     };
 
-    validate_root_certificate(&parsed[root_index])?;
+    validate_root_certificate(&parsed[root_index], root_index, options)?;
     validate_intermediates(&parsed, options)?;
     require_leaf_aki_matches_issuer(&parsed)?;
-    let public_metadata = validate_leaf_certificate(&parsed[0], options)?;
+    let public_metadata = validate_leaf_certificate(&parsed[0], 0, options)?;
 
     Ok(TzapCertificateProfileValidation {
         trust_anchor_type,
@@ -355,7 +362,16 @@ pub(crate) fn official_root_pin_kind(
     }
 }
 
-fn validate_root_certificate(certificate: &X509Certificate<'_>) -> Result<(), TzapCertificateProfileError> {
+fn validate_root_certificate(
+    certificate: &X509Certificate<'_>,
+    index: usize,
+    options: &TzapCertificateProfileOptions,
+) -> Result<(), TzapCertificateProfileError> {
+    if let Some(time) = options.validation_time_unix_seconds
+        && !is_valid_at(certificate, time)
+    {
+        return Err(TzapCertificateProfileError::Expired { index });
+    }
     let basic_constraints = certificate
         .basic_constraints()
         .map_err(|_| TzapCertificateProfileError::RootProfile {
@@ -381,12 +397,17 @@ fn validate_root_certificate(certificate: &X509Certificate<'_>) -> Result<(), Tz
 }
 
 fn validate_intermediates(
-    parsed: &[X509Certificate<'_>],
+    chain: &[X509Certificate<'_>],
     options: &TzapCertificateProfileOptions,
 ) -> Result<(), TzapCertificateProfileError> {
-    let has_org_intermediate = parsed.len() == MAX_TZAP_CHAIN_LEN;
-    for index in 1..parsed.len() - 1 {
-        let certificate = &parsed[index];
+    let root_index = chain.len() - 1;
+    for (index, certificate) in chain.iter().enumerate().take(root_index).skip(1) {
+        if let Some(time) = options.validation_time_unix_seconds
+            && !is_valid_at(certificate, time)
+        {
+            return Err(TzapCertificateProfileError::Expired { index });
+        }
+        let has_org_intermediate = chain.len() == MAX_TZAP_CHAIN_LEN;
         let role = if has_org_intermediate && index == 1 {
             CertificateRole::OrganizationIntermediate
         } else {
@@ -421,7 +442,7 @@ fn validate_intermediates(
 
         require_ca_key_usage(certificate, role, Some(index))?;
         reject_forbidden_extended_key_usage(certificate, role, Some(index))?;
-        require_aki_ski_pair(parsed, index)?;
+        require_aki_ski_pair(chain, index)?;
         if !certificate_has_policy(certificate, TZAP_OID_CA_POLICY) {
             return Err(TzapCertificateProfileError::IntermediateProfile {
                 index,
@@ -449,8 +470,14 @@ fn validate_intermediates(
 
 fn validate_leaf_certificate(
     certificate: &X509Certificate<'_>,
+    index: usize,
     options: &TzapCertificateProfileOptions,
 ) -> Result<TzapCertificatePublicMetadata, TzapCertificateProfileError> {
+    if let Some(time) = options.validation_time_unix_seconds
+        && !is_valid_at(certificate, time)
+    {
+        return Err(TzapCertificateProfileError::Expired { index });
+    }
     let basic_constraints = certificate
         .basic_constraints()
         .map_err(|_| TzapCertificateProfileError::LeafProfile {
@@ -879,4 +906,10 @@ impl CertificateRole {
             }
         }
     }
+}
+
+#[allow(clippy::cast_possible_wrap)]
+fn is_valid_at(certificate: &X509Certificate<'_>, unix_seconds: u64) -> bool {
+    let validity = certificate.validity();
+    validity.not_before.timestamp() <= (unix_seconds as i64) && (unix_seconds as i64) <= validity.not_after.timestamp()
 }

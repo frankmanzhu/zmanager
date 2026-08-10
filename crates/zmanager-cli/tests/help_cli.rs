@@ -643,7 +643,7 @@ fn package_channel_metadata_uses_release_checksums() {
 
 #[test]
 fn release_validation_artifacts_are_declared() {
-    assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.0");
+    assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.1");
 
     for required in
         ["*.deps.txt", "package-metadata.tar.gz", "SHA256SUMS", "sha256sum package-metadata.tar.gz >> SHA256SUMS"]

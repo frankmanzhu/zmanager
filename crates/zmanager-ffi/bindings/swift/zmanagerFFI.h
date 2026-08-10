@@ -328,6 +328,11 @@ RustBuffer uniffi_zmanager_ffi_fn_func_startextract(RustBuffer request, RustCall
 RustBuffer uniffi_zmanager_ffi_fn_func_testarchive(RustBuffer request, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TZAPPUBLICMETADATADISPLAYSUMMARY
+#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TZAPPUBLICMETADATADISPLAYSUMMARY
+RustBuffer uniffi_zmanager_ffi_fn_func_tzappublicmetadatadisplaysummary(RustBuffer archive_path, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TZAPPUBLICMETADATASUMMARY
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TZAPPUBLICMETADATASUMMARY
 RustBuffer uniffi_zmanager_ffi_fn_func_tzappublicmetadatasummary(RustBuffer archive_path, RustCallStatus *_Nonnull out_status
@@ -805,6 +810,12 @@ uint16_t uniffi_zmanager_ffi_checksum_func_startextract(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TESTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TESTARCHIVE
 uint16_t uniffi_zmanager_ffi_checksum_func_testarchive(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAPPUBLICMETADATADISPLAYSUMMARY
+#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAPPUBLICMETADATADISPLAYSUMMARY
+uint16_t uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary(void
     
 );
 #endif

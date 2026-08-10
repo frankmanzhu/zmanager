@@ -156,6 +156,12 @@ jobs:
           TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
           CUSTOM_NOTES: ${{ github.event.inputs.notes }}
         run: |
+          # Re-running this workflow fails if a release already exists for the
+          # tag (a manual release or a previous run). Delete it first so the
+          # step is idempotent; the tag itself is left intact.
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release delete "$TAG_NAME" --yes
+          fi
           if [ -n "$CUSTOM_NOTES" ]; then
             NOTES_ARGS=(--notes "$CUSTOM_NOTES")
           else

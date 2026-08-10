@@ -14,7 +14,6 @@ use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkcs12::Pkcs12;
 use openssl::pkey::{PKey, Public};
-use openssl::sign::Verifier;
 use openssl::x509::X509;
 use openssl::x509::extension::{BasicConstraints, KeyUsage, SubjectKeyIdentifier};
 use rand::RngCore as _;
@@ -32,14 +31,10 @@ use tzap_plugin_keywrap::{
     RecipientRecordMetadata, dispatch_key_wrap_record, wrap_master_key_for_recipient,
 };
 use tzap_plugin_signing::x509_chain::{
-    X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT, X509RootAuthReport, X509RootAuthSigner,
-    certificate_der_from_pem_or_der, certificates_der_from_pem_or_der, signing_input, verify_root_auth_footer,
+    X509_AUTHENTICATOR_ID, X509RootAuthReport, X509RootAuthSigner, certificate_der_from_pem_or_der,
+    certificates_der_from_pem_or_der, verify_root_auth_footer, verify_root_auth_signature,
 };
 
-const X509_ROOT_AUTH_MAGIC: &[u8; 4] = b"TZXC";
-const X509_ROOT_AUTH_VERSION: u16 = 1;
-const X509_ROOT_AUTH_OPENSSL_SHA256_SCHEME: u16 = 1;
-const X509_ROOT_AUTH_FIXED_AUTHENTICATOR_LEN: usize = 60;
 // The official root literals live in `trust::` (pinned there too), so the
 // pin set and the embedded certificates cannot drift.
 const OFFICIAL_TZAP_ROOT_CERT_SHA256: &str = crate::trust::TZAP_PRODUCTION_ROOT_SHA256;
@@ -932,47 +927,23 @@ fn inspect_opened_x509_signer(opened: &OpenedArchive) -> Result<TzapX509SignerIn
     Ok(inspection)
 }
 
-fn inspect_x509_root_auth_footer(
+pub(crate) fn inspect_x509_root_auth_footer(
     footer: &RootAuthFooterV1,
     archive_root: &[u8; 32],
 ) -> Result<TzapX509SignerInspection, TzapError> {
-    if footer.authenticator_id != X509_AUTHENTICATOR_ID {
-        return Err(TzapError::X509RootAuth("unsupported authenticator id".to_owned()));
-    }
-    if footer.signer_identity_type != X509_SIGNER_IDENTITY_TYPE_DER_CERT {
-        return Err(TzapError::X509RootAuth("unsupported signer identity type".to_owned()));
-    }
-
+    // All crypto is delegated to the plugin's trust-less assertion-1 check
+    // (scheme-aware: RSA-PKCS1 / ECDSA / RSA-PSS). This wrapper only adds the
+    // display fields derived from the embedded leaf certificate.
+    let report =
+        verify_root_auth_signature(footer, archive_root).map_err(|error| TzapError::X509RootAuth(error.to_string()))?;
     let leaf_certificate =
         X509::from_der(&footer.signer_identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
-    let authenticator = parse_x509_authenticator_for_inspection(&footer.authenticator_value)?;
-    let signing_input = signing_input(
-        &footer.archive_uuid,
-        &footer.session_id,
-        archive_root,
-        authenticator.signed_at_unix_seconds,
-        &authenticator.chain_digest,
-    );
-    let leaf_public_key =
-        leaf_certificate.public_key().map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
-    let mut verifier = Verifier::new(MessageDigest::sha256(), &leaf_public_key)
-        .map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
-    verifier.update(&signing_input).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
-    if !verifier.verify(&authenticator.signature).map_err(|source| TzapError::X509RootAuth(source.to_string()))? {
-        return Err(TzapError::X509RootAuth("X.509 RootAuth signature failed".to_owned()));
-    }
-
-    let fingerprint = leaf_certificate
-        .digest(MessageDigest::sha256())
-        .map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
-    let mut certificate_sha256 = [0u8; 32];
-    certificate_sha256.copy_from_slice(&fingerprint);
     Ok(TzapX509SignerInspection {
         archive_root: *archive_root,
         authenticator_id: footer.authenticator_id,
         signer_identity_type: footer.signer_identity_type,
         total_data_block_count: footer.total_data_block_count,
-        signed_at_unix_seconds: authenticator.signed_at_unix_seconds,
+        signed_at_unix_seconds: report.signed_at_unix_seconds,
         subject: x509_name_to_string(leaf_certificate.subject_name()),
         issuer: x509_name_to_string(leaf_certificate.issuer_name()),
         serial_number_hex: leaf_certificate
@@ -981,103 +952,9 @@ fn inspect_x509_root_auth_footer(
             .and_then(|serial| serial.to_hex_str())
             .map_err(|source| TzapError::X509RootAuth(source.to_string()))?
             .to_string(),
-        certificate_sha256,
+        certificate_sha256: report.certificate_sha256,
         diagnostics: Vec::new(),
     })
-}
-
-struct X509AuthenticatorInspection {
-    signed_at_unix_seconds: i64,
-    chain_digest: [u8; 32],
-    signature: Vec<u8>,
-}
-
-fn parse_x509_authenticator_for_inspection(value: &[u8]) -> Result<X509AuthenticatorInspection, TzapError> {
-    if value.len() < X509_ROOT_AUTH_FIXED_AUTHENTICATOR_LEN {
-        return Err(TzapError::X509RootAuth("X.509 authenticator is too short".to_owned()));
-    }
-    if &value[0..4] != X509_ROOT_AUTH_MAGIC {
-        return Err(TzapError::X509RootAuth("X.509 authenticator magic mismatch".to_owned()));
-    }
-    if read_x509_u16(value, 4)? != X509_ROOT_AUTH_VERSION {
-        return Err(TzapError::X509RootAuth("unsupported X.509 authenticator version".to_owned()));
-    }
-    if read_x509_u16(value, 6)? != X509_ROOT_AUTH_OPENSSL_SHA256_SCHEME {
-        return Err(TzapError::X509RootAuth("unsupported X.509 signature scheme".to_owned()));
-    }
-
-    let signed_at_unix_seconds = read_x509_i64(value, 8)?;
-    let mut chain_digest = [0u8; 32];
-    chain_digest.copy_from_slice(&value[16..48]);
-    let signature_len = usize::try_from(read_x509_u32(value, 48)?)
-        .map_err(|_| TzapError::X509RootAuth("X.509 signature length overflow".to_owned()))?;
-    let signature_capacity = usize::try_from(read_x509_u32(value, 52)?)
-        .map_err(|_| TzapError::X509RootAuth("X.509 signature capacity overflow".to_owned()))?;
-    let chain_count = usize::try_from(read_x509_u32(value, 56)?)
-        .map_err(|_| TzapError::X509RootAuth("X.509 chain count overflow".to_owned()))?;
-    if signature_len > signature_capacity {
-        return Err(TzapError::X509RootAuth("X.509 signature length exceeds capacity".to_owned()));
-    }
-
-    let mut offset = X509_ROOT_AUTH_FIXED_AUTHENTICATOR_LEN
-        .checked_add(signature_capacity)
-        .ok_or_else(|| TzapError::X509RootAuth("X.509 authenticator length overflow".to_owned()))?;
-    if value.len() < offset {
-        return Err(TzapError::X509RootAuth("X.509 authenticator signature is truncated".to_owned()));
-    }
-    if chain_count > value.len().saturating_sub(offset) / 4 {
-        return Err(TzapError::X509RootAuth("X.509 authenticator chain count exceeds payload".to_owned()));
-    }
-
-    let signature_start = X509_ROOT_AUTH_FIXED_AUTHENTICATOR_LEN;
-    let signature_end = signature_start
-        .checked_add(signature_len)
-        .ok_or_else(|| TzapError::X509RootAuth("X.509 authenticator length overflow".to_owned()))?;
-    if value[signature_end..offset].iter().any(|byte| *byte != 0) {
-        return Err(TzapError::X509RootAuth("X.509 authenticator signature padding is non-zero".to_owned()));
-    }
-    let signature = value[signature_start..signature_end].to_vec();
-
-    for _ in 0..chain_count {
-        let cert_len = usize::try_from(read_x509_u32(value, offset)?)
-            .map_err(|_| TzapError::X509RootAuth("X.509 chain certificate length overflow".to_owned()))?;
-        offset = offset
-            .checked_add(4)
-            .ok_or_else(|| TzapError::X509RootAuth("X.509 authenticator length overflow".to_owned()))?;
-        let cert_end = offset
-            .checked_add(cert_len)
-            .ok_or_else(|| TzapError::X509RootAuth("X.509 authenticator length overflow".to_owned()))?;
-        if cert_end > value.len() {
-            return Err(TzapError::X509RootAuth("X.509 authenticator certificate chain is truncated".to_owned()));
-        }
-        offset = cert_end;
-    }
-    if offset != value.len() {
-        return Err(TzapError::X509RootAuth("X.509 authenticator has trailing bytes".to_owned()));
-    }
-
-    Ok(X509AuthenticatorInspection { signed_at_unix_seconds, chain_digest, signature })
-}
-
-fn read_x509_u16(value: &[u8], offset: usize) -> Result<u16, TzapError> {
-    let bytes = value
-        .get(offset..offset + 2)
-        .ok_or_else(|| TzapError::X509RootAuth("X.509 authenticator is truncated".to_owned()))?;
-    Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
-}
-
-fn read_x509_u32(value: &[u8], offset: usize) -> Result<u32, TzapError> {
-    let bytes = value
-        .get(offset..offset + 4)
-        .ok_or_else(|| TzapError::X509RootAuth("X.509 authenticator is truncated".to_owned()))?;
-    Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-}
-
-fn read_x509_i64(value: &[u8], offset: usize) -> Result<i64, TzapError> {
-    let bytes = value
-        .get(offset..offset + 8)
-        .ok_or_else(|| TzapError::X509RootAuth("X.509 authenticator is truncated".to_owned()))?;
-    Ok(i64::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]]))
 }
 
 #[cfg(test)]

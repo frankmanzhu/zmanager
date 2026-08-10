@@ -4,6 +4,7 @@
 //! `tzap_backend.rs`. The historical `crate::tzap_backend::...` paths are
 //! preserved by the re-export facade in `tzap_backend.rs`.
 
+mod display;
 mod extract;
 mod listing;
 mod metadata;
@@ -14,6 +15,10 @@ mod x509;
 #[cfg(test)]
 mod tests;
 
+pub use display::{
+    TzapPublicDisplaySummary, TzapPublicSignatureStatus, inspect_tzap_public_footer_signature,
+    summarize_tzap_public_display,
+};
 pub use extract::{
     TzapExtractKeySource, TzapExtractReport, TzapExtractRequest, TzapFileExtractReport, TzapRestoreOptions,
     TzapRestorePolicy, copy_tzap_file_to_writer, copy_tzap_files_to_writer, extract_tzap,
@@ -27,7 +32,8 @@ pub use listing::{
 };
 pub use open::is_tzap_archive_path;
 pub use open::{
-    TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, summarize_tzap_public_metadata,
+    TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume,
+    summarize_tzap_public_metadata,
 };
 pub use write::{TzapCreateOptions, TzapCreateReport, TzapKeySource, create_tzap_from_manifest_with_context};
 pub use x509::{
@@ -37,11 +43,6 @@ pub use x509::{
     test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust,
     tzap_x509_signing_options_from_inventory, verify_tzap_x509_public_no_key,
 };
-
-pub(crate) const TZAP_EXTENSION: &str = "tzap";
-pub(crate) const TZAP_EXTENSION_SUFFIX: &str = ".tzap";
-pub(crate) const TZAP_VOLUME_MARKER: &str = ".vol";
-pub(crate) const TZAP_VOLUME_INDEX_WIDTH: usize = 3;
 
 /// `.tzap` backend error.
 #[derive(Debug)]

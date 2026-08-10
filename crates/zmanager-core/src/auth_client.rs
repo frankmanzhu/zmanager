@@ -1192,4 +1192,77 @@ mod tests {
             Ok(())
         }
     }
+
+    struct RetryFakeTransport {
+        response: TzapAuthHttpResponse,
+        attempts: std::cell::Cell<usize>,
+        fail_count: usize,
+        is_offline: bool,
+    }
+
+    impl TzapAuthHttpTransport for RetryFakeTransport {
+        fn send(&self, _request: &TzapAuthHttpRequest) -> Result<TzapAuthHttpResponse, TzapAuthError> {
+            self.attempts.set(self.attempts.get() + 1);
+            if self.is_offline {
+                return Err(TzapAuthError::Transport { message: "offline".to_owned() });
+            }
+            if self.attempts.get() <= self.fail_count {
+                return Ok(TzapAuthHttpResponse { status_code: 500, body: Vec::new() });
+            }
+            Ok(self.response.clone())
+        }
+    }
+
+    #[test]
+    fn auth_client_retries_on_500_and_429_errors() {
+        let session = TzapSessionRecord {
+            audience: SESSION_AUDIENCE_SIGN_TZAP.to_owned(),
+            access_token: TzapBearerToken::new("secret-token").unwrap(),
+            expires_at_unix_seconds: 200,
+            identity_assurance: trust::TzapIdentityAssurance::OauthVerifiedEmail,
+            selected_org_id: Some("org_123".to_owned()),
+            login_session_id: Some("login_session_123".to_owned()),
+        };
+        let transport = RetryFakeTransport {
+            response: TzapAuthHttpResponse {
+                status_code: 200,
+                body: br#"{
+                    "display_name": "Ada Lovelace",
+                    "public_signer_id": "psign_0123456789ABCDEFGH",
+                    "assurance_level": "oauth_verified_email",
+                    "selected_org_id": "org_123"
+                }"#
+                .to_vec(),
+            },
+            attempts: std::cell::Cell::new(0),
+            fail_count: 2, // Fails twice, succeeds on third attempt
+            is_offline: false,
+        };
+
+        let current_user = fetch_current_user(&transport, SIGN_TZAP_BASE_URL, &session).unwrap();
+        assert_eq!(current_user.display_name, "Ada Lovelace");
+        assert_eq!(transport.attempts.get(), 3);
+    }
+
+    #[test]
+    fn auth_client_handles_offline_timeout_gracefully() {
+        let session = TzapSessionRecord {
+            audience: SESSION_AUDIENCE_SIGN_TZAP.to_owned(),
+            access_token: TzapBearerToken::new("secret-token").unwrap(),
+            expires_at_unix_seconds: 200,
+            identity_assurance: trust::TzapIdentityAssurance::OauthVerifiedEmail,
+            selected_org_id: Some("org_123".to_owned()),
+            login_session_id: Some("login_session_123".to_owned()),
+        };
+        let transport = RetryFakeTransport {
+            response: TzapAuthHttpResponse { status_code: 200, body: Vec::new() },
+            attempts: std::cell::Cell::new(0),
+            fail_count: 0,
+            is_offline: true, // Always fails with transport error
+        };
+
+        let result = fetch_current_user(&transport, SIGN_TZAP_BASE_URL, &session);
+        assert!(matches!(result, Err(TzapAuthError::Transport { .. })));
+        assert_eq!(transport.attempts.get(), 3); // Exhausts retries
+    }
 }

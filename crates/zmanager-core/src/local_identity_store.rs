@@ -928,6 +928,18 @@ mod tests {
     }
 
     #[test]
+    fn file_identity_store_rejects_corrupted_json() {
+        let temp_dir = TestDir::new("rejects-corrupted-json");
+        let store = FileTzapLocalIdentityStore::new(temp_dir.path(""));
+        let legacy_path = store.inventory_path(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
+
+        fs::write(&legacy_path, b"{ corrupted_json: ").unwrap();
+
+        let error = store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap_err();
+        assert!(matches!(error, TzapLocalIdentityStoreError::Json(_)));
+    }
+
+    #[test]
     fn legacy_contacts_without_verification_state_are_not_claimed_verified() {
         let base = json!({
             "contact_id": "contact-1",

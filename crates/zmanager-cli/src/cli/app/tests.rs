@@ -88,6 +88,42 @@ fn password_prompt_strips_line_endings_without_logging_secret() {
 }
 
 #[test]
+fn password_prompt_preserves_utf8_encoding() {
+    assert_eq!(normalize_prompted_password("パスワード\r\n".to_owned(), 17), Some("パスワード".to_owned()));
+}
+
+#[test]
+fn retry_password_required_fails_if_prompts_disabled() {
+    let global = GlobalOptions { no_password_prompt: true, ..Default::default() };
+    let mut reported = String::new();
+    let code = retry_password_required(
+        &global,
+        "test: ",
+        Some("password: "),
+        |msg| reported = msg.to_owned(),
+        |_| std::process::ExitCode::SUCCESS,
+    );
+    // 2 is usage error
+    assert_eq!(format!("{code:?}"), format!("{:?}", std::process::ExitCode::from(2)));
+    assert_eq!(reported, "test: password required and prompts are disabled");
+}
+
+#[test]
+fn retry_password_required_fails_if_no_prompt_label() {
+    let global = GlobalOptions::default();
+    let mut reported = String::new();
+    let code = retry_password_required(
+        &global,
+        "test: ",
+        None,
+        |msg| reported = msg.to_owned(),
+        |_| std::process::ExitCode::SUCCESS,
+    );
+    assert_eq!(format!("{code:?}"), format!("{:?}", std::process::ExitCode::from(2)));
+    assert_eq!(reported, "test: password required but no prompt is available");
+}
+
+#[test]
 fn create_parser_accepts_tzap_x509_signing_options() {
     let mut request = CreateRequest::default();
     let mut global = GlobalOptions::default();

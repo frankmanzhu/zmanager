@@ -4859,6 +4859,13 @@ public func testArchive(request: TestArchiveRequest)throws  -> TestArchiveResult
     )
 })
 }
+public func tzapPublicMetadataDisplaySummary(archivePath: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_tzappublicmetadatadisplaysummary(
+        FfiConverterString.lower(archivePath),$0
+    )
+})
+}
 public func tzapPublicMetadataSummary(archivePath: String) -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_zmanager_ffi_fn_func_tzappublicmetadatasummary(
@@ -5077,6 +5084,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_testarchive() != 25757) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary() != 19687) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_tzappublicmetadatasummary() != 16201) {

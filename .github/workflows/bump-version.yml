@@ -1,0 +1,38 @@
+name: Bump Workspace Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New semver release version (e.g. 0.2.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  bump-version:
+    name: Bump Version to ${{ inputs.version }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run version bump script
+        run: |
+          chmod +x ./scripts/bump-version.sh
+          ./scripts/bump-version.sh "${{ inputs.version }}"
+
+      - name: Verify workspace tests
+        run: cargo test --workspace
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: bump version to v${{ inputs.version }}"
+          git push
