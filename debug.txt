@@ -27,3 +27,15 @@ drwxr-xr-x 6 runner runner 4096 Aug 10 04:32 ..
 -rw-r--r-- 1 runner runner 3751 Aug 10 04:32 README.md
 drwxr-xr-x 5 runner runner 4096 Aug 10 04:32 src
 drwxr-xr-x 2 runner runner 4096 Aug 10 04:32 tests
+    Updating crates.io index
+    Updating crates.io index
+   Packaging zmanager-core v2.0.1 (/home/runner/work/zmanager/zmanager/crates/zmanager-core)
+    Updating crates.io index
+error: failed to prepare local package for uploading
+
+Caused by:
+  failed to select a version for the requirement `zmanager-unrar = "^2.0.1"`
+  candidate versions found which didn't match: 1.0.8, 1.0.6, 1.0.5
+  location searched: crates.io index
+  required by package `zmanager-core v2.0.1 (/home/runner/work/zmanager/zmanager/crates/zmanager-core)`
+Cargo publish failed
