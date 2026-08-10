@@ -3838,3 +3838,15 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "tzap-core"
+version = "0.2.1"
+
+[[patch.unused]]
+name = "tzap-plugin-keywrap"
+version = "0.2.1"
+
+[[patch.unused]]
+name = "tzap-plugin-signing"
+version = "0.2.1"
