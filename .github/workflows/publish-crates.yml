@@ -85,8 +85,14 @@ jobs:
             else
               echo "Publishing $crate v$version..."
               cargo publish -p "$crate"
-              echo "Waiting 15 seconds for crates.io index to update..."
-              sleep 15
+              echo "Waiting for $crate v$version to appear in crates.io index..."
+              for i in {1..12}; do
+                if is_published "$crate" "$version"; then
+                  echo "✓ $crate v$version index updated"
+                  break
+                fi
+                sleep 10
+              done
             fi
           }
 
