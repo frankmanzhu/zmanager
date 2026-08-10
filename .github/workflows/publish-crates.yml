@@ -1,13 +1,10 @@
 name: Publish crates.io
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish:
@@ -16,12 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone tzap
-        shell: bash
-        run: |
-          TZAP_REV=$(cat tzap-rev.txt 2>/dev/null || echo "main")
-          git clone https://github.com/tzap-org/tzap.git ../tzap
-          git -C ../tzap checkout "$TZAP_REV" || git -C ../tzap checkout main
 
       - name: Install Rust
         run: |
@@ -85,35 +76,14 @@ jobs:
               echo "✓ $crate v$version already published — skipping"
             else
               echo "Publishing $crate v$version..."
-              cargo publish -p "$crate" >> debug.txt 2>&1 || { echo "Cargo publish failed" >> debug.txt; exit 1; }
+              cargo publish -p "$crate"
             fi
           }
 
-          echo "DEBUG: current directory: $(pwd)" > debug.txt
-          echo "DEBUG: ls -la ../tzap || echo missing" >> debug.txt
-          ls -la ../tzap >> debug.txt 2>&1 || true
-          echo "DEBUG: ls -la ../tzap/crates/tzap-core || echo missing" >> debug.txt
-          ls -la ../tzap/crates/tzap-core >> debug.txt 2>&1 || true
-
           publish_if_needed zmanager-libarchive-sys
-          git config user.name "bot"
-          git config user.email "bot@example.com"
-          git add debug.txt
-          git commit -m "debug logs" || true
-          git push || true
-
           publish_if_needed zmanager-libarchive
-          publish_if_needed zmanager-core
           publish_if_needed zmanager-apple-archive
           publish_if_needed zmanager-unrar
+          publish_if_needed zmanager-core
           publish_if_needed zmanager-ffi
           publish_if_needed zmanager-cli
-
-      - name: Push debug logs
-        if: always()
-        run: |
-          git config user.name "bot"
-          git config user.email "bot@example.com"
-          git add debug.txt || true
-          git commit -m "debug logs" || true
-          git push || true

@@ -33,8 +33,3 @@ zmanager-libarchive = { path = "crates/zmanager-libarchive", version = "2.0.1" }
 zmanager-libarchive-sys = { path = "crates/zmanager-libarchive-sys", version = "2.0.1" }
 zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.0.1" }
 
-[patch.crates-io]
-zmanager-libarchive-sys = { path = "crates/zmanager-libarchive-sys" }
-tzap-core = { path = "../tzap/crates/tzap-core" }
-tzap-plugin-keywrap = { path = "../tzap/crates/tzap-plugin-keywrap" }
-tzap-plugin-signing = { path = "../tzap/crates/tzap-plugin-signing" }
