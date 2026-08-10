@@ -101,5 +101,5 @@ jobs:
           publish_if_needed zmanager-apple-archive
           publish_if_needed zmanager-unrar
           publish_if_needed zmanager-core
-          publish_if_needed zmanager-ffi
+          # publish_if_needed zmanager-ffi
           publish_if_needed zmanager-cli
