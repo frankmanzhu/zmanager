@@ -11,7 +11,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.0.2"
+version = "2.0.1"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/tzap-org/zmanager"
@@ -25,13 +25,13 @@ all = "warn"
 pedantic = "warn"
 
 [workspace.dependencies]
-zmanager-apple-archive = { path = "crates/zmanager-apple-archive", version = "2.0.2" }
-zmanager-cli = { path = "crates/zmanager-cli", version = "2.0.2" }
-zmanager-core = { path = "crates/zmanager-core", version = "2.0.2" }
-zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.0.2" }
-zmanager-libarchive = { path = "crates/zmanager-libarchive", version = "2.0.2" }
-zmanager-libarchive-sys = { path = "crates/zmanager-libarchive-sys", version = "2.0.2" }
-zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.0.2" }
+zmanager-apple-archive = { path = "crates/zmanager-apple-archive", version = "2.0.1" }
+zmanager-cli = { path = "crates/zmanager-cli", version = "2.0.1" }
+zmanager-core = { path = "crates/zmanager-core", version = "2.0.1" }
+zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.0.1" }
+zmanager-libarchive = { path = "crates/zmanager-libarchive", version = "2.0.1" }
+zmanager-libarchive-sys = { path = "crates/zmanager-libarchive-sys", version = "2.0.1" }
+zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.0.1" }
 
 
 [patch.crates-io]
