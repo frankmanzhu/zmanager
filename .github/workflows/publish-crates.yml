@@ -1,10 +1,13 @@
 name: Publish crates.io
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   publish:
@@ -82,11 +85,23 @@ jobs:
               echo "✓ $crate v$version already published — skipping"
             else
               echo "Publishing $crate v$version..."
-              cargo publish -p "$crate"
+              cargo publish -p "$crate" >> debug.txt 2>&1 || { echo "Cargo publish failed" >> debug.txt; exit 1; }
             fi
           }
 
+          echo "DEBUG: current directory: $(pwd)" > debug.txt
+          echo "DEBUG: ls -la ../tzap || echo missing" >> debug.txt
+          ls -la ../tzap >> debug.txt 2>&1 || true
+          echo "DEBUG: ls -la ../tzap/crates/tzap-core || echo missing" >> debug.txt
+          ls -la ../tzap/crates/tzap-core >> debug.txt 2>&1 || true
+
           publish_if_needed zmanager-libarchive-sys
+          git config user.name "bot"
+          git config user.email "bot@example.com"
+          git add debug.txt
+          git commit -m "debug logs" || true
+          git push || true
+
           publish_if_needed zmanager-libarchive
           publish_if_needed zmanager-core
           publish_if_needed zmanager-apple-archive
