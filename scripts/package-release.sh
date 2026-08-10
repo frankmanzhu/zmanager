@@ -21,6 +21,11 @@ mkdir -p "$OUT_DIR"
 OUT_ABS="$(cd "$OUT_DIR" && pwd)"
 
 configure_static_linux_target() {
+  if [[ "$TARGET" == *"apple-darwin" ]]; then
+    export CC="${CC:-clang}"
+    export CXX="${CXX:-clang++}"
+  fi
+
   case "$TARGET" in
     *-unknown-linux-musl)
       local musl_abi
