@@ -85,6 +85,8 @@ jobs:
             else
               echo "Publishing $crate v$version..."
               cargo publish -p "$crate"
+              echo "Waiting 15 seconds for crates.io index to update..."
+              sleep 15
             fi
           }
 
