@@ -552,7 +552,7 @@ pub fn startCreate(request: StartCreateRequest) -> Result<StartJobResult, Zmanag
         match worker_result {
             Ok(Ok(summary)) => worker_registry.set_terminal_summary(&job_id, summary),
             Ok(Err(error)) => {
-                worker_registry.finish_with_error(&job_id, extraction_worker_error(error));
+                worker_registry.finish_with_error(&job_id, create_worker_error(error));
             }
             Err(_) => {
                 worker_registry.finish_with_error(
@@ -585,6 +585,10 @@ fn extraction_worker_error(error: ZmanagerGuiError) -> BridgeError {
     } else {
         error
     }
+}
+
+fn create_worker_error(error: ZmanagerGuiError) -> BridgeError {
+    bridge_error_from_mobile(error)
 }
 
 #[allow(non_snake_case)]

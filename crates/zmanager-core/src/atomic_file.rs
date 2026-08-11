@@ -73,8 +73,23 @@ impl AtomicOutputFile {
             remove_file_destination_for_replace(&self.final_path)?;
             fs::rename(&self.temp_path, &self.final_path)?;
         } else {
-            fs::hard_link(&self.temp_path, &self.final_path)?;
-            let _ = fs::remove_file(&self.temp_path);
+            match fs::hard_link(&self.temp_path, &self.final_path) {
+                Ok(()) => {
+                    let _ = fs::remove_file(&self.temp_path);
+                }
+                Err(error)
+                    if matches!(error.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported)
+                        && !self.final_path.exists() =>
+                {
+                    // Some app sandboxes (notably Android app filesystems)
+                    // reject hard links even within one directory. The
+                    // destination was validated as absent, so a same-volume
+                    // rename preserves the refuse policy without weakening
+                    // collision safety.
+                    fs::rename(&self.temp_path, &self.final_path)?;
+                }
+                Err(error) => return Err(error),
+            }
         }
         self.committed = true;
         Ok(())

@@ -15,6 +15,7 @@ use std::fmt;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::{Mutex, PoisonError};
 use zeroize::Zeroizing;
 
 const ERAR_SUCCESS: c_int = 0;
@@ -37,6 +38,12 @@ const ZMU_UNRAR_DESTINATION_TOO_LONG: c_int = -1001;
 const KIBIBYTE_BYTES: u64 = 1024;
 const MEBIBYTE_BYTES: u64 = 1024 * KIBIBYTE_BYTES;
 const MAX_LARGE_DICTIONARY_MIB: u64 = 512;
+
+// The bundled UnRAR implementation keeps error state in a process-global
+// `ErrHandler`, so separate archive handles are not thread-safe with respect
+// to one another. Keep each complete bridge operation isolated from every
+// other operation.
+static UNRAR_OPERATION_LOCK: Mutex<()> = Mutex::new(());
 
 /// Maximum RAR dictionary size accepted by the bundled `UnRAR` bridge.
 pub const MAX_LARGE_DICTIONARY_BYTES: u64 = MAX_LARGE_DICTIONARY_MIB * MEBIBYTE_BYTES;
@@ -174,6 +181,7 @@ pub fn large_dictionary_allowed_bytes(bytes: u64) -> bool {
 ///
 /// Returns [`UnrarError`] when the archive cannot be opened, decrypted, or read.
 pub fn list_archive(archive: impl AsRef<Path>, password: Option<&str>) -> Result<Vec<RarEntry>, UnrarError> {
+    let _operation_guard = UNRAR_OPERATION_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     let archive = path_to_cstring(archive.as_ref())?;
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ListContext { entries: Vec::new(), error: None };
@@ -227,6 +235,7 @@ pub fn extract_selected_with_progress(
     selections: &BTreeMap<String, PathBuf>,
     progress: Option<&mut dyn FnMut(String, u64)>,
 ) -> Result<(), UnrarError> {
+    let _operation_guard = UNRAR_OPERATION_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     let archive = path_to_cstring(archive.as_ref())?;
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ExtractContext { selections, error: None, progress };
