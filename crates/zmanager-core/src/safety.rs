@@ -891,14 +891,27 @@ fn archive_path_selected(path: &str, includes: &[String], excludes: &[String]) -
 
 #[must_use]
 pub fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
-    // A trailing `/**` matches the directory itself and everything below it:
-    // `a/**` matches `a/`, `a/b`, `a/b/c`. Because the prefix is trimmed to
-    // just `a/`, a pattern like `a/**/**` degrades to the same prefix match
-    // and behaves like `a/**` — matching `a/` and everything below — which is
-    // the conservative interpretation for a redundant glob.
-    pattern == path
-        || (pattern.ends_with("/**") && path.starts_with(pattern.trim_end_matches("**")))
-        || wildcard_matches(pattern.as_bytes(), path.as_bytes())
+    let norm_pattern = pattern.replace('\\', "/");
+    let norm_path = path.replace('\\', "/");
+
+    if norm_pattern == norm_path {
+        return true;
+    }
+
+    if norm_pattern.ends_with("/**") && norm_path.starts_with(norm_pattern.trim_end_matches("**")) {
+        return true;
+    }
+
+    let clean_pattern = norm_pattern.trim_end_matches('/');
+    if !clean_pattern.is_empty()
+        && !clean_pattern.contains('*')
+        && !clean_pattern.contains('?')
+        && (norm_path == clean_pattern || norm_path.starts_with(&format!("{clean_pattern}/")))
+    {
+        return true;
+    }
+
+    wildcard_matches(norm_pattern.as_bytes(), norm_path.as_bytes())
 }
 
 fn wildcard_matches(pattern: &[u8], value: &[u8]) -> bool {
@@ -1449,8 +1462,25 @@ mod tests {
         assert!(archive_entry_matches_selected("Antigravity-arm64/", "Antigravity-arm64"));
         assert!(archive_entry_matches_selected("Antigravity-arm64", "Antigravity-arm64/"));
         assert!(archive_entry_matches_selected("./Antigravity-arm64", "./Antigravity-arm64/"));
+        assert!(archive_entry_matches_selected("folder\\sub\\file.txt", "folder"));
+        assert!(archive_entry_matches_selected("folder\\sub\\file.txt", "folder/"));
+        assert!(archive_entry_matches_selected("folder/sub/file.txt", "folder\\"));
+        assert!(archive_entry_matches_selected("folder\\sub\\file.txt", "folder\\sub"));
+        assert!(archive_entry_matches_selected("folder\\sub\\file.txt", "folder\\sub\\"));
         assert!(!archive_entry_matches_selected("Antigravity-arm64-v2/lib.so", "Antigravity-arm64"));
         assert!(archive_entry_matches_selected("file.txt", "file.txt"));
         assert!(!archive_entry_matches_selected("other.txt", "file.txt"));
+    }
+
+    #[test]
+    fn test_archive_pattern_matches_directory_and_backslashes() {
+        assert!(archive_pattern_matches("folder", "folder/file.txt"));
+        assert!(archive_pattern_matches("folder/", "folder/file.txt"));
+        assert!(archive_pattern_matches("folder\\", "folder/file.txt"));
+        assert!(archive_pattern_matches("folder\\sub", "folder/sub/file.txt"));
+        assert!(archive_pattern_matches("folder\\sub\\", "folder/sub/file.txt"));
+        assert!(archive_pattern_matches("folder/sub", "folder\\sub\\file.txt"));
+        assert!(!archive_pattern_matches("folder-v2", "folder/file.txt"));
+        assert!(archive_pattern_matches("folder\\*.txt", "folder/file.txt"));
     }
 }

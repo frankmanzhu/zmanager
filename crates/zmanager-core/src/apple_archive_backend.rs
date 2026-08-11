@@ -522,7 +522,7 @@ fn extract_apple_archive_inner(
 
     while let Some(entry) = reader.next_entry()? {
         if let Some(selected_entry) = selected_entry
-            && entry.path() != selected_entry
+            && !crate::safety::archive_entry_matches_selected(entry.path(), selected_entry)
         {
             reader.skip_entry_data(&entry)?;
             continue;

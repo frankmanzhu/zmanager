@@ -487,8 +487,14 @@ pub fn extract_entry_with_options(
                 policy,
                 options.password,
             )?;
+            let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
+            let destination_path = if rel_dest.is_empty() {
+                destination.to_path_buf()
+            } else {
+                destination.join(rel_dest)
+            };
             Ok(EntryExtractReport {
-                destination_path: destination.join(entry_path),
+                destination_path,
                 written_bytes: report.written_bytes,
                 metadata_diagnostics: Vec::new(),
             })
@@ -909,62 +915,75 @@ fn extract_tzap_entry(
     restore_options: TzapRestoreOptions,
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_index_with_optional_password(archive_path, password)?;
-    let entry = listing
+    let matching_entries: Vec<_> = listing
         .entries
         .into_iter()
-        .find(|entry| entry.path == entry_path)
-        .ok_or_else(|| ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() })?;
-    let extraction_kind = tzap_extraction_kind(entry.kind, &entry.path)?;
-    let safety_entry = ExtractionEntry {
-        archive_path: entry.path,
-        kind: extraction_kind,
-        uncompressed_size: Some(entry.size),
-        compressed_size: None,
-    };
-    let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
-    let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
+        .filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, entry_path))
+        .collect();
 
-    match &safety_entry.kind {
-        ExtractionEntryKind::Directory => {
-            let mut empty = io::empty();
-            let written_bytes = write_selected_entry(&mut empty, &safety_entry, &write_plan)?;
-            Ok(EntryExtractReport {
-                destination_path: write_plan.destination_path,
-                written_bytes,
-                metadata_diagnostics: Vec::new(),
-            })
-        }
-        ExtractionEntryKind::File => {
-            let key = match password {
-                Some(password) => crate::tzap_backend::TzapExtractKeySource::Password(password),
-                None => crate::tzap_backend::TzapExtractKeySource::None,
-            };
-            let Some(report) = crate::tzap_backend::extract_tzap_file_to_destination(
-                archive_path,
-                key,
-                entry_path,
-                &write_plan.destination_path,
-                write_plan.replace_existing,
-                restore_options,
-            )?
-            else {
-                return Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() });
-            };
-            Ok(EntryExtractReport {
-                destination_path: write_plan.destination_path,
-                written_bytes: report.written_bytes,
-                metadata_diagnostics: report.metadata_diagnostics,
-            })
-        }
-        // Unreachable: tzap_extraction_kind rejects link-like and special
-        // TZAP entries before planning, so no such kind reaches this match.
-        // Kept as a graceful fallback rather than a panic so a future change
-        // to the kind mapping cannot turn hostile input into a crash.
-        _ => Err(ArchiveBrowserError::UnsupportedEntry {
-            path: safety_entry.archive_path,
-            kind: BrowserEntryKind::Special,
-        }),
+    if matching_entries.is_empty() {
+        return Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() });
     }
+
+    let mut total_written_bytes = 0u64;
+    let mut all_diagnostics = Vec::new();
+    let mut primary_destination_path = None;
+
+    for entry in matching_entries {
+        let extraction_kind = tzap_extraction_kind(entry.kind, &entry.path)?;
+        let safety_entry = ExtractionEntry {
+            archive_path: entry.path.clone(),
+            kind: extraction_kind,
+            uncompressed_size: Some(entry.size),
+            compressed_size: None,
+        };
+        let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
+        let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
+        if primary_destination_path.is_none() {
+            primary_destination_path = Some(write_plan.destination_path.clone());
+        }
+
+        match &safety_entry.kind {
+            ExtractionEntryKind::Directory => {
+                let mut empty = io::empty();
+                let written_bytes = write_selected_entry(&mut empty, &safety_entry, &write_plan)?;
+                total_written_bytes = total_written_bytes.saturating_add(written_bytes);
+            }
+            ExtractionEntryKind::File => {
+                let key = match password {
+                    Some(password) => crate::tzap_backend::TzapExtractKeySource::Password(password),
+                    None => crate::tzap_backend::TzapExtractKeySource::None,
+                };
+                if let Some(report) = crate::tzap_backend::extract_tzap_file_to_destination(
+                    archive_path,
+                    key,
+                    &entry.path,
+                    &write_plan.destination_path,
+                    write_plan.replace_existing,
+                    restore_options,
+                )? {
+                    total_written_bytes = total_written_bytes.saturating_add(report.written_bytes);
+                    all_diagnostics.extend(report.metadata_diagnostics);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
+    let destination_path = primary_destination_path.unwrap_or_else(|| {
+        if rel_dest.is_empty() {
+            destination.to_path_buf()
+        } else {
+            destination.join(rel_dest)
+        }
+    });
+
+    Ok(EntryExtractReport {
+        destination_path,
+        written_bytes: total_written_bytes,
+        metadata_diagnostics: all_diagnostics,
+    })
 }
 
 fn extract_zip_entry(
