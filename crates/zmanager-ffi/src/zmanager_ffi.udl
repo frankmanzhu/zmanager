@@ -224,6 +224,7 @@ dictionary PlanExtractResult {
     u64? estimated_bytes;
     boolean can_start;
     sequence<BridgeError> warnings;
+    string plan_token;
 };
 
 enum CreateArchiveFormat {
@@ -366,6 +367,7 @@ dictionary StartExtractRequest {
     sequence<string> selected_paths;
     u64 strip_components;
     ExtractionCollisionPolicy collision_policy;
+    string plan_token;
 };
 
 dictionary StartJobResult {

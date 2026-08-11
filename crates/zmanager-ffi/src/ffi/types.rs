@@ -167,7 +167,7 @@ pub struct MaterializePreviewResult {
     pub warnings: Vec<BridgeError>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExtractionCollisionPolicy {
     Refuse,
     Replace,
@@ -218,6 +218,7 @@ pub struct PlanExtractResult {
     pub estimated_bytes: Option<u64>,
     pub can_start: bool,
     pub warnings: Vec<BridgeError>,
+    pub plan_token: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -377,6 +378,7 @@ pub struct StartExtractRequest {
     pub selected_paths: Vec<String>,
     pub strip_components: u64,
     pub collision_policy: ExtractionCollisionPolicy,
+    pub plan_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

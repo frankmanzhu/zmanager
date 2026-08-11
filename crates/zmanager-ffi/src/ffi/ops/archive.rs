@@ -1,9 +1,13 @@
 //! Archive healthcheck/detect/list/test/materialize/plan ops and the
 //! job-spawning entry points.
 
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
+use std::time::UNIX_EPOCH;
+
+use sha2::{Digest as _, Sha256};
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use zmanager_core::apple_archive_backend;
@@ -30,17 +34,140 @@ use crate::ffi::ops::jobs::{
 };
 use crate::ffi::types::{
     ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult,
-    ClearSensitiveStateResult, CreatePlanEntry, DetectArchiveRequest, DetectArchiveResult, ExtractionPlanEntryStatus,
-    HealthcheckResult, ListArchiveRequest, ListArchiveResult, MaterializePreviewRequest, MaterializePreviewResult,
-    PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult, PollJobEventsRequest,
-    PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest,
-    TestArchiveResult, ZmanagerGuiError, usize_to_u64,
+    ClearSensitiveStateResult, CreatePlanEntry, DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy,
+    ExtractionPlanEntryStatus, HealthcheckResult, ListArchiveRequest, ListArchiveResult, MaterializePreviewRequest,
+    MaterializePreviewResult, PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult,
+    PollJobEventsRequest, PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult,
+    TestArchiveRequest, TestArchiveResult, ZmanagerGuiError, usize_to_u64,
 };
 use crate::ffi::util::{
     classify_archive_path, create_format_label, ensure_destination_archive_path, ensure_destination_root_path,
     ensure_existing_file_path, ensure_existing_source_paths, ensure_non_empty_entry_path, format_capabilities,
     format_label, map_browser_entry_kind, password_ref, sanitize_password, usize_from_u64,
 };
+
+const MAX_RETAINED_EXTRACTION_PLANS: usize = 64;
+
+static EXTRACTION_PLAN_REGISTRY: OnceLock<Mutex<ExtractionPlanRegistry>> = OnceLock::new();
+
+#[derive(Default)]
+struct ExtractionPlanRegistry {
+    next_plan_index: u64,
+    plans: HashMap<String, ExtractionPlanBinding>,
+    insertion_order: VecDeque<String>,
+}
+
+struct ExtractionPlanBinding {
+    archive_path: String,
+    destination_root: String,
+    archive_size: u64,
+    archive_modified_nanos: Option<u128>,
+    password_digest: [u8; 32],
+    selected_paths: Vec<String>,
+    strip_components: u64,
+    collision_policy: ExtractionCollisionPolicy,
+}
+
+impl ExtractionPlanBinding {
+    fn from_request(
+        archive_path: String,
+        destination_root: String,
+        password: Option<&str>,
+        selected_paths: Vec<String>,
+        strip_components: u64,
+        collision_policy: ExtractionCollisionPolicy,
+    ) -> Result<Self, ZmanagerGuiError> {
+        let metadata = std::fs::metadata(&archive_path).map_err(|_| {
+            bridge_error(
+                ERROR_INVALID_REQUEST,
+                "Unable to read the archive while preparing extraction.",
+                hint("Reopen the archive and review the extraction plan again."),
+                BridgeSeverity::Warning,
+                true,
+            )
+        })?;
+        let archive_modified_nanos = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos());
+
+        Ok(Self {
+            archive_path,
+            destination_root,
+            archive_size: metadata.len(),
+            archive_modified_nanos,
+            password_digest: extraction_password_digest(password),
+            selected_paths,
+            strip_components,
+            collision_policy,
+        })
+    }
+
+    fn matches(&self, other: &Self) -> bool {
+        self.archive_path == other.archive_path
+            && self.destination_root == other.destination_root
+            && self.archive_size == other.archive_size
+            && self.archive_modified_nanos == other.archive_modified_nanos
+            && self.password_digest == other.password_digest
+            && self.selected_paths == other.selected_paths
+            && self.strip_components == other.strip_components
+            && self.collision_policy == other.collision_policy
+    }
+}
+
+fn extraction_plan_registry() -> &'static Mutex<ExtractionPlanRegistry> {
+    EXTRACTION_PLAN_REGISTRY.get_or_init(|| Mutex::new(ExtractionPlanRegistry::default()))
+}
+
+fn register_extraction_plan(binding: ExtractionPlanBinding) -> String {
+    let mut registry = extraction_plan_registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    registry.next_plan_index = registry.next_plan_index.saturating_add(1);
+    let token = format!("plan-{}-{}", std::process::id(), registry.next_plan_index);
+
+    while registry.plans.len() >= MAX_RETAINED_EXTRACTION_PLANS {
+        let Some(oldest_token) = registry.insertion_order.pop_front() else {
+            break;
+        };
+        registry.plans.remove(&oldest_token);
+    }
+
+    registry.insertion_order.push_back(token.clone());
+    registry.plans.insert(token.clone(), binding);
+    token
+}
+
+fn consume_extraction_plan(token: &str, candidate: ExtractionPlanBinding) -> Result<(), ZmanagerGuiError> {
+    let mut registry = extraction_plan_registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(expected) = registry.plans.remove(token) else {
+        return Err(invalid_extraction_plan_error());
+    };
+    registry.insertion_order.retain(|registered_token| registered_token != token);
+
+    if expected.matches(&candidate) { Ok(()) } else { Err(invalid_extraction_plan_error()) }
+}
+
+fn extraction_password_digest(password: Option<&str>) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    match password {
+        Some(value) => {
+            digest.update(b"zmanager-extraction-plan-password-present\0");
+            digest.update(value.as_bytes());
+        }
+        None => digest.update(b"zmanager-extraction-plan-password-absent\0"),
+    }
+    digest.finalize().into()
+}
+
+fn invalid_extraction_plan_error() -> ZmanagerGuiError {
+    bridge_error(
+        ERROR_INVALID_REQUEST,
+        "The extraction plan is no longer valid.",
+        hint("Review the extraction plan again before starting."),
+        BridgeSeverity::Warning,
+        true,
+    )
+}
 
 pub fn healthcheck() -> HealthcheckResult {
     let report = zmanager_core::healthcheck();
@@ -234,6 +361,14 @@ pub fn planExtract(request: PlanExtractRequest) -> Result<PlanExtractResult, Zma
     let strip_components = usize_from_u64(request.strip_components, "stripComponents")?;
     let password = password_ref(&request.password);
     let selected_paths = sanitize_selected_paths(request.selected_paths);
+    let plan_binding = ExtractionPlanBinding::from_request(
+        archive_path.clone(),
+        destination_root.clone(),
+        password,
+        selected_paths.clone(),
+        request.strip_components,
+        request.collision_policy,
+    )?;
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
     let listing = archive_browser::list_entries_with_options(path, BrowserListOptions { password })
@@ -281,6 +416,9 @@ pub fn planExtract(request: PlanExtractRequest) -> Result<PlanExtractResult, Zma
     let blocked_entries =
         usize_to_u64(entries.iter().filter(|entry| matches!(entry.status, ExtractionPlanEntryStatus::Block)).count());
 
+    let can_start = writable_entries > 0 && blocked_entries == 0;
+    let plan_token = if can_start { register_extraction_plan(plan_binding) } else { String::new() };
+
     Ok(PlanExtractResult {
         archive_path,
         destination_root,
@@ -292,8 +430,9 @@ pub fn planExtract(request: PlanExtractRequest) -> Result<PlanExtractResult, Zma
         skipped_entries,
         blocked_entries,
         estimated_bytes: has_estimated_bytes.then_some(estimated_bytes),
-        can_start: writable_entries > 0,
+        can_start,
         warnings,
+        plan_token,
     })
 }
 
@@ -404,7 +543,7 @@ pub fn startCreate(request: StartCreateRequest) -> Result<StartJobResult, Zmanag
         match worker_result {
             Ok(Ok(summary)) => worker_registry.set_terminal_summary(&job_id, summary),
             Ok(Err(error)) => {
-                worker_registry.finish_with_error(&job_id, bridge_error_from_mobile(error));
+                worker_registry.finish_with_error(&job_id, extraction_worker_error(error));
             }
             Err(_) => {
                 worker_registry.finish_with_error(
@@ -424,6 +563,21 @@ pub fn startCreate(request: StartCreateRequest) -> Result<StartJobResult, Zmanag
     Ok(result)
 }
 
+fn extraction_worker_error(error: ZmanagerGuiError) -> BridgeError {
+    let error = bridge_error_from_mobile(error);
+    if matches!(error.code.as_str(), "io_error" | "not_found" | ERROR_OPERATION_FAILED) {
+        BridgeError {
+            code: error.code,
+            message: "Unable to write the staged extraction.".to_string(),
+            recovery_hint: hint("Check available storage and retry the extraction."),
+            severity: error.severity,
+            retryable: true,
+        }
+    } else {
+        error
+    }
+}
+
 #[allow(non_snake_case)]
 pub fn startExtract(request: StartExtractRequest) -> Result<StartJobResult, ZmanagerGuiError> {
     let archive_path = ensure_existing_file_path(request.archive_path, "archivePath")?;
@@ -431,6 +585,15 @@ pub fn startExtract(request: StartExtractRequest) -> Result<StartJobResult, Zman
     let strip_components = usize_from_u64(request.strip_components, "stripComponents")?;
     let selected_paths = sanitize_selected_paths(request.selected_paths);
     let password = sanitize_password(request.password);
+    let plan_binding = ExtractionPlanBinding::from_request(
+        archive_path.clone(),
+        destination_root.clone(),
+        password.as_deref(),
+        selected_paths.clone(),
+        request.strip_components,
+        request.collision_policy,
+    )?;
+    consume_extraction_plan(&request.plan_token, plan_binding)?;
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
     let (_, can_extract, _) = format_capabilities(format);

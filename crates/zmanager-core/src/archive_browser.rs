@@ -707,7 +707,12 @@ fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing
             path: entry.name,
             kind: sevenz_entry_kind(entry.kind),
             size: Some(entry.size),
-            compressed_size: Some(entry.compressed_size),
+            // Solid 7z archives report the packed size only for the first
+            // entry in a block. A zero here means "not attributable to this
+            // entry", not a genuinely zero-byte compressed stream; exposing
+            // it as a size makes extraction safety reject ordinary entries
+            // as implausible compression-ratio bombs.
+            compressed_size: (entry.compressed_size > 0).then_some(entry.compressed_size),
             modified: entry.modified.and_then(system_time_string),
             mode: entry.mode,
             metadata_diagnostics: Vec::new(),

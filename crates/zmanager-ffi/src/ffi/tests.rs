@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use zmanager_core::jobs::{CancellationToken, JobEvent as CoreJobEvent, JobKind as CoreJobKind};
-use zmanager_core::manifest::{PlanOptions, plan_archive};
+use zmanager_core::manifest::{PlanOptions, plan_archive, plan_archives};
+use zmanager_core::sevenz_backend::{SevenZCreateOptions, create_7z_from_manifest};
 use zmanager_core::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
 
 use tzap_core::format::FormatError;
@@ -127,6 +128,33 @@ fn list_archive_reads_real_zip_through_core() {
     assert!(result.entry_count >= 1);
     assert!(result.entries.iter().any(|entry| entry.path.ends_with("readme.txt")));
     assert!(result.total_size.is_some());
+}
+
+#[test]
+fn plan_extract_starts_for_a_real_7z_archive() {
+    let temp = TestDir::new("plan-extract-real-7z");
+    temp.write_file("readme.txt", b"hello mobile bridge\n");
+    temp.write_file("manifest.json", b"{}\n");
+    let archive = temp.path("archive.7z");
+    let destination = temp.path("staging");
+    let manifest = plan_archives([temp.path("readme.txt"), temp.path("manifest.json")], &PlanOptions::default())
+        .expect("fixture manifest should be planned");
+    create_7z_from_manifest(&manifest, &archive, &SevenZCreateOptions::default())
+        .expect("fixture archive should be created through zmanager-core");
+
+    let plan = planExtract(PlanExtractRequest {
+        archive_path: archive.to_string_lossy().to_string(),
+        destination_root: destination.to_string_lossy().to_string(),
+        password: None,
+        selected_paths: Vec::new(),
+        strip_components: 0,
+        collision_policy: ExtractionCollisionPolicy::Replace,
+    })
+    .expect("7z plan should be created");
+
+    assert!(plan.can_start, "7z plan should be startable: {plan:?}");
+    assert_eq!(plan.blocked_entries, 0);
+    assert!(!plan.plan_token.is_empty());
 }
 
 #[test]
@@ -356,6 +384,7 @@ fn start_extract_job_extracts_zip_and_reports_terminal_summary() {
         selected_paths: Vec::new(),
         strip_components: 0,
         collision_policy: ExtractionCollisionPolicy::Refuse,
+        plan_token: approved_refuse_plan_token(&fixture.archive, &destination, None, Vec::new()),
     })
     .expect("extract job should start");
 
@@ -376,6 +405,27 @@ fn start_extract_job_extracts_zip_and_reports_terminal_summary() {
         fs::read_to_string(destination.join(entry_path)).expect("extracted file should be readable"),
         "hello mobile bridge\n"
     );
+}
+
+#[test]
+fn start_extract_rejects_a_plan_token_when_the_reviewed_request_changed() {
+    let fixture = create_test_zip("start-extract-plan-token");
+    let destination = fixture.temp.path("out");
+    let plan_token = approved_refuse_plan_token(&fixture.archive, &destination, None, Vec::new());
+
+    let error = startExtract(StartExtractRequest {
+        archive_path: fixture.archive.to_string_lossy().to_string(),
+        destination_root: destination.to_string_lossy().to_string(),
+        password: None,
+        selected_paths: vec![readme_entry_path(&fixture.archive)],
+        strip_components: 0,
+        collision_policy: ExtractionCollisionPolicy::Refuse,
+        plan_token,
+    })
+    .expect_err("a changed selection must require a new extraction plan");
+
+    assert_bridge_error_code(error, ERROR_INVALID_REQUEST);
+    assert!(!destination.exists(), "rejected plan tokens must not write output");
 }
 
 #[test]
@@ -531,6 +581,7 @@ fn start_extract_job_honors_selected_paths() {
         selected_paths: vec![entry_path.clone()],
         strip_components: 0,
         collision_policy: ExtractionCollisionPolicy::Refuse,
+        plan_token: approved_refuse_plan_token(&fixture.archive, &destination, None, vec![entry_path.clone()]),
     })
     .expect("selected extract job should start");
 
@@ -559,6 +610,7 @@ fn clear_sensitive_state_removes_retained_terminal_jobs() {
         selected_paths: Vec::new(),
         strip_components: 0,
         collision_policy: ExtractionCollisionPolicy::Refuse,
+        plan_token: approved_refuse_plan_token(&fixture.archive, &destination, Some(" secret "), Vec::new()),
     })
     .expect("sensitive extract job should start");
     let terminal = wait_for_terminal_job(&started.job_id);
@@ -611,6 +663,7 @@ fn poll_job_events_uses_sequence_cursor() {
         selected_paths: Vec::new(),
         strip_components: 0,
         collision_policy: ExtractionCollisionPolicy::Refuse,
+        plan_token: approved_refuse_plan_token(&fixture.archive, &destination, None, Vec::new()),
     })
     .expect("extract job should start");
 
@@ -948,6 +1001,27 @@ fn assert_bridge_error_code(error: ZmanagerGuiError, expected: &str) {
     match error {
         ZmanagerGuiError::Bridge { code, .. } => assert_eq!(code, expected),
     }
+}
+
+fn approved_refuse_plan_token(
+    archive: &Path,
+    destination: &Path,
+    password: Option<&str>,
+    selected_paths: Vec<String>,
+) -> String {
+    let plan = planExtract(PlanExtractRequest {
+        archive_path: archive.to_string_lossy().to_string(),
+        destination_root: destination.to_string_lossy().to_string(),
+        password: password.map(ToOwned::to_owned),
+        selected_paths,
+        strip_components: 0,
+        collision_policy: ExtractionCollisionPolicy::Refuse,
+    })
+    .expect("extraction plan should be approved for the test fixture");
+
+    assert!(plan.can_start, "test fixture plan should be startable");
+    assert!(!plan.plan_token.is_empty(), "startable plan should have an opaque token");
+    plan.plan_token
 }
 
 fn wait_for_terminal_job(job_id: &str) -> PollJobEventsResult {
