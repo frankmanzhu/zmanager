@@ -867,16 +867,41 @@ pub fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
 }
 
 fn wildcard_matches(pattern: &[u8], value: &[u8]) -> bool {
-    if pattern.is_empty() {
-        return value.is_empty();
+    // Keep the matcher linear in the pattern and value lengths. The previous
+    // recursive implementation tried both branches of every `*`, which made
+    // patterns such as `*a*a*a*a*b` take exponential time on a long
+    // non-matching path. Include/exclude patterns are caller-controlled, so
+    // this is a real extraction and manifest-planning hot path rather than a
+    // theoretical micro-optimization.
+    let mut pattern_index = 0;
+    let mut value_index = 0;
+    let mut last_star = None;
+    let mut star_value_index = 0;
+
+    while value_index < value.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == value[value_index])
+        {
+            pattern_index += 1;
+            value_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            last_star = Some(pattern_index);
+            pattern_index += 1;
+            star_value_index = value_index;
+        } else if let Some(star_index) = last_star {
+            pattern_index = star_index + 1;
+            star_value_index += 1;
+            value_index = star_value_index;
+        } else {
+            return false;
+        }
     }
-    if pattern[0] == b'*' {
-        return wildcard_matches(&pattern[1..], value) || (!value.is_empty() && wildcard_matches(pattern, &value[1..]));
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
     }
-    if !value.is_empty() && (pattern[0] == b'?' || pattern[0] == value[0]) {
-        return wildcard_matches(&pattern[1..], &value[1..]);
-    }
-    false
+
+    pattern_index == pattern.len()
 }
 
 fn strip_archive_components(path: &str, count: usize) -> Option<String> {
@@ -995,7 +1020,7 @@ mod tests {
     use super::{
         ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionLimits, ExtractionPolicy,
         ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteConflict, OverwriteDecision, OverwritePolicy,
-        OverwriteResolver, UnsafeFilePolicy, deferred_link_dependency_order,
+        OverwriteResolver, UnsafeFilePolicy, archive_pattern_matches, deferred_link_dependency_order,
         next_available_destination_path_with_budget, normalize_archive_path, prepare_destination_root,
     };
     use crate::test_support::TestDir;
@@ -1021,6 +1046,17 @@ mod tests {
     fn normalizes_archive_paths() {
         assert_eq!(normalize_archive_path("./dir\\file.txt").unwrap(), "dir/file.txt");
         assert_eq!(normalize_archive_path("dir//file.txt").unwrap(), "dir/file.txt");
+    }
+
+    #[test]
+    fn wildcard_patterns_match_without_backtracking_explosion() {
+        assert!(archive_pattern_matches("src/*.rs", "src/main.rs"));
+        assert!(archive_pattern_matches("src/???.rs", "src/lib.rs"));
+        assert!(!archive_pattern_matches("src/*.rs", "src/main.txt"));
+
+        let pattern = format!("{}b", "*a".repeat(64));
+        let path = format!("{}c", "a".repeat(256));
+        assert!(!archive_pattern_matches(&pattern, &path));
     }
 
     #[test]

@@ -371,12 +371,11 @@ pub fn visit_entries_with_options(
         return visit_zip_entries(path, visitor);
     }
     if is_tzap_archive_path(path) {
-        let listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, options.password)?;
-        let mut entries = listing.entries.clone();
-        entries.sort_by_key(|e| e.path.matches('/').count());
+        let mut listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, options.password)?;
+        listing.entries.sort_by_key(|entry| entry.path.matches('/').count());
 
         let mut visited = 0;
-        for entry in &entries {
+        for entry in &listing.entries {
             let browser_entry = tzap_browser_entry(&listing, entry);
             if !visitor(browser_entry) {
                 return Err(ArchiveBrowserError::Cancelled);
@@ -854,7 +853,7 @@ fn extract_tzap_entry(
     password: Option<&str>,
     restore_options: TzapRestoreOptions,
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    let listing = crate::tzap_backend::list_tzap_with_optional_password(archive_path, password)?;
+    let listing = crate::tzap_backend::list_tzap_index_with_optional_password(archive_path, password)?;
     let entry = listing
         .entries
         .into_iter()

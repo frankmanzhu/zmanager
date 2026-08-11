@@ -191,6 +191,7 @@ pub(crate) struct MultiVolumeReader {
 struct MultiVolumePart {
     path: PathBuf,
     file: File,
+    file_position: u64,
     start: u64,
     len: u64,
 }
@@ -202,7 +203,7 @@ impl MultiVolumeReader {
         for path in paths {
             let file = File::open(&path).map_err(|source| SevenZError::Io { path: path.clone(), source })?;
             let len = file.metadata().map_err(|source| SevenZError::Io { path: path.clone(), source })?.len();
-            parts.push(MultiVolumePart { path, file, start: total_len, len });
+            parts.push(MultiVolumePart { path, file, file_position: 0, start: total_len, len });
             total_len = total_len.checked_add(len).ok_or_else(|| {
                 io_error(Path::new("archive.7z.001"), io::ErrorKind::InvalidInput, "7z volume set is too large")
             })?;
@@ -211,9 +212,9 @@ impl MultiVolumeReader {
     }
 
     fn current_part_index(&self) -> Option<usize> {
-        self.parts
-            .iter()
-            .position(|part| self.position >= part.start && self.position < part.start.saturating_add(part.len))
+        let index = self.parts.partition_point(|part| part.start <= self.position).checked_sub(1)?;
+        let part = self.parts.get(index)?;
+        (self.position < part.start.saturating_add(part.len)).then_some(index)
     }
 }
 
@@ -232,7 +233,10 @@ impl Read for MultiVolumeReader {
             let offset = self.position.saturating_sub(part.start);
             let remaining_in_part =
                 usize::try_from(part.len.saturating_sub(offset)).unwrap_or(usize::MAX).min(buffer.len());
-            part.file.seek(SeekFrom::Start(offset))?;
+            if part.file_position != offset {
+                part.file.seek(SeekFrom::Start(offset))?;
+                part.file_position = offset;
+            }
             let read = part.file.read(&mut buffer[..remaining_in_part])?;
             if read == 0 {
                 return Err(io::Error::new(
@@ -240,10 +244,18 @@ impl Read for MultiVolumeReader {
                     format!("unexpected EOF in {}", part.path.display()),
                 ));
             }
+            let read = u64::try_from(read)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
             self.position = self
                 .position
-                .checked_add(u64::try_from(read).unwrap_or(0))
+                .checked_add(read)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume position overflow"))?;
+            part.file_position = part
+                .file_position
+                .checked_add(read)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume file position overflow"))?;
+            let read = usize::try_from(read)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
             copied += read;
             buffer = &mut buffer[read..];
         }
@@ -292,12 +304,13 @@ fn io_error(path: &Path, kind: io::ErrorKind, message: impl Into<String>) -> Sev
 
 #[cfg(test)]
 mod tests {
-    use super::MIN_VOLUME_SIZE_BYTES;
+    use super::{MIN_VOLUME_SIZE_BYTES, MultiVolumeReader};
     use crate::safety::ExtractionPolicy;
     use crate::secrets::SecretString;
     use crate::sevenz_backend::{SevenZCreateOptions, SevenZError, create_7z_from_path, extract_7z, list_7z};
     use crate::test_support::TestDir;
     use std::fs;
+    use std::io::{Read as _, Seek as _, SeekFrom};
 
     #[test]
     fn creates_split_7z_volumes() {
@@ -400,6 +413,23 @@ mod tests {
 
         let listing = list_7z(&archive, None).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.name == "payload/file.txt"));
+    }
+
+    #[test]
+    fn multi_volume_reader_streams_across_parts_and_supports_reseek() {
+        let temp = TestDir::new("multi_volume_reader_streams_across_parts_and_supports_reseek");
+        temp.write_file("part-1", b"abc");
+        temp.write_file("part-2", b"def");
+
+        let mut reader = MultiVolumeReader::open(vec![temp.path("part-1"), temp.path("part-2")]).unwrap();
+        let mut contents = Vec::new();
+        reader.read_to_end(&mut contents).unwrap();
+        assert_eq!(contents, b"abcdef");
+
+        reader.seek(SeekFrom::Start(2)).unwrap();
+        let mut suffix = Vec::new();
+        reader.read_to_end(&mut suffix).unwrap();
+        assert_eq!(suffix, b"cdef");
     }
 
     #[test]

@@ -18,7 +18,7 @@ libc = "0.2.186"
 [build-dependencies]
 cmake = "0.1.58"
 pkg-config = "0.3.32"
-bindgen = "0.70"
+bindgen = "0.72"
 
 [lints.rust]
 unsafe_code = "allow"
@@ -31,4 +31,3 @@ pedantic = "warn"
 lz4-sys = "1.9.4"
 liblzma-sys = { version = "0.1.11", features = ["static"] }
 zstd-sys = "2.0.16"
-
