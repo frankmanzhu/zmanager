@@ -1,6 +1,7 @@
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::apple_archive_backend::{self, AppleArchiveEntryKind, AppleArchiveError};
 use crate::libarchive_backend::{self, LibarchiveEntryKind, LibarchiveError};
+use crate::rar_backend::{self, RarBackendError, RarListEntryKind};
 use crate::raw_stream_backend::{self, RawStreamError, RawStreamFormat};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
@@ -164,6 +165,8 @@ pub enum ArchiveBrowserError {
     TarZst(TarZstdError),
     /// 7z backend failed.
     SevenZ(SevenZError),
+    /// RAR backend failed.
+    Rar(RarBackendError),
     /// TZAP backend failed.
     Tzap(TzapError),
     /// `AppleArchive` backend failed.
@@ -192,6 +195,7 @@ impl fmt::Display for ArchiveBrowserError {
             Self::Zip(source) => write!(f, "ZIP browser operation failed: {source}"),
             Self::TarZst(source) => write!(f, "TAR.ZST browser operation failed: {source}"),
             Self::SevenZ(source) => write!(f, "7z browser operation failed: {source}"),
+            Self::Rar(source) => write!(f, "RAR browser operation failed: {source}"),
             Self::Tzap(source) => write!(f, "TZAP browser operation failed: {source}"),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             Self::AppleArchive(source) => {
@@ -219,6 +223,7 @@ impl std::error::Error for ArchiveBrowserError {
             Self::Zip(source) => Some(source),
             Self::TarZst(source) => Some(source),
             Self::SevenZ(source) => Some(source),
+            Self::Rar(source) => Some(source),
             Self::Tzap(source) => Some(source),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             Self::AppleArchive(source) => Some(source),
@@ -248,6 +253,12 @@ impl From<TarZstdError> for ArchiveBrowserError {
 impl From<SevenZError> for ArchiveBrowserError {
     fn from(source: SevenZError) -> Self {
         Self::SevenZ(source)
+    }
+}
+
+impl From<RarBackendError> for ArchiveBrowserError {
+    fn from(source: RarBackendError) -> Self {
+        Self::Rar(source)
     }
 }
 
@@ -305,6 +316,8 @@ pub fn list_entries_with_options(
         list_zip_entries(path)
     } else if is_tar_zst_archive(path) {
         list_tar_zst_entries(path)
+    } else if is_rar_archive(path) {
+        list_rar_entries(path, options.password)
     } else if is_7z_archive(path) {
         list_7z_entries(path, options.password)
     } else if is_tzap_archive_path(path) {
@@ -725,6 +738,37 @@ fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing
             solid: Some(listing.solid),
             link_target: None,
             attributes: entry.attributes.map(|attr| format!("{attr:#010X}")),
+            uid: None,
+            gid: None,
+            owner: None,
+            group: None,
+        })
+        .collect();
+    Ok(BrowserListing { entries })
+}
+
+fn list_rar_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
+    let listing = rar_backend::list_rar_with_password(path, password)?;
+    let entries = listing
+        .entries
+        .into_iter()
+        .map(|entry| BrowserEntry {
+            path: entry.path,
+            kind: rar_entry_kind(entry.kind),
+            size: Some(entry.size),
+            compressed_size: None,
+            modified: None,
+            mode: None,
+            metadata_diagnostics: Vec::new(),
+            encrypted: Some(entry.encrypted),
+            method: None,
+            crc: None,
+            comment: None,
+            created: None,
+            accessed: None,
+            solid: Some(entry.solid),
+            link_target: entry.link_target,
+            attributes: (entry.file_attr != 0).then(|| format!("{:#010X}", entry.file_attr)),
             uid: None,
             gid: None,
             owner: None,
@@ -1185,6 +1229,16 @@ fn sevenz_entry_kind(kind: SevenZEntryKind) -> BrowserEntryKind {
     }
 }
 
+fn rar_entry_kind(kind: RarListEntryKind) -> BrowserEntryKind {
+    match kind {
+        RarListEntryKind::File => BrowserEntryKind::File,
+        RarListEntryKind::Directory => BrowserEntryKind::Directory,
+        RarListEntryKind::Symlink => BrowserEntryKind::Symlink,
+        RarListEntryKind::Hardlink | RarListEntryKind::FileCopy => BrowserEntryKind::Hardlink,
+        RarListEntryKind::Special => BrowserEntryKind::Special,
+    }
+}
+
 fn tzap_entry_kind(kind: TzapEntryKind) -> BrowserEntryKind {
     match kind {
         TzapEntryKind::File => BrowserEntryKind::File,
@@ -1247,6 +1301,10 @@ fn is_tar_zst_archive(path: &Path) -> bool {
 
 fn is_7z_archive(path: &Path) -> bool {
     matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::SevenZ)
+}
+
+fn is_rar_archive(path: &Path) -> bool {
+    matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::Rar)
 }
 
 #[cfg(test)]
@@ -1436,6 +1494,22 @@ mod tests {
         let listing =
             list_entries_with_options(&archive, BrowserListOptions { password: Some("correct horse") }).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.path == "project/a.txt"));
+    }
+
+    #[test]
+    fn passworded_multipart_rar_listing_uses_the_rar_backend() {
+        let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/archives/rar5-passworded-multipart.part1.rar");
+
+        let missing_password = list_entries(&archive).unwrap_err().to_string();
+        assert!(missing_password.contains("password"), "{missing_password}");
+        assert!(!missing_password.contains("libarchive"), "{missing_password}");
+
+        let listing =
+            list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password") })
+                .unwrap();
+        assert_eq!(listing.entries.iter().filter(|entry| entry.path == "rar-fixture/data/stream.bin").count(), 1);
+        assert!(listing.entries.iter().any(|entry| entry.path == "rar-fixture/docs/readme.txt"));
     }
 
     #[test]

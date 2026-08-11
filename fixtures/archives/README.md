@@ -13,6 +13,8 @@ Regenerate them with:
 
 ```sh
 bash scripts/generate_fixtures.sh
+# Requires the proprietary RAR creator; refreshes only the multipart RAR corpus.
+bash scripts/generate-rar-test-fixtures.sh
 ```
 
 `manifest.tsv` records the expected SHA-256 for each fixture. The CLI fixture
@@ -32,11 +34,12 @@ drift is caught early.
 | `basic.xar` | XAR | macOS `xar` | Apple package-adjacent archive fixture. |
 | `basic.iso` | ISO 9660/Joliet | macOS `hdiutil makehybrid` | Disk/container listing and extraction fixture; generated without symlink because ISO/Joliet is not the symlink-preserving path. |
 | `basic.deb` | Debian package | `bsdtar --format=ar` plus tar members | Package/container fixture; extraction exposes package members. |
+| `rar5-multipart.part1.rar`–`part4.rar` | RAR5 multipart | RAR | Checked-in multi-volume fixture with a 192 KiB spanning file; core, FFI, and CLI tests verify every extracted byte. |
+| `rar5-passworded-multipart.part1.rar`–`part4.rar` | Passworded RAR5 multipart | RAR | Same corpus with encrypted headers and data; tests require the exact password and ensure it never appears in diagnostics. |
 
 ## Not Included By Default
 
 - ZIPX: requires a compatible creator such as 7-Zip with ZIPX/Zstd/Deflate64 options.
-- RAR: creation requires proprietary tooling and redistribution can be awkward.
 - CAB: no stock macOS creator is available.
 - WIM: requires `wimlib-imagex` or equivalent.
 - RPM: requires an RPM build toolchain and package metadata setup.

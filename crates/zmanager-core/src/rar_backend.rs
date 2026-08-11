@@ -821,10 +821,68 @@ mod tests {
         DeferredLink, DeferredLinkKind, RAR_FILETIME_TICKS_PER_SECOND, RarExtractReport, WINDOWS_TO_UNIX_EPOCH_SECONDS,
         apply_rar_metadata, materialize_deferred_links,
     };
-    #[cfg(unix)]
+    use super::{extract_rar_with_password, list_rar_with_password};
+    use crate::safety::{ExtractionPolicy, OverwritePolicy};
     use crate::test_support::TestDir;
+    use std::collections::HashSet;
     #[cfg(unix)]
     use std::fs;
+    use std::path::PathBuf;
+
+    fn rar_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives").join(name)
+    }
+
+    fn assert_complete_multipart_rar_round_trip(archive: &std::path::Path, password: Option<&str>, label: &str) {
+        let listing =
+            list_rar_with_password(archive, password).unwrap_or_else(|error| panic!("{label} listing failed: {error}"));
+        let paths = listing.entries.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>();
+        let unique_paths = paths.iter().copied().collect::<HashSet<_>>();
+        assert_eq!(paths.len(), unique_paths.len(), "{label} must not list volume continuations as duplicate entries");
+        assert_eq!(paths.iter().filter(|path| **path == "rar-fixture/data/stream.bin").count(), 1);
+        assert!(paths.contains(&"rar-fixture/docs/readme.txt"));
+        assert!(paths.contains(&"rar-fixture/data/manifest.json"));
+
+        let temp = TestDir::new("checked_in_rar_fixture_extract");
+        let report = extract_rar_with_password(
+            archive,
+            temp.path("out"),
+            ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() },
+            password,
+        )
+        .unwrap_or_else(|error| panic!("{label} extraction failed: {error}"));
+
+        assert_eq!(report.written_bytes, 196_608 + 22 + 23);
+        assert_eq!(std::fs::read(temp.path("out/rar-fixture/data/stream.bin")).unwrap(), vec![0; 196_608]);
+        assert_eq!(
+            std::fs::read_to_string(temp.path("out/rar-fixture/docs/readme.txt")).unwrap(),
+            "RAR multipart fixture\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path("out/rar-fixture/data/manifest.json")).unwrap(),
+            "{\"fixture\":\"zmanager\"}\n"
+        );
+    }
+
+    #[test]
+    fn checked_in_rar5_multipart_fixture_lists_once_and_extracts_every_file() {
+        assert_complete_multipart_rar_round_trip(&rar_fixture("rar5-multipart.part1.rar"), None, "rar5-multipart");
+    }
+
+    #[test]
+    fn checked_in_passworded_rar5_multipart_fixture_requires_the_exact_password() {
+        let archive = rar_fixture("rar5-passworded-multipart.part1.rar");
+        assert!(list_rar_with_password(&archive, None).is_err(), "passworded RAR must not list without a password");
+        assert!(
+            list_rar_with_password(&archive, Some("wrong password")).is_err(),
+            "passworded RAR must reject a wrong password"
+        );
+        assert_complete_multipart_rar_round_trip(
+            &archive,
+            Some("zmanager-rar-fixture-password"),
+            "rar5-passworded-multipart",
+        );
+    }
 
     #[cfg(unix)]
     #[test]

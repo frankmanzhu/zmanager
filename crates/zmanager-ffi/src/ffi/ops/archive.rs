@@ -17,6 +17,7 @@ use zmanager_core::libarchive_backend;
 use zmanager_core::manifest;
 use zmanager_core::raw_stream_backend;
 use zmanager_core::safety::{ExtractionPolicy, ExtractionSafetyPlanner};
+use zmanager_core::sevenz_backend;
 use zmanager_core::tzap_backend;
 use zmanager_core::zip_backend;
 
@@ -24,7 +25,7 @@ use zmanager_core::zip_backend;
 use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
     ERROR_INVALID_REQUEST, ERROR_OPERATION_FAILED, ERROR_UNSUPPORTED_FORMAT, WARNING_LAUNCH_GATED_FORMAT, bridge_error,
-    bridge_error_from_mobile, bridge_warning, bridge_warning_with_code, hint, map_archive_browser_error,
+    bridge_error_from_mobile, bridge_warning, bridge_warning_with_code, hint, map_7z_error, map_archive_browser_error,
     map_libarchive_error, map_plan_error, map_raw_stream_error, map_tzap_error, map_zip_error,
 };
 use crate::ffi::ops::jobs::{
@@ -304,6 +305,14 @@ pub fn testArchive(request: TestArchiveRequest) -> Result<TestArchiveResult, Zma
                 None,
             )
             .map_err(map_tzap_error)?,
+        )
+    } else if matches!(format, ArchiveFormat::SevenZ) {
+        let selected_paths = selected_paths.as_slice();
+        TestArchiveReport::from_7z(
+            sevenz_backend::test_7z_with_password_filter(path, password, |entry_path| {
+                selected_path_matches(selected_paths, entry_path)
+            })
+            .map_err(map_7z_error)?,
         )
     } else if let Some(report) = maybe_test_apple_archive(format, path, &selected_paths) {
         report?

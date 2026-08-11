@@ -765,6 +765,15 @@ impl TestArchiveReport {
         }
     }
 
+    pub(crate) fn from_7z(report: zmanager_core::sevenz_backend::SevenZTestReport) -> Self {
+        Self {
+            tested_entries: usize_to_u64(report.tested_entries),
+            skipped_entries: usize_to_u64(report.skipped_entries),
+            tested_bytes: report.tested_bytes,
+            warnings: Vec::new(),
+        }
+    }
+
     pub(crate) fn from_libarchive(report: LibarchiveTestReport) -> Self {
         Self {
             tested_entries: usize_to_u64(report.tested_entries),

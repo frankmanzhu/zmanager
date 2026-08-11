@@ -1,4 +1,7 @@
-use super::error::{ERROR_DAMAGED_ARCHIVE, ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, WARNING_LAUNCH_GATED_FORMAT};
+use super::error::{
+    ERROR_DAMAGED_ARCHIVE, ERROR_INVALID_PASSWORD, ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, ERROR_PASSWORD_REQUIRED,
+    WARNING_LAUNCH_GATED_FORMAT,
+};
 use super::ops::jobs::MobileJobRegistry;
 use super::util::{classify_archive_path, password_ref, sanitize_password};
 use super::*;
@@ -173,6 +176,164 @@ fn plan_extract_starts_for_a_real_7z_archive() {
         plan.entries.iter().all(|entry| entry.replace_existing),
         "replace staging plans must use rename-based commits even for new files: {plan:?}"
     );
+}
+
+#[test]
+fn bridge_lists_tests_plans_and_extracts_passworded_split_7z() {
+    let _guard = JOB_TEST_LOCK.lock().expect("job test lock poisoned");
+    let temp = TestDir::new("bridge-passworded-split-7z");
+    let password = " split 7z password ";
+    let payload = deterministic_bytes(2_300_000);
+    temp.write_file("project/blob.bin", &payload);
+    temp.write_file("project/notes/readme.txt", b"bridge coverage\n");
+    temp.create_dir("project/empty");
+    let archive = temp.path("project.7z");
+    let destination = temp.path("out");
+    let manifest =
+        plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
+
+    let created = create_7z_from_manifest(
+        &manifest,
+        &archive,
+        &SevenZCreateOptions {
+            password: Some(password.into()),
+            encrypt_file_names: true,
+            volume_size: Some(1_048_576),
+            ..SevenZCreateOptions::default()
+        },
+    )
+    .expect("passworded split 7z fixture should be created");
+    assert!(created.encrypted);
+    assert!(created.volume_count >= 2);
+    let first_volume = temp.path("project.7z.001");
+
+    let missing_password =
+        listArchive(ListArchiveRequest { archive_path: first_volume.to_string_lossy().to_string(), password: None })
+            .expect_err("encrypted header listing must require a password");
+    assert_bridge_error_code(missing_password, ERROR_PASSWORD_REQUIRED);
+
+    let wrong_password = listArchive(ListArchiveRequest {
+        archive_path: first_volume.to_string_lossy().to_string(),
+        password: Some("wrong password".to_string()),
+    })
+    .expect_err("an incorrect password must not list the archive");
+    assert_bridge_error_code(wrong_password, ERROR_INVALID_PASSWORD);
+
+    let listing = listArchive(ListArchiveRequest {
+        archive_path: first_volume.to_string_lossy().to_string(),
+        password: Some(password.to_string()),
+    })
+    .expect("the exact password should list every split 7z entry");
+    assert_eq!(listing.format, ArchiveFormat::SevenZ);
+    assert_eq!(listing.entries.iter().filter(|entry| entry.path == "project/blob.bin").count(), 1);
+    assert!(listing.entries.iter().any(|entry| entry.path == "project/empty"));
+
+    let verified = testArchive(TestArchiveRequest {
+        archive_path: first_volume.to_string_lossy().to_string(),
+        password: Some(password.to_string()),
+        selected_paths: Vec::new(),
+    })
+    .expect("the split archive should verify through the mobile bridge");
+    assert!(verified.verified);
+    assert!(verified.tested_entries >= 2);
+
+    let plan = planExtract(PlanExtractRequest {
+        archive_path: first_volume.to_string_lossy().to_string(),
+        destination_root: destination.to_string_lossy().to_string(),
+        password: Some(password.to_string()),
+        selected_paths: Vec::new(),
+        strip_components: 0,
+        collision_policy: ExtractionCollisionPolicy::Replace,
+    })
+    .expect("the split archive should produce an approved replacement plan");
+    assert!(plan.can_start, "split 7z plan should be startable: {plan:?}");
+    assert_eq!(plan.blocked_entries, 0);
+
+    let started = startExtract(StartExtractRequest {
+        archive_path: first_volume.to_string_lossy().to_string(),
+        destination_root: destination.to_string_lossy().to_string(),
+        password: Some(password.to_string()),
+        selected_paths: Vec::new(),
+        strip_components: 0,
+        collision_policy: ExtractionCollisionPolicy::Replace,
+        plan_token: plan.plan_token,
+    })
+    .expect("the approved split 7z plan should start");
+    assert_eq!(started.kind, MobileJobKind::SevenZExtract);
+
+    let terminal = wait_for_terminal_job(&started.job_id);
+    assert_eq!(terminal.status, MobileJobStatus::Completed);
+    assert!(
+        terminal
+            .terminal_summary
+            .as_ref()
+            .is_some_and(|summary| summary.written_bytes == (payload.len() + b"bridge coverage\n".len()) as u64)
+    );
+    assert!(!format!("{terminal:?}").contains(password), "bridge diagnostics must not retain archive passwords");
+    assert_eq!(fs::read(destination.join("project/blob.bin")).unwrap(), payload);
+    assert_eq!(fs::read_to_string(destination.join("project/notes/readme.txt")).unwrap(), "bridge coverage\n");
+    assert!(destination.join("project/empty").is_dir());
+}
+
+#[test]
+fn bridge_lists_plans_and_extracts_passworded_multipart_rar() {
+    let _guard = JOB_TEST_LOCK.lock().expect("job test lock poisoned");
+    let password = "zmanager-rar-fixture-password";
+    let archive = checked_in_rar_fixture("rar5-passworded-multipart.part1.rar");
+    let temp = TestDir::new("bridge-passworded-multipart-rar");
+    let destination = temp.path("out");
+
+    let missing_password =
+        listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: None })
+            .expect_err("passworded multipart RAR must not list without a password");
+    assert_bridge_error_code(missing_password, ERROR_INVALID_PASSWORD);
+
+    let wrong_password = listArchive(ListArchiveRequest {
+        archive_path: archive.to_string_lossy().to_string(),
+        password: Some("wrong password".to_string()),
+    })
+    .expect_err("passworded multipart RAR must reject a wrong password");
+    assert_bridge_error_code(wrong_password, ERROR_INVALID_PASSWORD);
+
+    let listing = listArchive(ListArchiveRequest {
+        archive_path: archive.to_string_lossy().to_string(),
+        password: Some(password.to_string()),
+    })
+    .expect("the exact password should list the multipart RAR");
+    assert_eq!(listing.format, ArchiveFormat::MultipartRar);
+    assert_eq!(listing.entries.iter().filter(|entry| entry.path == "rar-fixture/data/stream.bin").count(), 1);
+    assert!(listing.entries.iter().any(|entry| entry.path == "rar-fixture/docs/readme.txt"));
+
+    let plan = planExtract(PlanExtractRequest {
+        archive_path: archive.to_string_lossy().to_string(),
+        destination_root: destination.to_string_lossy().to_string(),
+        password: Some(password.to_string()),
+        selected_paths: Vec::new(),
+        strip_components: 0,
+        collision_policy: ExtractionCollisionPolicy::Replace,
+    })
+    .expect("the multipart RAR should produce an approved extraction plan");
+    assert!(plan.can_start, "multipart RAR plan should be startable: {plan:?}");
+    assert_eq!(plan.blocked_entries, 0);
+
+    let started = startExtract(StartExtractRequest {
+        archive_path: archive.to_string_lossy().to_string(),
+        destination_root: destination.to_string_lossy().to_string(),
+        password: Some(password.to_string()),
+        selected_paths: Vec::new(),
+        strip_components: 0,
+        collision_policy: ExtractionCollisionPolicy::Replace,
+        plan_token: plan.plan_token,
+    })
+    .expect("the approved multipart RAR plan should start");
+    assert_eq!(started.kind, MobileJobKind::RarExtract);
+
+    let terminal = wait_for_terminal_job(&started.job_id);
+    assert_eq!(terminal.status, MobileJobStatus::Completed);
+    assert_eq!(terminal.terminal_summary.as_ref().map(|summary| summary.written_bytes), Some(196_608 + 22 + 23));
+    assert!(!format!("{terminal:?}").contains(password), "bridge diagnostics must not retain archive passwords");
+    assert_eq!(fs::read(destination.join("rar-fixture/data/stream.bin")).unwrap(), vec![0; 196_608]);
+    assert_eq!(fs::read_to_string(destination.join("rar-fixture/docs/readme.txt")).unwrap(), "RAR multipart fixture\n");
 }
 
 #[test]
@@ -1080,6 +1241,20 @@ fn readme_entry_path(archive: &Path) -> String {
         .find(|entry| entry.path.ends_with("readme.txt"))
         .expect("fixture archive should contain readme.txt")
         .path
+}
+
+fn deterministic_bytes(length: usize) -> Vec<u8> {
+    let mut state = 0x9e37_79b9_u32;
+    let mut bytes = Vec::with_capacity(length);
+    for _ in 0..length {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        bytes.push((state >> 24) as u8);
+    }
+    bytes
+}
+
+fn checked_in_rar_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives").join(name)
 }
 
 fn create_test_zip(name: &str) -> TestArchiveFixture {

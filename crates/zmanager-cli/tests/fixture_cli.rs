@@ -138,6 +138,39 @@ fn cli_extracts_extractable_fixture_archives() {
 }
 
 #[test]
+fn cli_lists_tests_and_extracts_checked_in_multipart_rar_fixtures() {
+    let password = "zmanager-rar-fixture-password";
+
+    for (filename, fixture_password) in
+        [("rar5-multipart.part1.rar", None), ("rar5-passworded-multipart.part1.rar", Some(password))]
+    {
+        let archive = archives_dir().join(filename);
+        let temp = TestDir::new("fixture-cli-multipart-rar");
+        let mut list = Command::new(cli_path());
+        list.arg("list").arg(&archive).arg("--json");
+        let list = run_with_optional_password(list, fixture_password);
+        assert_success(&format!("zm list {filename}"), &list);
+        let list_stdout = String::from_utf8_lossy(&list.stdout);
+        assert_eq!(list_stdout.matches("rar-fixture/data/stream.bin").count(), 1, "{list_stdout}");
+
+        let mut test = Command::new(cli_path());
+        test.arg("test").arg(&archive).arg("--json");
+        let test = run_with_optional_password(test, fixture_password);
+        assert_success(&format!("zm test {filename}"), &test);
+        let test_stdout = String::from_utf8_lossy(&test.stdout);
+        assert!(test_stdout.contains("\"tested_entries\":6"), "{test_stdout}");
+
+        let output = temp.path("out");
+        let mut extract = Command::new(cli_path());
+        extract.arg("extract").arg(&archive).arg("-C").arg(&output).arg("--overwrite").arg("always");
+        let extract = run_with_optional_password(extract, fixture_password);
+        assert_success(&format!("zm extract {filename}"), &extract);
+        assert_eq!(fs::read(output.join("rar-fixture/data/stream.bin")).unwrap(), vec![0; 196_608]);
+        assert_eq!(fs::read_to_string(output.join("rar-fixture/docs/readme.txt")).unwrap(), "RAR multipart fixture\n");
+    }
+}
+
+#[test]
 fn optional_unzip_validates_zip_fixture_when_available() {
     let Some(unzip) = find_on_path("unzip") else {
         return;
@@ -1525,6 +1558,14 @@ fn zm_create_passworded_split_archives_extract_with_password_stdin() {
         fs::read(temp.path("out-7z/project/blob.bin")).unwrap(),
         fs::read(temp.path("project/blob.bin")).unwrap()
     );
+
+    let mut test_7z = Command::new(zm_path());
+    test_7z.arg("test").arg(&first_7z_volume).arg("--json").arg("--password-stdin");
+    let sevenz_test = run_with_stdin(test_7z, "correct horse\n");
+    assert_success("zm test passworded split 7z", &sevenz_test);
+    let stdout = String::from_utf8_lossy(&sevenz_test.stdout);
+    assert!(stdout.contains("\"format\":\"7z\""), "{stdout}");
+    assert!(stdout.contains("\"tested_entries\":"), "{stdout}");
 }
 
 #[test]
@@ -2755,6 +2796,16 @@ fn run_with_stdin(mut command: Command, input: &str) -> std::process::Output {
         .unwrap();
     child.stdin.as_mut().unwrap().write_all(input.as_bytes()).unwrap();
     child.wait_with_output().unwrap()
+}
+
+fn run_with_optional_password(mut command: Command, password: Option<&str>) -> std::process::Output {
+    match password {
+        Some(password) => {
+            command.arg("--password-stdin");
+            run_with_stdin(command, &format!("{password}\n"))
+        }
+        None => command.output().unwrap(),
+    }
 }
 
 fn write_deb_ar_archive(

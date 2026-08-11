@@ -1,8 +1,6 @@
 //! `.7z` archive creation, listing, and extraction.
 //!
 //! Format API asymmetries vs the ZIP backend, deliberately kept:
-//! - There is no integrity test API (`test_7z`); 7z archives are validated by
-//!   extraction and listing. ZIP exposes `test_zip_with_password_filter`.
 //! - [`list_7z`] takes a password because 7z can encrypt its file names,
 //!   while `list_zip` does not (ZIP names are always readable).
 //! - 7z never materializes symlinks: `sevenz_rust2` exposes no link-target
@@ -163,6 +161,17 @@ pub struct SevenZExtractReport {
     pub written_bytes: u64,
     /// Non-fatal extraction warnings.
     pub warnings: Vec<String>,
+}
+
+/// Integrity-test report returned after reading selected 7z entries.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SevenZTestReport {
+    /// Entries whose headers or data were read.
+    pub tested_entries: usize,
+    /// Entries excluded by the filter or represented by an anti-item.
+    pub skipped_entries: usize,
+    /// Regular-file bytes read while validating the archive.
+    pub tested_bytes: u64,
 }
 
 /// Error returned by the 7z backend.
@@ -478,6 +487,61 @@ pub fn list_7z(path: impl AsRef<Path>, password: Option<&str>) -> Result<SevenZL
         .collect();
 
     Ok(SevenZListing { entries, solid: archive.is_solid })
+}
+
+/// Reads selected `.7z` entries without writing them, validating that their
+/// encrypted/compressed content can be decoded with the supplied password.
+///
+/// # Errors
+///
+/// Returns [`SevenZError`] when the archive cannot be read, or when its
+/// encrypted data requires a missing or incorrect password.
+pub fn test_7z_with_password_filter(
+    archive_path: impl AsRef<Path>,
+    password: Option<&str>,
+    mut selected: impl FnMut(&str) -> bool,
+) -> Result<SevenZTestReport, SevenZError> {
+    let archive_path = archive_path.as_ref();
+    let password = archive_password(password);
+    let source = open_7z_reader(archive_path)?;
+    let mut reader = ArchiveReader::new(source, password)?;
+    let mut report = SevenZTestReport { tested_entries: 0, skipped_entries: 0, tested_bytes: 0 };
+    let mut callback_error = None;
+
+    let result = reader.for_each_entries(|entry, entry_reader| {
+        let path = entry.name().to_owned();
+        if entry.is_anti_item() || !selected(&path) {
+            if let Err(error) = drain_reader(entry_reader, &path) {
+                return Err(callback_failed_with(&mut callback_error, error));
+            }
+            report.skipped_entries += 1;
+            return Ok(true);
+        }
+
+        let copied = if entry.is_directory() {
+            0
+        } else {
+            match io::copy(entry_reader, &mut io::sink()) {
+                Ok(copied) => copied,
+                Err(source) => {
+                    return Err(callback_failed_with(
+                        &mut callback_error,
+                        SevenZError::Io { path: PathBuf::from(&path), source },
+                    ));
+                }
+            }
+        };
+        report.tested_entries += 1;
+        report.tested_bytes += copied;
+        Ok(true)
+    });
+
+    if let Some(error) = callback_error {
+        return Err(error);
+    }
+    result?;
+
+    Ok(report)
 }
 
 /// Extracts a `.7z` archive through the shared extraction safety policy.
@@ -1025,6 +1089,7 @@ fn callback_failed_error() -> sevenz_rust2::Error {
 mod tests {
     use super::{
         SevenZCreateOptions, SevenZEntryKind, SevenZError, create_7z_from_path, extract_7z, extraction_kind, list_7z,
+        test_7z_with_password_filter,
     };
     use crate::safety::{ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError};
     use crate::secrets::SecretString;
@@ -1233,6 +1298,16 @@ mod tests {
             extract_7z(&archive, temp.path("wrong"), Some("wrong password"), ExtractionPolicy::default()),
             Err(SevenZError::InvalidPassword)
         ));
+        assert!(matches!(test_7z_with_password_filter(&archive, None, |_| true), Err(SevenZError::PasswordRequired)));
+        assert!(matches!(
+            test_7z_with_password_filter(&archive, Some("wrong password"), |_| true),
+            Err(SevenZError::InvalidPassword)
+        ));
+        let verification =
+            test_7z_with_password_filter(&archive, Some("correct horse"), |entry| entry == "payload/file.txt").unwrap();
+        assert_eq!(verification.tested_entries, 1);
+        assert_eq!(verification.tested_bytes, 6);
+        assert_eq!(verification.skipped_entries, 1);
 
         let listing = list_7z(&archive, Some("correct horse")).unwrap();
         let extract_report =

@@ -53,6 +53,7 @@ pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerG
         ArchiveBrowserError::Zip(source) => map_zip_error(source),
         ArchiveBrowserError::TarZst(source) => map_tar_zst_error(source),
         ArchiveBrowserError::SevenZ(source) => map_7z_error(source),
+        ArchiveBrowserError::Rar(source) => map_rar_error(source),
         ArchiveBrowserError::Tzap(source) => map_tzap_error(source),
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveBrowserError::AppleArchive(source) => map_apple_archive_error(source),
