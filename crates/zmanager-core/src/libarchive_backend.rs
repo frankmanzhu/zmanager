@@ -426,7 +426,7 @@ fn extract_archive_inner(
     while let Some(entry) = archive.next_entry()? {
         let owned_entry = OwnedEntry::from_entry(&entry)?;
         if let Some(selected_entry) = selected_entry
-            && owned_entry.path != selected_entry
+            && !crate::safety::archive_entry_matches_selected(&owned_entry.path, selected_entry)
         {
             archive.skip_data()?;
             continue;

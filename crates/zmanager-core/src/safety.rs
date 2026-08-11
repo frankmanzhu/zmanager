@@ -809,6 +809,33 @@ pub fn normalize_archive_path(raw_path: &str) -> Result<String, ExtractionSafety
     Ok(parts.join("/"))
 }
 
+/// Returns true when `entry_path` matches `selected_path` or is a descendant of `selected_path`.
+///
+/// Both paths are normalized using slash separators and stripped of leading/trailing dots and slashes.
+#[must_use]
+pub fn archive_entry_matches_selected(entry_path: &str, selected_path: &str) -> bool {
+    let norm_entry = entry_path
+        .replace('\\', "/")
+        .trim_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    let norm_selected = selected_path
+        .replace('\\', "/")
+        .trim_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+
+    if norm_selected.is_empty() {
+        return true;
+    }
+
+    norm_entry == norm_selected || norm_entry.starts_with(&format!("{norm_selected}/"))
+}
+
 fn reject_raw_path_hazards(raw_path: &str) -> Result<(), ExtractionSafetyError> {
     if raw_path.contains('\0') {
         return Err(ExtractionSafetyError::NulByte { path: raw_path.to_owned() });
@@ -1028,8 +1055,9 @@ mod tests {
     use super::{
         ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionLimits, ExtractionPolicy,
         ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteConflict, OverwriteDecision, OverwritePolicy,
-        OverwriteResolver, UnsafeFilePolicy, archive_pattern_matches, deferred_link_dependency_order,
-        next_available_destination_path_with_budget, normalize_archive_path, prepare_destination_root,
+        OverwriteResolver, UnsafeFilePolicy, archive_entry_matches_selected, archive_pattern_matches,
+        deferred_link_dependency_order, next_available_destination_path_with_budget, normalize_archive_path,
+        prepare_destination_root,
     };
     use crate::test_support::TestDir;
     use std::fs;
@@ -1412,5 +1440,17 @@ mod tests {
             assert_eq!(conflict.archive_path, "file.txt");
             self.0
         }
+    }
+
+    #[test]
+    fn test_archive_entry_matches_selected() {
+        assert!(archive_entry_matches_selected("Antigravity-arm64/Antigravity", "Antigravity-arm64"));
+        assert!(archive_entry_matches_selected("./Antigravity-arm64/lib/foo.so", "Antigravity-arm64"));
+        assert!(archive_entry_matches_selected("Antigravity-arm64/", "Antigravity-arm64"));
+        assert!(archive_entry_matches_selected("Antigravity-arm64", "Antigravity-arm64/"));
+        assert!(archive_entry_matches_selected("./Antigravity-arm64", "./Antigravity-arm64/"));
+        assert!(!archive_entry_matches_selected("Antigravity-arm64-v2/lib.so", "Antigravity-arm64"));
+        assert!(archive_entry_matches_selected("file.txt", "file.txt"));
+        assert!(!archive_entry_matches_selected("other.txt", "file.txt"));
     }
 }

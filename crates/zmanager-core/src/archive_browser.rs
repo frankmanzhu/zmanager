@@ -978,12 +978,14 @@ fn extract_zip_entry(
         .map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = ZipArchive::new(file).map_err(ZipBackendError::from)?;
     let password = password_bytes(password);
+    let mut matched_any = false;
+    let mut written_bytes = 0u64;
 
     for index in 0..archive.len() {
         let mut file = archive
             .by_index_with_options(index, ZipReadOptions::new().password(password))
             .map_err(ZipBackendError::from)?;
-        if file.name() != entry_path {
+        if !crate::safety::archive_entry_matches_selected(file.name(), entry_path) {
             continue;
         }
         let entry = ExtractionEntry {
@@ -994,9 +996,14 @@ fn extract_zip_entry(
         };
         let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&entry)?;
         let write_plan = decision_write_plan(decision, &entry.archive_path, policy.overwrite)?;
-        let written_bytes = write_selected_entry(&mut file, &entry, &write_plan)?;
+        let bytes = write_selected_entry(&mut file, &entry, &write_plan)?;
+        written_bytes = written_bytes.saturating_add(bytes);
+        matched_any = true;
+    }
+
+    if matched_any {
         return Ok(EntryExtractReport {
-            destination_path: write_plan.destination_path,
+            destination_path: destination.join(entry_path),
             written_bytes,
             metadata_diagnostics: Vec::new(),
         });
@@ -1016,6 +1023,8 @@ fn extract_tar_zst_entry(
     let decoder = zstd::stream::read::Decoder::new(file)
         .map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = tar::Archive::new(decoder);
+    let mut matched_any = false;
+    let mut written_bytes = 0u64;
 
     for entry in
         archive.entries().map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?
@@ -1026,7 +1035,7 @@ fn extract_tar_zst_entry(
             .map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?
             .to_string_lossy()
             .into_owned();
-        if path != entry_path {
+        if !crate::safety::archive_entry_matches_selected(&path, entry_path) {
             continue;
         }
         let safety_entry = ExtractionEntry {
@@ -1037,9 +1046,14 @@ fn extract_tar_zst_entry(
         };
         let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
         let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
-        let written_bytes = write_selected_entry(&mut entry, &safety_entry, &write_plan)?;
+        let bytes = write_selected_entry(&mut entry, &safety_entry, &write_plan)?;
+        written_bytes = written_bytes.saturating_add(bytes);
+        matched_any = true;
+    }
+
+    if matched_any {
         return Ok(EntryExtractReport {
-            destination_path: write_plan.destination_path,
+            destination_path: destination.join(entry_path),
             written_bytes,
             metadata_diagnostics: Vec::new(),
         });
