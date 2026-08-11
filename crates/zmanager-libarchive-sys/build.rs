@@ -204,6 +204,23 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("LIBLZMA_LIBRARIES", &lzma_lib)
             .define("ZSTD_INCLUDE_DIR", &zstd_include)
             .define("ZSTD_LIBRARY", &zstd_lib);
+    } else if target.contains("android") {
+        let android_abi = if target.starts_with("aarch64") {
+            "arm64-v8a"
+        } else if target.starts_with("x86_64") {
+            "x86_64"
+        } else {
+            "armeabi-v7a"
+        };
+        config
+            .define("ANDROID_ABI", android_abi)
+            .define("CMAKE_ANDROID_ARCH_ABI", android_abi)
+            .define("ENABLE_ACL", "OFF")
+            .define("ENABLE_XATTR", "OFF")
+            .define("ENABLE_ICONV", "OFF")
+            .define("ENABLE_LIBXML2", "OFF")
+            .define("ENABLE_EXPAT", "ON")
+            .define("ENABLE_WIN32_XMLLITE", "OFF");
     } else {
         config
             .define("ENABLE_ACL", "ON")
@@ -336,6 +353,13 @@ fn link_bundled_archive_dependencies(target: &str) {
         println!("cargo:rustc-link-lib=static:+whole-archive=nettle");
         println!("cargo:rustc-link-lib=static:+whole-archive=hogweed");
         println!("cargo:rustc-link-lib=static:+whole-archive=expat");
+    } else if target.contains("android") {
+        // Android provides zlib through the platform and the bundled
+        // libarchive build is self-contained for the remaining archive
+        // filters. Do not link desktop-only pthread, ACL, XML, or crypto
+        // libraries that are not part of the Android NDK.
+        println!("cargo:rustc-link-lib=z");
+        println!("cargo:rustc-link-lib=log");
     } else if target.contains("linux") {
         link_common_unix_libraries();
         println!("cargo:rustc-link-lib=pthread");

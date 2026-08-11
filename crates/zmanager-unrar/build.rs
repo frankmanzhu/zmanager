@@ -153,7 +153,7 @@ fn main() {
 
     build.compile("zmanager_unrar");
 
-    if std::env::var("CARGO_CFG_UNIX").is_ok() {
+    if std::env::var("CARGO_CFG_UNIX").is_ok() && target_os != "android" {
         println!("cargo:rustc-link-lib=pthread");
     }
     if target_os == "windows" {
