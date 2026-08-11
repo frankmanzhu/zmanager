@@ -518,7 +518,13 @@ pub fn preview_entry_with_options(
     fs::create_dir_all(&cleanup_root)
         .map_err(|source| ArchiveBrowserError::Io { path: cleanup_root.clone(), source })?;
 
-    let report = match extract_entry_with_options(archive_path, entry_path, &cleanup_root, options) {
+    // The freshly-created, app-controlled preview root cannot contain a user
+    // destination. Replacing therefore keeps the normal safety planner while
+    // allowing the atomic writer to rename its temporary file. Android app
+    // cache filesystems can reject the hard-link commit used for a refuse
+    // policy, which would otherwise make safe preview materialization fail.
+    let preview_options = BrowserExtractOptions { overwrite: OverwritePolicy::Replace, ..options };
+    let report = match extract_entry_with_options(archive_path, entry_path, &cleanup_root, preview_options) {
         Ok(report) => report,
         Err(error) => {
             let _ = fs::remove_dir_all(&cleanup_root);
@@ -867,7 +873,7 @@ fn extract_tzap_entry(
         compressed_size: None,
     };
     let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
-    let write_plan = decision_write_plan(decision, &safety_entry.archive_path)?;
+    let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
 
     match &safety_entry.kind {
         ExtractionEntryKind::Directory => {
@@ -938,7 +944,7 @@ fn extract_zip_entry(
             compressed_size: Some(file.compressed_size()),
         };
         let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&entry)?;
-        let write_plan = decision_write_plan(decision, &entry.archive_path)?;
+        let write_plan = decision_write_plan(decision, &entry.archive_path, policy.overwrite)?;
         let written_bytes = write_selected_entry(&mut file, &entry, &write_plan)?;
         return Ok(EntryExtractReport {
             destination_path: write_plan.destination_path,
@@ -981,7 +987,7 @@ fn extract_tar_zst_entry(
             compressed_size: None,
         };
         let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
-        let write_plan = decision_write_plan(decision, &safety_entry.archive_path)?;
+        let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
         let written_bytes = write_selected_entry(&mut entry, &safety_entry, &write_plan)?;
         return Ok(EntryExtractReport {
             destination_path: write_plan.destination_path,
@@ -1014,7 +1020,7 @@ fn extract_raw_stream_entry(
         compressed_size: archive_path.metadata().ok().map(|metadata| metadata.len()),
     };
     let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
-    let write_plan = decision_write_plan(decision, &safety_entry.archive_path)?;
+    let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
     let written_bytes = write_selected_entry(&mut reader, &safety_entry, &write_plan)?;
     Ok(EntryExtractReport {
         destination_path: write_plan.destination_path,
@@ -1068,11 +1074,13 @@ struct SelectedEntryWritePlan {
 fn decision_write_plan(
     decision: ExtractionDecision,
     archive_path: &str,
+    overwrite: OverwritePolicy,
 ) -> Result<SelectedEntryWritePlan, ArchiveBrowserError> {
     match decision {
-        ExtractionDecision::Write { destination_path, replace_existing, .. } => {
-            Ok(SelectedEntryWritePlan { destination_path, replace_existing })
-        }
+        ExtractionDecision::Write { destination_path, replace_existing, .. } => Ok(SelectedEntryWritePlan {
+            destination_path,
+            replace_existing: replace_existing || overwrite == OverwritePolicy::Replace,
+        }),
         ExtractionDecision::Skip { reason, .. } => Err(ArchiveBrowserError::UnsupportedEntry {
             path: format!("{archive_path}: {reason}"),
             kind: BrowserEntryKind::Special,
