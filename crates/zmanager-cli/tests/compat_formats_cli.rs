@@ -114,7 +114,7 @@ fn competitor_rar_multipart_formats_extract_with_zm() {
     };
     let temp = TestDir::new("compat_rar_multipart");
     create_project_payload(&temp);
-    write_deterministic_blob(&temp.path("project/big.bin"), 384 * 1024);
+    let large_payload = write_deterministic_blob(&temp.path("project/big.bin"), 384 * 1024);
 
     for (label, switch, filename) in
         [("rar5 multipart", "-ma5", "payload-rar5.rar"), ("rar4 multipart", "-ma4", "payload-rar4.rar")]
@@ -142,7 +142,20 @@ fn competitor_rar_multipart_formats_extract_with_zm() {
             .with_file_name(archive.file_name().and_then(|name| name.to_str()).unwrap().replace(".rar", ".part2.rar"));
         assert!(first_volume.exists() && second_volume.exists(), "{label} did not produce split .partN.rar volumes");
 
-        assert_zm_extracts_payload(label, &first_volume, PAYLOAD);
+        let list = Command::new(zm_path()).arg("list").arg(&first_volume).output().unwrap();
+        assert_success(&format!("zm lists {label}"), &list);
+        let listing = String::from_utf8_lossy(&list.stdout);
+        assert_eq!(
+            listing.matches("project/big.bin").count(),
+            1,
+            "zm listed a multipart continuation more than once for {label}; stdout:\n{listing}"
+        );
+
+        let out = extraction_output_dir(&first_volume);
+        let extract = Command::new(zm_path()).arg("extract").arg(&first_volume).arg("-C").arg(&out).output().unwrap();
+        assert_success(&format!("zm extracts {label}"), &extract);
+        assert_eq!(fs::read(out.join("project/file.txt")).unwrap(), PAYLOAD);
+        assert_eq!(fs::read(out.join("project/big.bin")).unwrap(), large_payload);
     }
 }
 
@@ -872,14 +885,15 @@ fn create_project_payload(temp: &TestDir) {
     fs::write(temp.path("project/file.txt"), PAYLOAD).unwrap();
 }
 
-fn write_deterministic_blob(path: &Path, bytes: usize) {
+fn write_deterministic_blob(path: &Path, bytes: usize) -> Vec<u8> {
     let mut state = 0x9e37_79b9_u32;
     let mut data = Vec::with_capacity(bytes);
     for _ in 0..bytes {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         data.push((state >> 24) as u8);
     }
-    fs::write(path, data).unwrap();
+    fs::write(path, &data).unwrap();
+    data
 }
 
 fn create_stdout_archive(label: &str, command: &mut Command, archive: &Path) {

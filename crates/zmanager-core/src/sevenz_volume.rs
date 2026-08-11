@@ -305,9 +305,12 @@ fn io_error(path: &Path, kind: io::ErrorKind, message: impl Into<String>) -> Sev
 #[cfg(test)]
 mod tests {
     use super::{MIN_VOLUME_SIZE_BYTES, MultiVolumeReader};
-    use crate::safety::ExtractionPolicy;
+    use crate::manifest::{PlanOptions, plan_archives};
+    use crate::safety::{ExtractionPolicy, OverwritePolicy};
     use crate::secrets::SecretString;
-    use crate::sevenz_backend::{SevenZCreateOptions, SevenZError, create_7z_from_path, extract_7z, list_7z};
+    use crate::sevenz_backend::{
+        SevenZCreateOptions, SevenZError, create_7z_from_manifest, create_7z_from_path, extract_7z, list_7z,
+    };
     use crate::test_support::TestDir;
     use std::fs;
     use std::io::{Read as _, Seek as _, SeekFrom};
@@ -386,6 +389,38 @@ mod tests {
             extract_7z(&first_volume, temp.path("out"), Some("correct horse"), ExtractionPolicy::default()).unwrap();
 
         assert_eq!(extract_report.written_bytes, payload.len() as u64);
+        assert_eq!(fs::read(temp.path("out/payload/blob.bin")).unwrap(), payload);
+    }
+
+    #[test]
+    fn solid_split_7z_volumes_extract_from_first_part() {
+        let temp = TestDir::new("solid_split_7z_volumes_extract_from_first_part");
+        let payload = deterministic_bytes(3_200_000);
+        temp.write_file("payload/blob.bin", &payload);
+        let archive = temp.path("payload.7z");
+        let first_volume = temp.path("payload.7z.001");
+
+        let manifest = plan_archives([temp.path("payload")], &PlanOptions::default()).unwrap();
+        let create_report = create_7z_from_manifest(
+            &manifest,
+            &archive,
+            &SevenZCreateOptions { volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() },
+        )
+        .unwrap();
+        assert!(create_report.volume_count >= 2);
+
+        let listing = list_7z(&first_volume, None).unwrap();
+        assert!(listing.entries.iter().any(|entry| entry.name == "payload/blob.bin"));
+
+        let report = extract_7z(
+            &first_volume,
+            temp.path("out"),
+            None,
+            ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() },
+        )
+        .unwrap();
+
+        assert_eq!(report.written_bytes, payload.len() as u64);
         assert_eq!(fs::read(temp.path("out/payload/blob.bin")).unwrap(), payload);
     }
 

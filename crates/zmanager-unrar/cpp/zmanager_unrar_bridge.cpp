@@ -169,17 +169,23 @@ extern "C" int zmu_unrar_list(const char *archive, const char *password,
   int code = ERAR_SUCCESS;
   while ((code = RARReadHeaderEx(handle, buffers.prepare())) == ERAR_SUCCESS) {
     const RARHeaderDataEx &header = buffers.header;
-    std::string path = file_name_utf8(header);
-    std::string redir_target = redir_name_utf8(header);
-    std::uint64_t mtime = ((std::uint64_t)header.MtimeHigh << 32) | header.MtimeLow;
-    int callback_code =
-        callback(user, path.c_str(), unpacked_size(header),
-                 dictionary_size(header), header.Flags, header.RedirType,
-                 redir_target.empty() ? nullptr : redir_target.c_str(),
-                 header.FileAttr, mtime);
-    if (callback_code < 0) {
-      RARCloseArchive(handle);
-      return ZMU_UNRAR_ABORTED;
+    // UnRAR exposes the continuation header for a file that spans volumes
+    // after RAR_SKIP advances to the next part. It is not a second archive
+    // entry, so reporting it would make callers reject a valid multipart
+    // archive as a duplicate path.
+    if ((header.Flags & RHDF_SPLITBEFORE) == 0) {
+      std::string path = file_name_utf8(header);
+      std::string redir_target = redir_name_utf8(header);
+      std::uint64_t mtime = ((std::uint64_t)header.MtimeHigh << 32) | header.MtimeLow;
+      int callback_code =
+          callback(user, path.c_str(), unpacked_size(header),
+                   dictionary_size(header), header.Flags, header.RedirType,
+                   redir_target.empty() ? nullptr : redir_target.c_str(),
+                   header.FileAttr, mtime);
+      if (callback_code < 0) {
+        RARCloseArchive(handle);
+        return ZMU_UNRAR_ABORTED;
+      }
     }
 
     int process_code = RARProcessFile(handle, RAR_SKIP, nullptr, nullptr);

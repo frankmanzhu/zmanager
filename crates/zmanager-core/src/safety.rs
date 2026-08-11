@@ -384,7 +384,15 @@ impl<'a> ExtractionSafetyPlanner<'a> {
         mut destination_path: PathBuf,
         link_target_path: Option<PathBuf>,
     ) -> Result<PlannedDestination, ExtractionSafetyError> {
-        let mut replace_existing = false;
+        // Replace must select the rename-based atomic commit for regular
+        // files even when the destination is absent. The refuse path uses a
+        // hard link to enforce no-clobber semantics; that operation is
+        // unavailable on Android's app-cache filesystems, including freshly
+        // created staging roots. Directories are materialized separately and
+        // must not be replaced when absent: readers such as 7z may emit the
+        // directory after its child files.
+        let mut replace_existing = matches!(self.policy.overwrite, OverwritePolicy::Replace)
+            && !matches!(entry.kind, ExtractionEntryKind::Directory);
         let destination_metadata = std::fs::symlink_metadata(&destination_path);
         if let Ok(metadata) = destination_metadata {
             match self.policy.overwrite {

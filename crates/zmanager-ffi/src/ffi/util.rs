@@ -269,7 +269,9 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
     let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
     let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
 
-    let format = if matches!(extension.as_str(), "zip" | "zipx" | "jar" | "war" | "ipa" | "apk" | "appx" | "xpi") {
+    let format = if zmanager_core::libarchive_backend::is_split_zip_path(path) {
+        ArchiveFormat::SplitZip
+    } else if matches!(extension.as_str(), "zip" | "zipx" | "jar" | "war" | "ipa" | "apk" | "appx" | "xpi") {
         ArchiveFormat::Zip
     } else if is_split_zip_extension(&extension) {
         ArchiveFormat::SplitZip
@@ -277,7 +279,7 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
         if file_name.contains(".part") { ArchiveFormat::MultipartRar } else { ArchiveFormat::Rar }
     } else if is_rar_sidecar_extension(&extension) {
         ArchiveFormat::MultipartRar
-    } else if extension == "7z" {
+    } else if extension == "7z" || zmanager_core::sevenz_backend::is_7z_volume_path(path) {
         ArchiveFormat::SevenZ
     } else if extension == "tar" {
         ArchiveFormat::Tar

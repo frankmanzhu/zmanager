@@ -55,6 +55,20 @@ fn classify_archive_path_supports_launch_extensions() {
 }
 
 #[test]
+fn classify_archive_path_identifies_the_final_volume_of_a_split_zip() {
+    let temp = TestDir::new("classify-split-zip");
+    temp.write_file("archive.z01", b"first volume");
+    temp.write_file("archive.zip", b"final volume");
+
+    assert_eq!(classify_archive_path(&temp.path("archive.zip")).0, ArchiveFormat::SplitZip);
+}
+
+#[test]
+fn classify_archive_path_identifies_the_first_volume_of_a_split_7z() {
+    assert_eq!(classify_archive_path(Path::new("archive.7z.001")).0, ArchiveFormat::SevenZ);
+}
+
+#[test]
 fn detect_archive_rejects_platform_uri_objects() {
     let error = detectArchive(DetectArchiveRequest { archive_path: "content://downloads/archive.zip".to_string() })
         .unwrap_err();
@@ -155,6 +169,10 @@ fn plan_extract_starts_for_a_real_7z_archive() {
     assert!(plan.can_start, "7z plan should be startable: {plan:?}");
     assert_eq!(plan.blocked_entries, 0);
     assert!(!plan.plan_token.is_empty());
+    assert!(
+        plan.entries.iter().all(|entry| entry.replace_existing),
+        "replace staging plans must use rename-based commits even for new files: {plan:?}"
+    );
 }
 
 #[test]

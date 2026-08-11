@@ -633,7 +633,7 @@ pub fn startExtract(request: StartExtractRequest) -> Result<StartJobResult, Zman
         match worker_result {
             Ok(Ok(summary)) => worker_registry.set_terminal_summary(&job_id, summary),
             Ok(Err(error)) => {
-                worker_registry.finish_with_error(&job_id, bridge_error_from_mobile(error));
+                worker_registry.finish_with_error(&job_id, extraction_worker_error(error));
             }
             Err(_) => {
                 worker_registry.finish_with_error(
