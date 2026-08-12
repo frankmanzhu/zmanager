@@ -28,7 +28,14 @@ jobs:
           git clone https://github.com/frankmanzhu/ntfs-forensic.git ../ntfs-forensic
           git -C ../ntfs-forensic checkout "$NTFS_REV" || git -C ../ntfs-forensic checkout main
 
+      # cargo-deny-action runs in a container that mounts only the repo at
+      # /github/workspace, so the fork siblings cloned to ../ on the runner
+      # are invisible to it and the path dependencies fail to resolve. Run
+      # cargo-deny directly on the runner instead, where the siblings sit at
+      # the paths the path deps expect.
+      - name: Install cargo-deny
+        run: |
+          curl -sSfL https://github.com/EmbarkStudios/cargo-deny/releases/latest/download/cargo-deny-x86_64-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin cargo-deny
+
       - name: Run cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check licenses
+        run: cargo deny check licenses
