@@ -33,9 +33,12 @@ jobs:
       # are invisible to it and the path dependencies fail to resolve. Run
       # cargo-deny directly on the runner instead, where the siblings sit at
       # the paths the path deps expect.
+      # The prebuilt release asset is version-prefixed, so resolve the asset
+      # name from the latest release API rather than hardcoding a version.
       - name: Install cargo-deny
         run: |
-          curl -sSfL https://github.com/EmbarkStudios/cargo-deny/releases/latest/download/cargo-deny-x86_64-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin cargo-deny
+          ASSET=$(curl -s https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/latest | python3 -c 'import json,sys; print(next(a["name"] for a in json.load(sys.stdin)["assets"] if a["name"].endswith("x86_64-unknown-linux-musl.tar.gz")))')
+          curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/latest/download/$ASSET" | tar -xz -C /usr/local/bin cargo-deny
 
       - name: Run cargo-deny
         run: cargo deny check licenses
