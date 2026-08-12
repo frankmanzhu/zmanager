@@ -125,6 +125,50 @@ fn cli_extracts_extractable_fixture_archives() {
 }
 
 #[test]
+fn cli_lists_tests_and_extracts_msi_fixture() {
+    let fixture = archives_dir().join("basic.msi");
+    if !fixture.exists() {
+        return;
+    }
+    let temp = TestDir::new("fixture-cli-msi");
+
+    let list = Command::new(cli_path()).arg("list").arg(&fixture).output().unwrap();
+    assert_success("zm list basic.msi", &list);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(list_stdout.contains("payload/README.txt"), "{list_stdout}");
+    assert!(list_stdout.contains("payload/nested/file.txt"), "{list_stdout}");
+    assert!(list_stdout.contains("payload/dir with spaces/file with spaces.txt"), "{list_stdout}");
+    assert!(!list_stdout.contains("payload/./"), "entries must not carry ./ prefixes: {list_stdout}");
+
+    let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
+    assert_success("zm test basic.msi", &test);
+
+    let out = temp.path("out");
+    let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
+    assert_success("zm extract basic.msi", &extract);
+    assert_eq!(fs::read_to_string(out.join("payload/README.txt")).unwrap(), "ZManager fixture payload\n");
+    assert_eq!(fs::read_to_string(out.join("payload/nested/file.txt")).unwrap(), "nested fixture file\n");
+    assert_eq!(fs::read_to_string(out.join("payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
+
+    // Selective extraction exercises pattern matching against the resolved paths.
+    let out_sel = temp.path("out-sel");
+    let selective =
+        Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_sel).arg("--include").arg("payload/nested/file.txt").output().unwrap();
+    assert_success("zm extract basic.msi --include", &selective);
+    assert!(out_sel.join("payload/nested/file.txt").is_file());
+    assert!(!out_sel.join("payload/README.txt").exists());
+
+    // --to-stdout is explicitly unsupported for MSI.
+    let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("payload/README.txt").arg("--to-stdout").output().unwrap();
+    assert_failure("zm extract basic.msi --to-stdout", &stdout);
+    assert!(
+        String::from_utf8_lossy(&stdout.stderr).contains("do not currently support extracting to stdout"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&stdout.stderr)
+    );
+}
+
+#[test]
 fn cli_lists_tests_and_extracts_apple_dmg_pkg_fixtures() {
     for filename in ["basic.dmg", "basic.pkg"] {
         let fixture = archives_dir().join(filename);
@@ -279,62 +323,6 @@ fn optional_xar_lists_xar_fixture_when_available() {
     );
 }
 
-/// Apple tools drop `._` `AppleDouble` companion entries during extraction
-/// (pkgutil --expand-full, ditto), while zm materializes them as regular
-/// files (fidelity-first, like tar). Filter them on both sides so the
-/// cross-tool comparison asserts the payload content is identical modulo
-/// that known, documented divergence.
-fn is_apple_double(rel: &Path) -> bool {
-    rel.file_name().is_some_and(|name| name.to_string_lossy().starts_with("._"))
-}
-
-/// Recursively collects the relative paths of every entry under `root`.
-fn collect_tree_entries(root: &Path) -> Vec<PathBuf> {
-    let mut entries = Vec::new();
-    let mut stack = vec![PathBuf::new()];
-    while let Some(dir) = stack.pop() {
-        let mut children = fs::read_dir(root.join(&dir)).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
-        children.sort();
-        for child in children {
-            let rel = dir.join(child.file_name().unwrap());
-            if is_apple_double(&rel) {
-                continue;
-            }
-            entries.push(rel.clone());
-            if fs::symlink_metadata(&child).unwrap().is_dir() {
-                stack.push(rel);
-            }
-        }
-    }
-    entries
-}
-
-/// Asserts `actual` matches `expected` entry-for-entry: same tree shape,
-/// byte-identical file contents, identical symlink targets.
-fn assert_trees_match(label: &str, expected: &Path, actual: &Path) {
-    let expected_entries = collect_tree_entries(expected);
-    let actual_entries = collect_tree_entries(actual);
-
-    for rel in &expected_entries {
-        let actual_path = actual.join(rel);
-        assert!(fs::symlink_metadata(&actual_path).is_ok(), "{label}: zm output is missing {}", rel.display());
-        let expected_meta = fs::symlink_metadata(expected.join(rel)).unwrap();
-        let actual_meta = fs::symlink_metadata(&actual_path).unwrap();
-        assert_eq!(expected_meta.is_symlink(), actual_meta.is_symlink(), "{label}: type mismatch for {}", rel.display());
-        if expected_meta.is_symlink() {
-            assert_eq!(
-                fs::read_link(expected.join(rel)).unwrap(),
-                fs::read_link(&actual_path).unwrap(),
-                "{label}: symlink target mismatch for {}",
-                rel.display()
-            );
-        } else if expected_meta.is_file() {
-            assert_eq!(fs::read(expected.join(rel)).unwrap(), fs::read(&actual_path).unwrap(), "{label}: content mismatch for {}", rel.display());
-        }
-    }
-    assert_eq!(actual_entries.len(), expected_entries.len(), "{label}: zm output has entries the reference tool does not");
-}
-
 /// The DMG fixture must pass Apple's own integrity check.
 #[test]
 fn optional_hdiutil_verifies_dmg_fixture_when_available() {
@@ -426,6 +414,33 @@ fn optional_pkgutil_compares_pkg_extraction_when_available() {
     assert_success("zm extract basic.pkg", &extract);
 
     assert_trees_match("pkgutil reference vs zm", &reference, &out.join("payload"));
+}
+
+/// Extracts the MSI fixture with msitools' `msiextract` (the reference
+/// Windows-Installer extraction tool) and compares the payload tree
+/// entry-for-entry against zmanager's extraction.
+#[test]
+fn optional_msiextract_compares_msi_extraction_when_available() {
+    let Some(msiextract) = find_on_path("msiextract") else {
+        return;
+    };
+    let fixture = archives_dir().join("basic.msi");
+    if !fixture.exists() {
+        return;
+    }
+
+    let temp = TestDir::new("fixture-cli-msiextract-compare");
+    let reference = temp.path("reference");
+    let expand = Command::new(msiextract).arg("-C").arg(&reference).arg(&fixture).output().unwrap();
+    assert_success("msiextract basic.msi", &expand);
+
+    let out = temp.path("zm");
+    let extract = Command::new(zm_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).output().unwrap();
+    assert_success("zm extract basic.msi", &extract);
+
+    // msiextract resolves the Directory table the same way the backend does:
+    // TARGETDIR -> payload -> nested / dir with spaces.
+    assert_trees_match("msiextract reference vs zm", &reference.join("payload"), &out.join("payload"));
 }
 
 #[test]

@@ -5,6 +5,7 @@ pub(crate) const FORMAT_TZAP: &str = "tzap";
 pub(crate) const FORMAT_APPLE_ARCHIVE: &str = "aar";
 pub(crate) const FORMAT_DMG: &str = "dmg";
 pub(crate) const FORMAT_PKG: &str = "pkg";
+pub(crate) const FORMAT_MSI: &str = "msi";
 pub(crate) const FORMAT_SEVEN_Z: &str = "7z";
 pub(crate) const FORMAT_TGZ: &str = "tgz";
 pub(crate) const FORMAT_RAR: &str = "rar";
@@ -41,9 +42,9 @@ pub(crate) const TGZ_FORMAT_ALIASES: &[&str] = &[FORMAT_TGZ, "tar.gz", "gz"];
 // Extension lists are canonical in `zmanager_core::archive_format` (CR-114);
 // this crate re-exports them for display and option validation.
 pub(crate) use zmanager_core::archive_format::{
-    APPLE_ARCHIVE_EXTENSIONS, AR_EXTENSIONS, CAB_EXTENSIONS, CPIO_EXTENSIONS, DEB_EXTENSIONS, ISO_EXTENSIONS, LHA_EXTENSIONS, MTREE_EXTENSIONS, RAR_EXTENSIONS,
-    RPM_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_BZ2_EXTENSIONS, TAR_EXTENSIONS, TAR_LZMA_EXTENSIONS, TAR_XZ_EXTENSIONS, TAR_ZST_EXTENSIONS, TGZ_EXTENSIONS,
-    TZAP_EXTENSIONS, WARC_EXTENSIONS, XAR_EXTENSIONS, ZIP_FAMILY_EXTENSIONS,
+    APPLE_ARCHIVE_EXTENSIONS, AR_EXTENSIONS, CAB_EXTENSIONS, CPIO_EXTENSIONS, DEB_EXTENSIONS, ISO_EXTENSIONS, LHA_EXTENSIONS, MSI_EXTENSIONS, MTREE_EXTENSIONS,
+    RAR_EXTENSIONS, RPM_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_BZ2_EXTENSIONS, TAR_EXTENSIONS, TAR_LZMA_EXTENSIONS, TAR_XZ_EXTENSIONS, TAR_ZST_EXTENSIONS,
+    TGZ_EXTENSIONS, TZAP_EXTENSIONS, WARC_EXTENSIONS, XAR_EXTENSIONS, ZIP_FAMILY_EXTENSIONS,
 };
 
 pub(crate) const ZIP_CREATE_EXTENSIONS: &[&str] = &[".zip"];
@@ -84,6 +85,7 @@ pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
     FormatDescriptor { name: FORMAT_CPIO, extensions: CPIO_EXTENSIONS, kind: ArchiveFormatKind::Cpio },
     FormatDescriptor { name: FORMAT_RPM, extensions: RPM_EXTENSIONS, kind: ArchiveFormatKind::Rpm },
     FormatDescriptor { name: FORMAT_XAR, extensions: XAR_EXTENSIONS, kind: ArchiveFormatKind::Xar },
+    FormatDescriptor { name: FORMAT_MSI, extensions: MSI_EXTENSIONS, kind: ArchiveFormatKind::Msi },
     FormatDescriptor { name: FORMAT_LHA, extensions: LHA_EXTENSIONS, kind: ArchiveFormatKind::Lha },
     FormatDescriptor { name: FORMAT_AR, extensions: AR_EXTENSIONS, kind: ArchiveFormatKind::Ar },
     FormatDescriptor { name: FORMAT_WARC, extensions: WARC_EXTENSIONS, kind: ArchiveFormatKind::Warc },
@@ -134,6 +136,10 @@ pub(crate) fn is_dmg_archive(path: &str) -> bool {
 
 pub(crate) fn is_pkg_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::Pkg)
+}
+
+pub(crate) fn is_msi_archive(path: &str) -> bool {
+    matches!(detect_archive_format(path), ArchiveFormatKind::Msi)
 }
 
 pub(crate) fn is_deb_archive(path: &str) -> bool {

@@ -1039,7 +1039,9 @@ fn assert_zm_extracts_complex_matrix_inner(label: &str, archive: &Path, temp: &T
     assert_success(&format!("zm extract {label} (full)"), &output);
     assert!(out.join("project/root_file.txt").exists(), "missing root file for {label}");
     assert!(out.join("project/nested/deep_file.txt").exists(), "missing deep file");
-    if !label.contains("cab") {
+    // CAB-internal names are file keys, and MSI packages have no empty
+    // directory entries, so neither fixture carries empty_dir.
+    if !label.contains("cab") && !label.contains("msi") {
         assert!(out.join("project/nested/empty_dir").is_dir(), "missing dir");
     }
     assert!(out.join("project/large_blob.bin").exists(), "missing blob");
@@ -1220,4 +1222,73 @@ fn competitor_apple_dmg_and_pkg_formats_extract_with_zm() {
     assert_success("pkgbuild creates pkg", &create_pkg);
     assert_zm_extracts_complex_matrix_without_stdout("pkgbuild-created pkg", &archive_pkg, &temp);
     assert_zm_extracts_apple_extra_entries("pkgbuild-created pkg", &archive_pkg, &temp);
+}
+
+#[test]
+fn competitor_msi_formats_extract_with_zm() {
+    let Some(wixl) = find_on_path("wixl") else {
+        return;
+    };
+    let temp = TestDir::new("compat_msi");
+    let archive_temp = TestDir::new("compat_msi_archives");
+    create_complex_project_payload(&temp);
+
+    // MSI has no symlink entries and wixl cannot encode non-ASCII File
+    // table names; spaces in names is the only extra entry that carries.
+    fs::write(temp.path("project/file with spaces.txt"), b"spaces_content").unwrap();
+
+    // The Directory table drives target paths: TARGETDIR -> project ->
+    // nested, exactly the layout msiextract will resolve.
+    fs::write(
+        temp.path("project.wxs"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Name="ZManager Compat" Manufacturer="ZManager" Language="1033" Version="0.1.0"
+           Id="11111111-2222-3333-4444-666666666666" UpgradeCode="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee">
+    <Package Description="Compatibility test MSI" Comments="compat" InstallerVersion="200" Compressed="yes"/>
+    <Media Id="1" Cabinet="project.cab" EmbedCab="yes"/>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="PROJECTDIR" Name="project">
+        <Directory Id="NESTEDDIR" Name="nested">
+          <Component Id="NestedFiles" Guid="99999999-8888-7777-6666-555555555501">
+            <File Id="deep_file" Name="deep_file.txt" Source="project/nested/deep_file.txt"/>
+          </Component>
+        </Directory>
+        <Component Id="RootFiles" Guid="99999999-8888-7777-6666-555555555502">
+          <File Id="root_file" Name="root_file.txt" Source="project/root_file.txt"/>
+          <File Id="large_blob" Name="large_blob.bin" Source="project/large_blob.bin"/>
+          <File Id="large_blob_copy" Name="large_blob_copy.bin" Source="project/large_blob_copy.bin"/>
+          <File Id="spaces" Name="file with spaces.txt" Source="project/file with spaces.txt"/>
+        </Component>
+      </Directory>
+    </Directory>
+    <Feature Id="DefaultFeature" Title="Main Feature" Level="1">
+      <ComponentRef Id="NestedFiles"/>
+      <ComponentRef Id="RootFiles"/>
+    </Feature>
+  </Product>
+</Wix>
+"#,
+    )
+    .unwrap();
+
+    let archive_msi = archive_temp.path("project.msi");
+    let create_msi = Command::new(&wixl).current_dir(temp.root()).arg("-o").arg(&archive_msi).arg("project.wxs").output().unwrap();
+    assert_success("wixl creates msi", &create_msi);
+    assert_zm_extracts_complex_matrix_without_stdout("wixl-created msi", &archive_msi, &temp);
+
+    let out_extra = temp.path("out_extras_msi");
+    let extract_extra = Command::new(zm_path()).arg("extract").arg(&archive_msi).arg("-C").arg(&out_extra).output().unwrap();
+    assert_success("zm extract wixl-created msi (extra entries)", &extract_extra);
+    assert_eq!(fs::read(out_extra.join("project/file with spaces.txt")).unwrap(), b"spaces_content");
+
+    // Cross-tool verification against msitools' msiextract when available:
+    // the reference extraction must match entry-for-entry.
+    let Some(msiextract) = find_on_path("msiextract") else {
+        return;
+    };
+    let reference = archive_temp.path("reference");
+    let extract_ref = Command::new(&msiextract).arg("-C").arg(&reference).arg(&archive_msi).output().unwrap();
+    assert_success("msiextract extracts msi", &extract_ref);
+    assert_trees_match("msiextract reference vs zm", &reference.join("project"), &out_extra.join("project"));
 }

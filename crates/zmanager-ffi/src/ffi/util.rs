@@ -232,7 +232,7 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_rar_sidecar_extension(&extension) => ArchiveFormat::MultipartRar,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if extension == "xip" => ArchiveFormat::Xip,
         // Kinds with no FFI variant (TarLzma, Iso, Cab, Cpio, Rpm, Xar, Pkg,
-        // Dmg, Lha, Ar, Warc, Mtree, Deb) and unknown paths: generic fallback.
+        // Dmg, Msi, Lha, Ar, Warc, Mtree, Deb) and unknown paths: generic fallback.
         _ => ArchiveFormat::Other,
     };
 
@@ -300,6 +300,7 @@ pub(crate) fn format_capabilities_for_kind(kind: zmanager_core::archive_format::
         | ArchiveFormatKind::Xar
         | ArchiveFormatKind::Pkg
         | ArchiveFormatKind::Dmg
+        | ArchiveFormatKind::Msi
         | ArchiveFormatKind::Lha
         | ArchiveFormatKind::Ar
         | ArchiveFormatKind::Warc
@@ -331,6 +332,7 @@ pub(crate) fn kind_label(kind: zmanager_core::archive_format::ArchiveFormatKind)
         ArchiveFormatKind::Xar => "XAR",
         ArchiveFormatKind::Pkg => "PKG",
         ArchiveFormatKind::Dmg => "DMG",
+        ArchiveFormatKind::Msi => "MSI",
         ArchiveFormatKind::Lha => "LHA",
         ArchiveFormatKind::Ar => "AR",
         ArchiveFormatKind::Warc => "WARC",

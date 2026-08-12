@@ -10,3 +10,4 @@ basic.iso	ISO	true		d923225dd5dfba13db4e9e2d3fb21a8c9ddb638ad3a64ece54c4bdbf0f2b
 basic.deb	DEB	true		bf7b523fcef115c34d5af248b9a4abde5ed13cdf3256af3b4040339e8879aeb3	Debian ar package fixture
 basic.dmg	DMG	true		c914a2313ac94380a3a1a5f6d5b55262ffad1a974a92f12e8cb4d3426405c8b2	Disk image fixture created by hdiutil create -srcfolder
 basic.pkg	PKG	true		e5e294f5631d74e3485de3f0961465b4d17f479289f92418208d718ce9d12a96	Apple package fixture created by pkgbuild
+basic.msi	MSI	true		b31f05dc8a656752da14ce9f4ea012067801a3ce4d75138343a2ded0f936b29f	Windows Installer fixture created by wixl (msitools)

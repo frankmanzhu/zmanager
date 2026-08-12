@@ -23,7 +23,8 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.iso \
   "$ARCHIVES"/basic.deb \
   "$ARCHIVES"/basic.dmg \
-  "$ARCHIVES"/basic.pkg
+  "$ARCHIVES"/basic.pkg \
+  "$ARCHIVES"/basic.msi
 
 mkdir -p "$SRC/nested/empty-dir"
 mkdir -p "$SRC/dir with spaces"
@@ -100,6 +101,56 @@ pkgbuild --root "$PKG_ROOT" --identifier com.zmanager.fixture --version 0.1.0 "$
   pkgbuild --root "$PKG_ROOT" --identifier com.zmanager.fixture --version 0.1.0 "$ARCHIVES/basic.pkg"
 }
 
+# MSI fixture: built with wixl from msitools (brew install msitools). The
+# Directory table maps TARGETDIR -> payload -> nested / dir with spaces, so
+# extraction resolves the same payload/ prefix as every other fixture. MSI
+# has no symlink entries, and wixl cannot encode non-ASCII File table names,
+# so the unicode file is intentionally absent from this fixture.
+if ! command -v wixl >/dev/null 2>&1; then
+  echo "wixl not found (brew install msitools); cannot regenerate basic.msi" >&2
+  exit 1
+fi
+cat > "$WORK/basic.wxs" <<'WXS'
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Name="ZManager Fixture" Manufacturer="ZManager" Language="1033" Version="0.1.0"
+           Id="11111111-2222-3333-4444-555555555555" UpgradeCode="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee">
+    <Package Description="Small MSI fixture for ZManager compatibility tests"
+             Comments="fixture" InstallerVersion="200" Compressed="yes"/>
+    <Media Id="1" Cabinet="basic.cab" EmbedCab="yes"/>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="PAYLOADDIR" Name="payload">
+        <Directory Id="NESTEDDIR" Name="nested">
+          <Component Id="NestedFiles" Guid="99999999-8888-7777-6666-555555555554">
+            <File Id="filetxt" Name="file.txt" Source="payload/nested/file.txt"/>
+          </Component>
+        </Directory>
+        <Directory Id="SPACEDIR" Name="dir with spaces">
+          <Component Id="SpaceFiles" Guid="99999999-8888-7777-6666-555555555553">
+            <File Id="spaces" Name="file with spaces.txt" Source="payload/dir with spaces/file with spaces.txt"/>
+          </Component>
+        </Directory>
+        <Component Id="PayloadFiles" Guid="99999999-8888-7777-6666-555555555555">
+          <File Id="readme" Name="README.txt" Source="payload/README.txt"/>
+        </Component>
+      </Directory>
+    </Directory>
+    <Feature Id="DefaultFeature" Title="Main Feature" Level="1">
+      <ComponentRef Id="PayloadFiles"/>
+      <ComponentRef Id="NestedFiles"/>
+      <ComponentRef Id="SpaceFiles"/>
+    </Feature>
+  </Product>
+</Wix>
+WXS
+(
+  cd "$WORK"
+  wixl -o "$ARCHIVES/basic.msi" basic.wxs >/dev/null 2>&1 || {
+    # Fall back to showing wixl diagnostics on failure
+    wixl -o "$ARCHIVES/basic.msi" basic.wxs
+  }
+)
+
 sha256_file() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
@@ -135,5 +186,6 @@ append_manifest "basic.iso" "ISO" "true" "" "ISO fixture created by hdiutil make
 append_manifest "basic.deb" "DEB" "true" "" "Debian ar package fixture"
 append_manifest "basic.dmg" "DMG" "true" "" "Disk image fixture created by hdiutil create -srcfolder"
 append_manifest "basic.pkg" "PKG" "true" "" "Apple package fixture created by pkgbuild"
+append_manifest "basic.msi" "MSI" "true" "" "Windows Installer fixture created by wixl (msitools)"
 
 echo "Generated fixtures in $ARCHIVES"

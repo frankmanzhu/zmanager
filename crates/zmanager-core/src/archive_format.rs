@@ -36,6 +36,7 @@ pub const TGZ_EXTENSIONS: &[&str] = &[".tgz", ".tar.gz"];
 pub const TZAP_EXTENSIONS: &[&str] = &[".tzap"];
 pub const APPLE_ARCHIVE_EXTENSIONS: &[&str] = &[".aar", ".aea"];
 pub const DEB_EXTENSIONS: &[&str] = &[".deb"];
+pub const MSI_EXTENSIONS: &[&str] = &[".msi"];
 
 /// Compile-time availability of a format's backend on this target.
 ///
@@ -104,6 +105,8 @@ pub enum ArchiveFormatKind {
     AppleArchive,
     /// `.deb` package.
     Deb,
+    /// Windows Installer package (`.msi`).
+    Msi,
     /// Raw single-file compression stream.
     RawStream,
     /// Not recognized as any archive format.
@@ -153,6 +156,7 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
     FormatCapability { kind: ArchiveFormatKind::Tzap, extensions: &[], status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::AppleArchive, extensions: APPLE_ARCHIVE_EXTENSIONS, status: apple_archive_status() },
     FormatCapability { kind: ArchiveFormatKind::Deb, extensions: DEB_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Msi, extensions: MSI_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Unknown, extensions: &[], status: BackendStatus::Available },
 ];
 
@@ -243,6 +247,7 @@ mod tests {
             ArchiveFormatKind::Rar,
             ArchiveFormatKind::AppleArchive,
             ArchiveFormatKind::Deb,
+            ArchiveFormatKind::Msi,
             ArchiveFormatKind::RawStream,
         ] {
             assert!(table_kinds.contains(&kind), "capability table is missing a row for {kind:?}");
@@ -294,6 +299,8 @@ mod tests {
         assert_eq!(detect("archive.aar"), ArchiveFormatKind::AppleArchive);
         assert_eq!(detect("archive.AEA"), ArchiveFormatKind::AppleArchive);
         assert_eq!(detect("archive.deb"), ArchiveFormatKind::Deb);
+        assert_eq!(detect("archive.msi"), ArchiveFormatKind::Msi);
+        assert_eq!(detect("archive.MSI"), ArchiveFormatKind::Msi);
         assert_eq!(detect("archive.unknown"), ArchiveFormatKind::Unknown);
     }
 

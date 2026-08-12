@@ -113,3 +113,59 @@ pub fn assert_owner_only_file(path: PathBuf) {
 /// No-op on platforms without Unix permission bits.
 #[cfg(not(unix))]
 pub fn assert_owner_only_file(_path: PathBuf) {}
+
+/// Apple tools drop `._` `AppleDouble` companion entries during extraction
+/// (pkgutil --expand-full, ditto), while zm materializes them as regular
+/// files (fidelity-first, like tar). Filter them on both sides so the
+/// cross-tool comparison asserts the payload content is identical modulo
+/// that known, documented divergence.
+pub fn is_apple_double(rel: &Path) -> bool {
+    rel.file_name().is_some_and(|name| name.to_string_lossy().starts_with("._"))
+}
+
+/// Recursively collects the relative paths of every entry under `root`.
+pub fn collect_tree_entries(root: &Path) -> Vec<PathBuf> {
+    let mut entries = Vec::new();
+    let mut stack = vec![PathBuf::new()];
+    while let Some(dir) = stack.pop() {
+        let mut children = fs::read_dir(root.join(&dir)).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+        children.sort();
+        for child in children {
+            let rel = dir.join(child.file_name().unwrap());
+            if is_apple_double(&rel) {
+                continue;
+            }
+            entries.push(rel.clone());
+            if fs::symlink_metadata(&child).unwrap().is_dir() {
+                stack.push(rel);
+            }
+        }
+    }
+    entries
+}
+
+/// Asserts `actual` matches `expected` entry-for-entry: same tree shape,
+/// byte-identical file contents, identical symlink targets.
+pub fn assert_trees_match(label: &str, expected: &Path, actual: &Path) {
+    let expected_entries = collect_tree_entries(expected);
+    let actual_entries = collect_tree_entries(actual);
+
+    for rel in &expected_entries {
+        let actual_path = actual.join(rel);
+        assert!(fs::symlink_metadata(&actual_path).is_ok(), "{label}: zm output is missing {}", rel.display());
+        let expected_meta = fs::symlink_metadata(expected.join(rel)).unwrap();
+        let actual_meta = fs::symlink_metadata(&actual_path).unwrap();
+        assert_eq!(expected_meta.is_symlink(), actual_meta.is_symlink(), "{label}: type mismatch for {}", rel.display());
+        if expected_meta.is_symlink() {
+            assert_eq!(
+                fs::read_link(expected.join(rel)).unwrap(),
+                fs::read_link(&actual_path).unwrap(),
+                "{label}: symlink target mismatch for {}",
+                rel.display()
+            );
+        } else if expected_meta.is_file() {
+            assert_eq!(fs::read(expected.join(rel)).unwrap(), fs::read(&actual_path).unwrap(), "{label}: content mismatch for {}", rel.display());
+        }
+    }
+    assert_eq!(actual_entries.len(), expected_entries.len(), "{label}: zm output has entries the reference tool does not");
+}

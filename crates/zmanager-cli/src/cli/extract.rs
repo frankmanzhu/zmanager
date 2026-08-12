@@ -4,7 +4,7 @@ use crate::cli::app::{
 };
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
-    BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP,
+    BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_MSI, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP,
     is_deb_archive,
 };
 use crate::cli::open::entry_selected;
@@ -176,6 +176,7 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         ArchiveFormatKind::AppleArchive => run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::Dmg => run_apple_dmg_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::Pkg => run_apple_pkg_extract_with_policy(request.archive, destination, policy, global),
+        ArchiveFormatKind::Msi => run_msi_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::Tzap => run_tzap_extract_with_policy(
             request.archive,
             destination,
@@ -321,8 +322,8 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             ArchiveFormatKind::TarZst => copy_tar_zst_archive_to_stdout(request, global),
             ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
             ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(&request.archive, &request.include, &request.exclude, password.as_deref(), global),
-            ArchiveFormatKind::Dmg | ArchiveFormatKind::Pkg => {
-                print_error_line(global, format_args!("extract to stdout failed: DMG and PKG formats do not currently support extracting to stdout"));
+            ArchiveFormatKind::Dmg | ArchiveFormatKind::Pkg | ArchiveFormatKind::Msi => {
+                print_error_line(global, format_args!("extract to stdout failed: DMG, PKG, and MSI formats do not currently support extracting to stdout"));
                 ExitCode::FAILURE
             }
             // Split ZIP volume sets, tgz, .deb, RAR, and unrecognized formats
@@ -581,6 +582,17 @@ impl From<zmanager_core::apple_dmg_backend::DmgExtractReport> for CliExtractRepo
 
 impl From<zmanager_core::apple_pkg_backend::PkgExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::apple_pkg_backend::PkgExtractReport) -> Self {
+        Self {
+            written_entries: report.written_entries,
+            skipped_entries: report.skipped_entries,
+            written_bytes: report.written_bytes,
+            warnings: report.warnings,
+        }
+    }
+}
+
+impl From<zmanager_core::msi_backend::MsiExtractReport> for CliExtractReport {
+    fn from(report: zmanager_core::msi_backend::MsiExtractReport) -> Self {
         Self {
             written_entries: report.written_entries,
             skipped_entries: report.skipped_entries,
@@ -1028,6 +1040,38 @@ fn run_apple_pkg_extract_with_policy(
             },
             plain: &|archive_path, destination_path, policy, _password, context| {
                 zmanager_core::apple_pkg_backend::extract_pkg_with_context(archive_path, destination_path, policy, context)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+        },
+    )
+}
+
+fn run_msi_extract_with_policy(
+    archive: impl AsRef<std::path::Path>,
+    destination: impl AsRef<std::path::Path>,
+    policy: zmanager_core::safety::ExtractionPolicy,
+    global: &GlobalOptions,
+) -> ExitCode {
+    run_extract_with_policy(
+        archive,
+        destination,
+        policy,
+        None,
+        global,
+        ExtractBackendSpec {
+            label: FORMAT_MSI,
+            kind: JobKind::ArchiveExtract,
+            error_prefix: "msi extract failed: ",
+            password_prompt: None,
+            progress: true,
+            ask: &|archive_path, destination_path, policy, _password, resolver| {
+                zmanager_core::msi_backend::extract_msi_with_overwrite_resolver(archive_path, destination_path, policy, resolver)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+            plain: &|archive_path, destination_path, policy, _password, context| {
+                zmanager_core::msi_backend::extract_msi_with_context(archive_path, destination_path, policy, context)
                     .map(CliExtractReport::from)
                     .map_err(|error| CliExtractError::Message(error.to_string()))
             },

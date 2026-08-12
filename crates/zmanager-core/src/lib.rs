@@ -72,6 +72,7 @@ pub mod libarchive_backend;
 pub mod local_identity_store;
 pub mod local_tzap_service;
 pub mod manifest;
+pub mod msi_backend;
 pub mod p256_signature;
 pub mod rar_backend;
 pub mod raw_stream_backend;
