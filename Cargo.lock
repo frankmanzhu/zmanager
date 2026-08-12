@@ -158,8 +158,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "apfs"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c1b4ecd96379464ea8b4ef2517c8eb674d8658ad364e9176bf5b8c278aa801e"
+source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -896,8 +895,7 @@ dependencies = [
 [[package]]
 name = "dpp"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3399ec08ae109d9c17d548bf15b05aecacf16c33f2ec6e0f06a76b62f48bcf3"
+source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
 dependencies = [
  "apfs",
  "hfsplus",
@@ -1256,8 +1254,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hfsplus"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1003d8eed80d61e8e8ea6a958bbe1afd3aef060882b9d6134e50500dd307c0dc"
+source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -1967,8 +1964,7 @@ dependencies = [
 [[package]]
 name = "pbzx"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0677fd1b7fa44f524f9ba3a6f4ec7ea10b9370f83e9394bf651f55923462405d"
+source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -3057,8 +3053,7 @@ dependencies = [
 [[package]]
 name = "udif"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e8c125861be904b01e97d4e85c31dd8f9b7578a143ac39d90e03ef130d95834"
+source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
 dependencies = [
  "base64",
  "byteorder",
@@ -3642,8 +3637,7 @@ dependencies = [
 [[package]]
 name = "xara"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef4110b070be271aa876e3e93858a49e8ae332021bd9331b2ceac6c53956a50"
+source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
 dependencies = [
  "byteorder",
  "flate2",

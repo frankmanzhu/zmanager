@@ -39,7 +39,9 @@ zmanager-libarchive = { workspace = true }
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
-dpp = "0.4.2"
+# Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4).
+# Switch back to `dpp = "0.4.2"` once upstream releases the fix.
+dpp = { git = "https://github.com/frankmanzhu/dpp", branch = "fix-apfs-symlink-xattr" }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 zmanager-apple-archive = { workspace = true }
