@@ -69,8 +69,7 @@ fn list_formats_returns_full_registry() {
     assert_eq!(result.formats.len(), zmanager_core::archive_format::FORMAT_CAPABILITIES.len());
     assert!(result.formats.len() >= 26);
 
-    let by_kind: std::collections::HashMap<&str, &FormatDescriptor> =
-        result.formats.iter().map(|format| (format.kind.as_str(), format)).collect();
+    let by_kind: std::collections::HashMap<&str, &FormatDescriptor> = result.formats.iter().map(|format| (format.kind.as_str(), format)).collect();
 
     let apple_archive = by_kind.get("AppleArchive").expect("Apple Archive row");
     assert_eq!(apple_archive.label, "AppleArchive / AAR");
