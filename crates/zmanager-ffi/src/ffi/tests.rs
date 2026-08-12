@@ -2,7 +2,7 @@ use super::error::{
     ERROR_DAMAGED_ARCHIVE, ERROR_INVALID_PASSWORD, ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, ERROR_PASSWORD_REQUIRED, WARNING_LAUNCH_GATED_FORMAT,
 };
 use super::ops::jobs::MobileJobRegistry;
-use super::util::{classify_archive_path, password_ref, sanitize_password};
+use super::util::{classify_archive_path, format_capabilities, password_ref, sanitize_password};
 use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,12 +48,55 @@ fn classify_archive_path_supports_launch_extensions() {
         ("archive.zst", ArchiveFormat::Zstd),
         ("archive.tzap", ArchiveFormat::Tzap),
         ("archive.aar", ArchiveFormat::AppleArchive),
+        ("archive.aea", ArchiveFormat::AppleArchive),
+        ("archive.cbz", ArchiveFormat::Zip),
+        ("archive.epub", ArchiveFormat::Zip),
+        ("archive.cb7", ArchiveFormat::SevenZ),
+        ("archive.cbr", ArchiveFormat::Rar),
+        ("archive.cbt", ArchiveFormat::Tar),
         ("archive.xip", ArchiveFormat::Xip),
     ];
 
     for (path, expected) in cases {
         assert_eq!(classify_archive_path(Path::new(path)).0, expected, "{path}");
     }
+}
+
+#[test]
+fn list_formats_returns_full_registry() {
+    let result = listFormats();
+    // One row per core format kind (26 rows including RawStream and Unknown).
+    assert_eq!(result.formats.len(), zmanager_core::archive_format::FORMAT_CAPABILITIES.len());
+    assert!(result.formats.len() >= 26);
+
+    let by_kind: std::collections::HashMap<&str, &FormatDescriptor> =
+        result.formats.iter().map(|format| (format.kind.as_str(), format)).collect();
+
+    let apple_archive = by_kind.get("AppleArchive").expect("Apple Archive row");
+    assert_eq!(apple_archive.label, "AppleArchive / AAR");
+    assert_eq!(apple_archive.extensions, vec![".aar".to_string(), ".aea".to_string()]);
+    assert_eq!(
+        apple_archive.can_list,
+        zmanager_core::archive_format::format_status(zmanager_core::archive_format::ArchiveFormatKind::AppleArchive)
+            == zmanager_core::archive_format::BackendStatus::Available
+    );
+    assert!(!apple_archive.can_create);
+
+    let zip = by_kind.get("Zip").expect("Zip row");
+    assert!(zip.extensions.contains(&".zip".to_string()));
+    assert!(zip.can_list && zip.can_extract && zip.can_create);
+
+    // Predicate-detected kinds carry no extension list.
+    for kind in ["SplitZip", "Tzap", "Unknown"] {
+        assert_eq!(by_kind.get(kind).expect(kind).extensions, Vec::<String>::new(), "{kind} extensions");
+    }
+    // RawStream is recognized by suffixes (not predicates).
+    assert!(by_kind.get("RawStream").expect("RawStream row").extensions.contains(&".zst".to_string()));
+
+    // The FFI-level capability semantics are preserved alongside the registry.
+    assert_eq!(format_capabilities(ArchiveFormat::Xip), (false, false, false));
+    assert_eq!(format_capabilities(ArchiveFormat::Other), (true, true, false));
+    assert_eq!(format_capabilities(ArchiveFormat::MultipartRar), (true, true, false));
 }
 
 #[test]

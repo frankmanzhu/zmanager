@@ -18,7 +18,7 @@ use std::io::{self, IsTerminal as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
-use zmanager_core::archive_format::{BackendStatus, format_status};
+use zmanager_core::archive_format::{ArchiveFormatKind, BackendStatus, FORMAT_CAPABILITIES, format_status};
 use zmanager_core::jobs::{JobEvent, JobKind};
 use zmanager_core::safety::{OverwriteConflict, OverwriteDecision, OverwriteResolver};
 
@@ -568,6 +568,12 @@ fn formats_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
         print_help_stdout(FORMATS_HELP, &global);
         return ExitCode::SUCCESS;
     }
+    // --contract is a data flag, not a global option; handle it before
+    // parse_global_only (which rejects unknown arguments).
+    if args.iter().any(|arg| arg == "--contract") {
+        print_formats_contract();
+        return ExitCode::SUCCESS;
+    }
     if let Err(error) = parse_global_only(args, &mut global) {
         return command_usage_error("formats", &error, &global);
     }
@@ -584,7 +590,45 @@ fn print_formats_json() {
     print_format_descriptors_json(CREATE_FORMATS);
     print!(",\"extract\":");
     print_format_descriptors_json(EXTRACT_FORMATS);
+    print!(",\"capabilities\":");
+    print_formats_capabilities_json(true);
     println!("}}");
+}
+
+/// Emits the byte-stable capability contract consumed by downstream projects
+/// (the desktop manifest generator and mobile snapshots). Platform-independent
+/// on purpose: it carries kind/label/extensions only — never status or
+/// capability flags, which flip per build target. Regenerate with
+/// scripts/refresh-format-contract.sh.
+fn print_formats_contract() {
+    println!("{{\"schemaVersion\":1,\"formats\":");
+    print_formats_capabilities_json(false);
+    println!("}}");
+}
+
+fn print_formats_capabilities_json(include_runtime: bool) {
+    print!("[");
+    for (index, capability) in FORMAT_CAPABILITIES.iter().enumerate() {
+        if index > 0 {
+            print!(",");
+        }
+        let kind_name = format!("{:?}", capability.kind);
+        print!("{{\"kind\":\"{}\",\"label\":\"{}\",\"extensions\":", json_escape(&kind_name), json_escape(&kind_name));
+        print!("{}", crate::cli::usage::json_string_array(capability.extensions));
+        if include_runtime {
+            let status = format_status(capability.kind);
+            let available = status == BackendStatus::Available;
+            let can_create = cli_can_create(capability.kind) && available;
+            print!(",\"status\":\"{}\",\"can_list\":{available},\"can_extract\":{available},\"can_create\":{can_create}", backend_status_string(status));
+        }
+        print!("}}");
+    }
+    print!("]");
+}
+
+/// The CLI can create a format when a create descriptor exists for its kind.
+fn cli_can_create(kind: ArchiveFormatKind) -> bool {
+    CREATE_FORMATS.iter().any(|format| format.kind == kind)
 }
 
 fn print_format_descriptors_json(formats: &[FormatDescriptor]) {

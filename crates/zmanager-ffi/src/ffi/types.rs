@@ -40,6 +40,31 @@ pub struct HealthcheckResult {
     pub summary: String,
 }
 
+/// One row of the compile-time format capability registry, exposed so
+/// downstream consumers (gui/mobile) can build or verify their format tables
+/// against the same source of truth as the engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormatDescriptor {
+    /// Debug name of the core `ArchiveFormatKind`, for example "Zip" or "AppleArchive".
+    pub kind: String,
+    /// Human-readable display label.
+    pub label: String,
+    /// Extension suffixes (with leading dot) this format is recognized by.
+    /// Predicate-detected formats (split volumes, raw streams) carry an empty list.
+    pub extensions: Vec<String>,
+    /// Whether this build can list the format's contents.
+    pub can_list: bool,
+    /// Whether this build can extract the format.
+    pub can_extract: bool,
+    /// Whether this build can create the format.
+    pub can_create: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListFormatsResult {
+    pub formats: Vec<FormatDescriptor>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArchiveFormat {
     Zip,

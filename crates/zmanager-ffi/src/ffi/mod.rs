@@ -15,8 +15,8 @@ mod util;
 mod tests;
 
 pub use ops::archive::{
-    cancelJob, clearSensitiveState, detectArchive, healthcheck, listArchive, materializePreview, planCreate, planExtract, pollJobEvents, startCreate,
-    startExtract, testArchive,
+    cancelJob, clearSensitiveState, detectArchive, healthcheck, listArchive, listFormats, materializePreview, planCreate, planExtract, pollJobEvents,
+    startCreate, startExtract, testArchive,
 };
 pub use ops::tzap::{
     createTzapSelfSignedIdentity, inspectTzapX509PublicNoKeySigner, inspectTzapX509Signer, tzap_auth_account_url_json, tzap_auth_callback_json,
@@ -28,7 +28,8 @@ pub use ops::tzap::{
 pub use types::{
     ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult,
     CreateArchiveFormat, CreatePlanEntry, DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntry, ExtractionPlanEntryStatus,
-    HealthcheckResult, JobTerminalSummary, ListArchiveRequest, ListArchiveResult, MaterializePreviewRequest, MaterializePreviewResult, MobileJobEvent,
-    MobileJobEventKind, MobileJobKind, MobileJobStatus, PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult, PollJobEventsRequest,
-    PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest, TestArchiveResult, ZmanagerGuiError,
+    FormatDescriptor, HealthcheckResult, JobTerminalSummary, ListArchiveRequest, ListArchiveResult, ListFormatsResult, MaterializePreviewRequest,
+    MaterializePreviewResult, MobileJobEvent, MobileJobEventKind, MobileJobKind, MobileJobStatus, PlanCreateRequest, PlanCreateResult, PlanExtractRequest,
+    PlanExtractResult, PollJobEventsRequest, PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest,
+    TestArchiveResult, ZmanagerGuiError,
 };

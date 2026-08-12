@@ -23,6 +23,7 @@ const PACKAGE_METADATA_SH: &str = include_str!("../../../scripts/generate-packag
 const RELEASE_COMPATIBILITY_SH: &str = include_str!("../../../scripts/release-compatibility-check.sh");
 const THIRD_PARTY_NOTICE_GENERATOR: &str = include_str!("../../../scripts/generate-third-party-notices.py");
 const RUNTIME_DEPS_SH: &str = include_str!("../../../scripts/inspect-runtime-deps.sh");
+const FORMAT_CONTRACT: &str = include_str!("../../../crates/zmanager-cli/contracts/archive-formats.json");
 const CI_WINDOWS_PS1: &str = include_str!("../../../scripts/ci-windows.ps1");
 const HOMEBREW_TEMPLATE: &str = include_str!("../../../packaging/homebrew/zmanager.rb.template");
 const WINGET_INSTALLER_TEMPLATE: &str = include_str!("../../../packaging/winget/TzapOrg.ZManagerCLI.installer.yaml.template");
@@ -285,6 +286,18 @@ fn formats_command_lists_apple_archive_with_platform_annotation() {
     assert_success("zm formats --json", &json);
     let json_stdout = String::from_utf8_lossy(&json.stdout);
     assert_contains(&json_stdout, expected_aar_json);
+}
+
+#[test]
+fn formats_contract_matches_committed_artifact() {
+    // Downstream projects (desktop manifest generation, mobile snapshots) read
+    // crates/zmanager-cli/contracts/archive-formats.json; this test keeps the
+    // committed artifact byte-identical to `zm formats --contract`. Regenerate
+    // with scripts/refresh-format-contract.sh after registry changes.
+    let output = Command::new(zm_path()).arg("formats").arg("--contract").output().unwrap();
+    assert_success("zm formats --contract", &output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, FORMAT_CONTRACT, "contract drift: run scripts/refresh-format-contract.sh");
 }
 
 #[test]

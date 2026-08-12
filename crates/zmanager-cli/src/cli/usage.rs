@@ -285,10 +285,17 @@ Show supported archive formats
 
 Usage:
   zm formats [--json]
+  zm formats --contract
 
 Examples:
   zm formats
   zm formats --json
+  zm formats --contract
+
+--contract prints the byte-stable capability contract (kind/label/extensions
+per format, no platform-dependent fields) consumed by downstream projects;
+regenerate crates/zmanager-cli/contracts/archive-formats.json with
+scripts/refresh-format-contract.sh.
 
 Create:
   zip       .zip

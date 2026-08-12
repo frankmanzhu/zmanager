@@ -32,14 +32,15 @@ use crate::ffi::ops::jobs::{
 };
 use crate::ffi::types::{
     ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreatePlanEntry,
-    DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntryStatus, HealthcheckResult, ListArchiveRequest, ListArchiveResult,
-    MaterializePreviewRequest, MaterializePreviewResult, PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult, PollJobEventsRequest,
-    PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest, TestArchiveResult, ZmanagerGuiError, usize_to_u64,
+    DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntryStatus, FormatDescriptor, HealthcheckResult, ListArchiveRequest,
+    ListArchiveResult, ListFormatsResult, MaterializePreviewRequest, MaterializePreviewResult, PlanCreateRequest, PlanCreateResult, PlanExtractRequest,
+    PlanExtractResult, PollJobEventsRequest, PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest,
+    TestArchiveResult, ZmanagerGuiError, usize_to_u64,
 };
 use crate::ffi::util::{
     classify_archive_path, create_format_label, ensure_destination_archive_path, ensure_destination_root_path, ensure_existing_file_path,
-    ensure_existing_source_paths, ensure_non_empty_entry_path, format_capabilities, format_label, map_browser_entry_kind, password_ref, sanitize_password,
-    usize_from_u64,
+    ensure_existing_source_paths, ensure_non_empty_entry_path, format_capabilities, format_capabilities_for_kind, format_label, kind_label,
+    map_browser_entry_kind, password_ref, sanitize_password, usize_from_u64,
 };
 
 const MAX_RETAINED_EXTRACTION_PLANS: usize = 64;
@@ -170,6 +171,28 @@ pub fn healthcheck() -> HealthcheckResult {
         ready: report.ready,
         summary: report.summary(),
     }
+}
+
+/// Enumerates the full compile-time format capability registry so consumers
+/// can present or verify format support without duplicating extension lists
+/// or platform predicates.
+#[allow(non_snake_case)]
+pub fn listFormats() -> ListFormatsResult {
+    let formats = zmanager_core::archive_format::FORMAT_CAPABILITIES
+        .iter()
+        .map(|capability| {
+            let (can_list, can_extract, can_create) = format_capabilities_for_kind(capability.kind);
+            FormatDescriptor {
+                kind: format!("{:?}", capability.kind),
+                label: kind_label(capability.kind).to_string(),
+                extensions: capability.extensions.iter().map(|suffix| suffix.to_string()).collect(),
+                can_list,
+                can_extract,
+                can_create,
+            }
+        })
+        .collect();
+    ListFormatsResult { formats }
 }
 
 #[allow(non_snake_case)]

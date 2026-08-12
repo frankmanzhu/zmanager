@@ -1,5 +1,6 @@
 namespace zmanager {
     HealthcheckResult healthcheck();
+    ListFormatsResult listFormats();
     [Throws=ZmanagerGuiError]
     DetectArchiveResult detectArchive(DetectArchiveRequest request);
     [Throws=ZmanagerGuiError]
@@ -72,6 +73,19 @@ dictionary HealthcheckResult {
     string version;
     boolean ready;
     string summary;
+};
+
+dictionary FormatDescriptor {
+    string kind;
+    string label;
+    sequence<string> extensions;
+    boolean can_list;
+    boolean can_extract;
+    boolean can_create;
+};
+
+dictionary ListFormatsResult {
+    sequence<FormatDescriptor> formats;
 };
 
 enum ArchiveFormat {
