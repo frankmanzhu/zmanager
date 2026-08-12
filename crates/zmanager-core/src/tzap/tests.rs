@@ -1223,6 +1223,9 @@ fn public_display_summary_reports_not_authentic_for_forged_signature() {
 /// root, which is unchanged). The footer-only display status must stay
 /// `Signed`, and the service JSON must mark the verification scope honestly.
 #[test]
+// This test crosses into the auth-gated tzap_service surface (public
+// metadata summary); the offline build's tzap module has no access to it.
+#[cfg(feature = "auth")]
 fn public_display_summary_scope_markers_report_footer_only_status() {
     let temp = TestDir::new("tzap_display_scope_markers");
     let archive = temp.path("signed.tzap");

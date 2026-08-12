@@ -146,6 +146,6 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: zm-preview-${{ matrix.target }}
-          path: dist/zm-${{ matrix.target }}.*
+          path: dist/zm*${{ matrix.target }}.*
           if-no-files-found: error
           retention-days: 14

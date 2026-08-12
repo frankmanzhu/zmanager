@@ -15,6 +15,7 @@ use zmanager_core::tzap_backend::TzapError;
 use zmanager_core::zip_backend::ZipBackendError;
 
 use crate::ffi::types::{BridgeError, BridgeSeverity, ZmanagerGuiError};
+#[cfg(feature = "auth")]
 use crate::ffi::util::ensure_existing_tzap_archive_path;
 
 pub(crate) const ERROR_INVALID_REQUEST: &str = "invalid_request";
@@ -32,6 +33,7 @@ pub(crate) const WARNING_LAUNCH_GATED_FORMAT: &str = "launch_gated_format";
 
 /// Turns a path-validation error into the JSON error envelope the tzap
 /// service endpoints use, since they are declared without `[Throws]`.
+#[cfg(feature = "auth")]
 pub(crate) fn return_tzap_error(error: ZmanagerGuiError) -> String {
     let message = match error {
         ZmanagerGuiError::Bridge { user_message, .. } => user_message,
@@ -43,6 +45,7 @@ pub(crate) fn return_tzap_error(error: ZmanagerGuiError) -> String {
 /// returns it, or the JSON error envelope as `Err` on validation failure.
 /// The service endpoints are declared without `[Throws]`, so callers must
 /// return the envelope as the function value instead of continuing with it.
+#[cfg(feature = "auth")]
 pub(crate) fn existing_archive_path_or_tzap_error(value: String) -> Result<String, String> {
     ensure_existing_tzap_archive_path(value, "archivePath").map_err(return_tzap_error)
 }

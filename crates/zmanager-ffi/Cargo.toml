@@ -20,6 +20,10 @@ thiserror = "2"
 uniffi = { version = "0.29", features = ["cli"] }
 zmanager-core = { workspace = true }
 
+[features]
+default = ["auth"]
+auth = ["zmanager-core/auth"]
+
 [build-dependencies]
 uniffi = { version = "0.29", features = ["build"] }
 

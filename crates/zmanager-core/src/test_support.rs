@@ -1,3 +1,4 @@
+#![cfg_attr(not(feature = "auth"), allow(dead_code))]
 //! Shared test-support utilities for the core crate.
 //!
 //! Only compiled when the crate is built for testing. Consolidated from the
@@ -86,6 +87,7 @@ pub mod x509_factory {
     use openssl::x509::{X509, X509Extension, X509Ref};
     use serde_json::json;
 
+    #[cfg(feature = "auth")]
     #[derive(Clone, Copy, Default)]
     pub struct ChainConfig {
         pub omit_leaf_policy: bool,
@@ -98,6 +100,7 @@ pub mod x509_factory {
         pub root_der: Vec<u8>,
     }
 
+    #[cfg(feature = "auth")]
     pub fn certificate_fixture(config: ChainConfig) -> CertificateFixture {
         let root_key = p256_private_key();
         let platform_key = p256_private_key();
@@ -135,6 +138,7 @@ pub mod x509_factory {
         builder.build()
     }
 
+    #[cfg(feature = "auth")]
     pub fn leaf_certificate(key: &PKeyRef<Private>, issuer_cert: &X509Ref, issuer_key: &PKeyRef<Private>, aki_source: &X509Ref, config: ChainConfig) -> X509 {
         let mut builder = base_certificate_builder("TZAP Test Signer", key, Some(issuer_cert));
         builder.set_not_after(&Asn1Time::days_from_now(90).unwrap()).unwrap();

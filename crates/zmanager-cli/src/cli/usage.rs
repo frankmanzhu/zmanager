@@ -25,14 +25,7 @@ Commands:
   test <archive>                 Test archive readability
   plan <paths...>                Show planned archive entries
   formats                        Show supported formats
-  auth <command>                 Hosted TZAP auth handoff helpers
-  me                             Show the local TZAP session summary
-  cert <command>                 Manage local TZAP certificate inventory
-  device retire                  Retire local TZAP device material
-  sign <input>                   Sign a TZAP document JSON payload
-  verify <input>                 Verify a TZAP document envelope
-  contact <command>              Manage TZAP contact cards
-  share <archive> <paths...>     Create a TZAP archive for contacts
+  auth <command>                 Online identity, signing, and sharing
   doctor                         Verify the archive engine
   completions <shell>            Print shell completion scripts
   help [command]                 Show help for a command

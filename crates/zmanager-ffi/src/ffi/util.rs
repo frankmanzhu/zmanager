@@ -5,6 +5,7 @@ use std::io;
 use std::path::Path;
 
 use zmanager_core::archive_browser::BrowserEntryKind;
+#[cfg(feature = "auth")]
 use zmanager_core::tzap_backend::{has_existing_tzap_input_volume, is_tzap_archive_path};
 
 use crate::ffi::error::{ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, bridge_error, hint, map_io_error};
@@ -172,6 +173,7 @@ pub(crate) fn ensure_existing_file_path(value: String, field: &str) -> Result<St
 /// names a TZAP archive (or one of its numbered volumes) whose volumes exist
 /// beside it — a multi-volume archive is addressed by its non-existent base
 /// name (e.g. `sample.tzap`), and the core discovery resolves the volumes.
+#[cfg(feature = "auth")]
 pub(crate) fn ensure_existing_tzap_archive_path(value: String, field: &str) -> Result<String, ZmanagerGuiError> {
     let value = sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
 

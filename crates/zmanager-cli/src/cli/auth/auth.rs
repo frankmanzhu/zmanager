@@ -18,7 +18,7 @@ pub(crate) fn auth_command(args: &[String], global: GlobalOptions) -> ExitCode {
     match args[0].as_str() {
         "--help" | "-h" => {
             print_help_stdout(AUTH_MENU_HELP, &global);
-            return ExitCode::SUCCESS;
+            ExitCode::SUCCESS
         }
         "login" => auth_login_command(&args[1..], global),
         "callback" => auth_callback_command(&args[1..], global),

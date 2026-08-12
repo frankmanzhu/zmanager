@@ -88,6 +88,7 @@ impl AtomicOutputFile {
     /// point leaves either the old or the new file — never neither. Used by
     /// writers whose final file must never disappear (identity catalog).
     #[allow(unsafe_code)]
+    #[cfg(feature = "auth")]
     pub(crate) fn commit_with_atomic_replace(mut self) -> io::Result<()> {
         drop(self.file.take());
         #[cfg(unix)]
@@ -167,6 +168,7 @@ impl Drop for TemporaryFile {
 ///
 /// The temporary file is allocated with `create_new` plus a retry loop, so
 /// two concurrent writers can never clobber each other's temporary file.
+#[cfg(feature = "auth")]
 pub(crate) fn write_atomic_secret_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write as _;
     #[cfg(unix)]
@@ -215,7 +217,7 @@ pub(crate) fn write_atomic_secret_file(path: &Path, bytes: &[u8]) -> io::Result<
     Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("could not allocate temporary secret file for {}", path.display())))
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), feature = "auth"))]
 fn replace_file_over_existing(temporary: &Path, path: &Path) -> io::Result<()> {
     fs::rename(temporary, path)
 }

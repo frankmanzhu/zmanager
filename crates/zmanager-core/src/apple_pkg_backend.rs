@@ -370,7 +370,7 @@ mod tests {
 
         // The fixture carries one symlink; it is materialized on unix and
         // skipped with a warning elsewhere.
-        assert_eq!(report.skipped_entries, if cfg!(unix) { 0 } else { 1 }, "warnings: {:?}", report.warnings);
+        assert_eq!(report.skipped_entries, usize::from(!cfg!(unix)), "warnings: {:?}", report.warnings);
         assert_eq!(fs::read_to_string(temp.path("out/payload/README.txt")).unwrap(), "ZManager fixture payload\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/nested/file.txt")).unwrap(), "nested fixture file\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");

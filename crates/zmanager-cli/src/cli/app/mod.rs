@@ -1,4 +1,3 @@
-#[cfg(feature = "auth")]
 use crate::cli::auth::auth_command;
 use crate::cli::create::{create_command, create_command_from_expanded};
 use crate::cli::extract::{extract_command, extract_command_from_expanded};
@@ -60,7 +59,6 @@ pub fn run_from_env() -> ExitCode {
         "doctor" | "healthcheck" => doctor_command(&raw_args[1..], global),
         "completions" | "completion" => completions_command(&raw_args[1..], global),
         "formats" => formats_command(&raw_args[1..], global),
-        #[cfg(feature = "auth")]
         "auth" => auth_command(&raw_args[1..], global),
         "create" | "c" => create_command(&raw_args[1..], global),
         "extract" | "x" => extract_command(&raw_args[1..], global),

@@ -1,3 +1,4 @@
+#![cfg(feature = "auth")]
 mod common;
 
 use common::*;

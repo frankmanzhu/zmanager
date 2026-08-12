@@ -33,17 +33,9 @@ macro_rules! backend_error_from_impls {
 pub mod archive_format;
 mod archive_split;
 mod atomic_file;
-#[cfg(feature = "auth")]
-pub mod crl;
 mod extract_loop;
 mod extract_materialize;
 mod gitignore;
-#[cfg(feature = "auth")]
-mod http_client;
-#[cfg(feature = "auth")]
-mod identity_migration;
-#[cfg(feature = "auth")]
-mod json_util;
 mod multi_volume;
 mod sevenz_volume;
 mod strings;
@@ -52,8 +44,6 @@ mod temp_names;
 #[cfg(test)]
 mod test_support;
 mod tzap;
-#[cfg(feature = "auth")]
-pub mod tzap_service_auth;
 mod wire_profile;
 mod zip_split;
 
@@ -61,53 +51,37 @@ pub mod apple_archive_backend;
 pub mod apple_dmg_backend;
 pub mod apple_pkg_backend;
 pub mod archive_browser;
-#[cfg(feature = "auth")]
-pub mod auth_client;
-#[cfg(feature = "auth")]
-pub mod certificate_lifecycle;
-#[cfg(feature = "auth")]
-pub mod contact_card;
 pub mod deb_backend;
-#[cfg(feature = "auth")]
-pub mod device_identity;
-#[cfg(feature = "auth")]
-pub mod document_envelope;
-#[cfg(feature = "auth")]
-pub mod document_signing;
-#[cfg(feature = "auth")]
-pub mod document_verification;
-#[cfg(feature = "auth")]
-pub mod enrollment_client;
-#[cfg(feature = "auth")]
-pub mod identity_catalog;
-#[cfg(feature = "auth")]
-pub mod jcs;
 pub mod jobs;
 pub mod libarchive_backend;
-#[cfg(feature = "auth")]
-pub mod local_identity_store;
-#[cfg(feature = "auth")]
-pub mod local_tzap_service;
 pub mod manifest;
 pub mod msi_backend;
-#[cfg(feature = "auth")]
-pub mod p256_signature;
 pub mod rar_backend;
 pub mod raw_stream_backend;
 pub mod safety;
 pub mod secrets;
 pub mod sevenz_backend;
-#[cfg(feature = "auth")]
-pub mod status_client;
 pub mod tar_gz_backend;
 pub mod tar_zst_backend;
 pub mod trust;
 pub mod tzap_backend;
-#[cfg(feature = "auth")]
-pub mod tzap_service;
 pub mod virtual_disk_backend;
 pub mod x509_format;
 pub mod zip_backend;
+
+// The online/identity surface is one gated unit: everything under `auth`
+// (see auth/mod.rs). The public re-exports keep the historical flat paths
+// (`zmanager_core::auth_client`, …) working for the CLI, FFI, and tests; the
+// crate-private re-exports cover the helpers the auth modules share.
+#[cfg(feature = "auth")]
+mod auth;
+#[cfg(feature = "auth")]
+pub use auth::{
+    auth_client, certificate_lifecycle, contact_card, crl, device_identity, document_envelope, document_signing, document_verification, enrollment_client,
+    identity_catalog, jcs, local_identity_store, local_tzap_service, p256_signature, status_client, tzap_service, tzap_service_auth,
+};
+#[cfg(feature = "auth")]
+pub(crate) use auth::{http_client, identity_migration, json_util};
 
 mod hex;
 

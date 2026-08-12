@@ -20,6 +20,7 @@ pub use certificate_profile::{
     TzapCertificateProfileError, TzapCertificateProfileOptions, TzapCertificateProfileValidation, TzapCertificatePublicMetadata, TzapOfficialRootPinKind,
     public_intermediate_chain_der, validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
 };
+#[cfg(feature = "auth")]
 pub(crate) use identifiers::candidate_chains;
 pub use identifiers::{
     TrustIdentifierError, canonical_serial_hex, decode_base64url_no_padding, format_certificate_sha256, format_csr_sha256, format_issuer_sha256,

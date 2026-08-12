@@ -30,7 +30,9 @@ pedantic = "warn"
 [workspace.dependencies]
 zmanager-apple-archive = { path = "crates/zmanager-apple-archive", version = "2.0.1" }
 zmanager-cli = { path = "crates/zmanager-cli", version = "2.0.1" }
-zmanager-core = { path = "crates/zmanager-core", version = "2.0.1" }
+# default-features = false: online/identity modules are gated behind the
+# `auth` feature, which each member re-enables through its own feature.
+zmanager-core = { path = "crates/zmanager-core", version = "2.0.1", default-features = false }
 zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.0.1" }
 zmanager-libarchive = { path = "crates/zmanager-libarchive", version = "2.0.1" }
 zmanager-libarchive-sys = { path = "crates/zmanager-libarchive-sys", version = "2.0.1" }

@@ -588,13 +588,7 @@ mod tests {
             // skipped with a warning elsewhere (the FAT vmdk has none). The
             // NTFS-metadata filter warns but does not count toward
             // skipped_entries.
-            let skipped_symlink = if cfg!(unix) {
-                0
-            } else if name != "basic.vmdk" {
-                1
-            } else {
-                0
-            };
+            let skipped_symlink = usize::from(!cfg!(unix) && name != "basic.vmdk");
             assert_eq!(report.skipped_entries, skipped_symlink, "{name}: warnings: {:?}", report.warnings);
             assert_eq!(
                 report.written_entries,
