@@ -112,6 +112,13 @@ impl<W: io::Write> io::Write for ProgressWriter<'_, '_, W> {
     }
 }
 
+/// HFS+ volumes carry a reserved `\0\0\0\0HFS+ Private Data` directory
+/// (Finder metadata) that cannot exist as a real path; skip it and any other
+/// entry whose raw name contains NUL bytes.
+fn is_reserved_volume_entry(path: &str) -> bool {
+    path.contains('\0')
+}
+
 /// Lists the entries of a `.dmg` archive without extracting them.
 pub fn list_dmg(archive_path: impl AsRef<Path>) -> Result<Vec<DmgListEntry>, DmgBackendError> {
     let mut pipeline = dpp::DmgPipeline::open(archive_path.as_ref()).map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
@@ -123,7 +130,7 @@ pub fn list_dmg(archive_path: impl AsRef<Path>) -> Result<Vec<DmgListEntry>, Dmg
         .into_iter()
         .filter_map(|entry| {
             let path = entry.path.strip_prefix('/').unwrap_or(&entry.path).to_string();
-            if path.is_empty() {
+            if path.is_empty() || is_reserved_volume_entry(&path) {
                 return None;
             }
             let kind = match entry.entry.kind {
@@ -181,6 +188,10 @@ fn extract_dmg_inner(
         if archive_entry_path.is_empty() {
             continue;
         }
+        if is_reserved_volume_entry(&archive_entry_path) {
+            crate::extract_loop::skip_entry(&mut report, context.as_deref_mut(), format!("skipped {archive_entry_path}: reserved filesystem entry"));
+            continue;
+        }
 
         let size = walk_entry.entry.size;
 
@@ -234,10 +245,10 @@ fn extract_dmg_inner(
                             Ok(written_bytes)
                         }
                         ExtractionEntryKind::Symlink { target } => {
-                            // HFS+ stores symlink targets in the resource fork, which the
-                            // underlying DPP reader does not expose: read_file returns
-                            // empty for such entries. Skip rather than materialize a
-                            // broken empty symlink.
+                            // APFS stores symlink targets in a "com.apple.fs.symlink"
+                            // extended attribute, HFS+ in the data fork; the DPP reader
+                            // exposes both via read_file. Skip rather than materialize
+                            // a broken empty symlink if a target is still missing.
                             if target.as_os_str().is_empty() {
                                 crate::extract_loop::skip_entry(
                                     report,
@@ -260,6 +271,7 @@ fn extract_dmg_inner(
                             {
                                 let _ = target;
                             }
+                            report.written_entries += 1;
                             Ok::<u64, DmgBackendError>(0)
                         }
                         _ => Ok::<u64, DmgBackendError>(0),
@@ -326,17 +338,17 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.written_entries, 4);
+        assert_eq!(report.written_entries, 5);
         assert_eq!(report.written_bytes, 81);
-        assert_eq!(report.skipped_entries, 1, "warnings: {:?}", report.warnings);
+        assert_eq!(report.skipped_entries, 0, "warnings: {:?}", report.warnings);
         assert_eq!(fs::read_to_string(temp.path("out/payload/README.txt")).unwrap(), "ZManager fixture payload\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/nested/file.txt")).unwrap(), "nested fixture file\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
         assert!(temp.path("out/payload/nested/empty-dir").is_dir());
-        // HFS+ symlink targets live in the resource fork, which the reader
-        // cannot expose; the entry is skipped with a warning instead of
-        // materializing a broken empty symlink.
-        assert!(!temp.path("out/payload/nested/readme-link.txt").exists());
+        // APFS stores the symlink target in a "com.apple.fs.symlink" xattr,
+        // which the reader exposes via read_file; the link is materialized.
+        let link = fs::read_link(temp.path("out/payload/nested/readme-link.txt")).unwrap();
+        assert_eq!(link, PathBuf::from("../README.txt"));
     }
 }

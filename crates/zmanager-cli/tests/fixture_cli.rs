@@ -153,6 +153,13 @@ fn cli_lists_tests_and_extracts_apple_dmg_pkg_fixtures() {
         assert_eq!(fs::read_to_string(out.join("payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
         assert_eq!(fs::read_to_string(out.join("payload/unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
         assert!(out.join("payload/nested/empty-dir").is_dir());
+        #[cfg(unix)]
+        {
+            // The symlink target must be materialized, not skipped (APFS DMGs
+            // store it in a catalog xattr; PKGs carry it in the cpio payload).
+            let link = fs::read_link(out.join("payload/nested/readme-link.txt")).unwrap();
+            assert_eq!(link, PathBuf::from("../README.txt"), "symlink target for {filename}");
+        }
 
         // Selective extraction exercises pattern matching against the normalized paths.
         let out_sel = temp.path("out-sel");
@@ -268,6 +275,150 @@ fn optional_xar_lists_xar_fixture_when_available() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// Apple tools drop `._` AppleDouble companion entries during extraction
+/// (pkgutil --expand-full, ditto), while zm materializes them as regular
+/// files (fidelity-first, like tar). Filter them on both sides so the
+/// cross-tool comparison asserts the payload content is identical modulo
+/// that known, documented divergence.
+fn is_apple_double(rel: &Path) -> bool {
+    rel.file_name().is_some_and(|name| name.to_string_lossy().starts_with("._"))
+}
+
+/// Recursively collects the relative paths of every entry under `root`.
+fn collect_tree_entries(root: &Path) -> Vec<PathBuf> {
+    let mut entries = Vec::new();
+    let mut stack = vec![PathBuf::new()];
+    while let Some(dir) = stack.pop() {
+        let mut children = fs::read_dir(root.join(&dir)).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+        children.sort();
+        for child in children {
+            let rel = dir.join(child.file_name().unwrap());
+            if is_apple_double(&rel) {
+                continue;
+            }
+            entries.push(rel.clone());
+            if fs::symlink_metadata(&child).unwrap().is_dir() {
+                stack.push(rel);
+            }
+        }
+    }
+    entries
+}
+
+/// Asserts `actual` matches `expected` entry-for-entry: same tree shape,
+/// byte-identical file contents, identical symlink targets.
+fn assert_trees_match(label: &str, expected: &Path, actual: &Path) {
+    let expected_entries = collect_tree_entries(expected);
+    let actual_entries = collect_tree_entries(actual);
+
+    for rel in &expected_entries {
+        let actual_path = actual.join(rel);
+        assert!(fs::symlink_metadata(&actual_path).is_ok(), "{label}: zm output is missing {rel:?}");
+        let expected_meta = fs::symlink_metadata(expected.join(rel)).unwrap();
+        let actual_meta = fs::symlink_metadata(&actual_path).unwrap();
+        assert_eq!(expected_meta.is_symlink(), actual_meta.is_symlink(), "{label}: type mismatch for {rel:?}");
+        if expected_meta.is_symlink() {
+            assert_eq!(fs::read_link(expected.join(rel)).unwrap(), fs::read_link(&actual_path).unwrap(), "{label}: symlink target mismatch for {rel:?}");
+        } else if expected_meta.is_file() {
+            assert_eq!(fs::read(expected.join(rel)).unwrap(), fs::read(&actual_path).unwrap(), "{label}: content mismatch for {rel:?}");
+        }
+    }
+    assert_eq!(actual_entries.len(), expected_entries.len(), "{label}: zm output has entries the reference tool does not");
+}
+
+/// The DMG fixture must pass Apple's own integrity check.
+#[test]
+fn optional_hdiutil_verifies_dmg_fixture_when_available() {
+    let Some(hdiutil) = find_on_path("hdiutil") else {
+        return;
+    };
+    let fixture = archives_dir().join("basic.dmg");
+    if !fixture.exists() {
+        return;
+    }
+
+    let output = Command::new(hdiutil).arg("verify").arg(&fixture).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "hdiutil verify failed for {}\nstdout:\n{}\nstderr:\n{}",
+        fixture.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Attaches the DMG with Apple's tools, copies the volume tree out, and
+/// compares it entry-for-entry against zmanager's own extraction: the two
+/// must agree on tree shape, file contents, and symlink targets.
+#[test]
+fn optional_hdiutil_attach_compares_dmg_extraction_when_available() {
+    let Some(hdiutil) = find_on_path("hdiutil") else {
+        return;
+    };
+    let fixture = archives_dir().join("basic.dmg");
+    if !fixture.exists() {
+        return;
+    }
+
+    let temp = TestDir::new("fixture-cli-hdiutil-compare");
+    let mountpoint = temp.path("mnt");
+    fs::create_dir_all(&mountpoint).unwrap();
+
+    let attach = Command::new(&hdiutil).arg("attach").arg("-readonly").arg("-nobrowse").arg("-mountpoint").arg(&mountpoint).arg(&fixture).output().unwrap();
+    assert_success("hdiutil attach", &attach);
+
+    let reference = temp.path("reference");
+    // ditto preserves symlinks and copies the whole volume root.
+    let copy = Command::new("ditto").arg(&mountpoint).arg(&reference).output().unwrap();
+    assert_success("ditto copy of attached volume", &copy);
+    let detach = Command::new(hdiutil).arg("detach").arg(&mountpoint).output().unwrap();
+    assert_success("hdiutil detach", &detach);
+
+    let out = temp.path("zm");
+    let extract = Command::new(zm_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).output().unwrap();
+    assert_success("zm extract basic.dmg", &extract);
+
+    // Compare the payload subtree only: the volume root may carry
+    // filesystem-level metadata that ditto copies but that is not part of
+    // the archived payload tree.
+    assert!(reference.join("payload").is_dir(), "reference payload missing: {}", reference.display());
+    assert_trees_match("hdiutil reference vs zm", &reference.join("payload"), &out.join("payload"));
+}
+
+/// Expands the PKG with Apple's own installer tools (`pkgutil --expand-full`)
+/// and compares the payload tree entry-for-entry against zmanager's
+/// extraction: same tree shape, file contents, and symlink targets.
+#[test]
+fn optional_pkgutil_compares_pkg_extraction_when_available() {
+    let Some(pkgutil) = find_on_path("pkgutil") else {
+        return;
+    };
+    let fixture = archives_dir().join("basic.pkg");
+    if !fixture.exists() {
+        return;
+    }
+
+    let temp = TestDir::new("fixture-cli-pkgutil-compare");
+    let expanded = temp.path("expanded");
+    let expand = Command::new(pkgutil).arg("--expand-full").arg(&fixture).arg(&expanded).output().unwrap();
+    assert_success("pkgutil --expand-full", &expand);
+
+    // Flat pkgbuild packages expand to Payload/payload/...; accept the
+    // common layouts in case the component directory is named differently.
+    let reference = ["Payload/payload", "payload"]
+        .iter()
+        .map(|rel| expanded.join(rel))
+        .find(|path| path.is_dir())
+        .unwrap_or_else(|| panic!("expanded payload missing under {}", expanded.display()));
+
+    let out = temp.path("zm");
+    let extract = Command::new(zm_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).output().unwrap();
+    assert_success("zm extract basic.pkg", &extract);
+
+    assert_trees_match("pkgutil reference vs zm", &reference, &out.join("payload"));
 }
 
 #[test]

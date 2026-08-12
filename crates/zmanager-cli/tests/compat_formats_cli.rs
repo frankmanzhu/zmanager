@@ -1142,6 +1142,20 @@ fn competitor_mtree_format_extract_with_zm() {
     assert!(out_mtree.join("project/file.txt").exists(), "mtree extraction failed to create file metadata placeholder");
 }
 
+/// The Apple formats must handle entries beyond the shared complex payload:
+/// unicode paths, spaces in names, and symlinks.
+fn assert_zm_extracts_apple_extra_entries(label: &str, archive: &Path, temp: &TestDir) {
+    let out = temp.path(format!("out_extras_{}", label.replace([' ', '-'], "_")));
+    let output = Command::new(zm_path()).arg("extract").arg(archive).arg("-C").arg(&out).output().unwrap();
+    assert_success(&format!("zm extract {label} (extra entries)"), &output);
+    assert_eq!(fs::read(out.join("project/unicode/こんにちは.txt")).unwrap(), b"unicode_content");
+    assert_eq!(fs::read(out.join("project/file with spaces.txt")).unwrap(), b"spaces_content");
+    #[cfg(unix)]
+    {
+        assert_eq!(fs::read_link(out.join("project/nested/link.txt")).unwrap(), PathBuf::from("../root_file.txt"));
+    }
+}
+
 #[test]
 fn competitor_apple_dmg_and_pkg_formats_extract_with_zm() {
     let Some(hdiutil) = find_on_path("hdiutil") else {
@@ -1154,14 +1168,46 @@ fn competitor_apple_dmg_and_pkg_formats_extract_with_zm() {
     let archive_temp = TestDir::new("compat_apple_archives");
     create_complex_project_payload(&temp);
 
+    // Extra entries beyond the shared payload: unicode paths, spaces in
+    // names, and a symlink (APFS keeps its target in a catalog xattr).
+    fs::create_dir_all(temp.path("project/unicode")).unwrap();
+    fs::write(temp.path("project/unicode/こんにちは.txt"), b"unicode_content").unwrap();
+    fs::write(temp.path("project/file with spaces.txt"), b"spaces_content").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink("../root_file.txt", temp.path("project/nested/link.txt")).unwrap();
+    }
+
+    // APFS image (hdiutil's default on modern macOS).
     let archive_dmg = archive_temp.path("project.dmg");
     let create_dmg =
-        Command::new(hdiutil).arg("create").arg("-format").arg("UDZO").arg("-ov").arg("-srcfolder").arg(temp.root()).arg(&archive_dmg).output().unwrap();
+        Command::new(&hdiutil).arg("create").arg("-format").arg("UDZO").arg("-ov").arg("-srcfolder").arg(temp.root()).arg(&archive_dmg).output().unwrap();
     assert_success("hdiutil creates dmg", &create_dmg);
     assert_zm_extracts_complex_matrix_without_stdout("hdiutil-created dmg", &archive_dmg, &temp);
+    assert_zm_extracts_apple_extra_entries("hdiutil-created dmg", &archive_dmg, &temp);
+
+    // HFS+ image: symlink targets live in the data fork there, so this
+    // exercises the other on-disk storage path.
+    let archive_dmg_hfs = archive_temp.path("project-hfs.dmg");
+    let create_dmg_hfs = Command::new(&hdiutil)
+        .arg("create")
+        .arg("-fs")
+        .arg("HFS+")
+        .arg("-format")
+        .arg("UDZO")
+        .arg("-ov")
+        .arg("-srcfolder")
+        .arg(temp.root())
+        .arg(&archive_dmg_hfs)
+        .output()
+        .unwrap();
+    assert_success("hdiutil creates HFS+ dmg", &create_dmg_hfs);
+    assert_zm_extracts_complex_matrix_without_stdout("hdiutil-created HFS+ dmg", &archive_dmg_hfs, &temp);
+    assert_zm_extracts_apple_extra_entries("hdiutil-created HFS+ dmg", &archive_dmg_hfs, &temp);
 
     let archive_pkg = archive_temp.path("project.pkg");
-    let create_pkg = Command::new(pkgbuild)
+    let create_pkg = Command::new(&pkgbuild)
         .arg("--root")
         .arg(temp.root())
         .arg("--identifier")
@@ -1173,4 +1219,5 @@ fn competitor_apple_dmg_and_pkg_formats_extract_with_zm() {
         .unwrap();
     assert_success("pkgbuild creates pkg", &create_pkg);
     assert_zm_extracts_complex_matrix_without_stdout("pkgbuild-created pkg", &archive_pkg, &temp);
+    assert_zm_extracts_apple_extra_entries("pkgbuild-created pkg", &archive_pkg, &temp);
 }
