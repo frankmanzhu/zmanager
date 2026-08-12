@@ -221,8 +221,6 @@ fn top_level_help_is_user_facing_and_hides_legacy_commands() {
     assert_contains(&stdout, "extract");
     assert_contains(&stdout, "formats");
     assert_contains(&stdout, "auth");
-    assert_contains(&stdout, "contact");
-    assert_contains(&stdout, "share");
     assert_contains(&stdout, "completions");
     assert_contains(&stdout, "Run 'zm help <command>'");
     assert_contains(&stdout, "Run 'zm completions --help'");
@@ -347,11 +345,11 @@ fn every_public_command_has_targeted_help() {
 
 #[test]
 fn me_has_targeted_help_through_both_navigation_paths() {
-    let direct = Command::new(zm_path()).args(["me", "--help"]).output().unwrap();
-    assert_success("zm me --help", &direct);
+    let direct = Command::new(zm_path()).args(["auth", "me", "--help"]).output().unwrap();
+    assert_success("zm auth me --help", &direct);
     let stdout = String::from_utf8_lossy(&direct.stdout);
     assert_contains(&stdout, "Show the local TZAP session summary");
-    assert_contains(&stdout, "zm me [options]");
+    assert_contains(&stdout, "zm auth me [options]");
 
     let help = Command::new(zm_path()).args(["help", "me"]).output().unwrap();
     assert_success("zm help me", &help);

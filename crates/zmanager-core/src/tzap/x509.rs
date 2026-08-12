@@ -93,6 +93,7 @@ impl TzapX509TrustOptions {
 /// Resolves the in-memory X.509 signing material for a locally enrolled
 /// certificate (CR-113: moved from the CLI so the tzap JSON service's share
 /// endpoint uses the same battle-tested resolution rules).
+#[cfg(feature = "auth")]
 pub fn tzap_x509_signing_options_from_inventory(
     store: &impl crate::local_identity_store::TzapLocalIdentityStore,
     account_key: &str,

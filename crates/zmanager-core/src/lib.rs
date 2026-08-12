@@ -33,12 +33,16 @@ macro_rules! backend_error_from_impls {
 pub mod archive_format;
 mod archive_split;
 mod atomic_file;
+#[cfg(feature = "auth")]
 pub mod crl;
 mod extract_loop;
 mod extract_materialize;
 mod gitignore;
+#[cfg(feature = "auth")]
 mod http_client;
+#[cfg(feature = "auth")]
 mod identity_migration;
+#[cfg(feature = "auth")]
 mod json_util;
 mod multi_volume;
 mod sevenz_volume;
@@ -48,6 +52,7 @@ mod temp_names;
 #[cfg(test)]
 mod test_support;
 mod tzap;
+#[cfg(feature = "auth")]
 pub mod tzap_service_auth;
 mod wire_profile;
 mod zip_split;
@@ -56,34 +61,49 @@ pub mod apple_archive_backend;
 pub mod apple_dmg_backend;
 pub mod apple_pkg_backend;
 pub mod archive_browser;
+#[cfg(feature = "auth")]
 pub mod auth_client;
+#[cfg(feature = "auth")]
 pub mod certificate_lifecycle;
+#[cfg(feature = "auth")]
 pub mod contact_card;
 pub mod deb_backend;
+#[cfg(feature = "auth")]
 pub mod device_identity;
+#[cfg(feature = "auth")]
 pub mod document_envelope;
+#[cfg(feature = "auth")]
 pub mod document_signing;
+#[cfg(feature = "auth")]
 pub mod document_verification;
+#[cfg(feature = "auth")]
 pub mod enrollment_client;
+#[cfg(feature = "auth")]
 pub mod identity_catalog;
+#[cfg(feature = "auth")]
 pub mod jcs;
 pub mod jobs;
 pub mod libarchive_backend;
+#[cfg(feature = "auth")]
 pub mod local_identity_store;
+#[cfg(feature = "auth")]
 pub mod local_tzap_service;
 pub mod manifest;
 pub mod msi_backend;
+#[cfg(feature = "auth")]
 pub mod p256_signature;
 pub mod rar_backend;
 pub mod raw_stream_backend;
 pub mod safety;
 pub mod secrets;
 pub mod sevenz_backend;
+#[cfg(feature = "auth")]
 pub mod status_client;
 pub mod tar_gz_backend;
 pub mod tar_zst_backend;
 pub mod trust;
 pub mod tzap_backend;
+#[cfg(feature = "auth")]
 pub mod tzap_service;
 pub mod virtual_disk_backend;
 pub mod x509_format;

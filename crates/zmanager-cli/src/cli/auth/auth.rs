@@ -4,23 +4,34 @@ use super::support::{
 };
 use super::{AUTH_PENDING_FILE, AuthEndpointOptions, DEFAULT_TZAP_CLIENT_ID, TzapCliContext};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
-use crate::cli::usage::{AUTH_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help};
+use crate::cli::usage::{AUTH_MENU_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line};
 use serde_json::{Value, json};
 use std::fs;
 use std::process::ExitCode;
 use zmanager_core::tzap_service::{tzap_auth_account_url_json, tzap_auth_callback_json, tzap_auth_forget_json, tzap_auth_login_json, tzap_auth_status_json};
 
 pub(crate) fn auth_command(args: &[String], global: GlobalOptions) -> ExitCode {
-    if wants_help(args) || args.is_empty() {
-        print_help_stdout(AUTH_HELP, &global);
-        return if args.is_empty() { ExitCode::from(2) } else { ExitCode::SUCCESS };
+    if args.is_empty() {
+        print_help_stdout(AUTH_MENU_HELP, &global);
+        return ExitCode::from(2);
     }
     match args[0].as_str() {
+        "--help" | "-h" => {
+            print_help_stdout(AUTH_MENU_HELP, &global);
+            return ExitCode::SUCCESS;
+        }
         "login" => auth_login_command(&args[1..], global),
         "callback" => auth_callback_command(&args[1..], global),
         "status" => auth_status_command(&args[1..], global),
         "forget" => auth_forget_command(&args[1..], global),
         "account" => auth_account_command(&args[1..], global),
+        "me" => super::me_command(&args[1..], global),
+        "cert" => super::cert_command(&args[1..], global),
+        "device" => super::device_command(&args[1..], global),
+        "sign" => super::sign_command(&args[1..], global),
+        "verify" => super::verify_command(&args[1..], global),
+        "contact" => super::contact_command(&args[1..], global),
+        "share" => super::share_command(&args[1..], global),
         command => command_usage_error("auth", &format!("unknown auth command: {command}"), &global),
     }
 }

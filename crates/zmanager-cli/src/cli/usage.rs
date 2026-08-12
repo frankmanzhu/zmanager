@@ -334,45 +334,47 @@ Examples:
 Use --json in scripts and bug reports.
 ";
 
-pub(crate) const AUTH_HELP: &str = "\
-Hosted TZAP auth handoff helpers
+pub(crate) const AUTH_MENU_HELP: &str = "\
+Online identity and sharing operations
 
 Usage:
-  zm auth login [--print-url] [options]
-  zm auth callback --state <state> --relay-body <file|->
-  zm auth callback --callback-url <url> [--auth-base-url <url>]
-  zm auth status [options]
-  zm auth forget [options]
-  zm auth account [options]
+  zm auth <command> [options]
 
-Examples:
-  zm auth login --print-url
-  zm auth callback --state \"$STATE\" --relay-body relay.json
-  zm auth status --json
+Commands:
+  login                          Hosted TZAP auth login
+  callback                       Process auth callback
+  status                         Show auth status
+  forget                         Forget local auth material
+  account                        Show account URL
+  me                             Show the local TZAP session summary
+  cert <command>                 Manage local TZAP certificate inventory
+  device retire                  Retire local TZAP device material
+  sign <input>                   Sign a TZAP document JSON payload
+  verify <input>                 Verify a TZAP document envelope
+  contact <command>              Manage TZAP contact cards
+  share <archive> <paths...>     Create a TZAP archive for contacts
 
 Options:
-      --state-dir <dir>          Store local auth/session state in dir
+      --environment <name>       Select a hosted service environment (local|staging|prod)
+      --auth-base-url <url>      Override the hosted auth service base URL
+      --account-base-url <url>   Override the hosted account service base URL
+      --client-id <id>           Override the OAuth client id
+      --redirect-uri <url>       Override the OAuth callback redirect URI
+      --provider <name>          Require a specific login provider integration
+      --org-id <id>              Require a specific login organization
+      --state-dir <dir>          Read and write local auth/session state from dir
       --account-key <key>        Local account inventory key; default is default
-      --auth-base-url <url>      Override hosted Auth base URL
-      --account-base-url <url>   Override hosted Account base URL
-      --client-id <id>           Hosted Auth client id
-      --redirect-uri <uri>       Registered app callback URI
-      --provider <id>            Hosted provider id to launch
-      --org-id <id>              Optional organization id for launch
-      --callback-url <url>       Full callback URL, checked for leaked tokens
-      --handoff-code <code>      One-time hosted Auth handoff code
-      --relay-body <file|->      Relay JSON from hosted Auth callback
-      --json                     Emit machine-readable JSON
+      --json                     Emit machine-readable JSON (status, account, and sign in/out)
 
-The CLI only handles launch and registered handoff material. It does not collect
-provider credentials, OTPs, or OAuth secrets.
+`zm auth` commands manage your identity, sign documents, and share archives securely.
 ";
+
 
 pub(crate) const ME_HELP: &str = "\
 Show the local TZAP session summary
 
 Usage:
-  zm me [options]
+  zm auth me [options]
 
 Options:
       --state-dir <dir>          Read local auth/session state from dir
@@ -384,10 +386,10 @@ pub(crate) const CERT_HELP: &str = "\
 Manage local TZAP certificate inventory
 
 Usage:
-  zm cert list [options]
-  zm cert enroll [options]
-  zm cert renew [options]
-  zm cert revoke [options]
+  zm auth cert list [options]
+  zm auth cert enroll [options]
+  zm auth cert renew [options]
+  zm auth cert revoke [options]
 
 Options:
       --state-dir <dir>          Store local identity/session state in dir
@@ -408,8 +410,8 @@ pub(crate) const DEVICE_HELP: &str = "\
 Manage local TZAP device material
 
 Usage:
-  zm device retire [options]
-  zm device revoke [options]
+  zm auth device retire [options]
+  zm auth device revoke [options]
 
 Options:
       --state-dir <dir>          Store local identity/session state in dir
@@ -423,7 +425,7 @@ pub(crate) const SIGN_HELP: &str = "\
 Sign a TZAP document JSON payload
 
 Usage:
-  zm sign <input.json> --certificate-id <id> --output <envelope.json> [options]
+  zm auth sign <input.json> --certificate-id <id> --output <envelope.json> [options]
 
 Options:
       --state-dir <dir>          Store local identity state in dir
@@ -439,7 +441,7 @@ pub(crate) const VERIFY_HELP: &str = "\
 Verify a TZAP document envelope
 
 Usage:
-  zm verify <envelope.json> [options]
+  zm auth verify <envelope.json> [options]
 
 Options:
       --custom-trust-root <sha256:id>
@@ -460,11 +462,11 @@ pub(crate) const CONTACT_HELP: &str = "\
 Manage TZAP contact cards
 
 Usage:
-  zm contact keygen [--label <name>] [options]
-  zm contact export --recipient-key-id <id> --certificate-id <id> --display-name <name> --output <file>
-  zm contact import <card.json> --accept [options]
-  zm contact list [options]
-  zm contact remove <contact-id> [options]
+  zm auth contact keygen [--label <name>] [options]
+  zm auth contact export --recipient-key-id <id> --certificate-id <id> --display-name <name> --output <file>
+  zm auth contact import <card.json> --accept [options]
+  zm auth contact list [options]
+  zm auth contact remove <contact-id> [options]
 
 Options:
       --state-dir <dir>          Store local identity state in dir
@@ -487,7 +489,7 @@ pub(crate) const SHARE_HELP: &str = "\
 Create a TZAP archive for accepted contacts
 
 Usage:
-  zm share <archive.tzap> <paths...> --contact <id> --certificate-id <id> [options]
+  zm auth share <archive.tzap> <paths...> --contact <id> --certificate-id <id> [options]
 
 Options:
       --state-dir <dir>          Store local identity state in dir
@@ -554,7 +556,7 @@ fn command_help(command: &str) -> Option<&'static str> {
         "test" => Some(TEST_HELP),
         "plan" => Some(PLAN_HELP),
         "formats" => Some(FORMATS_HELP),
-        "auth" => Some(AUTH_HELP),
+        "auth" => Some(AUTH_MENU_HELP),
         "me" => Some(ME_HELP),
         "cert" => Some(CERT_HELP),
         "device" => Some(DEVICE_HELP),

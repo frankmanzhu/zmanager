@@ -6,7 +6,8 @@ use crate::cli::format::{
 };
 use crate::cli::open::{list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded};
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_output_mode};
-use crate::cli::tzap::{auth_command, cert_command, contact_command, device_command, me_command, share_command, sign_command, verify_command};
+#[cfg(feature = "auth")]
+use crate::cli::auth::auth_command;
 use crate::cli::usage::{
     COMPLETION_BASH_SCRIPT, COMPLETION_FISH_SCRIPT, COMPLETION_POWERSHELL_SCRIPT, COMPLETION_ZSH_SCRIPT, COMPLETIONS_HELP, DOCTOR_HELP, FORMATS_HELP, USAGE,
     command_usage_error, help_command, json_escape, print_help_stderr, print_help_stdout, usage_error, wants_help,
@@ -59,14 +60,8 @@ pub fn run_from_env() -> ExitCode {
         "doctor" | "healthcheck" => doctor_command(&raw_args[1..], global),
         "completions" | "completion" => completions_command(&raw_args[1..], global),
         "formats" => formats_command(&raw_args[1..], global),
+        #[cfg(feature = "auth")]
         "auth" => auth_command(&raw_args[1..], global),
-        "me" => me_command(&raw_args[1..], global),
-        "cert" => cert_command(&raw_args[1..], global),
-        "device" => device_command(&raw_args[1..], global),
-        "sign" => sign_command(&raw_args[1..], global),
-        "verify" => verify_command(&raw_args[1..], global),
-        "contact" => contact_command(&raw_args[1..], global),
-        "share" => share_command(&raw_args[1..], global),
         "create" | "c" => create_command(&raw_args[1..], global),
         "extract" | "x" => extract_command(&raw_args[1..], global),
         "list" | "ls" => list_command(&raw_args[1..], global),

@@ -5,5 +5,6 @@ pub mod format;
 pub mod open;
 pub mod options;
 pub mod planning;
-pub mod tzap;
+#[cfg(feature = "auth")]
+pub mod auth;
 pub mod usage;

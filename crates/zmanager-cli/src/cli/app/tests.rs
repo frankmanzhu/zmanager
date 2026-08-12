@@ -3,7 +3,7 @@ use crate::cli::create::*;
 use crate::cli::extract::*;
 use crate::cli::open::*;
 use crate::cli::options::*;
-use crate::cli::tzap::*;
+use crate::cli::auth::*;
 use crate::cli::usage::*;
 use std::fs;
 use std::io::Cursor;
