@@ -1,0 +1,7 @@
+# Fetch git dependencies (dpp fork, tzap, forensic-vfs-engine) with the git CLI
+# instead of libgit2. GitHub Actions' macos-15-intel runners fail libgit2's TLS
+# handshake to github.com ("untrusted connection error; class=Ssl(16)") while
+# the git CLI's system-cert path succeeds; this is also cargo's own suggested
+# remedy in that error message.
+[net]
+git-fetch-with-cli = true
