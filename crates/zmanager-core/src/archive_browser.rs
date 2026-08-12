@@ -488,11 +488,8 @@ pub fn extract_entry_with_options(
                 options.password,
             )?;
             let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
-            let destination_path = if rel_dest.is_empty() {
-                destination.to_path_buf()
-            } else {
-                destination.join(rel_dest)
-            };
+            let destination_path =
+                if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) };
             Ok(EntryExtractReport {
                 destination_path,
                 written_bytes: report.written_bytes,
@@ -971,13 +968,8 @@ fn extract_tzap_entry(
     }
 
     let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
-    let destination_path = primary_destination_path.unwrap_or_else(|| {
-        if rel_dest.is_empty() {
-            destination.to_path_buf()
-        } else {
-            destination.join(rel_dest)
-        }
-    });
+    let destination_path = primary_destination_path
+        .unwrap_or_else(|| if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) });
 
     Ok(EntryExtractReport {
         destination_path,

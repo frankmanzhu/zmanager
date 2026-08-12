@@ -8,19 +8,21 @@ use common::TestDir;
 use std::fs;
 use std::path::Path;
 
-use zmanager_core::archive_browser::{extract_entry, extract_entry_with_options, BrowserExtractOptions};
+use zmanager_core::archive_browser::{BrowserExtractOptions, extract_entry, extract_entry_with_options};
 use zmanager_core::jobs::{CancellationToken, JobContext, JobEvent};
-use zmanager_core::manifest::{plan_archive, PlanOptions};
+use zmanager_core::manifest::{PlanOptions, plan_archive};
 use zmanager_core::safety::{archive_entry_matches_selected, archive_pattern_matches};
 use zmanager_core::secrets::SecretString;
-use zmanager_core::sevenz_backend::{create_7z_from_path, SevenZCreateOptions};
-use zmanager_core::tar_gz_backend::{create_tar_gz_from_path, TarGzCreateOptions};
-use zmanager_core::tar_zst_backend::{create_tar_zst_from_path, TarZstdCreateOptions};
-use zmanager_core::tzap_backend::{create_tzap_from_manifest_with_context, TzapCreateOptions, TzapKeySource};
-use zmanager_core::zip_backend::{create_zip_from_manifest, ZipCompression, ZipCreateOptions};
+use zmanager_core::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
+use zmanager_core::tar_gz_backend::{TarGzCreateOptions, create_tar_gz_from_path};
+use zmanager_core::tar_zst_backend::{TarZstdCreateOptions, create_tar_zst_from_path};
+use zmanager_core::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
+use zmanager_core::zip_backend::{ZipCompression, ZipCreateOptions, create_zip_from_manifest};
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use zmanager_core::apple_archive_backend::{create_apple_archive_from_path, AppleArchiveCreateOptions};
+use zmanager_core::apple_archive_backend::{
+    AppleArchiveCompression, AppleArchiveCreateOptions, create_apple_archive_from_path, extract_apple_archive,
+};
 
 fn create_nested_tree(root: &Path) {
     fs::create_dir_all(root.join("folder/sub1/sub2")).unwrap();
@@ -37,10 +39,7 @@ fn create_nested_tree(root: &Path) {
 }
 
 fn create_tgz_fixture(source: &Path, archive: &Path, level: Option<u32>) {
-    let options = TarGzCreateOptions {
-        level: level.unwrap_or(6) as i32,
-        ..Default::default()
-    };
+    let options = TarGzCreateOptions { level: level.unwrap_or(6).cast_signed(), ..Default::default() };
     create_tar_gz_from_path(source, archive, &options).unwrap();
 }
 
@@ -48,17 +47,14 @@ fn create_zip_fixture(source: &Path, archive: &Path, level: Option<u32>, store_o
     let manifest = plan_archive(source, &PlanOptions::default()).unwrap();
     let options = ZipCreateOptions {
         compression: if store_only { ZipCompression::Store } else { ZipCompression::Deflate },
-        level: level.map(|l| l as i64),
+        level: level.map(i64::from),
         ..Default::default()
     };
     create_zip_from_manifest(&manifest, archive, &options).unwrap();
 }
 
 fn create_tar_zst_fixture(source: &Path, archive: &Path, level: Option<i32>) {
-    let options = TarZstdCreateOptions {
-        level: level.unwrap_or(3),
-        ..Default::default()
-    };
+    let options = TarZstdCreateOptions { level: level.unwrap_or(3), ..Default::default() };
     create_tar_zst_from_path(source, archive, &options).unwrap();
 }
 
@@ -81,12 +77,14 @@ fn create_tzap_fixture(source: &Path, archive: &Path, recovery_percentage: u8) {
 }
 
 fn create_7z_fixture(source: &Path, archive: &Path, level: Option<u32>, password: Option<String>) {
-    let options = SevenZCreateOptions {
-        level,
-        password: password.map(SecretString::new),
-        ..Default::default()
-    };
+    let options = SevenZCreateOptions { level, password: password.map(SecretString::new), ..Default::default() };
     create_7z_from_path(source, archive, &options).unwrap();
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn create_aar_fixture(source: &Path, archive: &Path, options: &AppleArchiveCreateOptions) {
+    let opts = AppleArchiveCreateOptions { replace_existing: true, ..options.clone() };
+    create_apple_archive_from_path(source, archive, &opts).unwrap();
 }
 
 // =========================================================================
@@ -111,7 +109,10 @@ fn test_matrix_archive_pattern_matches_exact_and_directory_prefixes() {
     let test_paths = vec![
         ("folder/a.txt", vec!["folder", "folder/", "folder\\"]),
         ("folder/sub1/c.txt", vec!["folder", "folder/", "folder\\", "folder/sub1", "folder\\sub1", "folder\\sub1\\"]),
-        ("folder/sub1/sub2/d.txt", vec!["folder", "folder/", "folder\\", "folder/sub1", "folder\\sub1", "folder\\sub1\\", "folder/sub1/sub2"]),
+        (
+            "folder/sub1/sub2/d.txt",
+            vec!["folder", "folder/", "folder\\", "folder/sub1", "folder\\sub1", "folder\\sub1\\", "folder/sub1/sub2"],
+        ),
         ("dir1/e.txt", vec!["dir1", "dir1/"]),
         ("file1.txt", vec!["file1.txt"]),
     ];
@@ -120,30 +121,16 @@ fn test_matrix_archive_pattern_matches_exact_and_directory_prefixes() {
         for pattern in &patterns {
             let matches = archive_pattern_matches(pattern, path);
             let should_match = expected_matching_patterns.contains(pattern);
-            assert_eq!(
-                matches, should_match,
-                "Pattern match mismatch for pattern={pattern:?}, path={path:?}"
-            );
+            assert_eq!(matches, should_match, "Pattern match mismatch for pattern={pattern:?}, path={path:?}");
         }
     }
 }
 
 #[test]
 fn test_matrix_archive_entry_matches_selected_slashes_and_backslashes() {
-    let selected_variants = vec![
-        "folder",
-        "folder/",
-        "folder\\",
-        "./folder",
-        "./folder/",
-    ];
+    let selected_variants = vec!["folder", "folder/", "folder\\", "./folder", "./folder/"];
 
-    let entry_paths = vec![
-        "folder/a.txt",
-        "folder\\b.txt",
-        "folder/sub1/c.txt",
-        "folder\\sub1\\sub2\\d.txt",
-    ];
+    let entry_paths = vec!["folder/a.txt", "folder\\b.txt", "folder/sub1/c.txt", "folder\\sub1\\sub2\\d.txt"];
 
     for entry in &entry_paths {
         for selected in &selected_variants {
@@ -169,9 +156,18 @@ fn test_tgz_combinatorial_folder_extraction_variants() {
     create_tgz_fixture(&source_dir, &archive, Some(6));
 
     let selection_variants = vec![
-        ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
-        ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
-        ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+        (
+            "src/folder",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
+        (
+            "src/folder/",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
+        (
+            "src/folder\\",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
         ("src/folder/sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/folder\\sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/folder\\sub1\\", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
@@ -182,16 +178,13 @@ fn test_tgz_combinatorial_folder_extraction_variants() {
     ];
 
     for (idx, (sel_path, expected_files)) in selection_variants.iter().enumerate() {
-        let out_dir = scenario.path(&format!("out_{idx}"));
+        let out_dir = scenario.path(format!("out_{idx}"));
         let report = extract_entry(&archive, sel_path, &out_dir).unwrap();
         assert!(report.written_bytes > 0, "Written bytes should be > 0 for {sel_path}");
 
         for expected in expected_files {
             let extracted_file = out_dir.join(expected);
-            assert!(
-                extracted_file.exists(),
-                "Expected file {expected:?} to exist when extracting {sel_path:?}"
-            );
+            assert!(extracted_file.exists(), "Expected file {expected:?} to exist when extracting {sel_path:?}");
         }
     }
 }
@@ -237,17 +230,26 @@ fn test_zip_combinatorial_folder_extraction_variants() {
     let archive = scenario.path("test.zip");
     create_zip_fixture(&source_dir, &archive, Some(6), false);
 
-    let selection_variants = vec![
-        ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
-        ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
-        ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+    let selection_variants = [
+        (
+            "src/folder",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
+        (
+            "src/folder/",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
+        (
+            "src/folder\\",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
         ("src/folder/sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/dir1", vec!["src/dir1/e.txt"]),
         ("src/file1.txt", vec!["src/file1.txt"]),
     ];
 
     for (idx, (sel_path, expected_files)) in selection_variants.iter().enumerate() {
-        let out_dir = scenario.path(&format!("out_{idx}"));
+        let out_dir = scenario.path(format!("out_{idx}"));
         let report = extract_entry(&archive, sel_path, &out_dir).unwrap();
         assert!(report.written_bytes > 0);
 
@@ -297,7 +299,7 @@ fn test_tar_zst_combinatorial_folder_extraction_variants() {
     let archive = scenario.path("test.tar.zst");
     create_tar_zst_fixture(&source_dir, &archive, Some(3));
 
-    let selection_variants = vec![
+    let selection_variants = [
         ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt"]),
         ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt"]),
         ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt"]),
@@ -306,7 +308,7 @@ fn test_tar_zst_combinatorial_folder_extraction_variants() {
     ];
 
     for (idx, (sel_path, expected_files)) in selection_variants.iter().enumerate() {
-        let out_dir = scenario.path(&format!("out_{idx}"));
+        let out_dir = scenario.path(format!("out_{idx}"));
         let report = extract_entry(&archive, sel_path, &out_dir).unwrap();
         assert!(report.written_bytes > 0);
 
@@ -357,17 +359,26 @@ fn test_tzap_combinatorial_folder_extraction_variants() {
     let archive = scenario.path("test.tzap");
     create_tzap_fixture(&source_dir, &archive, 0);
 
-    let selection_variants = vec![
-        ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
-        ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
-        ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+    let selection_variants = [
+        (
+            "src/folder",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
+        (
+            "src/folder/",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
+        (
+            "src/folder\\",
+            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
+        ),
         ("src/folder/sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/dir1", vec!["src/dir1/e.txt"]),
         ("src/file1.txt", vec!["src/file1.txt"]),
     ];
 
     for (idx, (sel_path, expected_files)) in selection_variants.iter().enumerate() {
-        let out_dir = scenario.path(&format!("out_{idx}"));
+        let out_dir = scenario.path(format!("out_{idx}"));
         let report = extract_entry(&archive, sel_path, &out_dir).unwrap();
         assert!(report.written_bytes > 0);
 
@@ -418,7 +429,7 @@ fn test_7z_combinatorial_folder_extraction_variants() {
     let archive = scenario.path("test.7z");
     create_7z_fixture(&source_dir, &archive, Some(6), None);
 
-    let selection_variants = vec![
+    let selection_variants = [
         ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt"]),
         ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt"]),
         ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt"]),
@@ -427,7 +438,7 @@ fn test_7z_combinatorial_folder_extraction_variants() {
     ];
 
     for (idx, (sel_path, expected_files)) in selection_variants.iter().enumerate() {
-        let out_dir = scenario.path(&format!("out_{idx}"));
+        let out_dir = scenario.path(format!("out_{idx}"));
         let report = extract_entry(&archive, sel_path, &out_dir).unwrap();
         assert!(report.written_bytes > 0);
 
@@ -451,8 +462,7 @@ fn test_extraction_policy_strip_components_and_overwrite() {
     create_tgz_fixture(&source_dir, &archive, Some(6));
 
     let out_dir = scenario.path("out_strip");
-    let mut options = BrowserExtractOptions::default();
-    options.strip_components = 1;
+    let options = BrowserExtractOptions { strip_components: 1, ..Default::default() };
 
     extract_entry_with_options(&archive, "src/folder", &out_dir, options).unwrap();
     assert!(out_dir.join("folder/a.txt").exists());
@@ -472,6 +482,88 @@ fn test_apple_archive_combinatorial_folder_extraction() {
     let out_dir = scenario.path("out");
     extract_entry(&archive, "src/folder", &out_dir).unwrap();
     assert!(out_dir.join("src/folder/a.txt").exists());
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[test]
+fn test_apple_archive_compression_variants() {
+    let compressions = vec![
+        AppleArchiveCompression::None,
+        AppleArchiveCompression::Lz4,
+        AppleArchiveCompression::Zlib,
+        AppleArchiveCompression::Lzma,
+        AppleArchiveCompression::Lzfse,
+        AppleArchiveCompression::Lzbitmap,
+    ];
+
+    for (idx, comp) in compressions.into_iter().enumerate() {
+        let scenario = TestDir::new(&format!("aar_comp_{idx}"));
+        let source_dir = scenario.path("src");
+        create_nested_tree(&source_dir);
+
+        let archive = scenario.path(format!("test_{idx}.aar"));
+        let options = AppleArchiveCreateOptions { compression: comp, ..Default::default() };
+        create_aar_fixture(&source_dir, &archive, &options);
+
+        let out_dir = scenario.path("out");
+        let report = extract_entry(&archive, "src/file1.txt", &out_dir).unwrap();
+        assert!(report.written_bytes > 0);
+        assert!(out_dir.join("src/file1.txt").exists());
+        let content = fs::read_to_string(out_dir.join("src/file1.txt")).unwrap();
+        assert_eq!(content, "root file 1\n");
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[test]
+fn test_apple_archive_encrypted_aea_passwords() {
+    let scenario = TestDir::new("aar_aea_pass");
+    let source_dir = scenario.path("src");
+    create_nested_tree(&source_dir);
+
+    let archive = scenario.path("test_encrypted.aea");
+    let password = "super_secret_password_123";
+    let options = AppleArchiveCreateOptions { password: Some(password.to_string()), ..Default::default() };
+    create_aar_fixture(&source_dir, &archive, &options);
+
+    let out_dir_fail = scenario.path("out_fail");
+    assert!(extract_entry(&archive, "src/file1.txt", &out_dir_fail).is_err());
+
+    let extract_opts_wrong = BrowserExtractOptions { password: Some("WrongPassword"), ..Default::default() };
+    let out_dir_wrong = scenario.path("out_wrong");
+    assert!(extract_entry_with_options(&archive, "src/file1.txt", &out_dir_wrong, extract_opts_wrong).is_err());
+
+    let extract_opts = BrowserExtractOptions { password: Some(password), ..Default::default() };
+    let out_dir_ok = scenario.path("out_ok");
+    let report = extract_entry_with_options(&archive, "src/file1.txt", &out_dir_ok, extract_opts).unwrap();
+    assert!(report.written_bytes > 0);
+    assert!(out_dir_ok.join("src/file1.txt").exists());
+    let content = fs::read_to_string(out_dir_ok.join("src/file1.txt")).unwrap();
+    assert_eq!(content, "root file 1\n");
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[test]
+fn test_apple_archive_custom_flags_and_metadata() {
+    let scenario = TestDir::new("aar_flags");
+    let source_dir = scenario.path("src");
+    create_nested_tree(&source_dir);
+
+    let archive = scenario.path("test_flags.aar");
+    let options = AppleArchiveCreateOptions {
+        block_size: 1_048_576,
+        threads: 2,
+        preserve_metadata: true,
+        replace_existing: true,
+        ..Default::default()
+    };
+    create_aar_fixture(&source_dir, &archive, &options);
+
+    let out_dir = scenario.path("out");
+    let report =
+        extract_apple_archive(&archive, &out_dir, zmanager_core::safety::ExtractionPolicy::default(), None).unwrap();
+    assert!(report.written_bytes > 0);
+    assert!(out_dir.join("src/folder/sub1/c.txt").exists());
 }
 macro_rules! generate_pattern_matching_tests {
     ($($name:ident: $pat:expr => $path:expr, $expected:expr);* $(;)?) => {
@@ -786,7 +878,6 @@ generate_pattern_matching_tests! {
     test_pm_300: "src/controllers-other" => "src/controllers/file_297.sqlite", false;
 }
 
-
 macro_rules! generate_selected_matching_tests {
     ($($name:ident: $entry:expr, $selected:expr => $expected:expr);* $(;)?) => {
         $(
@@ -1100,13 +1191,12 @@ generate_selected_matching_tests! {
     test_sel_300: "folder/depth2/item_295.bin", "folder-v2" => false;
 }
 
-
 macro_rules! generate_tgz_matrix_tests {
     ($($name:ident: $sel:expr);* $(;)?) => {
         $(
             #[test]
             fn $name() {
-                let scenario = TestDir::new("tgz_mat");
+                let scenario = TestDir::new(&format!("tgz_mat_{}", stringify!($name)));
                 let source_dir = scenario.path("src");
                 create_nested_tree(&source_dir);
                 let archive = scenario.path("archive.tgz");
@@ -1221,13 +1311,12 @@ generate_tgz_matrix_tests! {
     test_tgz_mat_100: "src/file1.txt";
 }
 
-
 macro_rules! generate_zip_matrix_tests {
     ($($name:ident: $sel:expr);* $(;)?) => {
         $(
             #[test]
             fn $name() {
-                let scenario = TestDir::new("zip_mat");
+                let scenario = TestDir::new(&format!("zip_mat_{}", stringify!($name)));
                 let source_dir = scenario.path("src");
                 create_nested_tree(&source_dir);
                 let archive = scenario.path("archive.zip");
@@ -1342,13 +1431,12 @@ generate_zip_matrix_tests! {
     test_zip_mat_100: "src/file1.txt";
 }
 
-
 macro_rules! generate_tzst_matrix_tests {
     ($($name:ident: $sel:expr);* $(;)?) => {
         $(
             #[test]
             fn $name() {
-                let scenario = TestDir::new("tzst_mat");
+                let scenario = TestDir::new(&format!("tzst_mat_{}", stringify!($name)));
                 let source_dir = scenario.path("src");
                 create_nested_tree(&source_dir);
                 let archive = scenario.path("archive.tzst");
@@ -1463,13 +1551,12 @@ generate_tzst_matrix_tests! {
     test_tzst_mat_100: "src/file1.txt";
 }
 
-
 macro_rules! generate_tzap_matrix_tests {
     ($($name:ident: $sel:expr);* $(;)?) => {
         $(
             #[test]
             fn $name() {
-                let scenario = TestDir::new("tzap_mat");
+                let scenario = TestDir::new(&format!("tzap_mat_{}", stringify!($name)));
                 let source_dir = scenario.path("src");
                 create_nested_tree(&source_dir);
                 let archive = scenario.path("archive.tzap");
@@ -1584,13 +1671,12 @@ generate_tzap_matrix_tests! {
     test_tzap_mat_100: "src/file1.txt";
 }
 
-
 macro_rules! generate_sevenz_matrix_tests {
     ($($name:ident: $sel:expr);* $(;)?) => {
         $(
             #[test]
             fn $name() {
-                let scenario = TestDir::new("sevenz_mat");
+                let scenario = TestDir::new(&format!("sevenz_mat_{}", stringify!($name)));
                 let source_dir = scenario.path("src");
                 create_nested_tree(&source_dir);
                 let archive = scenario.path("archive.sevenz");
@@ -1703,4 +1789,127 @@ generate_sevenz_matrix_tests! {
     test_sevenz_mat_098: "src/dir1/";
     test_sevenz_mat_099: "src/dir1\\";
     test_sevenz_mat_100: "src/file1.txt";
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+macro_rules! generate_aar_matrix_tests {
+    ($($name:ident: $sel:expr);* $(;)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let scenario = TestDir::new(&format!("aar_mat_{}", stringify!($name)));
+                let source_dir = scenario.path("src");
+                create_nested_tree(&source_dir);
+                let archive = scenario.path("archive.aar");
+                create_aar_fixture(&source_dir, &archive, &AppleArchiveCreateOptions::default());
+                let out_dir = scenario.path("out");
+                let report = extract_entry(&archive, $sel, &out_dir).unwrap();
+                assert!(report.written_bytes > 0);
+            }
+        )*
+    };
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+generate_aar_matrix_tests! {
+    test_aar_mat_001: "src/folder";
+    test_aar_mat_002: "src/folder/";
+    test_aar_mat_003: "src/folder\\";
+    test_aar_mat_004: "src/folder/sub1";
+    test_aar_mat_005: "src/folder\\sub1";
+    test_aar_mat_006: "src/folder\\sub1\\";
+    test_aar_mat_007: "src/dir1";
+    test_aar_mat_008: "src/dir1/";
+    test_aar_mat_009: "src/dir1\\";
+    test_aar_mat_010: "src/file1.txt";
+    test_aar_mat_011: "src/folder";
+    test_aar_mat_012: "src/folder/";
+    test_aar_mat_013: "src/folder\\";
+    test_aar_mat_014: "src/folder/sub1";
+    test_aar_mat_015: "src/folder\\sub1";
+    test_aar_mat_016: "src/folder\\sub1\\";
+    test_aar_mat_017: "src/dir1";
+    test_aar_mat_018: "src/dir1/";
+    test_aar_mat_019: "src/dir1\\";
+    test_aar_mat_020: "src/file1.txt";
+    test_aar_mat_021: "src/folder";
+    test_aar_mat_022: "src/folder/";
+    test_aar_mat_023: "src/folder\\";
+    test_aar_mat_024: "src/folder/sub1";
+    test_aar_mat_025: "src/folder\\sub1";
+    test_aar_mat_026: "src/folder\\sub1\\";
+    test_aar_mat_027: "src/dir1";
+    test_aar_mat_028: "src/dir1/";
+    test_aar_mat_029: "src/dir1\\";
+    test_aar_mat_030: "src/file1.txt";
+    test_aar_mat_031: "src/folder";
+    test_aar_mat_032: "src/folder/";
+    test_aar_mat_033: "src/folder\\";
+    test_aar_mat_034: "src/folder/sub1";
+    test_aar_mat_035: "src/folder\\sub1";
+    test_aar_mat_036: "src/folder\\sub1\\";
+    test_aar_mat_037: "src/dir1";
+    test_aar_mat_038: "src/dir1/";
+    test_aar_mat_039: "src/dir1\\";
+    test_aar_mat_040: "src/file1.txt";
+    test_aar_mat_041: "src/folder";
+    test_aar_mat_042: "src/folder/";
+    test_aar_mat_043: "src/folder\\";
+    test_aar_mat_044: "src/folder/sub1";
+    test_aar_mat_045: "src/folder\\sub1";
+    test_aar_mat_046: "src/folder\\sub1\\";
+    test_aar_mat_047: "src/dir1";
+    test_aar_mat_048: "src/dir1/";
+    test_aar_mat_049: "src/dir1\\";
+    test_aar_mat_050: "src/file1.txt";
+    test_aar_mat_051: "src/folder";
+    test_aar_mat_052: "src/folder/";
+    test_aar_mat_053: "src/folder\\";
+    test_aar_mat_054: "src/folder/sub1";
+    test_aar_mat_055: "src/folder\\sub1";
+    test_aar_mat_056: "src/folder\\sub1\\";
+    test_aar_mat_057: "src/dir1";
+    test_aar_mat_058: "src/dir1/";
+    test_aar_mat_059: "src/dir1\\";
+    test_aar_mat_060: "src/file1.txt";
+    test_aar_mat_061: "src/folder";
+    test_aar_mat_062: "src/folder/";
+    test_aar_mat_063: "src/folder\\";
+    test_aar_mat_064: "src/folder/sub1";
+    test_aar_mat_065: "src/folder\\sub1";
+    test_aar_mat_066: "src/folder\\sub1\\";
+    test_aar_mat_067: "src/dir1";
+    test_aar_mat_068: "src/dir1/";
+    test_aar_mat_069: "src/dir1\\";
+    test_aar_mat_070: "src/file1.txt";
+    test_aar_mat_071: "src/folder";
+    test_aar_mat_072: "src/folder/";
+    test_aar_mat_073: "src/folder\\";
+    test_aar_mat_074: "src/folder/sub1";
+    test_aar_mat_075: "src/folder\\sub1";
+    test_aar_mat_076: "src/folder\\sub1\\";
+    test_aar_mat_077: "src/dir1";
+    test_aar_mat_078: "src/dir1/";
+    test_aar_mat_079: "src/dir1\\";
+    test_aar_mat_080: "src/file1.txt";
+    test_aar_mat_081: "src/folder";
+    test_aar_mat_082: "src/folder/";
+    test_aar_mat_083: "src/folder\\";
+    test_aar_mat_084: "src/folder/sub1";
+    test_aar_mat_085: "src/folder\\sub1";
+    test_aar_mat_086: "src/folder\\sub1\\";
+    test_aar_mat_087: "src/dir1";
+    test_aar_mat_088: "src/dir1/";
+    test_aar_mat_089: "src/dir1\\";
+    test_aar_mat_090: "src/file1.txt";
+    test_aar_mat_091: "src/folder";
+    test_aar_mat_092: "src/folder/";
+    test_aar_mat_093: "src/folder\\";
+    test_aar_mat_094: "src/folder/sub1";
+    test_aar_mat_095: "src/folder\\sub1";
+    test_aar_mat_096: "src/folder\\sub1\\";
+    test_aar_mat_097: "src/dir1";
+    test_aar_mat_098: "src/dir1/";
+    test_aar_mat_099: "src/dir1\\";
+    test_aar_mat_100: "src/file1.txt";
 }
