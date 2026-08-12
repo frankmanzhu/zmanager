@@ -62,7 +62,12 @@ release reviewers can inspect the complete Cargo dependency closure.
 | anstyle-parse | 1.0.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | anstyle-query | 1.1.5 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | anstyle-wincon | 3.0.11 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| anyhow | 1.0.104 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| apfs | 0.2.4 | MIT | third-party-licenses/rust/apfs-0.2.4/LICENSE |
 | argon2 | 0.5.3 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| askama | 0.13.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| askama_derive | 0.13.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| askama_parser | 0.13.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | asn1-rs | 0.7.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | asn1-rs-derive | 0.6.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | asn1-rs-impl | 0.2.0 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -71,6 +76,7 @@ release reviewers can inspect the complete Cargo dependency closure.
 | base16ct | 0.2.0 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | base64 | 0.22.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | base64ct | 1.8.3 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
+| basic-toml | 0.1.10 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | bindgen | 0.72.1 | BSD-3-Clause | third-party-licenses/rust/bindgen-0.72.1/LICENSE |
 | bitflags | 2.13.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | blake2 | 0.10.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -80,13 +86,19 @@ release reviewers can inspect the complete Cargo dependency closure.
 | brotli | 8.0.4 | BSD-3-Clause AND MIT | third-party-licenses/rust/brotli-8.0.4/LICENSE.MIT<br>third-party-licenses/rust/brotli-8.0.4/LICENSE.BSD-3-Clause |
 | brotli-decompressor | 5.0.3 | BSD-3-Clause/MIT | third-party-licenses/rust/brotli-decompressor-5.0.3/LICENSE |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| byteorder | 1.5.0 | Unlicense OR MIT | third-party-licenses/rust/byteorder-1.5.0/COPYING |
 | bytes | 1.12.1 | MIT | third-party-licenses/rust/bytes-1.12.1/LICENSE |
+| bzip2 | 0.5.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | bzip2 | 0.6.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| bzip2-sys | 0.1.13+1.0.8 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| camino | 1.2.5 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | cap-fs-ext | 4.0.2 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | cap-primitives | 4.0.2 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | cap-std | 4.0.2 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
+| cargo-platform | 0.1.9 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| cargo_metadata | 0.19.2 | MIT | Metadata only; no license file found in the local Cargo cache |
 | cbc | 0.2.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| cc | 1.4.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| cc | 1.4.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | cexpr | 0.6.0 | Apache-2.0/MIT | Metadata only; no license file found in the local Cargo cache |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | chacha20 | 0.9.1 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
@@ -94,6 +106,10 @@ release reviewers can inspect the complete Cargo dependency closure.
 | cipher | 0.4.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | cipher | 0.5.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | clang-sys | 1.9.1 | Apache-2.0 | third-party-licenses/rust/clang-sys-1.9.1/LICENSE.txt |
+| clap | 4.6.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| clap_builder | 4.6.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| clap_derive | 4.6.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| clap_lex | 1.1.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | cmake | 0.1.58 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | cmov | 0.5.4 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | colorchoice | 1.0.5 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -123,6 +139,7 @@ release reviewers can inspect the complete Cargo dependency closure.
 | digest | 0.10.7 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | digest | 0.11.3 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | displaydoc | 0.2.7 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| dpp | 0.4.2 | MIT | third-party-licenses/rust/dpp-0.4.2/LICENSE |
 | ed25519 | 2.2.3 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | ed25519-dalek | 2.2.0 | BSD-3-Clause | third-party-licenses/rust/ed25519-dalek-2.2.0/LICENSE |
 | either | 1.17.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -134,12 +151,13 @@ release reviewers can inspect the complete Cargo dependency closure.
 | ff | 0.13.1 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | fiat-crypto | 0.2.9 | MIT OR Apache-2.0 OR BSD-1-Clause | Metadata only; no license file found in the local Cargo cache |
 | filetime | 0.2.29 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| find-msvc-tools | 0.1.9 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| find-msvc-tools | 0.1.10 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | flate2 | 1.1.9 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | fnv | 1.0.7 | Apache-2.0 / MIT | Metadata only; no license file found in the local Cargo cache |
 | foreign-types | 0.3.2 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | foreign-types-shared | 0.1.1 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| fs-err | 2.11.0 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | fs-set-times | 0.20.3 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | futures-channel | 0.3.33 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | futures-core | 0.3.33 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -153,10 +171,13 @@ release reviewers can inspect the complete Cargo dependency closure.
 | getrandom | 0.4.3 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | ghash | 0.5.1 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | glob | 0.3.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| goblin | 0.8.2 | MIT | third-party-licenses/rust/goblin-0.8.2/LICENSE |
 | group | 0.13.0 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | h2 | 0.4.15 | MIT | third-party-licenses/rust/h2-0.4.15/LICENSE |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| heck | 0.5.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | hex | 0.4.3 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| hfsplus | 0.2.4 | MIT | third-party-licenses/rust/hfsplus-0.2.4/LICENSE |
 | hkdf | 0.12.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | hmac | 0.12.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | hmac | 0.13.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -190,19 +211,21 @@ release reviewers can inspect the complete Cargo dependency closure.
 | itertools | 0.13.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | jobserver | 0.1.35 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| js-sys | 0.3.103 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| js-sys | 0.3.104 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | lazy_static | 1.5.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | libbz2-rs-sys | 0.2.5 | bzip2-1.0.6 | third-party-licenses/rust/libbz2-rs-sys-0.2.5/LICENSE |
 | libc | 0.2.189 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | libloading | 0.8.9 | ISC | third-party-licenses/rust/libloading-0.8.9/LICENSE |
-| liblzma-sys | 0.1.24 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | litemap | 0.8.2 | Unicode-3.0 | third-party-licenses/rust/litemap-0.8.2/LICENSE |
 | log | 0.4.33 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | lz4-sys | 1.11.1+lz4-1.10.0 | MIT | third-party-licenses/rust/lz4-sys-1.11.1+lz4-1.10.0/LICENSE |
 | lz4_flex | 0.14.0 | MIT | third-party-licenses/rust/lz4_flex-0.14.0/LICENSE |
+| lzfse | 0.2.0 | MIT | Metadata only; no license file found in the local Cargo cache |
+| lzfse-sys | 2.0.0 | MIT | Metadata only; no license file found in the local Cargo cache |
 | lzma-rust2 | 0.16.5 | Apache-2.0 | third-party-licenses/rust/lzma-rust2-0.16.5/LICENSE |
-| lzma-rust2 | 0.18.0 | Apache-2.0 | third-party-licenses/rust/lzma-rust2-0.18.0/LICENSE |
+| lzma-rust2 | 0.18.1 | Apache-2.0 | third-party-licenses/rust/lzma-rust2-0.18.1/LICENSE |
+| lzma-sys | 0.1.20 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | maybe-owned | 0.3.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | memchr | 2.8.3 | Unlicense OR MIT | third-party-licenses/rust/memchr-2.8.3/COPYING |
 | mime | 0.3.17 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -227,18 +250,24 @@ release reviewers can inspect the complete Cargo dependency closure.
 | p256 | 0.13.2 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | password-hash | 0.5.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | pbkdf2 | 0.13.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| pbzx | 0.3.1 | MIT | third-party-licenses/rust/pbzx-0.3.1/LICENSE |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | pkcs8 | 0.10.2 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | pkg-config | 0.3.33 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| plain | 0.2.3 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| plist | 1.10.0 | MIT | third-party-licenses/rust/plist-1.10.0/LICENCE |
 | poly1305 | 0.8.0 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | polyval | 0.6.2 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | potential_utf | 0.1.5 | Unicode-3.0 | third-party-licenses/rust/potential_utf-0.1.5/LICENSE |
 | powerfmt | 0.2.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | ppmd-rust | 1.4.0 | CC0-1.0 OR MIT-0 | Metadata only; no license file found in the local Cargo cache |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| prettyplease | 0.2.37 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | primeorder | 0.13.6 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| quick-xml | 0.37.5 | MIT | Metadata only; no license file found in the local Cargo cache |
+| quick-xml | 0.41.0 | MIT | Metadata only; no license file found in the local Cargo cache |
 | quote | 1.0.47 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | Metadata only; no license file found in the local Cargo cache |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | Metadata only; no license file found in the local Cargo cache |
@@ -247,7 +276,7 @@ release reviewers can inspect the complete Cargo dependency closure.
 | rand_core | 0.6.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | rand_core | 0.9.5 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | regex | 1.13.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| regex-automata | 0.4.16 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| regex-automata | 0.4.18 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | reqwest | 0.12.28 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | ring | 0.17.14 | Apache-2.0 AND ISC | third-party-licenses/rust/ring-0.17.14/LICENSE |
@@ -265,6 +294,8 @@ release reviewers can inspect the complete Cargo dependency closure.
 | ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 | Metadata only; no license file found in the local Cargo cache |
 | ryu-js | 1.0.3 | Apache-2.0 OR BSL-1.0 | Metadata only; no license file found in the local Cargo cache |
 | schannel | 0.1.29 | MIT | third-party-licenses/rust/schannel-0.1.29/LICENSE.md |
+| scroll | 0.12.0 | MIT | third-party-licenses/rust/scroll-0.12.0/LICENSE |
+| scroll_derive | 0.12.1 | MIT | third-party-licenses/rust/scroll_derive-0.12.1/LICENSE |
 | sec1 | 0.7.3 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | security-framework | 3.7.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | security-framework-sys | 2.17.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -284,11 +315,15 @@ release reviewers can inspect the complete Cargo dependency closure.
 | shlex | 2.0.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | signature | 2.2.0 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | simd-adler32 | 0.3.10 | MIT | third-party-licenses/rust/simd-adler32-0.3.10/LICENSE.md |
+| siphasher | 0.3.11 | MIT/Apache-2.0 | third-party-licenses/rust/siphasher-0.3.11/COPYING |
 | slab | 0.4.12 | MIT | third-party-licenses/rust/slab-0.4.12/LICENSE |
 | smallvec | 1.15.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| smawk | 0.3.3 | MIT | third-party-licenses/rust/smawk-0.3.3/LICENSE |
 | socket2 | 0.6.5 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | spki | 0.7.3 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| static_assertions | 1.1.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| strsim | 0.11.1 | MIT | third-party-licenses/rust/strsim-0.11.1/LICENSE |
 | subtle | 2.6.1 | BSD-3-Clause | third-party-licenses/rust/subtle-2.6.1/LICENSE |
 | syn | 2.0.119 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | syn | 3.0.3 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -298,8 +333,9 @@ release reviewers can inspect the complete Cargo dependency closure.
 | system-configuration-sys | 0.6.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | tar | 0.4.46 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | tempfile | 3.27.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| thiserror | 2.0.19 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| thiserror-impl | 2.0.19 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| textwrap | 0.16.2 | MIT | third-party-licenses/rust/textwrap-0.16.2/LICENSE |
+| thiserror | 2.0.20 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| thiserror-impl | 2.0.20 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | time | 0.3.55 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | time-core | 0.1.9 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | time-macros | 0.2.32 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -310,6 +346,7 @@ release reviewers can inspect the complete Cargo dependency closure.
 | tokio-native-tls | 0.3.1 | MIT | third-party-licenses/rust/tokio-native-tls-0.3.1/LICENSE |
 | tokio-rustls | 0.26.4 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | tokio-util | 0.7.19 | MIT | third-party-licenses/rust/tokio-util-0.7.19/LICENSE |
+| toml | 0.5.11 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | tower | 0.5.3 | MIT | third-party-licenses/rust/tower-0.5.3/LICENSE |
 | tower-http | 0.6.11 | MIT | third-party-licenses/rust/tower-http-0.6.11/LICENSE |
 | tower-layer | 0.3.3 | MIT | third-party-licenses/rust/tower-layer-0.3.3/LICENSE |
@@ -320,8 +357,21 @@ release reviewers can inspect the complete Cargo dependency closure.
 | twox-hash | 2.1.3 | MIT | third-party-licenses/rust/twox-hash-2.1.3/LICENSE.txt |
 | typed-path | 0.12.3 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | typenum | 1.20.1 | MIT OR Apache-2.0 | third-party-licenses/rust/typenum-1.20.1/LICENSE |
+| tzap-core | 0.2.2 | Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| tzap-plugin-keywrap | 0.2.2 | Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| tzap-plugin-signing | 0.2.2 | Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| udif | 0.3.4 | MIT | third-party-licenses/rust/udif-0.3.4/LICENSE |
 | unicode-ident | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 | Metadata only; no license file found in the local Cargo cache |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_bindgen | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_build | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_core | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_internal_macros | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_macros | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_meta | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_pipeline | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
+| uniffi_udl | 0.29.5 | MPL-2.0 | Metadata only; no license file found in the local Cargo cache |
 | universal-hash | 0.5.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | untrusted | 0.9.0 | ISC | third-party-licenses/rust/untrusted-0.9.0/LICENSE.txt |
 | url | 2.5.8 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -333,12 +383,13 @@ release reviewers can inspect the complete Cargo dependency closure.
 | want | 0.3.1 | MIT | third-party-licenses/rust/want-0.3.1/LICENSE |
 | wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | wasip2 | 1.0.4+wasi-0.2.12 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
-| wasm-bindgen | 0.2.126 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| wasm-bindgen-futures | 0.4.76 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| wasm-bindgen-macro | 0.2.126 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| wasm-bindgen-macro-support | 0.2.126 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| wasm-bindgen-shared | 0.2.126 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| web-sys | 0.3.103 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| wasm-bindgen | 0.2.127 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| wasm-bindgen-futures | 0.4.77 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| wasm-bindgen-macro | 0.2.127 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| wasm-bindgen-macro-support | 0.2.127 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| wasm-bindgen-shared | 0.2.127 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| web-sys | 0.3.104 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| weedle2 | 5.0.0 | MIT | third-party-licenses/rust/weedle2-5.0.0/LICENSE.md |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows-registry | 0.6.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows-result | 0.4.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
@@ -365,16 +416,20 @@ release reviewers can inspect the complete Cargo dependency closure.
 | windows_x86_64_gnullvm | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_x86_64_msvc | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| winnow | 0.7.15 | MIT | Metadata only; no license file found in the local Cargo cache |
 | winx | 0.36.4 | Apache-2.0 WITH LLVM-exception | third-party-licenses/rust/winx-0.36.4/LICENSE |
 | wit-bindgen | 0.57.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | writeable | 0.6.3 | Unicode-3.0 | third-party-licenses/rust/writeable-0.6.3/LICENSE |
 | x25519-dalek | 2.0.1 | BSD-3-Clause | third-party-licenses/rust/x25519-dalek-2.0.1/LICENSE |
 | x509-parser | 0.18.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| xara | 0.3.2 | MIT | third-party-licenses/rust/xara-0.3.2/LICENSE |
 | xattr | 1.6.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
+| xml-rs | 0.8.29 | MIT | third-party-licenses/rust/xml-rs-0.8.29/LICENSE |
+| xz2 | 0.1.7 | MIT/Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | yoke | 0.8.3 | Unicode-3.0 | third-party-licenses/rust/yoke-0.8.3/LICENSE |
 | yoke-derive | 0.8.2 | Unicode-3.0 | third-party-licenses/rust/yoke-derive-0.8.2/LICENSE |
-| zerocopy | 0.8.55 | BSD-2-Clause OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
-| zerocopy-derive | 0.8.55 | BSD-2-Clause OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
+| zerocopy | 0.8.56 | BSD-2-Clause OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
+| zerocopy-derive | 0.8.56 | BSD-2-Clause OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
 | zerofrom | 0.1.8 | Unicode-3.0 | third-party-licenses/rust/zerofrom-0.1.8/LICENSE |
 | zerofrom-derive | 0.1.7 | Unicode-3.0 | third-party-licenses/rust/zerofrom-derive-0.1.7/LICENSE |
 | zeroize | 1.9.0 | Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |

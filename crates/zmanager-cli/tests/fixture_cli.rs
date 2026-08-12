@@ -113,6 +113,50 @@ fn cli_extracts_extractable_fixture_archives() {
 }
 
 #[test]
+fn cli_lists_tests_and_extracts_apple_dmg_pkg_fixtures() {
+    for filename in ["basic.dmg", "basic.pkg"] {
+        let fixture = archives_dir().join(filename);
+        if !fixture.exists() {
+            continue;
+        }
+        let temp = TestDir::new("fixture-cli-apple");
+
+        let list = Command::new(cli_path()).arg("list").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm list {filename}"), &list);
+        let list_stdout = String::from_utf8_lossy(&list.stdout);
+        assert!(list_stdout.contains("payload/README.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("payload/nested/file.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("payload/dir with spaces/file with spaces.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("payload/unicode/こんにちは.txt"), "{list_stdout}");
+        assert!(!list_stdout.contains("payload/./"), "entries must not carry ./ prefixes: {list_stdout}");
+
+        let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm test {filename}"), &test);
+
+        let out = temp.path("out");
+        let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
+        assert_success(&format!("zm extract {filename}"), &extract);
+        assert_eq!(fs::read_to_string(out.join("payload/README.txt")).unwrap(), "ZManager fixture payload\n");
+        assert_eq!(fs::read_to_string(out.join("payload/nested/file.txt")).unwrap(), "nested fixture file\n");
+        assert_eq!(fs::read_to_string(out.join("payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
+        assert_eq!(fs::read_to_string(out.join("payload/unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
+        assert!(out.join("payload/nested/empty-dir").is_dir());
+
+        // Selective extraction exercises pattern matching against the normalized paths.
+        let out_sel = temp.path("out-sel");
+        let selective = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_sel).arg("--include").arg("payload/nested/file.txt").output().unwrap();
+        assert_success(&format!("zm extract {filename} --include"), &selective);
+        assert!(out_sel.join("payload/nested/file.txt").is_file());
+        assert!(!out_sel.join("payload/README.txt").exists());
+
+        // --to-stdout is explicitly unsupported for DMG and PKG.
+        let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("payload/README.txt").arg("--to-stdout").output().unwrap();
+        assert_failure(&format!("zm extract {filename} --to-stdout"), &stdout);
+        assert!(String::from_utf8_lossy(&stdout.stderr).contains("do not currently support extracting to stdout"), "stderr:\n{}", String::from_utf8_lossy(&stdout.stderr));
+    }
+}
+
+#[test]
 fn cli_lists_tests_and_extracts_checked_in_multipart_rar_fixtures() {
     let password = "zmanager-rar-fixture-password";
 

@@ -21,7 +21,9 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.cpio \
   "$ARCHIVES"/basic.xar \
   "$ARCHIVES"/basic.iso \
-  "$ARCHIVES"/basic.deb
+  "$ARCHIVES"/basic.deb \
+  "$ARCHIVES"/basic.dmg \
+  "$ARCHIVES"/basic.pkg
 
 mkdir -p "$SRC/nested/empty-dir"
 mkdir -p "$SRC/dir with spaces"
@@ -77,6 +79,27 @@ bsdtar -czf "$DEB/control.tar.gz" -C "$DEB/control" control
 bsdtar -cJf "$DEB/data.tar.xz" -C "$DEB/data" .
 bsdtar --format=ar -cf "$ARCHIVES/basic.deb" -C "$DEB" debian-binary control.tar.gz data.tar.xz
 
+# DMG fixture: hdiutil treats the -srcfolder directory as the volume root,
+# so stage the payload tree in a dedicated directory to keep the payload/
+# prefix consistent with the tar family fixtures.
+DMG_SRC="$WORK/dmg-src"
+mkdir -p "$DMG_SRC"
+cp -PR "$SRC" "$DMG_SRC/"
+hdiutil create -format UDZO -ov -srcfolder "$DMG_SRC" "$ARCHIVES/basic.dmg" >/dev/null
+
+# PKG fixture: stage the payload tree under a root directory so the cpio
+# payload carries the same payload/ prefix as every other fixture. Strip
+# extended attributes first so pkgbuild does not emit ._ AppleDouble
+# payload entries.
+PKG_ROOT="$WORK/pkg-root"
+mkdir -p "$PKG_ROOT"
+xattr -cr "$SRC" 2>/dev/null || true
+cp -PR "$SRC" "$PKG_ROOT/"
+pkgbuild --root "$PKG_ROOT" --identifier com.zmanager.fixture --version 0.1.0 "$ARCHIVES/basic.pkg" >/dev/null 2>&1 || {
+  # Fall back to showing pkgbuild diagnostics on failure
+  pkgbuild --root "$PKG_ROOT" --identifier com.zmanager.fixture --version 0.1.0 "$ARCHIVES/basic.pkg"
+}
+
 sha256_file() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
@@ -110,5 +133,7 @@ append_manifest "basic.cpio" "CPIO" "true" "" "CPIO fixture created by bsdtar"
 append_manifest "basic.xar" "XAR" "true" "" "XAR fixture created by macOS xar"
 append_manifest "basic.iso" "ISO" "true" "" "ISO fixture created by hdiutil makehybrid"
 append_manifest "basic.deb" "DEB" "true" "" "Debian ar package fixture"
+append_manifest "basic.dmg" "DMG" "true" "" "Disk image fixture created by hdiutil create -srcfolder"
+append_manifest "basic.pkg" "PKG" "true" "" "Apple package fixture created by pkgbuild"
 
 echo "Generated fixtures in $ARCHIVES"

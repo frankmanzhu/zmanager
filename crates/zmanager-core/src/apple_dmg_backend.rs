@@ -6,6 +6,28 @@ use std::path::{Path, PathBuf};
 
 crate::backend_error_from_impls!(DmgBackendError);
 
+/// Entry reported by [`list_dmg`].
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DmgListEntry {
+    /// Path inside the disk image.
+    pub path: String,
+    /// Entry kind.
+    pub kind: DmgEntryKind,
+    /// Declared uncompressed size.
+    pub size: u64,
+}
+
+/// Kind of a [`DmgListEntry`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum DmgEntryKind {
+    /// Regular file.
+    File,
+    /// Directory.
+    Directory,
+    /// Symbolic link.
+    Symlink,
+}
+
 /// `.dmg` extraction report.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DmgExtractReport {
@@ -88,6 +110,30 @@ impl<W: io::Write> io::Write for ProgressWriter<'_, '_, W> {
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
     }
+}
+
+/// Lists the entries of a `.dmg` archive without extracting them.
+pub fn list_dmg(archive_path: impl AsRef<Path>) -> Result<Vec<DmgListEntry>, DmgBackendError> {
+    let mut pipeline = dpp::DmgPipeline::open(archive_path.as_ref()).map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
+    let mut fs = pipeline.open_filesystem().map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
+
+    let entries = fs.walk().map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
+
+    Ok(entries
+        .into_iter()
+        .filter_map(|entry| {
+            let path = entry.path.strip_prefix('/').unwrap_or(&entry.path).to_string();
+            if path.is_empty() {
+                return None;
+            }
+            let kind = match entry.entry.kind {
+                dpp::FsEntryKind::File => DmgEntryKind::File,
+                dpp::FsEntryKind::Directory => DmgEntryKind::Directory,
+                dpp::FsEntryKind::Symlink => DmgEntryKind::Symlink,
+            };
+            Some(DmgListEntry { path, kind, size: entry.entry.size })
+        })
+        .collect())
 }
 
 /// Extracts a `.dmg` archive with an overwrite resolver.
@@ -173,9 +219,22 @@ fn extract_dmg_inner(
                         output.commit_with_replace(replace_existing).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
 
                         report.written_entries += 1;
+                        report.written_bytes += written_bytes;
                         Ok(written_bytes)
                     }
                     ExtractionEntryKind::Symlink { target } => {
+                        // HFS+ stores symlink targets in the resource fork, which the
+                        // underlying DPP reader does not expose: read_file returns
+                        // empty for such entries. Skip rather than materialize a
+                        // broken empty symlink.
+                        if target.as_os_str().is_empty() {
+                            crate::extract_loop::skip_entry(
+                                report,
+                                context,
+                                format!("symlink {} skipped: disk image does not expose the symlink target", safety_entry.archive_path),
+                            );
+                            return Ok(0);
+                        }
                         if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
                             crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
                             return Ok(0);
@@ -198,4 +257,72 @@ fn extract_dmg_inner(
     }
 
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DmgEntryKind, extract_dmg_with_overwrite_resolver, list_dmg};
+    use crate::safety::{ExtractionPolicy, OverwriteConflict, OverwriteDecision, OverwritePolicy, OverwriteResolver};
+    use crate::test_support::TestDir;
+    use std::fs;
+    use std::path::PathBuf;
+
+    struct AlwaysReplace;
+    impl OverwriteResolver for AlwaysReplace {
+        fn decide(&mut self, _conflict: &OverwriteConflict) -> OverwriteDecision {
+            OverwriteDecision::Replace
+        }
+    }
+
+    fn dmg_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives").join(name)
+    }
+
+    #[test]
+    fn checked_in_dmg_fixture_lists_with_normalized_paths() {
+        let archive = dmg_fixture("basic.dmg");
+        assert!(archive.is_file(), "missing fixture; run scripts/generate_fixtures.sh");
+
+        let listing = list_dmg(&archive).unwrap();
+        let paths = listing.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>();
+        assert!(paths.contains(&"payload/README.txt"), "{paths:?}");
+        assert!(paths.contains(&"payload/nested/file.txt"), "{paths:?}");
+        assert!(paths.contains(&"payload/nested/empty-dir"), "{paths:?}");
+        assert!(paths.contains(&"payload/dir with spaces/file with spaces.txt"), "{paths:?}");
+        assert!(paths.contains(&"payload/unicode/こんにちは.txt"), "{paths:?}");
+        assert!(
+            listing.iter().all(|entry| !entry.path.starts_with('/') && !entry.path.starts_with("./")),
+            "dmg paths must be normalized: {paths:?}"
+        );
+
+        let readme = listing.iter().find(|entry| entry.path == "payload/README.txt").unwrap();
+        assert_eq!(readme.kind, DmgEntryKind::File);
+        assert_eq!(readme.size, 25);
+        let link = listing.iter().find(|entry| entry.path == "payload/nested/readme-link.txt").unwrap();
+        assert_eq!(link.kind, DmgEntryKind::Symlink);
+    }
+
+    #[test]
+    fn checked_in_dmg_fixture_extracts_every_file_with_byte_accurate_report() {
+        let archive = dmg_fixture("basic.dmg");
+        assert!(archive.is_file(), "missing fixture; run scripts/generate_fixtures.sh");
+
+        let temp = TestDir::new("checked_in_dmg_fixture_extract");
+        let report =
+            extract_dmg_with_overwrite_resolver(&archive, temp.path("out"), ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() }, &mut AlwaysReplace)
+                .unwrap();
+
+        assert_eq!(report.written_entries, 4);
+        assert_eq!(report.written_bytes, 81);
+        assert_eq!(report.skipped_entries, 1, "warnings: {:?}", report.warnings);
+        assert_eq!(fs::read_to_string(temp.path("out/payload/README.txt")).unwrap(), "ZManager fixture payload\n");
+        assert_eq!(fs::read_to_string(temp.path("out/payload/nested/file.txt")).unwrap(), "nested fixture file\n");
+        assert_eq!(fs::read_to_string(temp.path("out/payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
+        assert_eq!(fs::read_to_string(temp.path("out/payload/unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
+        assert!(temp.path("out/payload/nested/empty-dir").is_dir());
+        // HFS+ symlink targets live in the resource fork, which the reader
+        // cannot expose; the entry is skipped with a warning instead of
+        // materializing a broken empty symlink.
+        assert!(!temp.path("out/payload/nested/readme-link.txt").exists());
+    }
 }

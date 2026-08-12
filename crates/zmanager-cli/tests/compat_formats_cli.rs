@@ -9,30 +9,6 @@ use std::process::{Command, Stdio};
 
 const PAYLOAD: &[u8] = b"zmanager compatibility payload\n";
 
-macro_rules! test_format_combinations {
-    ($test_name:ident, $tool:expr, $ext:expr, [ $( $flags:expr ),+ ] ) => {
-        #[test]
-        fn $test_name() {
-            let Some(tool_path) = find_on_path($tool) else { return; };
-            let temp = TestDir::new(stringify!($test_name));
-            create_complex_project_payload(&temp);
-
-            let mut i = 0;
-            $(
-                let archive = temp.path(format!("payload_{}.{}", i, $ext));
-                let mut cmd = Command::new(&tool_path);
-                cmd.current_dir(temp.root()).args($flags).arg(&archive).arg("project");
-
-                let create = cmd.output().unwrap();
-                assert_success(&format!("{} creates archive {}", $tool, i), &create);
-
-                assert_zm_extracts_complex_matrix(&format!("{}-{}", $tool, i), &archive, &temp);
-                i += 1;
-            )+
-        }
-    }
-}
-
 #[test]
 fn competitor_zip_family_formats_extract_with_zm() {
     let Some(zip) = find_on_path("zip") else {
@@ -964,6 +940,14 @@ fn create_complex_project_payload(temp: &TestDir) {
 }
 
 fn assert_zm_extracts_complex_matrix(label: &str, archive: &Path, temp: &TestDir) {
+    assert_zm_extracts_complex_matrix_inner(label, archive, temp, true);
+}
+
+fn assert_zm_extracts_complex_matrix_without_stdout(label: &str, archive: &Path, temp: &TestDir) {
+    assert_zm_extracts_complex_matrix_inner(label, archive, temp, false);
+}
+
+fn assert_zm_extracts_complex_matrix_inner(label: &str, archive: &Path, temp: &TestDir, stdout_supported: bool) {
     println!("Matrix test for: {label}");
     // Matrix 1: Full Extract
     let out = temp.path(format!("out_full_{}", label.replace([' ', '-'], "_")));
@@ -983,10 +967,16 @@ fn assert_zm_extracts_complex_matrix(label: &str, archive: &Path, temp: &TestDir
     assert!(out_sel.join("project/nested/deep_file.txt").exists(), "missing selective file");
     assert!(!out_sel.join("project/root_file.txt").exists(), "unexpected root file");
 
-    // Matrix 3: Stdout Extract
+    // Matrix 3: Stdout Extract (unsupported for DMG and PKG, which must fail
+    // with the explicit rejection message instead)
     let output = Command::new(zm_path()).arg("extract").arg(archive).arg("--include").arg("project/root_file.txt").arg("--to-stdout").output().unwrap();
-    assert_success(&format!("zm extract {label} (stdout)"), &output);
-    assert_eq!(output.stdout, b"root_file_content");
+    if stdout_supported {
+        assert_success(&format!("zm extract {label} (stdout)"), &output);
+        assert_eq!(output.stdout, b"root_file_content");
+    } else {
+        assert_failure(&format!("zm extract {label} (stdout)"), &output);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("do not currently support extracting to stdout"), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    }
 
     // Matrix 4: Overwrite
     let out_ow = temp.path(format!("out_ow_{}", label.replace([' ', '-'], "_")));
@@ -1058,4 +1048,27 @@ fn competitor_mtree_format_extract_with_zm() {
     let extract_mtree = Command::new(zm_path()).arg("extract").arg(&archive_mtree).arg("-C").arg(&out_mtree).output().unwrap();
     assert_success("zm extract mtree", &extract_mtree);
     assert!(out_mtree.join("project/file.txt").exists(), "mtree extraction failed to create file metadata placeholder");
+}
+
+#[test]
+fn competitor_apple_dmg_and_pkg_formats_extract_with_zm() {
+    let Some(hdiutil) = find_on_path("hdiutil") else {
+        return;
+    };
+    let Some(pkgbuild) = find_on_path("pkgbuild") else {
+        return;
+    };
+    let temp = TestDir::new("compat_apple");
+    let archive_temp = TestDir::new("compat_apple_archives");
+    create_complex_project_payload(&temp);
+
+    let archive_dmg = archive_temp.path("project.dmg");
+    let create_dmg = Command::new(hdiutil).arg("create").arg("-format").arg("UDZO").arg("-ov").arg("-srcfolder").arg(temp.root()).arg(&archive_dmg).output().unwrap();
+    assert_success("hdiutil creates dmg", &create_dmg);
+    assert_zm_extracts_complex_matrix_without_stdout("hdiutil-created dmg", &archive_dmg, &temp);
+
+    let archive_pkg = archive_temp.path("project.pkg");
+    let create_pkg = Command::new(pkgbuild).arg("--root").arg(temp.root()).arg("--identifier").arg("com.zmanager.compat").arg("--version").arg("0.1.0").arg(&archive_pkg).output().unwrap();
+    assert_success("pkgbuild creates pkg", &create_pkg);
+    assert_zm_extracts_complex_matrix_without_stdout("pkgbuild-created pkg", &archive_pkg, &temp);
 }

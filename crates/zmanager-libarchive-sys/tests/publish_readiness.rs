@@ -30,7 +30,7 @@ fn vendored_libarchive_tree_is_present_for_package_and_workspace() {
 
     assert_has_libarchive_files(&publish_root);
 
-    assert!(publish_root.join(EXPECTED_SOURCE_DIR).is_dir(), "publishable libarchive source should include {PUBLISH_SOURCE_PATH}, got: {}", publish_root.display(),);
+    assert!(publish_root.join(EXPECTED_SOURCE_DIR).is_dir(), "publishable libarchive source should include {PUBLISH_SOURCE_PATH}, got: {}", publish_root.display());
 
     if workspace_root.is_dir() {
         assert_has_libarchive_files(&workspace_root);

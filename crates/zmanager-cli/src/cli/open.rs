@@ -2,8 +2,8 @@ use crate::cli::app::{GenericEntry, ListRequest, PlanRequest, TestRequest, expan
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
-    FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, TZAP_SINGLE_VOLUME_LOSS_TOLERANCE, TZAP_SPLIT_VOLUME_LOSS_TOLERANCE, is_7z_archive, is_apple_archive, is_rar_archive,
-    is_split_zip_archive_path, is_tar_zst_archive, is_tzap_archive, is_zip_family_archive,
+    FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, TZAP_SINGLE_VOLUME_LOSS_TOLERANCE, TZAP_SPLIT_VOLUME_LOSS_TOLERANCE, is_7z_archive, is_apple_archive, is_dmg_archive, is_pkg_archive,
+    is_rar_archive, is_split_zip_archive_path, is_tar_zst_archive, is_tzap_archive, is_zip_family_archive,
 };
 use crate::cli::options::{GlobalOptions, parse_archive_format, parse_global_option, read_optional_password_stdin, resolve_input_path, take_value, validate_recipient_key_open_option};
 use crate::cli::planning::{append_files_from, append_stdin_paths, apply_manifest_filters, plan_sources};
@@ -700,6 +700,14 @@ fn list_entries_with_password(archive: &str, password: Option<&str>, recipient_k
         list_apple_archive_cli(archive, password)
     } else if is_rar_archive(archive) && password.is_some() {
         zmanager_core::rar_backend::list_rar_with_password(archive, password).map(|listing| map_generic_entries(listing.entries, rar_list_entry_to_generic)).map_err(|error| error.to_string())
+    } else if is_dmg_archive(archive) {
+        zmanager_core::apple_dmg_backend::list_dmg(archive)
+            .map(|entries| map_generic_entries(entries, dmg_list_entry_to_generic))
+            .map_err(|error| error.to_string())
+    } else if is_pkg_archive(archive) {
+        zmanager_core::apple_pkg_backend::list_pkg(archive)
+            .map(|entries| map_generic_entries(entries, pkg_list_entry_to_generic))
+            .map_err(|error| error.to_string())
     } else {
         zmanager_core::libarchive_backend::list_archive_with_password(archive, password)
             .map(|listing| map_generic_entries(listing.entries, libarchive_list_entry_to_generic))
@@ -774,6 +782,14 @@ fn tzap_index_entry_to_generic(entry: zmanager_core::tzap_backend::TzapIndexEntr
 }
 
 fn rar_list_entry_to_generic(entry: zmanager_core::rar_backend::RarListEntry) -> GenericEntry {
+    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
+}
+
+fn dmg_list_entry_to_generic(entry: zmanager_core::apple_dmg_backend::DmgListEntry) -> GenericEntry {
+    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
+}
+
+fn pkg_list_entry_to_generic(entry: zmanager_core::apple_pkg_backend::PkgListEntry) -> GenericEntry {
     GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
 }
 

@@ -1,10 +1,12 @@
 # filename	format	extract	password	sha256	notes
-basic.zip	ZIP	true		0a2fd6f0c134f48591fdcbda2a21f4875150abc738b5882a04df9d33eb68068b	ZIP Deflate fixture created by ZManager
-basic.7z	7Z	true		4c630433ee7180d924ce2310ae1e3510799ae8d04c11aaee3692a0e45ede5134	7Z LZMA2 solid fixture created by ZManager
-basic.tar.gz	TAR.GZ	true		e4812efc64c8ff9a02f00aab037007a4dbb97ae9f8f76f0c749f091c0201a6a6	Tar fixture compressed with gzip
-basic.tar.xz	TAR.XZ	true		6960edeeabbf858fe4dd465c0b3afba27ad98a09c211b45598db09f3b374d21f	Tar fixture compressed with xz
-basic.tar.zst	TAR.ZST	true		3408a03fb76570042646e761f4e8b9cddb6870a6833fba51f0b038e3ce7a36f9	Tar fixture compressed with zstd
-basic.cpio	CPIO	true		4ece22b550dded02c8831899c87ec6144acbd5f92592330a2f7738de2fad2767	CPIO fixture created by bsdtar
-basic.xar	XAR	true		a5b5248745ca52db629f32b878960896e24f085d0fd4ce55fb1c2931bb62a982	XAR fixture created by macOS xar
-basic.iso	ISO	true		4047eb914216a69b7e76e1d89a67879cd9460114daf4fdc9b1873fcb2e50496c	ISO fixture created by hdiutil makehybrid
-basic.deb	DEB	true		de2900a20cd99b10fbc8fe6927e8a232629403fe1d1d0a2534f09489e94dd578	Debian ar package fixture
+basic.zip	ZIP	true		58477b053f79ed564c69fa1b04bd1dd87af39a44cd4094d8ae12da43e0e5e082	ZIP Deflate fixture created by ZManager
+basic.7z	7Z	true		62ff9096afeeda37265a6be95bbce1cdbd79ec85c0f6b4ce2bd76a32d511c5ad	7Z LZMA2 solid fixture created by ZManager
+basic.tar.gz	TAR.GZ	true		54360873da78bea625c2446d37b0950eba024c76c3d0e2f01d03a48eea2dbb64	Tar fixture compressed with gzip
+basic.tar.xz	TAR.XZ	true		6c2a4b6498004db73d7cee50aa40809269c8337396409f49cffde71651f0d08c	Tar fixture compressed with xz
+basic.tar.zst	TAR.ZST	true		036bc56d1a9c51559d620722aa7e8766b82f8ef2f5470aa35ea23a98e389a64b	Tar fixture compressed with zstd
+basic.cpio	CPIO	true		438e9498214d37b3796fca562be753a005a09aeb6e52b8ee0532b69a64aae6cc	CPIO fixture created by bsdtar
+basic.xar	XAR	true		9be784b4faaf5ed707851025f66e4189f099e6a61d628b472582e2420ae9076a	XAR fixture created by macOS xar
+basic.iso	ISO	true		d923225dd5dfba13db4e9e2d3fb21a8c9ddb638ad3a64ece54c4bdbf0f2bd403	ISO fixture created by hdiutil makehybrid
+basic.deb	DEB	true		bf7b523fcef115c34d5af248b9a4abde5ed13cdf3256af3b4040339e8879aeb3	Debian ar package fixture
+basic.dmg	DMG	true		c914a2313ac94380a3a1a5f6d5b55262ffad1a974a92f12e8cb4d3426405c8b2	Disk image fixture created by hdiutil create -srcfolder
+basic.pkg	PKG	true		e5e294f5631d74e3485de3f0961465b4d17f479289f92418208d718ce9d12a96	Apple package fixture created by pkgbuild

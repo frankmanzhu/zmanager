@@ -136,6 +136,14 @@ pub(crate) fn is_apple_archive(_path: &str) -> bool {
     false
 }
 
+pub(crate) fn is_dmg_archive(path: &str) -> bool {
+    matches!(detect_archive_format(path), ArchiveFormatKind::Dmg)
+}
+
+pub(crate) fn is_pkg_archive(path: &str) -> bool {
+    matches!(detect_archive_format(path), ArchiveFormatKind::Pkg)
+}
+
 pub(crate) fn is_deb_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::Deb)
 }
