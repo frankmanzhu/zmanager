@@ -1,3 +1,5 @@
+#[cfg(feature = "auth")]
+use crate::cli::auth::auth_command;
 use crate::cli::create::{create_command, create_command_from_expanded};
 use crate::cli::extract::{extract_command, extract_command_from_expanded};
 use crate::cli::format::{
@@ -6,8 +8,6 @@ use crate::cli::format::{
 };
 use crate::cli::open::{list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded};
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_output_mode};
-#[cfg(feature = "auth")]
-use crate::cli::auth::auth_command;
 use crate::cli::usage::{
     COMPLETION_BASH_SCRIPT, COMPLETION_FISH_SCRIPT, COMPLETION_POWERSHELL_SCRIPT, COMPLETION_ZSH_SCRIPT, COMPLETIONS_HELP, DOCTOR_HELP, FORMATS_HELP, USAGE,
     command_usage_error, help_command, json_escape, print_help_stderr, print_help_stdout, usage_error, wants_help,

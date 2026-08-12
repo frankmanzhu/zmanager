@@ -369,7 +369,6 @@ Options:
 `zm auth` commands manage your identity, sign documents, and share archives securely.
 ";
 
-
 pub(crate) const ME_HELP: &str = "\
 Show the local TZAP session summary
 

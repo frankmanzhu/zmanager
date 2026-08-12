@@ -1,10 +1,10 @@
 pub mod app;
+#[cfg(feature = "auth")]
+pub mod auth;
 pub mod create;
 pub mod extract;
 pub mod format;
 pub mod open;
 pub mod options;
 pub mod planning;
-#[cfg(feature = "auth")]
-pub mod auth;
 pub mod usage;
