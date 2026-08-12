@@ -30,7 +30,11 @@ fn vendored_libarchive_tree_is_present_for_package_and_workspace() {
 
     assert_has_libarchive_files(&publish_root);
 
-    assert!(publish_root.join(EXPECTED_SOURCE_DIR).is_dir(), "publishable libarchive source should include {PUBLISH_SOURCE_PATH}, got: {}", publish_root.display());
+    assert!(
+        publish_root.join(EXPECTED_SOURCE_DIR).is_dir(),
+        "publishable libarchive source should include {PUBLISH_SOURCE_PATH}, got: {}",
+        publish_root.display()
+    );
 
     if workspace_root.is_dir() {
         assert_has_libarchive_files(&workspace_root);
@@ -59,13 +63,24 @@ fn crate_build_script_version_metadata_is_consistent() {
 #[test]
 fn package_list_contains_packaged_libarchive_source() {
     let manifest_dir = PathBuf::from(manifest_dir());
-    let output = Command::new("cargo").current_dir(&manifest_dir).arg("package").arg("--list").arg("--allow-dirty").arg("--no-verify").output().expect("run cargo package --list");
+    let output = Command::new("cargo")
+        .current_dir(&manifest_dir)
+        .arg("package")
+        .arg("--list")
+        .arg("--allow-dirty")
+        .arg("--no-verify")
+        .output()
+        .expect("run cargo package --list");
 
     assert!(output.status.success(), "cargo package --list should succeed for publish readiness check. stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let listing = String::from_utf8(output.stdout).expect("cargo package output should be utf-8");
-    let expected_markers =
-        [format!("{PUBLISH_SOURCE_PATH}/NEWS"), format!("{PUBLISH_SOURCE_PATH}/CMakeLists.txt"), format!("{PUBLISH_SOURCE_PATH}/COPYING"), format!("{PUBLISH_SOURCE_PATH}/cat/CMakeLists.txt")];
+    let expected_markers = [
+        format!("{PUBLISH_SOURCE_PATH}/NEWS"),
+        format!("{PUBLISH_SOURCE_PATH}/CMakeLists.txt"),
+        format!("{PUBLISH_SOURCE_PATH}/COPYING"),
+        format!("{PUBLISH_SOURCE_PATH}/cat/CMakeLists.txt"),
+    ];
 
     for marker in expected_markers {
         assert!(listing.contains(&marker), "published package should include vendored path {marker}");
@@ -82,6 +97,11 @@ fn libarchive_version_number_matches_versioned_build_output() {
     assert_eq!(major, 3);
     assert_eq!(minor, 8);
     assert_eq!(patch, 9);
-    assert_eq!(format!("{major}.{minor}.{patch}"), EXPECTED_LIBARCHIVE_VERSION_TEXT, "ARCHIVE_VERSION_NUMBER should decode to {}", EXPECTED_LIBARCHIVE_VERSION_TEXT);
+    assert_eq!(
+        format!("{major}.{minor}.{patch}"),
+        EXPECTED_LIBARCHIVE_VERSION_TEXT,
+        "ARCHIVE_VERSION_NUMBER should decode to {}",
+        EXPECTED_LIBARCHIVE_VERSION_TEXT
+    );
     assert!(version_number >= EXPECTED_LIBARCHIVE_VERSION_NUMBER, "ARCHIVE_VERSION_NUMBER should be at least {EXPECTED_LIBARCHIVE_VERSION_NUMBER}");
 }

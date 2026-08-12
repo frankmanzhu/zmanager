@@ -1,6 +1,6 @@
 use super::support::{
-    callback_url_parameter, exchange_handoff_code, parse_environment_option, parse_tzap_context_args, parse_tzap_context_option, print_session_summary_json, print_stable_tzap_error,
-    read_bytes_argument, service_envelope, service_request,
+    callback_url_parameter, exchange_handoff_code, parse_environment_option, parse_tzap_context_args, parse_tzap_context_option, print_session_summary_json,
+    print_stable_tzap_error, read_bytes_argument, service_envelope, service_request,
 };
 use super::{AUTH_PENDING_FILE, AuthEndpointOptions, DEFAULT_TZAP_CLIENT_ID, TzapCliContext};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
@@ -121,7 +121,12 @@ pub(super) fn auth_login_command(args: &[String], mut global: GlobalOptions) -> 
     let state = response["state"].as_str().unwrap_or_default().to_owned();
     let expires_at_unix_seconds = response["expires_at_unix_seconds"].as_u64().unwrap_or(0);
     if global.json {
-        println!("{{\"status\":\"pending\",\"launch_url\":\"{}\",\"state\":\"{}\",\"expires_at_unix_seconds\":{}}}", json_escape(&url), json_escape(&state), expires_at_unix_seconds);
+        println!(
+            "{{\"status\":\"pending\",\"launch_url\":\"{}\",\"state\":\"{}\",\"expires_at_unix_seconds\":{}}}",
+            json_escape(&url),
+            json_escape(&state),
+            expires_at_unix_seconds
+        );
     } else if print_url {
         println!("{url}");
     } else {
@@ -254,7 +259,8 @@ pub(super) fn auth_callback_command(args: &[String], mut global: GlobalOptions) 
             }
         }
     } else if let Some(handoff_code) = handoff_code {
-        let exchange_base_url = auth_base_url.or(pending_metadata.auth_base_url).unwrap_or_else(|| zmanager_core::auth_client::LOCAL_HOSTED_AUTH_BASE_URL.to_owned());
+        let exchange_base_url =
+            auth_base_url.or(pending_metadata.auth_base_url).unwrap_or_else(|| zmanager_core::auth_client::LOCAL_HOSTED_AUTH_BASE_URL.to_owned());
         let exchange_client_id = client_id.or(pending_metadata.client_id).unwrap_or_else(|| DEFAULT_TZAP_CLIENT_ID.to_owned());
         match exchange_handoff_code(&exchange_base_url, &exchange_client_id, &redirect_uri, &state, &pkce_verifier, &handoff_code) {
             Ok(bytes) => bytes,

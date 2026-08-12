@@ -133,7 +133,9 @@ fn is_low_s(s: &BigNumRef, order: &BigNumRef, half_order: &BigNumRef) -> bool {
 #[cfg(test)]
 mod tests {
     use super::P256SignatureError;
-    use super::{P256_P1363_SIGNATURE_LENGTH, curve_orders, decode_p256_p1363_signature, encode_p256_p1363_signature, sign_p256_sha256_p1363, verify_p256_sha256_p1363};
+    use super::{
+        P256_P1363_SIGNATURE_LENGTH, curve_orders, decode_p256_p1363_signature, encode_p256_p1363_signature, sign_p256_sha256_p1363, verify_p256_sha256_p1363,
+    };
     use openssl::bn::BigNum;
     use openssl::ec::EcGroup;
     use openssl::ec::EcKey;

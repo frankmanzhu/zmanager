@@ -90,7 +90,13 @@ pub(crate) fn mobile_event_from_core_event(event: CoreJobEvent) -> Option<Mobile
             error: None,
         }),
         CoreJobEvent::Failed { message } => {
-            let error = BridgeError { code: ERROR_OPERATION_FAILED.to_string(), message: message.clone(), recovery_hint: None, severity: BridgeSeverity::Error, retryable: false };
+            let error = BridgeError {
+                code: ERROR_OPERATION_FAILED.to_string(),
+                message: message.clone(),
+                recovery_hint: None,
+                severity: BridgeSeverity::Error,
+                retryable: false,
+            };
             Some(MobileJobEvent {
                 sequence: 0,
                 event_type: MobileJobEventKind::Failed,
@@ -173,6 +179,12 @@ pub(crate) fn cancelled_event(message: String) -> MobileJobEvent {
         entries: None,
         total_entries: None,
         message: Some(message),
-        error: Some(BridgeError { code: ERROR_CANCELLED.to_string(), message: "Job was cancelled.".to_string(), recovery_hint: None, severity: BridgeSeverity::Info, retryable: true }),
+        error: Some(BridgeError {
+            code: ERROR_CANCELLED.to_string(),
+            message: "Job was cancelled.".to_string(),
+            recovery_hint: None,
+            severity: BridgeSeverity::Info,
+            retryable: true,
+        }),
     }
 }

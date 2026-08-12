@@ -214,8 +214,13 @@ impl TzapOAuthStateTracker {
         loop {
             let state = random_base64url(OAUTH_STATE_RANDOM_BYTES);
             if let std::collections::hash_map::Entry::Vacant(entry) = self.pending.entry(state.clone()) {
-                let pending =
-                    TzapPendingAuthState { state: state.clone(), provider_id: provider_id.clone(), redirect_uri: redirect_uri.clone(), pkce: TzapPkcePair::generate(), created_at_unix_seconds };
+                let pending = TzapPendingAuthState {
+                    state: state.clone(),
+                    provider_id: provider_id.clone(),
+                    redirect_uri: redirect_uri.clone(),
+                    pkce: TzapPkcePair::generate(),
+                    created_at_unix_seconds,
+                };
                 entry.insert(pending.clone());
                 return pending;
             }
@@ -237,7 +242,12 @@ impl TzapOAuthStateTracker {
         self.pending.remove(state).ok_or(TzapAuthError::UnknownState)
     }
 
-    pub fn consume_handoff(&mut self, callback: &TzapHostedAuthCallback, now_unix_seconds: u64, handoff_lifetime_seconds: u64) -> Result<TzapPendingAuthState, TzapAuthError> {
+    pub fn consume_handoff(
+        &mut self,
+        callback: &TzapHostedAuthCallback,
+        now_unix_seconds: u64,
+        handoff_lifetime_seconds: u64,
+    ) -> Result<TzapPendingAuthState, TzapAuthError> {
         reject_url_session_material(callback.callback_url.as_deref())?;
         validate_oauth_state(&callback.state)?;
         let pending = self.pending.get(&callback.state).ok_or(TzapAuthError::UnknownState)?;
@@ -508,7 +518,9 @@ impl fmt::Display for TzapAuthError {
             Self::EnabledProviderMissingAuthorizationUrl { provider_id } => {
                 write!(f, "enabled provider {provider_id} is missing an authorization URL")
             }
-            Self::ProviderDisabled { provider_id, reason } => write!(f, "provider {provider_id} is disabled ({})", reason.map_or("unknown", TzapDisabledProviderReason::as_str)),
+            Self::ProviderDisabled { provider_id, reason } => {
+                write!(f, "provider {provider_id} is disabled ({})", reason.map_or("unknown", TzapDisabledProviderReason::as_str))
+            }
             Self::ProviderMissingAuthorizationUrl { provider_id } => {
                 write!(f, "provider {provider_id} is missing an authorization URL")
             }
@@ -731,9 +743,10 @@ fn is_pkce_unreserved(byte: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, LOGIN_TZAP_BASE_URL, PKCE_METHOD_S256, SESSION_AUDIENCE_SIGN_TZAP, SIGN_TZAP_BASE_URL, TzapAuthError, TzapAuthHttpMethod,
-        TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapHostedAuthCallback, TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig, TzapOAuthStateTracker,
-        TzapPendingAuthState, TzapPkcePair, TzapSessionRecord, TzapSessionStore, complete_hosted_auth_handoff, fetch_current_user, pkce_s256_challenge, validate_pkce_verifier,
+        AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, LOGIN_TZAP_BASE_URL, PKCE_METHOD_S256, SESSION_AUDIENCE_SIGN_TZAP, SIGN_TZAP_BASE_URL,
+        TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapHostedAuthCallback,
+        TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig, TzapOAuthStateTracker, TzapPendingAuthState, TzapPkcePair, TzapSessionRecord, TzapSessionStore,
+        complete_hosted_auth_handoff, fetch_current_user, pkce_s256_challenge, validate_pkce_verifier,
     };
     use crate::trust;
     use serde_json::json;
@@ -759,7 +772,10 @@ mod tests {
     #[test]
     fn pkce_verifier_rejects_bad_length_and_characters() {
         assert!(matches!(TzapPkcePair::from_verifier("short"), Err(TzapAuthError::InvalidPkceVerifier)));
-        assert!(matches!(TzapPkcePair::from_verifier("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ=STUVWXYZ0123456789"), Err(TzapAuthError::InvalidPkceVerifier)));
+        assert!(matches!(
+            TzapPkcePair::from_verifier("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ=STUVWXYZ0123456789"),
+            Err(TzapAuthError::InvalidPkceVerifier)
+        ));
     }
 
     #[test]

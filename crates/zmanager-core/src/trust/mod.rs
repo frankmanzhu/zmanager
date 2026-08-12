@@ -17,14 +17,15 @@ mod tests;
 #[cfg(test)]
 pub(crate) use certificate_profile::{ORG_INTERMEDIATE_PATH_LEN, PLATFORM_LEAF_ONLY_PATH_LEN, PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE, REQUIRED_ROOT_PATH_LEN};
 pub use certificate_profile::{
-    TzapCertificateProfileError, TzapCertificateProfileOptions, TzapCertificateProfileValidation, TzapCertificatePublicMetadata, TzapOfficialRootPinKind, public_intermediate_chain_der,
-    validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
+    TzapCertificateProfileError, TzapCertificateProfileOptions, TzapCertificateProfileValidation, TzapCertificatePublicMetadata, TzapOfficialRootPinKind,
+    public_intermediate_chain_der, validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
 };
 pub(crate) use identifiers::candidate_chains;
 pub use identifiers::{
-    TrustIdentifierError, canonical_serial_hex, decode_base64url_no_padding, format_certificate_sha256, format_csr_sha256, format_issuer_sha256, format_sha256_identifier,
-    is_valid_base64url_no_padding, is_valid_issuer_key_identifier, is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id, is_valid_serial_hex, is_valid_sha256_identifier,
-    parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256, parse_serial_hex, parse_sha256_identifier, parse_spki_sha256, percent_encode_path_param, sha256_identifier,
+    TrustIdentifierError, canonical_serial_hex, decode_base64url_no_padding, format_certificate_sha256, format_csr_sha256, format_issuer_sha256,
+    format_sha256_identifier, is_valid_base64url_no_padding, is_valid_issuer_key_identifier, is_valid_public_device_id, is_valid_public_org_id,
+    is_valid_public_signer_id, is_valid_serial_hex, is_valid_sha256_identifier, parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256,
+    parse_issuer_sha256, parse_serial_hex, parse_sha256_identifier, parse_spki_sha256, percent_encode_path_param, sha256_identifier,
     status_certificate_by_fingerprint_path, status_crl_pem_path, validate_base64url_no_padding,
 };
 
@@ -278,7 +279,8 @@ impl TzapRootPinSet {
 pub const TZAP_PRODUCTION_ROOT_SHA256: &str = "sha256:d80d318f6cd6096dc791e314ec6f41434caa47feb75e85ad6f87d5bf72bbd53d";
 pub const TZAP_STAGING_ROOT_SHA256: &str = "sha256:4847bd67cf76f0d399565deac2583d4d4de51d2751b77cd6f7672a508bcc1341";
 
-pub const OFFICIAL_TZAP_ROOT_PINS: TzapRootPinSet = TzapRootPinSet { current: &[TZAP_PRODUCTION_ROOT_SHA256, TZAP_STAGING_ROOT_SHA256], planned_successors: &[] };
+pub const OFFICIAL_TZAP_ROOT_PINS: TzapRootPinSet =
+    TzapRootPinSet { current: &[TZAP_PRODUCTION_ROOT_SHA256, TZAP_STAGING_ROOT_SHA256], planned_successors: &[] };
 
 pub fn certificate_pem_or_der_to_der(bytes: &[u8]) -> Result<Vec<u8>, String> {
     if let Ok(certificate) = X509::from_pem(bytes) {

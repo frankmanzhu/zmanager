@@ -43,7 +43,11 @@ fn create_tgz_fixture(source: &Path, archive: &Path, level: Option<u32>) {
 
 fn create_zip_fixture(source: &Path, archive: &Path, level: Option<u32>, store_only: bool) {
     let manifest = plan_archive(source, &PlanOptions::default()).unwrap();
-    let options = ZipCreateOptions { compression: if store_only { ZipCompression::Store } else { ZipCompression::Deflate }, level: level.map(i64::from), ..Default::default() };
+    let options = ZipCreateOptions {
+        compression: if store_only { ZipCompression::Store } else { ZipCompression::Deflate },
+        level: level.map(i64::from),
+        ..Default::default()
+    };
     create_zip_from_manifest(&manifest, archive, &options).unwrap();
 }
 

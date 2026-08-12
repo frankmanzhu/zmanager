@@ -138,7 +138,9 @@ impl std::error::Error for LibarchiveError {
             Self::RawStream(source) => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::Safety(source) => Some(source),
-            Self::MissingPath | Self::MissingLinkTarget { .. } | Self::EntryNotFound { .. } | Self::Cancelled | Self::StdoutSelectionNotSingleFile { .. } => None,
+            Self::MissingPath | Self::MissingLinkTarget { .. } | Self::EntryNotFound { .. } | Self::Cancelled | Self::StdoutSelectionNotSingleFile { .. } => {
+                None
+            }
         }
     }
 }
@@ -208,7 +210,11 @@ pub fn list_archive_with_password(path: impl AsRef<Path>, password: Option<&str>
 ///
 /// Returns [`LibarchiveError`] when libarchive cannot read the archive, an entry
 /// is unsafe, or filesystem writes fail.
-pub fn extract_archive(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<LibarchiveExtractReport, LibarchiveError> {
+pub fn extract_archive(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+) -> Result<LibarchiveExtractReport, LibarchiveError> {
     extract_archive_with_password(archive_path, destination, policy, None)
 }
 
@@ -268,7 +274,12 @@ pub fn extract_archive_with_overwrite_resolver_and_password(
 ///
 /// Returns [`LibarchiveError`] when libarchive cannot read the archive, the
 /// entry is unsafe, the selected entry is not found, or filesystem writes fail.
-pub fn extract_archive_entry(archive_path: impl AsRef<Path>, entry_path: &str, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<LibarchiveExtractReport, LibarchiveError> {
+pub fn extract_archive_entry(
+    archive_path: impl AsRef<Path>,
+    entry_path: &str,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+) -> Result<LibarchiveExtractReport, LibarchiveError> {
     extract_archive_entry_with_password(archive_path, entry_path, destination, policy, None)
 }
 
@@ -323,7 +334,8 @@ pub fn copy_archive_files_to_writer<W: Write>(
             continue;
         }
 
-        let mut staged = crate::atomic_file::TemporaryFile::create("libarchive-stdout").map_err(|source| LibarchiveError::Io { path: std::env::temp_dir(), source })?;
+        let mut staged =
+            crate::atomic_file::TemporaryFile::create("libarchive-stdout").map_err(|source| LibarchiveError::Io { path: std::env::temp_dir(), source })?;
         let copied = copy_file_entry_to_writer(&mut archive, staged.file_mut(), &owned_entry.path)?;
         report.written_entries += 1;
         report.written_bytes += copied;
@@ -346,7 +358,11 @@ pub fn copy_archive_files_to_writer<W: Write>(
 /// # Errors
 ///
 /// Returns [`LibarchiveError`] when libarchive cannot open or read the archive.
-pub fn test_archive_with_password_filter(archive_path: impl AsRef<Path>, password: Option<&str>, mut selected: impl FnMut(&str) -> bool) -> Result<LibarchiveTestReport, LibarchiveError> {
+pub fn test_archive_with_password_filter(
+    archive_path: impl AsRef<Path>,
+    password: Option<&str>,
+    mut selected: impl FnMut(&str) -> bool,
+) -> Result<LibarchiveTestReport, LibarchiveError> {
     let archive_path = archive_path.as_ref();
     let mut archive = open_archive(archive_path, password)?;
     let mut report = LibarchiveTestReport { tested_entries: 0, skipped_entries: 0, tested_bytes: 0 };
@@ -382,7 +398,8 @@ fn extract_archive_inner(
     mut context: Option<&mut JobContext<'_>>,
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
     let destination = destination.as_ref();
-    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| LibarchiveError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root =
+        crate::safety::prepare_destination_root(destination).map_err(|source| LibarchiveError::Io { path: destination.to_path_buf(), source })?;
 
     let mut archive = open_archive(archive_path.as_ref(), password)?;
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
@@ -401,26 +418,32 @@ fn extract_archive_inner(
             continue;
         }
         found_selected_entry = true;
-        let safety_entry =
-            ExtractionEntry { archive_path: owned_entry.path.clone(), kind: owned_entry.extraction_kind.clone(), uncompressed_size: nonnegative_size(owned_entry.size), compressed_size: None };
+        let safety_entry = ExtractionEntry {
+            archive_path: owned_entry.path.clone(),
+            kind: owned_entry.extraction_kind.clone(),
+            uncompressed_size: nonnegative_size(owned_entry.size),
+            compressed_size: None,
+        };
 
-        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, context| match action {
-            crate::extract_loop::EntryAction::Skip => {
-                archive.skip_data()?;
-                Ok(0)
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, context| {
+            match action {
+                crate::extract_loop::EntryAction::Skip => {
+                    archive.skip_data()?;
+                    Ok(0)
+                }
+                crate::extract_loop::EntryAction::Write(decision) => write_entry(
+                    &mut archive,
+                    &owned_entry,
+                    decision.destination_path,
+                    decision.replace_existing,
+                    decision.link_target_path,
+                    report,
+                    context,
+                    &mut deferred_directories,
+                    &mut deferred_hardlinks,
+                    &mut io_buffer,
+                ),
             }
-            crate::extract_loop::EntryAction::Write(decision) => write_entry(
-                &mut archive,
-                &owned_entry,
-                decision.destination_path,
-                decision.replace_existing,
-                decision.link_target_path,
-                report,
-                context,
-                &mut deferred_directories,
-                &mut deferred_hardlinks,
-                &mut io_buffer,
-            ),
         })?;
     }
 
@@ -545,7 +568,13 @@ impl OwnedEntry {
         let kind = entry_kind(entry);
         let extraction_kind = extraction_kind(entry, kind, &path)?;
 
-        Ok(Self { path, kind, extraction_kind, size: entry.size(), metadata: LibarchiveEntryMetadata { mode: archive_entry_mode(entry.mode(), kind), modified: entry.mtime() } })
+        Ok(Self {
+            path,
+            kind,
+            extraction_kind,
+            size: entry.size(),
+            metadata: LibarchiveEntryMetadata { mode: archive_entry_mode(entry.mode(), kind), modified: entry.mtime() },
+        })
     }
 }
 
@@ -606,7 +635,8 @@ fn write_entry(
     io_buffer: &mut [u8],
 ) -> Result<u64, LibarchiveError> {
     if replace_existing && !matches!(entry.extraction_kind, ExtractionEntryKind::File) {
-        crate::safety::remove_destination_for_replace(destination_path).map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
+        crate::safety::remove_destination_for_replace(destination_path)
+            .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
     }
 
     match &entry.extraction_kind {
@@ -637,7 +667,8 @@ fn write_entry(
         }
         ExtractionEntryKind::Hardlink { .. } => {
             archive.skip_data()?;
-            let source_path = link_target_path.ok_or_else(|| LibarchiveError::Io { path: destination_path.to_path_buf(), source: crate::extract_loop::unresolved_hardlink_target() })?;
+            let source_path = link_target_path
+                .ok_or_else(|| LibarchiveError::Io { path: destination_path.to_path_buf(), source: crate::extract_loop::unresolved_hardlink_target() })?;
             deferred_hardlinks.push(DeferredHardlink { source_path: source_path.to_path_buf(), destination_path: destination_path.to_path_buf() });
             Ok(0)
         }
@@ -691,7 +722,8 @@ fn apply_metadata(path: &Path, metadata: LibarchiveEntryMetadata) -> Result<(), 
 /// Uses `set_symlink_file_times` to avoid following the link. Errors are
 /// reported so extraction cannot claim metadata was restored when it was not.
 fn apply_symlink_mtime(path: &Path, modified: Option<SystemTime>) -> Result<(), LibarchiveError> {
-    crate::extract_materialize::apply_symlink_mtime(path, modified.map(filetime::FileTime::from_system_time)).map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
+    crate::extract_materialize::apply_symlink_mtime(path, modified.map(filetime::FileTime::from_system_time))
+        .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
 }
 
 fn copy_file_entry_to_writer<W: Write>(archive: &mut ReadArchive, output: &mut W, entry_path: &str) -> Result<u64, LibarchiveError> {
@@ -717,7 +749,10 @@ fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), Libarchiv
 
 #[cfg(not(unix))]
 fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), LibarchiveError> {
-    Err(LibarchiveError::Io { path: destination_path.to_path_buf(), source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform") })
+    Err(LibarchiveError::Io {
+        path: destination_path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
+    })
 }
 
 #[cfg(test)]
@@ -761,7 +796,19 @@ mod tests {
 
         let temp = TestDir::new("extracts_tar_gz_permissions_and_modification_times");
         let archive = temp.path("archive.tar.gz");
-        write_tar_gz_with_metadata(&archive, "payload", 0o1750, DIRECTORY_MTIME, "payload/run.sh", 0o751, FILE_MTIME, b"#!/bin/sh\n", "payload/link.sh", "run.sh", FILE_MTIME);
+        write_tar_gz_with_metadata(
+            &archive,
+            "payload",
+            0o1750,
+            DIRECTORY_MTIME,
+            "payload/run.sh",
+            0o751,
+            FILE_MTIME,
+            b"#!/bin/sh\n",
+            "payload/link.sh",
+            "run.sh",
+            FILE_MTIME,
+        );
 
         extract_archive(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
@@ -892,7 +939,13 @@ mod tests {
         }
         let temp = TestDir::new("lists_common_non_zip_formats");
         temp.write_file("payload/file.txt", b"hello");
-        let formats = [("archive.tar", "-cf"), ("archive.tar.gz", "-czf"), ("archive.tar.bz2", "-cjf"), ("archive.tar.xz", "-cJf"), ("archive.cpio", "--format=cpio -cf")];
+        let formats = [
+            ("archive.tar", "-cf"),
+            ("archive.tar.gz", "-czf"),
+            ("archive.tar.bz2", "-cjf"),
+            ("archive.tar.xz", "-cJf"),
+            ("archive.cpio", "--format=cpio -cf"),
+        ];
 
         for (archive_name, flags) in formats {
             let archive = temp.path(archive_name);

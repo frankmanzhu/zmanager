@@ -75,7 +75,8 @@ impl JobProgressState {
             self.record_path_with_identity(path, identities.get(index).copied().unwrap_or_else(|| path_identity(path)));
         }
         if let Some(path) = current {
-            let identity = recent.iter().rposition(|candidate| candidate == path).and_then(|index| identities.get(index)).copied().unwrap_or_else(|| path_identity(path));
+            let identity =
+                recent.iter().rposition(|candidate| candidate == path).and_then(|index| identities.get(index)).copied().unwrap_or_else(|| path_identity(path));
             self.record_path_with_identity(path, identity);
         }
     }
@@ -152,7 +153,16 @@ impl ProgressCoalescer {
     }
 
     pub(crate) fn new_at(total_bytes: Option<u64>, now: Instant) -> Self {
-        Self { total_bytes, pending_bytes: 0, pending_entries: 0, latest_path: None, recent_paths: VecDeque::new(), last_emitted: now, emitted_once: false, recent_paths_truncated: false }
+        Self {
+            total_bytes,
+            pending_bytes: 0,
+            pending_entries: 0,
+            latest_path: None,
+            recent_paths: VecDeque::new(),
+            last_emitted: now,
+            emitted_once: false,
+            recent_paths_truncated: false,
+        }
     }
 
     pub(crate) fn reset(&mut self, total_bytes: Option<u64>) {
@@ -208,7 +218,11 @@ impl ProgressCoalescer {
 
         let one_percent = self.total_bytes.unwrap_or_default().div_ceil(100);
         let byte_step = PROGRESS_MIN_BYTE_STEP.max(one_percent);
-        if !self.emitted_once || self.pending_bytes >= byte_step || self.pending_entries >= PROGRESS_ENTRY_STEP || now.saturating_duration_since(self.last_emitted) >= PROGRESS_INTERVAL {
+        if !self.emitted_once
+            || self.pending_bytes >= byte_step
+            || self.pending_entries >= PROGRESS_ENTRY_STEP
+            || now.saturating_duration_since(self.last_emitted) >= PROGRESS_INTERVAL
+        {
             self.flush_at(now)
         } else {
             None

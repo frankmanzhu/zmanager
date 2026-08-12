@@ -164,7 +164,8 @@ pub fn list_archive(archive: impl AsRef<Path>, password: Option<&str>) -> Result
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ListContext { entries: Vec::new(), error: None };
 
-    let code = unsafe { zmu_unrar_list(archive.as_ptr(), optional_c_buffer_ptr(password.as_ref()), ptr::from_mut(&mut context).cast::<c_void>(), list_callback) };
+    let code =
+        unsafe { zmu_unrar_list(archive.as_ptr(), optional_c_buffer_ptr(password.as_ref()), ptr::from_mut(&mut context).cast::<c_void>(), list_callback) };
 
     if let Some(error) = context.error {
         return Err(error);
@@ -207,7 +208,9 @@ pub fn extract_selected_with_progress(
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ExtractContext { selections, error: None, progress };
 
-    let code = unsafe { zmu_unrar_extract(archive.as_ptr(), optional_c_buffer_ptr(password.as_ref()), ptr::from_mut(&mut context).cast::<c_void>(), extract_callback) };
+    let code = unsafe {
+        zmu_unrar_extract(archive.as_ptr(), optional_c_buffer_ptr(password.as_ref()), ptr::from_mut(&mut context).cast::<c_void>(), extract_callback)
+    };
 
     if let Some(error) = context.error {
         return Err(error);

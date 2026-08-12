@@ -46,7 +46,14 @@ mod tests {
             uid: Some(501),
             gid: Some(20),
         };
-        for algo in [CompressionAlgorithm::None, CompressionAlgorithm::Lz4, CompressionAlgorithm::Zlib, CompressionAlgorithm::Lzma, CompressionAlgorithm::Lzfse, CompressionAlgorithm::Lzbitmap] {
+        for algo in [
+            CompressionAlgorithm::None,
+            CompressionAlgorithm::Lz4,
+            CompressionAlgorithm::Zlib,
+            CompressionAlgorithm::Lzma,
+            CompressionAlgorithm::Lzfse,
+            CompressionAlgorithm::Lzbitmap,
+        ] {
             let round = roundtrip(original, algo);
             assert_eq!(original, round, "metadata mismatch for {algo:?}");
         }

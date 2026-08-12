@@ -69,7 +69,8 @@ impl<'a, T: TzapAuthHttpTransport> TzapStatusClient<'a, T> {
     }
 
     pub fn status_by_fingerprint(&self, certificate_sha256: &str) -> Result<TzapStatusResponse, TzapStatusClientError> {
-        let path = trust::status_certificate_by_fingerprint_path(certificate_sha256).map_err(|_| TzapStatusClientError::InvalidField { field: "certificate_sha256" })?;
+        let path = trust::status_certificate_by_fingerprint_path(certificate_sha256)
+            .map_err(|_| TzapStatusClientError::InvalidField { field: "certificate_sha256" })?;
         let bytes = self.get_bytes(&path)?;
         TzapStatusResponse::from_json_bytes(&bytes)
     }
@@ -123,7 +124,10 @@ impl TzapBulkStatusLookup {
 
     #[must_use]
     pub fn by_issuer_serial(lookup_id: impl Into<String>, issuer_certificate_sha256: impl Into<String>, serial_number: impl Into<String>) -> Self {
-        Self { lookup_id: lookup_id.into(), form: TzapBulkStatusLookupForm::IssuerSerial { issuer_certificate_sha256: issuer_certificate_sha256.into(), serial_number: serial_number.into() } }
+        Self {
+            lookup_id: lookup_id.into(),
+            form: TzapBulkStatusLookupForm::IssuerSerial { issuer_certificate_sha256: issuer_certificate_sha256.into(), serial_number: serial_number.into() },
+        }
     }
 
     fn to_json(&self) -> Value {
@@ -192,7 +196,9 @@ impl TzapStatusResponse {
 
     pub fn from_json_value(value: &Value) -> Result<Self, TzapStatusClientError> {
         let object = json_object::<TzapStatusClientError>(value, "object")?;
-        let status = required_string::<TzapStatusClientError>(object, "status")?.parse::<TzapCertificateStatus>().map_err(|()| TzapStatusClientError::InvalidField { field: "status" })?;
+        let status = required_string::<TzapStatusClientError>(object, "status")?
+            .parse::<TzapCertificateStatus>()
+            .map_err(|()| TzapStatusClientError::InvalidField { field: "status" })?;
         let query = parse_query_echo(object)?;
         let response = Self {
             status,
@@ -251,10 +257,17 @@ impl TzapStatusResponse {
                     require_some(self.revocation_reason.as_ref(), "revocation_reason")?;
                 }
             }
-            TzapCertificateStatus::UnknownCertificate | TzapCertificateStatus::UnknownIssuer | TzapCertificateStatus::MalformedLookup | TzapCertificateStatus::UnsupportedLookupForm => {
+            TzapCertificateStatus::UnknownCertificate
+            | TzapCertificateStatus::UnknownIssuer
+            | TzapCertificateStatus::MalformedLookup
+            | TzapCertificateStatus::UnsupportedLookupForm => {
                 require_some(self.this_update_unix_seconds.as_ref(), "this_update_unix_seconds")?;
                 require_some(self.next_update_unix_seconds.as_ref(), "next_update_unix_seconds")?;
-                if self.certificate_sha256.is_some() || self.issuer_certificate_sha256.is_some() || self.issuer_key_identifier.is_some() || self.serial_number.is_some() {
+                if self.certificate_sha256.is_some()
+                    || self.issuer_certificate_sha256.is_some()
+                    || self.issuer_key_identifier.is_some()
+                    || self.serial_number.is_some()
+                {
                     return Err(TzapStatusClientError::InvalidField { field: "unknown_leaf_fields" });
                 }
                 if self.query.certificate_sha256.is_none() && self.query.issuer_certificate_sha256.is_none() {
@@ -301,10 +314,18 @@ pub fn online_verification_result_from_status(
         };
     }
     if !status_matches_document(expected, status) {
-        return TzapDocumentVerificationResult { state: TzapVerificationState::Invalid, reason: Some("online status does not match the document".to_owned()), ..offline };
+        return TzapDocumentVerificationResult {
+            state: TzapVerificationState::Invalid,
+            reason: Some("online status does not match the document".to_owned()),
+            ..offline
+        };
     }
     if !status.is_fresh_valid_for_valid_now(verifier_time_unix_seconds) {
-        return TzapDocumentVerificationResult { state: TzapVerificationState::Invalid, reason: Some(format!("online status is {}", status.status.as_str())), ..offline };
+        return TzapDocumentVerificationResult {
+            state: TzapVerificationState::Invalid,
+            reason: Some(format!("online status is {}", status.status.as_str())),
+            ..offline
+        };
     }
     TzapDocumentVerificationResult { state: TzapVerificationState::ValidNow, reason: None, ..offline }
 }
@@ -314,7 +335,8 @@ fn status_matches_document(expected: &TzapDocumentStatusTarget, status: &TzapSta
         && status.issuer_certificate_sha256.as_deref() == Some(expected.issuer_certificate_sha256.as_str())
         && status.issuer_key_identifier.as_deref() == Some(expected.issuer_key_identifier.as_str())
         && status.serial_number.as_deref() == Some(expected.serial_number.as_str());
-    let query_matches = if status.query.certificate_sha256.is_none() && status.query.issuer_certificate_sha256.is_none() && status.query.serial_number.is_none() {
+    let query_matches = if status.query.certificate_sha256.is_none() && status.query.issuer_certificate_sha256.is_none() && status.query.serial_number.is_none()
+    {
         true
     } else {
         status.query.certificate_sha256.as_deref() == Some(expected.certificate_sha256.as_str())
@@ -346,10 +368,12 @@ fn validate_bulk_lookups(lookups: &[TzapBulkStatusLookup]) -> Result<(), TzapSta
         }
         match &lookup.form {
             TzapBulkStatusLookupForm::CertificateFingerprint { certificate_sha256 } => {
-                trust::parse_certificate_sha256(certificate_sha256).map_err(|_| TzapStatusClientError::InvalidBulkLookup { reason: "certificate_sha256 is invalid" })?;
+                trust::parse_certificate_sha256(certificate_sha256)
+                    .map_err(|_| TzapStatusClientError::InvalidBulkLookup { reason: "certificate_sha256 is invalid" })?;
             }
             TzapBulkStatusLookupForm::IssuerSerial { issuer_certificate_sha256, serial_number } => {
-                trust::parse_issuer_sha256(issuer_certificate_sha256).map_err(|_| TzapStatusClientError::InvalidBulkLookup { reason: "issuer_certificate_sha256 is invalid" })?;
+                trust::parse_issuer_sha256(issuer_certificate_sha256)
+                    .map_err(|_| TzapStatusClientError::InvalidBulkLookup { reason: "issuer_certificate_sha256 is invalid" })?;
                 trust::parse_serial_hex(serial_number).map_err(|_| TzapStatusClientError::InvalidBulkLookup { reason: "serial_number is invalid" })?;
             }
         }
@@ -392,7 +416,10 @@ fn parse_query_echo(response_object: &Map<String, Value>) -> Result<TzapStatusQu
 }
 
 fn optional_string(object: &Map<String, Value>, field: &'static str) -> Result<Option<String>, TzapStatusClientError> {
-    object.get(field).map(|value| value.as_str().filter(|value| !value.is_empty()).map(str::to_owned).ok_or(TzapStatusClientError::InvalidField { field })).transpose()
+    object
+        .get(field)
+        .map(|value| value.as_str().filter(|value| !value.is_empty()).map(str::to_owned).ok_or(TzapStatusClientError::InvalidField { field }))
+        .transpose()
 }
 
 pub(crate) fn optional_i64(object: &Map<String, Value>, field: &'static str) -> Result<Option<i64>, TzapStatusClientError> {
@@ -410,7 +437,9 @@ fn is_printable_ascii(value: &str) -> bool {
 // See `crate::trust::sha256_identifier` (CR-124).
 #[cfg(test)]
 mod tests {
-    use super::{TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, online_verification_result_from_status, validate_bulk_lookups};
+    use super::{
+        TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, online_verification_result_from_status, validate_bulk_lookups,
+    };
     use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport};
     use crate::document_verification::TzapDocumentVerificationResult;
     use crate::trust::{self, TzapCertificateStatus, TzapTrustAnchorType, TzapVerificationState};

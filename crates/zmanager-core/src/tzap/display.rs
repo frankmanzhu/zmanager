@@ -17,7 +17,10 @@ use tzap_core::format::FormatError;
 use tzap_core::{PublicNoKeyFooterStatus, ReaderOptions, public_no_key_inspect_footer};
 use tzap_plugin_signing::x509_chain::{X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT};
 
-use super::open::{TzapPublicMetadataSummary, discover_tzap_input_volume_paths, expected_tzap_input_volume_paths, read_public_tzap_header_from, summarize_tzap_public_metadata_from};
+use super::open::{
+    TzapPublicMetadataSummary, discover_tzap_input_volume_paths, expected_tzap_input_volume_paths, read_public_tzap_header_from,
+    summarize_tzap_public_metadata_from,
+};
 use super::x509::{TzapX509SignerInspection, inspect_x509_root_auth_footer};
 use super::{TzapError, io_error};
 
@@ -76,7 +79,11 @@ struct PerVolumeSignatureStatus {
 ///    verify, differing `Signed` footers or a status mix are `Unavailable`,
 ///    all `Unsigned` stays `Unsigned`, all `NotAuthentic` stays
 ///    `NotAuthentic`.
-fn aggregate_public_footer_status(volumes: &[PerVolumeSignatureStatus], missing_volume_indices: &[usize], expected_volume_count: usize) -> TzapPublicSignatureStatus {
+fn aggregate_public_footer_status(
+    volumes: &[PerVolumeSignatureStatus],
+    missing_volume_indices: &[usize],
+    expected_volume_count: usize,
+) -> TzapPublicSignatureStatus {
     if let Some(first_missing) = missing_volume_indices.first() {
         return TzapPublicSignatureStatus::Unavailable {
             reason: format!(
@@ -88,7 +95,9 @@ fn aggregate_public_footer_status(volumes: &[PerVolumeSignatureStatus], missing_
     if volumes.is_empty() {
         return TzapPublicSignatureStatus::Unavailable { reason: "no present volumes to inspect".to_owned() };
     }
-    if let Some(TzapPublicSignatureStatus::Unavailable { reason }) = volumes.iter().find(|volume| matches!(volume.status, TzapPublicSignatureStatus::Unavailable { .. })).map(|volume| &volume.status) {
+    if let Some(TzapPublicSignatureStatus::Unavailable { reason }) =
+        volumes.iter().find(|volume| matches!(volume.status, TzapPublicSignatureStatus::Unavailable { .. })).map(|volume| &volume.status)
+    {
         return TzapPublicSignatureStatus::Unavailable { reason: reason.clone() };
     }
 
@@ -148,9 +157,13 @@ fn inspect_volume_footer(file: &mut File) -> PerVolumeSignatureStatus {
         Ok(PublicNoKeyFooterStatus::Signed(inspection)) => {
             let footer = &inspection.root_auth_footer;
             let status = if footer.authenticator_id != X509_AUTHENTICATOR_ID {
-                TzapPublicSignatureStatus::Unavailable { reason: format!("signed with a non-X.509 root-auth profile (authenticator id {})", footer.authenticator_id) }
+                TzapPublicSignatureStatus::Unavailable {
+                    reason: format!("signed with a non-X.509 root-auth profile (authenticator id {})", footer.authenticator_id),
+                }
             } else if footer.signer_identity_type != X509_SIGNER_IDENTITY_TYPE_DER_CERT {
-                TzapPublicSignatureStatus::Unavailable { reason: format!("signed with an unsupported X.509 signer identity type ({})", footer.signer_identity_type) }
+                TzapPublicSignatureStatus::Unavailable {
+                    reason: format!("signed with an unsupported X.509 signer identity type ({})", footer.signer_identity_type),
+                }
             } else {
                 match inspect_x509_root_auth_footer(footer, &inspection.archive_root) {
                     Ok(signer) => TzapPublicSignatureStatus::Signed { signer },
@@ -159,7 +172,10 @@ fn inspect_volume_footer(file: &mut File) -> PerVolumeSignatureStatus {
             };
             PerVolumeSignatureStatus { status, footer_bytes: Some(inspection.root_auth_footer_bytes) }
         }
-        Err(error) => PerVolumeSignatureStatus { status: map_footer_read_error(&error).unwrap_or_else(|| TzapPublicSignatureStatus::Unavailable { reason: error.to_string() }), footer_bytes: None },
+        Err(error) => PerVolumeSignatureStatus {
+            status: map_footer_read_error(&error).unwrap_or_else(|| TzapPublicSignatureStatus::Unavailable { reason: error.to_string() }),
+            footer_bytes: None,
+        },
     }
 }
 
@@ -171,10 +187,16 @@ fn inspect_volume_footer(file: &mut File) -> PerVolumeSignatureStatus {
 /// `first_volume_file` is a handle to the first existing path in it (its
 /// header is read through this handle so the caller's single open serves both
 /// display passes).
-pub(crate) fn inspect_tzap_public_footer_signature_from(requested_path: &Path, volume_paths: &[PathBuf], first_volume_file: &mut File) -> Result<TzapPublicSignatureStatus, TzapError> {
-    let first_volume_path = volume_paths.iter().find(|path| path.exists()).expect("caller contract: first_volume_file is a handle to the first existing volume path");
+pub(crate) fn inspect_tzap_public_footer_signature_from(
+    requested_path: &Path,
+    volume_paths: &[PathBuf],
+    first_volume_file: &mut File,
+) -> Result<TzapPublicSignatureStatus, TzapError> {
+    let first_volume_path =
+        volume_paths.iter().find(|path| path.exists()).expect("caller contract: first_volume_file is a handle to the first existing volume path");
     let first_header = read_public_tzap_header_from(first_volume_file, first_volume_path)?;
-    let expected_volume_count = usize::try_from(first_header.volume_header.stripe_width).map_err(|_| TzapError::Format(FormatError::InvalidArchive("TZAP volume count overflow")))?;
+    let expected_volume_count =
+        usize::try_from(first_header.volume_header.stripe_width).map_err(|_| TzapError::Format(FormatError::InvalidArchive("TZAP volume count overflow")))?;
     let expected_paths = expected_tzap_input_volume_paths(requested_path, first_volume_path, expected_volume_count);
 
     let mut volumes = Vec::new();
@@ -213,7 +235,8 @@ pub(crate) fn inspect_tzap_public_footer_signature_from(requested_path: &Path, v
 /// error.)
 pub fn inspect_tzap_public_footer_signature(archive_path: &Path) -> Result<TzapPublicSignatureStatus, TzapError> {
     let volume_paths = discover_tzap_input_volume_paths(archive_path);
-    let first_volume_path = volume_paths.iter().find(|path| path.exists()).ok_or_else(|| io_error(archive_path, io::ErrorKind::NotFound, "no TZAP input volumes found"))?;
+    let first_volume_path =
+        volume_paths.iter().find(|path| path.exists()).ok_or_else(|| io_error(archive_path, io::ErrorKind::NotFound, "no TZAP input volumes found"))?;
     let mut file = File::open(first_volume_path).map_err(|source| TzapError::Io { path: first_volume_path.clone(), source })?;
     inspect_tzap_public_footer_signature_from(archive_path, &volume_paths, &mut file)
 }
@@ -232,7 +255,8 @@ pub fn inspect_tzap_public_footer_signature(archive_path: &Path) -> Result<TzapP
 /// are malformed.
 pub fn summarize_tzap_public_display(archive_path: &Path) -> Result<TzapPublicDisplaySummary, TzapError> {
     let volume_paths = discover_tzap_input_volume_paths(archive_path);
-    let first_volume_path = volume_paths.iter().find(|path| path.exists()).ok_or_else(|| io_error(archive_path, io::ErrorKind::NotFound, "no TZAP input volumes found"))?;
+    let first_volume_path =
+        volume_paths.iter().find(|path| path.exists()).ok_or_else(|| io_error(archive_path, io::ErrorKind::NotFound, "no TZAP input volumes found"))?;
     let mut first_volume_file = File::open(first_volume_path).map_err(|source| TzapError::Io { path: first_volume_path.clone(), source })?;
     let metadata = summarize_tzap_public_metadata_from(archive_path, &volume_paths, &mut first_volume_file)?;
     // The metadata pass read the first volume's headers through this handle
@@ -296,7 +320,8 @@ mod tests {
         assert!(matches!(status, TzapPublicSignatureStatus::Signed { .. }), "got {status:?}");
 
         // Any per-volume unavailable dominates.
-        let volume_with_failure = PerVolumeSignatureStatus { status: TzapPublicSignatureStatus::Unavailable { reason: "read failed".to_owned() }, footer_bytes: None };
+        let volume_with_failure =
+            PerVolumeSignatureStatus { status: TzapPublicSignatureStatus::Unavailable { reason: "read failed".to_owned() }, footer_bytes: None };
         let status = aggregate_public_footer_status(&[signed_per_volume(Some(vec![1])), volume_with_failure], &[], 2);
         let TzapPublicSignatureStatus::Unavailable { reason } = status else {
             panic!("expected unavailable status, got {status:?}");

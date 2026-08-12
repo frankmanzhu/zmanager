@@ -2,7 +2,8 @@ use serde_json::Value;
 
 #[test]
 fn normative_wire_fixture_preserves_current_protocol_anchors() {
-    let fixture: Value = serde_json::from_str(include_str!("../../../fixtures/tzap-normative-wire-anchors.json")).expect("normative TZAP fixture must be valid JSON");
+    let fixture: Value =
+        serde_json::from_str(include_str!("../../../fixtures/tzap-normative-wire-anchors.json")).expect("normative TZAP fixture must be valid JSON");
 
     assert_eq!(fixture["contractVersion"], "local-inventory-consolidation/v1");
     assert_eq!(fixture["nativeAuthExchange"]["path"], "/auth/session/exchange");

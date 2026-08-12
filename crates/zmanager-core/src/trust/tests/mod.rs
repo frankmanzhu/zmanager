@@ -1,9 +1,11 @@
 use super::{
-    OFFICIAL_TZAP_ROOT_PINS, TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TzapCertificateProfileError, TzapCertificateProfileOptions,
-    TzapCertificateStatus, TzapIdentityAssurance, TzapOfficialRootPinKind, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState, canonical_serial_hex, format_certificate_sha256,
-    format_csr_sha256, format_issuer_sha256, is_valid_base64url_no_padding, is_valid_issuer_key_identifier, is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id,
-    is_valid_serial_hex, is_valid_sha256_identifier, parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256, parse_serial_hex, parse_sha256_identifier, parse_spki_sha256,
-    percent_encode_path_param, status_certificate_by_fingerprint_path, validate_base64url_no_padding, validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
+    OFFICIAL_TZAP_ROOT_PINS, TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TzapCertificateProfileError,
+    TzapCertificateProfileOptions, TzapCertificateStatus, TzapIdentityAssurance, TzapOfficialRootPinKind, TzapRootPinSet, TzapTrustAnchorType,
+    TzapVerificationState, canonical_serial_hex, format_certificate_sha256, format_csr_sha256, format_issuer_sha256, is_valid_base64url_no_padding,
+    is_valid_issuer_key_identifier, is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id, is_valid_serial_hex,
+    is_valid_sha256_identifier, parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256, parse_serial_hex, parse_sha256_identifier,
+    parse_spki_sha256, percent_encode_path_param, status_certificate_by_fingerprint_path, validate_base64url_no_padding,
+    validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
 };
 use openssl::asn1::{Asn1Object, Asn1OctetString, Asn1Time};
 use openssl::bn::BigNum;
@@ -16,8 +18,10 @@ use openssl::x509::{X509, X509Extension, X509NameBuilder, X509Ref};
 use serde_json::{Value, json};
 use sha2::Digest as _;
 
-const SHA256_BYTES: [u8; 32] =
-    [0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x5f, 0x6a, 0x7b, 0x8c, 0x9d, 0xae, 0xbf, 0xca, 0xdb, 0xec, 0xfd, 0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87, 0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed, 0xfe, 0x0f];
+const SHA256_BYTES: [u8; 32] = [
+    0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x5f, 0x6a, 0x7b, 0x8c, 0x9d, 0xae, 0xbf, 0xca, 0xdb, 0xec, 0xfd, 0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87, 0x98, 0xa9,
+    0xba, 0xcb, 0xdc, 0xed, 0xfe, 0x0f,
+];
 const SHA256_IDENT: &str = "sha256:0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f";
 
 #[test]
@@ -43,8 +47,14 @@ fn sha256_identifier_validation_rejects_malformed_values() {
 
     let invalid_hex_character = format!("sha256:Z{}", "0".repeat(63));
     assert!(matches!(super::parse_sha256_identifier(&invalid_hex_character), Err(super::TrustIdentifierError::InvalidCharacter)));
-    assert!(matches!(super::parse_sha256_identifier("SHA256:0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f00"), Err(super::TrustIdentifierError::InvalidPrefix)));
-    assert!(matches!(super::parse_sha256_identifier("sha256:0A1B2C3D4E5F6A7B8C9DAEBFCADBECFD102132435465768798A9BACBDCEDFE0F"), Err(super::TrustIdentifierError::MixedCase)));
+    assert!(matches!(
+        super::parse_sha256_identifier("SHA256:0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f00"),
+        Err(super::TrustIdentifierError::InvalidPrefix)
+    ));
+    assert!(matches!(
+        super::parse_sha256_identifier("sha256:0A1B2C3D4E5F6A7B8C9DAEBFCADBECFD102132435465768798A9BACBDCEDFE0F"),
+        Err(super::TrustIdentifierError::MixedCase)
+    ));
     assert!(super::parse_sha256_identifier(SHA256_IDENT).is_ok());
     assert!(super::parse_sha256_identifier("0a1b2c3d4e5f6a7b8c9daebfcadbecfd102132435465768798a9bacbdcedfe0f00").is_err());
     assert!(super::parse_sha256_identifier("c2hhMjU2OmFiYw").is_err());
@@ -163,7 +173,10 @@ fn certificate_profile_unpinned_or_system_root_trust_never_becomes_official() {
     let fixture = certificate_fixture(ChainConfig::default());
     let pins = TzapRootPinSet { current: &[], planned_successors: &[] };
 
-    assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),), Err(TzapCertificateProfileError::RootNotPinned { .. })));
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+        Err(TzapCertificateProfileError::RootNotPinned { .. })
+    ));
 }
 
 #[test]
@@ -171,7 +184,10 @@ fn certificate_profile_rejects_missing_metadata() {
     let fixture = certificate_fixture(ChainConfig { metadata: MetadataMode::Missing, ..ChainConfig::default() });
     let pins = current_pin_set(&fixture.root_pin);
 
-    assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),), Err(TzapCertificateProfileError::MissingMetadata)));
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+        Err(TzapCertificateProfileError::MissingMetadata)
+    ));
 }
 
 #[test]
@@ -179,7 +195,10 @@ fn certificate_profile_rejects_nested_asn1_metadata() {
     let fixture = certificate_fixture(ChainConfig { metadata: MetadataMode::NestedOctetString, ..ChainConfig::default() });
     let pins = current_pin_set(&fixture.root_pin);
 
-    assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),), Err(TzapCertificateProfileError::NestedAsn1Metadata)));
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+        Err(TzapCertificateProfileError::NestedAsn1Metadata)
+    ));
 }
 
 #[test]
@@ -218,11 +237,16 @@ fn certificate_profile_rejects_symbolic_and_mismatched_metadata_policy_oids() {
 
 #[test]
 fn certificate_profile_rejects_root_profile_errors() {
-    for config in [ChainConfig { root_path_len: 1, ..ChainConfig::default() }, ChainConfig { root_key_usage_extra_digital_signature: true, ..ChainConfig::default() }] {
+    for config in
+        [ChainConfig { root_path_len: 1, ..ChainConfig::default() }, ChainConfig { root_key_usage_extra_digital_signature: true, ..ChainConfig::default() }]
+    {
         let fixture = certificate_fixture(config);
         let pins = current_pin_set(&fixture.root_pin);
 
-        assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),), Err(TzapCertificateProfileError::RootProfile { .. })));
+        assert!(matches!(
+            validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+            Err(TzapCertificateProfileError::RootProfile { .. })
+        ));
     }
 }
 
@@ -246,7 +270,10 @@ fn certificate_profile_rejects_org_intermediate_without_approved_policy() {
     let mut options = TzapCertificateProfileOptions::default();
     options.approved_org_intermediate_policy_oids.push(TEST_ORG_POLICY_OID.to_owned());
 
-    assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &options), Err(TzapCertificateProfileError::IntermediateProfile { .. })));
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &options),
+        Err(TzapCertificateProfileError::IntermediateProfile { .. })
+    ));
 }
 
 #[test]
@@ -267,7 +294,10 @@ fn certificate_profile_rejects_leaf_eku_for_tls_client_code_and_anyeku() {
         let fixture = certificate_fixture(ChainConfig { leaf_eku, ..ChainConfig::default() });
         let pins = current_pin_set(&fixture.root_pin);
 
-        assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),), Err(TzapCertificateProfileError::LeafProfile { .. })));
+        assert!(matches!(
+            validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+            Err(TzapCertificateProfileError::LeafProfile { .. })
+        ));
     }
 }
 
@@ -282,7 +312,10 @@ fn certificate_profile_rejects_leaf_key_usage_and_san_profile_errors() {
         let fixture = certificate_fixture(config);
         let pins = current_pin_set(&fixture.root_pin);
 
-        assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),), Err(TzapCertificateProfileError::LeafProfile { .. })));
+        assert!(matches!(
+            validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+            Err(TzapCertificateProfileError::LeafProfile { .. })
+        ));
     }
 }
 
@@ -290,7 +323,10 @@ fn certificate_profile_rejects_leaf_key_usage_and_san_profile_errors() {
 fn certificate_profile_rejects_aki_ski_mismatch_and_chain_order() {
     let fixture = certificate_fixture(ChainConfig { leaf_aki_from_root: true, ..ChainConfig::default() });
     let pins = current_pin_set(&fixture.root_pin);
-    assert!(matches!(validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),), Err(TzapCertificateProfileError::LeafProfile { .. })));
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+        Err(TzapCertificateProfileError::LeafProfile { .. })
+    ));
 
     let mut reordered = certificate_fixture(ChainConfig::default());
     reordered.chain_der.swap(1, 2);
@@ -415,7 +451,15 @@ fn certificate_fixture(config: ChainConfig) -> CertificateFixture {
         if !config.omit_org_policy {
             policies.push(TEST_ORG_POLICY_OID);
         }
-        let org = intermediate_certificate("TZAP Organization Intermediate", &org_key, platform.as_ref(), platform_key.as_ref(), platform.as_ref(), super::ORG_INTERMEDIATE_PATH_LEN, &policies);
+        let org = intermediate_certificate(
+            "TZAP Organization Intermediate",
+            &org_key,
+            platform.as_ref(),
+            platform_key.as_ref(),
+            platform.as_ref(),
+            super::ORG_INTERMEDIATE_PATH_LEN,
+            &policies,
+        );
         let org_der = org.to_der().unwrap();
         (org, org_key, Some(org_der))
     } else {
@@ -453,7 +497,15 @@ fn root_certificate(key: &PKeyRef<Private>, config: ChainConfig) -> X509 {
     builder.build()
 }
 
-fn intermediate_certificate(common_name: &str, key: &PKeyRef<Private>, issuer_cert: &X509Ref, issuer_key: &PKeyRef<Private>, aki_source: &X509Ref, path_len: u32, policies: &[&str]) -> X509 {
+fn intermediate_certificate(
+    common_name: &str,
+    key: &PKeyRef<Private>,
+    issuer_cert: &X509Ref,
+    issuer_key: &PKeyRef<Private>,
+    aki_source: &X509Ref,
+    path_len: u32,
+    policies: &[&str],
+) -> X509 {
     let mut builder = base_certificate_builder(common_name, key, Some(issuer_cert));
     builder.append_extension(BasicConstraints::new().critical().ca().pathlen(path_len).build().unwrap()).unwrap();
     builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build().unwrap()).unwrap();

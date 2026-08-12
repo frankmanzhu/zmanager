@@ -39,7 +39,12 @@ fn append_path_bytes(sources: &mut Vec<PathBuf>, bytes: &[u8], null_paths: bool)
     Ok(())
 }
 
-pub(crate) fn plan_sources(sources: &[PathBuf], clean: bool, no_ignore: bool, follow_symlinks: bool) -> Result<zmanager_core::manifest::ArchiveManifest, zmanager_core::manifest::PlanError> {
+pub(crate) fn plan_sources(
+    sources: &[PathBuf],
+    clean: bool,
+    no_ignore: bool,
+    follow_symlinks: bool,
+) -> Result<zmanager_core::manifest::ArchiveManifest, zmanager_core::manifest::PlanError> {
     use zmanager_core::manifest::{ExclusionProfile, PlanOptions};
 
     let mut options = if no_ignore {
@@ -78,7 +83,8 @@ pub(crate) fn apply_manifest_filters(
         let hidden_excluded = exclude_hidden && archive_path_has_hidden_component(path) && !explicitly_included;
         matches_include && !matches_exclude && !hidden_excluded
     });
-    manifest.total_bytes = manifest.entries.iter().filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File).map(|entry| entry.size).sum();
+    manifest.total_bytes =
+        manifest.entries.iter().filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File).map(|entry| entry.size).sum();
     Ok(())
 }
 
@@ -112,6 +118,7 @@ pub(crate) fn apply_junk_paths(manifest: &mut zmanager_core::manifest::ArchiveMa
 
     flattened.sort_by(|left, right| left.archive_path.cmp(&right.archive_path));
     manifest.entries = flattened;
-    manifest.total_bytes = manifest.entries.iter().filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File).map(|entry| entry.size).sum();
+    manifest.total_bytes =
+        manifest.entries.iter().filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File).map(|entry| entry.size).sum();
     Ok(())
 }

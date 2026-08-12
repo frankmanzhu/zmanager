@@ -28,7 +28,8 @@ pub(crate) fn append_pax_mtime<W: io::Write>(builder: &mut tar::Builder<W>, modi
     let Some(modified) = modified else {
         return Ok(());
     };
-    let timestamp = system_time_to_timestamp(modified).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "modification time is outside the supported tar timestamp range"))?;
+    let timestamp = system_time_to_timestamp(modified)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "modification time is outside the supported tar timestamp range"))?;
     if timestamp.seconds >= 0 && timestamp.nanoseconds == 0 {
         return Ok(());
     }
@@ -97,7 +98,11 @@ mod tests {
 
     #[test]
     fn pax_timestamp_parser_handles_positive_and_negative_fractions() {
-        for timestamp in [TarTimestamp { seconds: 1, nanoseconds: 250_000_000 }, TarTimestamp { seconds: -2, nanoseconds: 750_000_000 }, TarTimestamp { seconds: -1, nanoseconds: 500_000_000 }] {
+        for timestamp in [
+            TarTimestamp { seconds: 1, nanoseconds: 250_000_000 },
+            TarTimestamp { seconds: -2, nanoseconds: 750_000_000 },
+            TarTimestamp { seconds: -1, nanoseconds: 500_000_000 },
+        ] {
             let encoded = timestamp_to_pax_value(timestamp);
             assert_eq!(parse_pax_mtime(encoded.as_bytes()), Some(timestamp));
         }

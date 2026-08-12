@@ -171,7 +171,13 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("ENABLE_ZSTD", "ON")
             .define("ENABLE_LZ4", "ON");
     } else if target.contains("apple-darwin") {
-        config.define("ENABLE_ACL", "ON").define("ENABLE_XATTR", "ON").define("ENABLE_ICONV", "ON").define("ENABLE_LIBXML2", "ON").define("ENABLE_EXPAT", "ON").define("ENABLE_WIN32_XMLLITE", "OFF");
+        config
+            .define("ENABLE_ACL", "ON")
+            .define("ENABLE_XATTR", "ON")
+            .define("ENABLE_ICONV", "ON")
+            .define("ENABLE_LIBXML2", "ON")
+            .define("ENABLE_EXPAT", "ON")
+            .define("ENABLE_WIN32_XMLLITE", "OFF");
 
         let lz4_include = find_include_dir("DEP_LZ4_INCLUDE", "DEP_LZ4_ROOT");
         let lz4_lib = find_static_library("DEP_LZ4_ROOT", "liblz4.a");
@@ -209,7 +215,13 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("ENABLE_EXPAT", "ON")
             .define("ENABLE_WIN32_XMLLITE", "OFF");
     } else {
-        config.define("ENABLE_ACL", "ON").define("ENABLE_XATTR", "ON").define("ENABLE_ICONV", "ON").define("ENABLE_LIBXML2", "ON").define("ENABLE_EXPAT", "ON").define("ENABLE_WIN32_XMLLITE", "OFF");
+        config
+            .define("ENABLE_ACL", "ON")
+            .define("ENABLE_XATTR", "ON")
+            .define("ENABLE_ICONV", "ON")
+            .define("ENABLE_LIBXML2", "ON")
+            .define("ENABLE_EXPAT", "ON")
+            .define("ENABLE_WIN32_XMLLITE", "OFF");
     }
 }
 

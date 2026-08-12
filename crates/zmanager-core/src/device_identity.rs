@@ -80,7 +80,13 @@ pub fn generate_device_signing_key_and_csr(options: &TzapDeviceCsrOptions) -> Re
     let csr_der = build_device_csr(&private_key, options)?;
     let csr_sha256 = csr_fingerprint(&csr_der);
 
-    Ok(TzapDeviceSigningKeyMaterial { private_key_der: SecretBytes::from(private_key.private_key_to_der()?), public_key_spki_der, public_key_fingerprint, csr_der, csr_sha256 })
+    Ok(TzapDeviceSigningKeyMaterial {
+        private_key_der: SecretBytes::from(private_key.private_key_to_der()?),
+        public_key_spki_der,
+        public_key_fingerprint,
+        csr_der,
+        csr_sha256,
+    })
 }
 
 /// Rebuilds a device CSR from an existing private key.
@@ -108,7 +114,10 @@ pub fn generate_recipient_encryption_key() -> Result<TzapRecipientEncryptionKeyM
     })
 }
 
-pub fn ensure_recipient_key_is_distinct_from_signing_key(signing_public_key_fingerprint: &str, recipient_public_key_fingerprint: &str) -> Result<(), TzapDeviceIdentityError> {
+pub fn ensure_recipient_key_is_distinct_from_signing_key(
+    signing_public_key_fingerprint: &str,
+    recipient_public_key_fingerprint: &str,
+) -> Result<(), TzapDeviceIdentityError> {
     if signing_public_key_fingerprint == recipient_public_key_fingerprint { Err(TzapDeviceIdentityError::RecipientKeyReusesSigningKey) } else { Ok(()) }
 }
 
@@ -142,8 +151,9 @@ pub(crate) fn csr_fingerprint(csr_der: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEVICE_CSR_COMMON_NAME, RECIPIENT_ENCRYPTION_KEY_ALGORITHM, TzapDeviceCsrOptions, TzapDeviceIdentityError, ensure_recipient_key_is_distinct_from_signing_key,
-        generate_device_csr_from_private_key, generate_device_signing_key_and_csr, generate_recipient_encryption_key,
+        DEVICE_CSR_COMMON_NAME, RECIPIENT_ENCRYPTION_KEY_ALGORITHM, TzapDeviceCsrOptions, TzapDeviceIdentityError,
+        ensure_recipient_key_is_distinct_from_signing_key, generate_device_csr_from_private_key, generate_device_signing_key_and_csr,
+        generate_recipient_encryption_key,
     };
     use crate::trust;
     use openssl::nid::Nid;
@@ -176,7 +186,10 @@ mod tests {
 
     #[test]
     fn device_csr_options_reject_empty_common_name() {
-        assert!(matches!(generate_device_signing_key_and_csr(&TzapDeviceCsrOptions { common_name: String::new() }), Err(TzapDeviceIdentityError::EmptyCommonName)));
+        assert!(matches!(
+            generate_device_signing_key_and_csr(&TzapDeviceCsrOptions { common_name: String::new() }),
+            Err(TzapDeviceIdentityError::EmptyCommonName)
+        ));
     }
 
     #[test]
@@ -209,6 +222,9 @@ mod tests {
     fn recipient_key_distinctness_rejects_reused_signing_fingerprint() {
         let fingerprint = trust::format_certificate_sha256(&[0x42; 32]);
 
-        assert!(matches!(ensure_recipient_key_is_distinct_from_signing_key(&fingerprint, &fingerprint), Err(TzapDeviceIdentityError::RecipientKeyReusesSigningKey)));
+        assert!(matches!(
+            ensure_recipient_key_is_distinct_from_signing_key(&fingerprint, &fingerprint),
+            Err(TzapDeviceIdentityError::RecipientKeyReusesSigningKey)
+        ));
     }
 }

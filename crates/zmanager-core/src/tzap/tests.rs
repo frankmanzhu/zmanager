@@ -2,10 +2,11 @@
 //! private module internals live inside the module they belong to.
 
 use super::{
-    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapPublicSignatureStatus, TzapRestoreOptions, TzapRestorePolicy, TzapX509SigningOptions, TzapX509TrustOptions,
-    copy_tzap_file_to_writer, copy_tzap_files_to_writer, create_tzap_from_manifest_with_context, extract_tzap, extract_tzap_file_to_destination, list_tzap_index_with_optional_password,
-    list_tzap_with_optional_password, list_tzap_with_password, list_tzap_with_recipient_key, summarize_tzap_public_display, summarize_tzap_public_metadata,
-    test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
+    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapPublicSignatureStatus, TzapRestoreOptions, TzapRestorePolicy,
+    TzapX509SigningOptions, TzapX509TrustOptions, copy_tzap_file_to_writer, copy_tzap_files_to_writer, create_tzap_from_manifest_with_context, extract_tzap,
+    extract_tzap_file_to_destination, list_tzap_index_with_optional_password, list_tzap_with_optional_password, list_tzap_with_password,
+    list_tzap_with_recipient_key, summarize_tzap_public_display, summarize_tzap_public_metadata, test_tzap_with_password_filter_and_x509_trust,
+    test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
 };
 use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
@@ -68,8 +69,18 @@ fn create_windows_relative_symlink(path: &Path, target: &str) {
 
     let file = fs::OpenOptions::new().access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(path).unwrap();
     let mut returned = 0u32;
-    let result =
-        unsafe { DeviceIoControl(file.as_raw_handle().cast(), FSCTL_SET_REPARSE_POINT, reparse.as_ptr().cast(), reparse.len() as u32, std::ptr::null_mut(), 0, &mut returned, std::ptr::null_mut()) };
+    let result = unsafe {
+        DeviceIoControl(
+            file.as_raw_handle().cast(),
+            FSCTL_SET_REPARSE_POINT,
+            reparse.as_ptr().cast(),
+            reparse.len() as u32,
+            std::ptr::null_mut(),
+            0,
+            &mut returned,
+            std::ptr::null_mut(),
+        )
+    };
     assert_ne!(result, 0, "failed to create relative symlink fixture: {}", std::io::Error::last_os_error());
 }
 
@@ -79,16 +90,29 @@ fn windows_basic_info(path: &Path, directory: bool, reparse_point: bool) -> wind
     use std::mem::size_of;
     use std::os::windows::fs::OpenOptionsExt as _;
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FileBasicInfo, GetFileInformationByHandleEx};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FileBasicInfo, GetFileInformationByHandleEx,
+    };
 
     let mut flags = if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 };
     if reparse_point {
         flags |= FILE_FLAG_OPEN_REPARSE_POINT;
     }
-    let file = fs::OpenOptions::new().access_mode(FILE_READ_ATTRIBUTES).custom_flags(flags).open(path).unwrap_or_else(|error| panic!("failed to open {} for basic-info read: {error}", path.display()));
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .custom_flags(flags)
+        .open(path)
+        .unwrap_or_else(|error| panic!("failed to open {} for basic-info read: {error}", path.display()));
     let mut info = FILE_BASIC_INFO::default();
     assert_ne!(
-        unsafe { GetFileInformationByHandleEx(file.as_raw_handle().cast(), FileBasicInfo, (&mut info as *mut FILE_BASIC_INFO).cast(), size_of::<FILE_BASIC_INFO>() as u32,) },
+        unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&mut info as *mut FILE_BASIC_INFO).cast(),
+                size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
         0,
         "failed to read basic info for {}: {}",
         path.display(),
@@ -103,16 +127,28 @@ fn set_windows_basic_info(path: &Path, directory: bool, reparse_point: bool, inf
     use std::mem::size_of;
     use std::os::windows::fs::OpenOptionsExt as _;
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_WRITE_ATTRIBUTES, FileBasicInfo, SetFileInformationByHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_WRITE_ATTRIBUTES, FileBasicInfo, SetFileInformationByHandle,
+    };
 
     let mut flags = if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 };
     if reparse_point {
         flags |= FILE_FLAG_OPEN_REPARSE_POINT;
     }
-    let file =
-        fs::OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES).custom_flags(flags).open(path).unwrap_or_else(|error| panic!("failed to open {} for basic-info write: {error}", path.display()));
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_WRITE_ATTRIBUTES)
+        .custom_flags(flags)
+        .open(path)
+        .unwrap_or_else(|error| panic!("failed to open {} for basic-info write: {error}", path.display()));
     assert_ne!(
-        unsafe { SetFileInformationByHandle(file.as_raw_handle().cast(), FileBasicInfo, (&info as *const FILE_BASIC_INFO).cast(), size_of::<FILE_BASIC_INFO>() as u32,) },
+        unsafe {
+            SetFileInformationByHandle(
+                file.as_raw_handle().cast(),
+                FileBasicInfo,
+                (&info as *const FILE_BASIC_INFO).cast(),
+                size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        },
         0,
         "failed to set basic info for {}: {}",
         path.display(),
@@ -134,7 +170,9 @@ fn windows_process_is_elevated() -> bool {
     }
     let mut elevation = TOKEN_ELEVATION::default();
     let mut returned = 0u32;
-    let result = unsafe { GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut returned) };
+    let result = unsafe {
+        GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut returned)
+    };
     unsafe {
         CloseHandle(token);
     }
@@ -151,7 +189,11 @@ fn windows_security_descriptor(path: &Path, directory: bool) -> Vec<u8> {
     use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, GetSecurityDescriptorLength, OWNER_SECURITY_INFORMATION};
     use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT};
 
-    let file = fs::OpenOptions::new().read(true).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 }).open(path).unwrap();
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 })
+        .open(path)
+        .unwrap();
     let mut descriptor = std::ptr::null_mut();
     let status = unsafe {
         GetSecurityInfo(
@@ -197,7 +239,9 @@ fn windows_security_descriptors_equivalent(expected: &[u8], actual: &[u8]) -> bo
     if (expected_control ^ actual_control) & !ignorable != 0 {
         return false;
     }
-    for (offset_field, acl, represented) in [(4usize, false, true), (8, false, true), (12, true, expected_control & SACL_PRESENT != 0), (16, true, expected_control & DACL_PRESENT != 0)] {
+    for (offset_field, acl, represented) in
+        [(4usize, false, true), (8, false, true), (12, true, expected_control & SACL_PRESENT != 0), (16, true, expected_control & DACL_PRESENT != 0)]
+    {
         if represented && security_descriptor_component(expected, offset_field, acl) != security_descriptor_component(actual, offset_field, acl) {
             return false;
         }
@@ -241,9 +285,16 @@ fn selected_extract_uses_seekable_core_for_numbered_volumes() {
     assert!(listing.entries.iter().any(|entry| entry.path == "nested/small.txt"));
 
     let destination = temp.path("out/selected.txt");
-    let written = extract_tzap_file_to_destination(&selected_volume_path, TzapExtractKeySource::Password("secret"), "nested/small.txt", &destination, false, TzapRestoreOptions::default())
-        .unwrap()
-        .map(|report| report.written_bytes);
+    let written = extract_tzap_file_to_destination(
+        &selected_volume_path,
+        TzapExtractKeySource::Password("secret"),
+        "nested/small.txt",
+        &destination,
+        false,
+        TzapRestoreOptions::default(),
+    )
+    .unwrap()
+    .map(|report| report.written_bytes);
 
     assert_eq!(written, Some(12));
     assert_eq!(fs::read(&destination).unwrap(), b"small target");
@@ -608,7 +659,12 @@ fn fast_extract_restores_directory_metadata_after_children() {
     fs::create_dir(&source_dir).unwrap();
     fs::write(&source_file, b"payload").unwrap();
     symlink("file.txt", &source_link).unwrap();
-    filetime::set_symlink_file_times(&source_link, filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012), filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012)).unwrap();
+    filetime::set_symlink_file_times(
+        &source_link,
+        filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012),
+        filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012),
+    )
+    .unwrap();
     let directory_time = UNIX_EPOCH + Duration::new(1_650_000_000, 345_678_901);
     let manifest = ArchiveManifest {
         root: temp.root().to_path_buf(),
@@ -922,7 +978,11 @@ fn create_and_test_tzap_with_x509_root_auth() {
         volume_size: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
-        x509_signing: Some(TzapX509SigningOptions::InMemory { signing_certificate: signer_certificate, signing_private_key: SecretBytes::from(signer_private_key), signing_chain: Vec::new() }),
+        x509_signing: Some(TzapX509SigningOptions::InMemory {
+            signing_certificate: signer_certificate,
+            signing_private_key: SecretBytes::from(signer_private_key),
+            signing_chain: Vec::new(),
+        }),
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -973,7 +1033,8 @@ fn public_display_summary_reports_signed_authentic_footer() {
     let token = CancellationToken::new();
     let mut events = |_| {};
     let mut context = JobContext::new(&token, &mut events);
-    create_tzap_from_manifest_with_context(&single_file_manifest(&temp, source, b"signed display payload".len() as u64), &archive, &options, &mut context).unwrap();
+    create_tzap_from_manifest_with_context(&single_file_manifest(&temp, source, b"signed display payload".len() as u64), &archive, &options, &mut context)
+        .unwrap();
 
     let summary = summarize_tzap_public_display(&archive).unwrap();
     assert_eq!(summary.metadata.present_volume_count, 1);
@@ -1132,7 +1193,9 @@ fn public_display_summary_reports_not_authentic_for_forged_signature() {
     let (root_cert, root_key) = test_ca_cert("ZManager Forged Root CA");
     let (embedded_cert, _embedded_key) = test_leaf_cert("ZManager Embedded Signer", root_cert.as_ref(), root_key.as_ref());
     let (forger_cert, forger_key) = test_leaf_cert("ZManager Forger", root_cert.as_ref(), root_key.as_ref());
-    let forger = X509RootAuthSigner::from_pem_or_der(&forger_cert.to_pem().unwrap(), &forger_key.private_key_to_pem_pkcs8().unwrap(), Vec::new(), 1_700_000_000).unwrap();
+    let forger =
+        X509RootAuthSigner::from_pem_or_der(&forger_cert.to_pem().unwrap(), &forger_key.private_key_to_pem_pkcs8().unwrap(), Vec::new(), 1_700_000_000)
+            .unwrap();
     let written = write_archive_with_root_auth(
         &[RegularFile::new("forged.txt", b"forged payload")],
         &crate::tzap::write::placeholder_master_key().unwrap(),
@@ -1347,7 +1410,11 @@ fn create_tzap_embeds_chain_from_signing_certificate_bundle() {
         volume_size: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
-        x509_signing: Some(TzapX509SigningOptions::CertificateAndKey { signing_certificate: signer_bundle_path, signing_private_key: signer_key_path, signing_chain: Vec::new() }),
+        x509_signing: Some(TzapX509SigningOptions::CertificateAndKey {
+            signing_certificate: signer_bundle_path,
+            signing_private_key: signer_key_path,
+            signing_chain: Vec::new(),
+        }),
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -1360,7 +1427,10 @@ fn create_tzap_embeds_chain_from_signing_certificate_bundle() {
 
     assert_eq!(root_auth.subject, "CN=ZManager Test Signer");
     assert_eq!(root_auth.issuer, "CN=ZManager Test Intermediate CA");
-    assert_eq!(root_auth.verified_chain_subjects, vec!["CN=ZManager Test Signer".to_owned(), "CN=ZManager Test Intermediate CA".to_owned(), "CN=ZManager Test Root CA".to_owned(),]);
+    assert_eq!(
+        root_auth.verified_chain_subjects,
+        vec!["CN=ZManager Test Signer".to_owned(), "CN=ZManager Test Intermediate CA".to_owned(), "CN=ZManager Test Root CA".to_owned(),]
+    );
     assert_eq!(root_auth.trust_anchor_subject.as_deref(), Some("CN=ZManager Test Root CA"));
 }
 
@@ -1511,8 +1581,14 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
             symlink_target: Some(PathBuf::from(r"scripts\payload.txt")),
         },
     ];
-    let manifest =
-        ArchiveManifest { root: temp.root().to_path_buf(), entries, total_bytes: b"windows core metadata".len() as u64, excluded_entries: Vec::new(), excluded_bytes: 0, warnings: Vec::new() };
+    let manifest = ArchiveManifest {
+        root: temp.root().to_path_buf(),
+        entries,
+        total_bytes: b"windows core metadata".len() as u64,
+        excluded_entries: Vec::new(),
+        excluded_bytes: 0,
+        warnings: Vec::new(),
+    };
     let archive = temp.path("metadata.tzap");
     let options = public_metadata_create_options();
     let token = CancellationToken::new();
@@ -1535,8 +1611,11 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
     assert_eq!(listed_link.kind, BrowserEntryKind::Symlink);
     assert_eq!(listed_link.link_target.as_deref(), Some("scripts/payload.txt"));
 
-    let policies: &[TzapRestorePolicy] =
-        if windows_process_is_elevated() { &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs, TzapRestorePolicy::System] } else { &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs] };
+    let policies: &[TzapRestorePolicy] = if windows_process_is_elevated() {
+        &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs, TzapRestorePolicy::System]
+    } else {
+        &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs]
+    };
     for &policy in policies {
         let policy_name = match policy {
             TzapRestorePolicy::Portable => "portable",
@@ -1596,9 +1675,11 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
             }
         }
         if policy == TzapRestorePolicy::System {
-            for (actual_path, directory, expected) in
-                [(&restored_file, false, &source_file_security), (&restored_directory, true, &source_directory_security), (&restored_link, false, &source_link_security)]
-            {
+            for (actual_path, directory, expected) in [
+                (&restored_file, false, &source_file_security),
+                (&restored_directory, true, &source_directory_security),
+                (&restored_link, false, &source_link_security),
+            ] {
                 let actual = windows_security_descriptor(actual_path, directory);
                 assert!(windows_security_descriptors_equivalent(expected, &actual), "security descriptor mismatch for {}", actual_path.display());
             }
@@ -1642,11 +1723,13 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         fs::write(file_path.join("..namedfork/rsrc"), vec![0x6b; 2 * 1024 * 1024 + 31]).unwrap();
         let acl_status = std::process::Command::new("/bin/chmod").args(["+a", "everyone deny delete"]).arg(&file_path).status().expect("failed to set ACL");
         assert!(acl_status.success(), "chmod +a failed");
-        let directory_acl_status = std::process::Command::new("/bin/chmod").args(["+a", "everyone deny delete"]).arg(&directory_path).status().expect("failed to set directory ACL");
+        let directory_acl_status =
+            std::process::Command::new("/bin/chmod").args(["+a", "everyone deny delete"]).arg(&directory_path).status().expect("failed to set directory ACL");
         assert!(directory_acl_status.success(), "directory chmod +a failed");
         let status = std::process::Command::new("/usr/bin/chflags").arg("hidden").arg(&file_path).status().expect("failed to run chflags");
         assert!(status.success(), "chflags failed");
-        let directory_status = std::process::Command::new("/usr/bin/chflags").arg("hidden").arg(&directory_path).status().expect("failed to run directory chflags");
+        let directory_status =
+            std::process::Command::new("/usr/bin/chflags").arg("hidden").arg(&directory_path).status().expect("failed to run directory chflags");
         assert!(directory_status.success(), "directory chflags failed");
     }
 
@@ -1727,7 +1810,14 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         }
     });
 
-    let manifest = ArchiveManifest { root: temp.root().to_path_buf(), entries, total_bytes: payload.len() as u64, excluded_entries: Vec::new(), excluded_bytes: 0, warnings: Vec::new() };
+    let manifest = ArchiveManifest {
+        root: temp.root().to_path_buf(),
+        entries,
+        total_bytes: payload.len() as u64,
+        excluded_entries: Vec::new(),
+        excluded_bytes: 0,
+        warnings: Vec::new(),
+    };
 
     let archive = temp.path("metadata.tzap");
     let options = TzapCreateOptions {
@@ -1922,7 +2012,8 @@ fn preserves_all_metadata_in_tzap_round_trip() {
     {
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
-        let policies: &[TzapRestorePolicy] = if unix_process_is_elevated() { &[TzapRestorePolicy::SameOs, TzapRestorePolicy::System] } else { &[TzapRestorePolicy::SameOs] };
+        let policies: &[TzapRestorePolicy] =
+            if unix_process_is_elevated() { &[TzapRestorePolicy::SameOs, TzapRestorePolicy::System] } else { &[TzapRestorePolicy::SameOs] };
         for &policy in policies {
             let destination = temp.path(match policy {
                 TzapRestorePolicy::SameOs => "linux-same-os-extract",

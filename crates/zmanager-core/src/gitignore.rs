@@ -33,7 +33,8 @@ impl GitignoreRule {
         if self.is_anchored_or_path_pattern() {
             path_pattern_matches_or_contains_descendant(relative_path, &self.pattern)
         } else {
-            relative_path.split('/').any(|segment| segment_pattern_matches(segment, &self.pattern)) || file_type == ManifestFileType::Directory && segment_pattern_matches(relative_path, &self.pattern)
+            relative_path.split('/').any(|segment| segment_pattern_matches(segment, &self.pattern))
+                || file_type == ManifestFileType::Directory && segment_pattern_matches(relative_path, &self.pattern)
         }
     }
 
@@ -127,7 +128,12 @@ pub(crate) fn parse_gitignore_rule(line: &str, base_archive_path: &str) -> Optio
 }
 
 pub(crate) fn gitignore_decision(archive_path: &str, file_type: ManifestFileType, rules: &[GitignoreRule]) -> Option<(bool, usize)> {
-    rules.iter().enumerate().filter(|(_, rule)| rule.matches(archive_path, file_type)).map(|(index, rule)| (rule.polarity == GitignorePolarity::Ignore, index)).next_back()
+    rules
+        .iter()
+        .enumerate()
+        .filter(|(_, rule)| rule.matches(archive_path, file_type))
+        .map(|(index, rule)| (rule.polarity == GitignorePolarity::Ignore, index))
+        .next_back()
 }
 
 pub(crate) fn gitignore_has_later_negated_descendant(archive_path: &str, rules: &[GitignoreRule], rule_index: usize) -> bool {

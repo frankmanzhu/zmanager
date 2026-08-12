@@ -45,7 +45,8 @@ pub(crate) fn crl_download_to_der(bytes: &[u8]) -> Result<Vec<u8>, TzapStatusCli
 }
 
 fn validate_crl_manifest_fields(entry: &TzapCrlManifestEntry, crl: &CertificateRevocationList<'_>) -> Result<(), TzapStatusClientError> {
-    let crl_number = crl.crl_number().map(canonical_biguint_hex).ok_or_else(|| TzapStatusClientError::CrlValidation { reason: "CRL number is missing".to_owned() })?;
+    let crl_number =
+        crl.crl_number().map(canonical_biguint_hex).ok_or_else(|| TzapStatusClientError::CrlValidation { reason: "CRL number is missing".to_owned() })?;
     if crl_number != entry.crl_number {
         return Err(TzapStatusClientError::CrlValidation { reason: "CRL number does not match manifest".to_owned() });
     }
@@ -85,8 +86,10 @@ pub(crate) fn parse_crl_manifest(bytes: &[u8]) -> Result<Vec<TzapCrlManifestEntr
             if parsed.crl_scope != crate::trust::TZAP_CRL_SCOPE_ALL_CERTIFICATES_ISSUED_BY_CA {
                 return Err(TzapStatusClientError::InvalidField { field: "crl_scope" });
             }
-            crate::trust::parse_issuer_sha256(&parsed.issuer_certificate_sha256).map_err(|_| TzapStatusClientError::InvalidField { field: "issuer_certificate_sha256" })?;
-            let expected_crl_url = crate::trust::status_crl_pem_path(&parsed.issuer_certificate_sha256).map_err(|_| TzapStatusClientError::InvalidField { field: "issuer_certificate_sha256" })?;
+            crate::trust::parse_issuer_sha256(&parsed.issuer_certificate_sha256)
+                .map_err(|_| TzapStatusClientError::InvalidField { field: "issuer_certificate_sha256" })?;
+            let expected_crl_url = crate::trust::status_crl_pem_path(&parsed.issuer_certificate_sha256)
+                .map_err(|_| TzapStatusClientError::InvalidField { field: "issuer_certificate_sha256" })?;
             if parsed.crl_url != expected_crl_url {
                 return Err(TzapStatusClientError::InvalidField { field: "crl_url" });
             }
@@ -100,11 +103,21 @@ pub(crate) fn parse_crl_manifest(bytes: &[u8]) -> Result<Vec<TzapCrlManifestEntr
         .collect()
 }
 
-pub(crate) fn required_unix_or_rfc3339(object: &Map<String, Value>, unix_field: &'static str, rfc3339_field: &'static str, error_field: &'static str) -> Result<i64, TzapStatusClientError> {
+pub(crate) fn required_unix_or_rfc3339(
+    object: &Map<String, Value>,
+    unix_field: &'static str,
+    rfc3339_field: &'static str,
+    error_field: &'static str,
+) -> Result<i64, TzapStatusClientError> {
     optional_unix_or_rfc3339(object, unix_field, rfc3339_field, error_field)?.ok_or(TzapStatusClientError::InvalidField { field: error_field })
 }
 
-pub(crate) fn optional_unix_or_rfc3339(object: &Map<String, Value>, unix_field: &'static str, rfc3339_field: &'static str, error_field: &'static str) -> Result<Option<i64>, TzapStatusClientError> {
+pub(crate) fn optional_unix_or_rfc3339(
+    object: &Map<String, Value>,
+    unix_field: &'static str,
+    rfc3339_field: &'static str,
+    error_field: &'static str,
+) -> Result<Option<i64>, TzapStatusClientError> {
     if object.contains_key(unix_field) {
         return crate::status_client::optional_i64(object, unix_field);
     }

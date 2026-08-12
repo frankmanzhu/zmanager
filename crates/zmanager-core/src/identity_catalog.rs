@@ -394,7 +394,9 @@ fn acquire_catalog_lock(lock_path: &Path) -> Result<fs::File, TzapIdentityCatalo
 }
 
 fn lock_is_stale(lock_path: &Path) -> bool {
-    fs::metadata(lock_path).is_ok_and(|metadata| metadata.modified().is_ok_and(|modified| SystemTime::now().duration_since(modified).is_ok_and(|age| age.as_secs() >= LOCK_STALE_AFTER_SECONDS)))
+    fs::metadata(lock_path).is_ok_and(|metadata| {
+        metadata.modified().is_ok_and(|modified| SystemTime::now().duration_since(modified).is_ok_and(|age| age.as_secs() >= LOCK_STALE_AFTER_SECONDS))
+    })
 }
 
 impl TzapIdentityCatalogStore for FileTzapIdentityCatalogStore {
@@ -512,8 +514,16 @@ fn write_catalog_atomically(path: &Path, catalog: &TzapIdentityCatalog) -> Resul
             .set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     }
-    output.file_mut().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?.write_all(&bytes).map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
-    output.file_mut().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?.sync_all().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
+    output
+        .file_mut()
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?
+        .write_all(&bytes)
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
+    output
+        .file_mut()
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?
+        .sync_all()
+        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     output.commit_with_atomic_replace().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     #[cfg(unix)]
     if let Ok(directory) = fs::File::open(path.parent().unwrap_or_else(|| Path::new("."))) {
@@ -558,7 +568,9 @@ fn validate_unique<'a>(field: &'static str, values: impl Iterator<Item = &'a str
 mod tests {
     use super::*;
     use crate::device_identity::{TzapDeviceCsrOptions, generate_device_signing_key_and_csr, generate_recipient_encryption_key};
-    use crate::local_identity_store::{InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord};
+    use crate::local_identity_store::{
+        InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]

@@ -19,7 +19,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tzap_core::reader::{ArchiveEntry, ExtractedArchiveMember};
-use tzap_core::{ArchiveTimestamp, ExtractError, FormatError, MetadataDiagnostic, OpenedArchive, RestorePolicy as CoreRestorePolicy, SafeExtractionOptions, TarEntryKind};
+use tzap_core::{
+    ArchiveTimestamp, ExtractError, FormatError, MetadataDiagnostic, OpenedArchive, RestorePolicy as CoreRestorePolicy, SafeExtractionOptions, TarEntryKind,
+};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TzapExtractReport {
@@ -174,7 +176,13 @@ pub fn extract_tzap(request: TzapExtractRequest<'_, '_>, archive: impl AsRef<Pat
         return extract_tzap_fast_inner(archive, destination, policy, key, restore_options, context);
     }
     let (password, recipient_private_key, key_bytes) = key_components(key);
-    extract_tzap_inner(archive, destination, ExtractTzapOptions { policy, password, recipient_private_key, recipient_private_key_bytes: key_bytes, restore_options }, overwrite_resolver, context)
+    extract_tzap_inner(
+        archive,
+        destination,
+        ExtractTzapOptions { policy, password, recipient_private_key, recipient_private_key_bytes: key_bytes, restore_options },
+        overwrite_resolver,
+        context,
+    )
 }
 
 /// Fast extraction with authenticated v45 metadata: regular-file payloads
@@ -194,7 +202,10 @@ fn extract_tzap_fast_inner(
     let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
     let entries = opened.list_files()?;
     opened.plan_metadata_restore(restore_options.core_options(false))?;
-    if matches!(restore_options.policy, TzapRestorePolicy::SameOs | TzapRestorePolicy::System) && !restore_options.allow_degraded && entries.iter().any(|entry| entry.kind != TarEntryKind::Regular) {
+    if matches!(restore_options.policy, TzapRestorePolicy::SameOs | TzapRestorePolicy::System)
+        && !restore_options.allow_degraded
+        && entries.iter().any(|entry| entry.kind != TarEntryKind::Regular)
+    {
         return Err(TzapError::Format(FormatError::ReaderUnsupported(
             "strict native metadata restore for non-regular entries is not supported by zmanager fast extraction; explicitly allow degraded restore",
         )));
@@ -224,7 +235,12 @@ fn key_components(key: TzapExtractKeySource<'_>) -> (Option<&str>, Option<&Path>
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or selected members
 /// cannot be extracted.
-pub fn copy_tzap_files_to_writer(archive: impl AsRef<Path>, key: TzapExtractKeySource<'_>, selector: impl Fn(&str) -> bool, writer: &mut dyn io::Write) -> Result<TzapExtractReport, TzapError> {
+pub fn copy_tzap_files_to_writer(
+    archive: impl AsRef<Path>,
+    key: TzapExtractKeySource<'_>,
+    selector: impl Fn(&str) -> bool,
+    writer: &mut dyn io::Write,
+) -> Result<TzapExtractReport, TzapError> {
     let (password, recipient_private_key, key_bytes) = key_components(key);
     let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
     copy_opened_tzap_files_to_writer(&opened, selector, writer)
@@ -237,7 +253,12 @@ pub fn copy_tzap_files_to_writer(archive: impl AsRef<Path>, key: TzapExtractKeyS
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or the selected
 /// member cannot be extracted.
-pub fn copy_tzap_file_to_writer(archive: impl AsRef<Path>, key: TzapExtractKeySource<'_>, entry_path: &str, writer: &mut dyn io::Write) -> Result<TzapExtractReport, TzapError> {
+pub fn copy_tzap_file_to_writer(
+    archive: impl AsRef<Path>,
+    key: TzapExtractKeySource<'_>,
+    entry_path: &str,
+    writer: &mut dyn io::Write,
+) -> Result<TzapExtractReport, TzapError> {
     let (password, recipient_private_key, key_bytes) = key_components(key);
     let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
     let Some(entry) = opened.lookup_index_entry(entry_path)? else {
@@ -254,7 +275,11 @@ fn skipped_missing_entry_report(entry_path: &str) -> TzapExtractReport {
     TzapExtractReport { written_entries: 0, skipped_entries: 1, written_bytes: 0, warnings: vec![format!("skipped missing entry {entry_path}")] }
 }
 
-fn copy_opened_tzap_files_to_writer(opened: &OpenedArchive, selector: impl Fn(&str) -> bool, writer: &mut dyn io::Write) -> Result<TzapExtractReport, TzapError> {
+fn copy_opened_tzap_files_to_writer(
+    opened: &OpenedArchive,
+    selector: impl Fn(&str) -> bool,
+    writer: &mut dyn io::Write,
+) -> Result<TzapExtractReport, TzapError> {
     let entries = opened.list_index_entries()?;
     let mut report = TzapExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     for entry in entries {
@@ -367,7 +392,8 @@ impl<'archive, 'resolver> TzapExtractionState<'archive, 'resolver> {
             context.check_cancelled()?;
         }
         append_metadata_diagnostics(&entry.path, &entry.diagnostics, &mut self.report.warnings, context.as_deref_mut());
-        let preloaded_member = if matches!(entry.kind, TarEntryKind::Symlink | TarEntryKind::Hardlink) { self.opened.extract_member(&entry.path)? } else { None };
+        let preloaded_member =
+            if matches!(entry.kind, TarEntryKind::Symlink | TarEntryKind::Hardlink) { self.opened.extract_member(&entry.path)? } else { None };
         let safety_entry = ExtractionEntry {
             archive_path: entry.path.clone(),
             kind: extraction_kind_from_tzap_entry(entry, preloaded_member.as_ref()),
@@ -378,9 +404,13 @@ impl<'archive, 'resolver> TzapExtractionState<'archive, 'resolver> {
             context.entry_started(&entry.path, Some(entry.file_data_size));
         }
         match self.planner.validate_entry(&safety_entry)? {
-            ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => {
-                self.write_entry(entry, &safety_entry, preloaded_member, &TzapEntryWriteDecision { destination_path, replace_existing, link_target_path }, context)
-            }
+            ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => self.write_entry(
+                entry,
+                &safety_entry,
+                preloaded_member,
+                &TzapEntryWriteDecision { destination_path, replace_existing, link_target_path },
+                context,
+            ),
             ExtractionDecision::Skip { reason, .. } => {
                 self.record_skip(&entry.path, format!("skipped {}: {reason}", entry.path), context);
                 Ok(())
@@ -438,13 +468,23 @@ impl<'archive, 'resolver> TzapExtractionState<'archive, 'resolver> {
                 path: decision.destination_path.clone(),
                 source: io::Error::new(io::ErrorKind::InvalidData, "hardlink target was not resolved by extraction safety planning"),
             })?;
-            self.deferred_hardlinks.push(DeferredTzapHardlink { source_path, destination_path: decision.destination_path.clone(), replace_existing: decision.replace_existing });
+            self.deferred_hardlinks.push(DeferredTzapHardlink {
+                source_path,
+                destination_path: decision.destination_path.clone(),
+                replace_existing: decision.replace_existing,
+            });
             if let Some(context) = context {
                 context.entry_finished(&entry.path, 0);
             }
             return Ok(());
         }
-        let processed = materialize_non_regular_member(&member, &decision.destination_path, decision.replace_existing, decision.link_target_path.as_deref(), &mut self.report)?;
+        let processed = materialize_non_regular_member(
+            &member,
+            &decision.destination_path,
+            decision.replace_existing,
+            decision.link_target_path.as_deref(),
+            &mut self.report,
+        )?;
         if member.kind == TarEntryKind::Directory {
             self.deferred_directory_metadata.push((decision.destination_path.clone(), TzapPortableEntryMetadata::from_archive_entry(entry)));
         } else if member.kind == TarEntryKind::Symlink && should_restore_tzap_metadata(self.restore_options) {
@@ -576,12 +616,13 @@ struct DeferredTzapHardlink {
 
 fn materialize_deferred_tzap_hardlinks(hardlinks: &[DeferredTzapHardlink], report: &mut TzapExtractReport) -> Result<(), TzapError> {
     let paths = hardlinks.iter().map(|hardlink| (hardlink.source_path.clone(), hardlink.destination_path.clone())).collect::<Vec<_>>();
-    let order =
-        crate::safety::deferred_link_dependency_order(&paths).map_err(|source| TzapError::Io { path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()), source })?;
+    let order = crate::safety::deferred_link_dependency_order(&paths)
+        .map_err(|source| TzapError::Io { path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()), source })?;
     for index in order {
         let hardlink = &hardlinks[index];
         if hardlink.replace_existing {
-            crate::safety::remove_destination_for_replace(&hardlink.destination_path).map_err(|source| TzapError::Io { path: hardlink.destination_path.clone(), source })?;
+            crate::safety::remove_destination_for_replace(&hardlink.destination_path)
+                .map_err(|source| TzapError::Io { path: hardlink.destination_path.clone(), source })?;
         }
         write_hardlink(&hardlink.source_path, &hardlink.destination_path)?;
         report.written_entries += 1;
@@ -656,7 +697,8 @@ fn apply_deferred_tzap_directory_metadata(directories: &[(PathBuf, TzapPortableE
             fs::set_permissions(path, permissions).map_err(|source| TzapError::Io { path: path.clone(), source })?;
         }
 
-        let mtime = archive_timestamp_file_time(metadata.mtime).map_err(|message| TzapError::Io { path: path.clone(), source: io::Error::new(io::ErrorKind::InvalidData, message) })?;
+        let mtime = archive_timestamp_file_time(metadata.mtime)
+            .map_err(|message| TzapError::Io { path: path.clone(), source: io::Error::new(io::ErrorKind::InvalidData, message) })?;
         filetime::set_file_mtime(path, mtime).map_err(|source| TzapError::Io { path: path.clone(), source })?;
     }
     Ok(())
@@ -678,7 +720,8 @@ fn archive_timestamp_file_time(timestamp: ArchiveTimestamp) -> Result<filetime::
 }
 
 fn apply_tzap_symlink_mtime(path: &Path, timestamp: ArchiveTimestamp) -> Result<(), TzapError> {
-    let file_time = archive_timestamp_file_time(timestamp).map_err(|message| TzapError::Io { path: path.to_path_buf(), source: io::Error::new(io::ErrorKind::InvalidData, message) })?;
+    let file_time = archive_timestamp_file_time(timestamp)
+        .map_err(|message| TzapError::Io { path: path.to_path_buf(), source: io::Error::new(io::ErrorKind::InvalidData, message) })?;
     filetime::set_symlink_file_times(path, file_time, file_time).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })
 }
 
@@ -713,7 +756,9 @@ fn materialize_non_regular_member(
             return Ok(0);
         }
         TarEntryKind::Symlink => {
-            if crate::safety::should_skip_symlink_materialization(&ExtractionEntryKind::Symlink { target: member.link_target.as_deref().map(PathBuf::from).unwrap_or_default() }) {
+            if crate::safety::should_skip_symlink_materialization(&ExtractionEntryKind::Symlink {
+                target: member.link_target.as_deref().map(PathBuf::from).unwrap_or_default(),
+            }) {
                 report.skipped_entries += 1;
                 report.warnings.push(crate::safety::unsupported_symlink_warning(&member.path));
             } else if let Some(target) = &member.link_target {
@@ -745,8 +790,12 @@ fn extraction_kind_from_tzap_entry(entry: &ArchiveEntry, member: Option<&Extract
     match entry.kind {
         TarEntryKind::Regular => ExtractionEntryKind::File,
         TarEntryKind::Directory => ExtractionEntryKind::Directory,
-        TarEntryKind::Symlink => ExtractionEntryKind::Symlink { target: member.and_then(|member| member.link_target.as_deref()).map(PathBuf::from).unwrap_or_default() },
-        TarEntryKind::Hardlink => ExtractionEntryKind::Hardlink { target: member.and_then(|member| member.link_target.as_deref()).map(PathBuf::from).unwrap_or_default() },
+        TarEntryKind::Symlink => {
+            ExtractionEntryKind::Symlink { target: member.and_then(|member| member.link_target.as_deref()).map(PathBuf::from).unwrap_or_default() }
+        }
+        TarEntryKind::Hardlink => {
+            ExtractionEntryKind::Hardlink { target: member.and_then(|member| member.link_target.as_deref()).map(PathBuf::from).unwrap_or_default() }
+        }
         TarEntryKind::CharacterDevice | TarEntryKind::BlockDevice | TarEntryKind::Fifo => ExtractionEntryKind::Special,
     }
 }

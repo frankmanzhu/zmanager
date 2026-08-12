@@ -1,14 +1,20 @@
 use crate::cli::app::{
-    ArchiveFormat, CreateOutcome, CreateRequest, ProgressReporter, TestRequest, create_progress_kind, create_test_archive_path, expand_short_options, publish_archive, temp_archive_path,
+    ArchiveFormat, CreateOutcome, CreateRequest, ProgressReporter, TestRequest, create_progress_kind, create_test_archive_path, expand_short_options,
+    publish_archive, temp_archive_path,
 };
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
-use crate::cli::format::{FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TGZ, FORMAT_TZAP, FORMAT_ZIP, TZAP_DEFAULT_RECOVERY_PERCENTAGE, ZIP_CREATE_EXTENSIONS, path_has_known_extension};
+use crate::cli::format::{
+    FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TGZ, FORMAT_TZAP, FORMAT_ZIP, TZAP_DEFAULT_RECOVERY_PERCENTAGE, ZIP_CREATE_EXTENSIONS, path_has_known_extension,
+};
 use crate::cli::open::{run_test_request, tzap_default_volume_loss_tolerance};
-use crate::cli::options::{GlobalOptions, infer_create_format, parse_archive_format, parse_global_option, parse_i32, parse_volume_size, resolve_input_path, take_value};
+use crate::cli::options::{
+    GlobalOptions, infer_create_format, parse_archive_format, parse_global_option, parse_i32, parse_volume_size, resolve_input_path, take_value,
+};
 use crate::cli::planning::{append_files_from, append_stdin_paths, apply_junk_paths, apply_manifest_filters, manifest_has_symlinks, plan_sources};
 use crate::cli::usage::{
-    CREATE_HELP, command_usage_error, normalize_prompted_password, print_create_summary, print_error_line, print_help_stdout, print_manifest, print_optional_error_line, prompt_password, wants_help,
+    CREATE_HELP, command_usage_error, normalize_prompted_password, print_create_summary, print_error_line, print_help_stdout, print_manifest,
+    print_optional_error_line, prompt_password, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::fs;
@@ -294,13 +300,48 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
     let backend_replace_existing = split_output && request.force;
 
     let outcome_result = match format {
-        ArchiveFormat::Zip => run_zip_create_backend(request, &manifest, &temp, create_destination, password, backend_replace_existing, split_output, &mut progress, &token, global),
+        ArchiveFormat::Zip => run_zip_create_backend(
+            request,
+            &manifest,
+            &temp,
+            create_destination,
+            password,
+            backend_replace_existing,
+            split_output,
+            &mut progress,
+            &token,
+            global,
+        ),
         ArchiveFormat::TarZst => run_tar_zst_create_backend(request, &manifest, &temp, split_output, &mut progress, &token, global),
         ArchiveFormat::Tgz => run_tgz_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global),
-        ArchiveFormat::Tzap => run_tzap_create_backend(request, &manifest, &temp, create_destination, password, backend_replace_existing, split_output, &mut progress, &token, global),
+        ArchiveFormat::Tzap => run_tzap_create_backend(
+            request,
+            &manifest,
+            &temp,
+            create_destination,
+            password,
+            backend_replace_existing,
+            split_output,
+            &mut progress,
+            &token,
+            global,
+        ),
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        ArchiveFormat::AppleArchive => run_apple_archive_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global),
-        ArchiveFormat::SevenZ => run_seven_z_create_backend(request, &manifest, &temp, create_destination, password, backend_replace_existing, split_output, &mut progress, &token, global),
+        ArchiveFormat::AppleArchive => {
+            run_apple_archive_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global)
+        }
+        ArchiveFormat::SevenZ => run_seven_z_create_backend(
+            request,
+            &manifest,
+            &temp,
+            create_destination,
+            password,
+            backend_replace_existing,
+            split_output,
+            &mut progress,
+            &token,
+            global,
+        ),
     };
     let outcome = match outcome_result {
         Ok(outcome) => outcome,
@@ -354,9 +395,18 @@ fn run_zip_create_backend(
         manifest,
         progress,
         token,
-        |context| zmanager_core::zip_backend::create_zip_from_manifest_with_context(manifest, create_destination, &options, context).map_err(|error| error.to_string()),
+        |context| {
+            zmanager_core::zip_backend::create_zip_from_manifest_with_context(manifest, create_destination, &options, context)
+                .map_err(|error| error.to_string())
+        },
         |report| CreateOutcome {
-            summary: format!("created zip: {} entries, {} bytes, encrypted {}, {} warnings", report.written_entries, report.written_bytes, report.encrypted, report.warnings.len()),
+            summary: format!(
+                "created zip: {} entries, {} bytes, encrypted {}, {} warnings",
+                report.written_entries,
+                report.written_bytes,
+                report.encrypted,
+                report.warnings.len()
+            ),
             format: FORMAT_ZIP,
             backend: FORMAT_ZIP,
             entries: report.written_entries,
@@ -390,7 +440,9 @@ fn run_tar_zst_create_backend(
         manifest,
         progress,
         token,
-        |context| zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string()),
+        |context| {
+            zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string())
+        },
         |report| CreateOutcome {
             summary: format!(
                 "created tar.zst: {} entries, {} bytes, level {}, threads {:?}, {} warnings",
@@ -436,7 +488,13 @@ fn run_tgz_create_backend(
         token,
         |context| zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string()),
         |report| CreateOutcome {
-            summary: format!("created tar.gz: {} entries, {} bytes, level {}, {} warnings", report.written_entries, report.written_bytes, report.level, report.warnings.len()),
+            summary: format!(
+                "created tar.gz: {} entries, {} bytes, level {}, {} warnings",
+                report.written_entries,
+                report.written_bytes,
+                report.level,
+                report.warnings.len()
+            ),
             format: FORMAT_TGZ,
             backend: FORMAT_TGZ,
             entries: report.written_entries,
@@ -498,7 +556,10 @@ fn run_tzap_create_backend(
         manifest,
         progress,
         token,
-        |context| zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(manifest, create_destination, &options, context).map_err(|error| error.to_string()),
+        |context| {
+            zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(manifest, create_destination, &options, context)
+                .map_err(|error| error.to_string())
+        },
         |report| CreateOutcome {
             summary: format!(
                 "created tzap: {} entries, {} bytes, encrypted {}, level {}, {} warnings",
@@ -551,9 +612,18 @@ fn run_apple_archive_create_backend(
         manifest,
         progress,
         token,
-        |context| zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string()),
+        |context| {
+            zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(manifest, temp, &options, context)
+                .map_err(|error| error.to_string())
+        },
         |report| CreateOutcome {
-            summary: format!("created aar: {} entries, {} bytes, compression {:?}, {} warnings", report.written_entries, report.written_bytes, options.compression, report.warnings.len()),
+            summary: format!(
+                "created aar: {} entries, {} bytes, compression {:?}, {} warnings",
+                report.written_entries,
+                report.written_bytes,
+                options.compression,
+                report.warnings.len()
+            ),
             format: FORMAT_APPLE_ARCHIVE,
             backend: FORMAT_APPLE_ARCHIVE,
             entries: report.written_entries,
@@ -648,7 +718,13 @@ fn run_create_backend<R>(
     result.map(map_outcome)
 }
 
-fn create_stream(format: ArchiveFormat, manifest: &zmanager_core::manifest::ArchiveManifest, request: &CreateRequest, password: Option<SecretString>, global: &GlobalOptions) -> ExitCode {
+fn create_stream(
+    format: ArchiveFormat,
+    manifest: &zmanager_core::manifest::ArchiveManifest,
+    request: &CreateRequest,
+    password: Option<SecretString>,
+    global: &GlobalOptions,
+) -> ExitCode {
     if format != ArchiveFormat::Zip {
         print_error_line(global, format_args!("create failed: stdout output is currently supported only for ZIP"));
         return ExitCode::from(2);
@@ -661,7 +737,14 @@ fn create_stream(format: ArchiveFormat, manifest: &zmanager_core::manifest::Arch
             return ExitCode::from(2);
         }
     };
-    let options = zmanager_core::zip_backend::ZipCreateOptions { compression, level, preserve_metadata: !request.no_metadata, replace_existing: false, password, volume_size: None };
+    let options = zmanager_core::zip_backend::ZipCreateOptions {
+        compression,
+        level,
+        preserve_metadata: !request.no_metadata,
+        replace_existing: false,
+        password,
+        volume_size: None,
+    };
     let stdout = io::stdout();
     match zmanager_core::zip_backend::create_zip_stream_from_manifest(manifest, stdout.lock(), &options) {
         Ok((_output, report)) => {
@@ -736,7 +819,10 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
 
     if let Some(method) = request.method.as_deref() {
         match (format, method) {
-            (ArchiveFormat::Zip, "deflate" | "store") | (ArchiveFormat::TarZst | ArchiveFormat::Tzap, "zstd" | "zst") | (ArchiveFormat::SevenZ, "lzma2") | (ArchiveFormat::Tgz, "gzip" | "gz") => {}
+            (ArchiveFormat::Zip, "deflate" | "store")
+            | (ArchiveFormat::TarZst | ArchiveFormat::Tzap, "zstd" | "zst")
+            | (ArchiveFormat::SevenZ, "lzma2")
+            | (ArchiveFormat::Tgz, "gzip" | "gz") => {}
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             (ArchiveFormat::AppleArchive, "lzfse" | "lz4" | "zlib" | "lzma" | "raw") => {}
             _ => {

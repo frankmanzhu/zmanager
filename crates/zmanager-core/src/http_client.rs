@@ -36,7 +36,10 @@ pub(crate) fn send_json_request<T: TzapAuthHttpTransport>(
 }
 
 /// Requires a 2xx status code, otherwise maps the response into an error.
-pub(crate) fn require_success<E>(response: TzapAuthHttpResponse, error_from_status: impl FnOnce(u16, &TzapAuthHttpResponse) -> E) -> Result<TzapAuthHttpResponse, E> {
+pub(crate) fn require_success<E>(
+    response: TzapAuthHttpResponse,
+    error_from_status: impl FnOnce(u16, &TzapAuthHttpResponse) -> E,
+) -> Result<TzapAuthHttpResponse, E> {
     if (200..=299).contains(&response.status_code) { Ok(response) } else { Err(error_from_status(response.status_code, &response)) }
 }
 

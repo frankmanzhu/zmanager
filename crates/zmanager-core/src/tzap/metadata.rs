@@ -5,7 +5,9 @@ use super::TzapError;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tzap_core::{ArchiveTimestamp, MetadataDiagnostic, MetadataDiagnosticStatus, MetadataOperation, PortableFileMetadata, PortableModeOrigin, PortablePosixOwner};
+use tzap_core::{
+    ArchiveTimestamp, MetadataDiagnostic, MetadataDiagnosticStatus, MetadataOperation, PortableFileMetadata, PortableModeOrigin, PortablePosixOwner,
+};
 
 pub(crate) fn system_time_to_archive_timestamp(time: SystemTime) -> Option<ArchiveTimestamp> {
     match time.duration_since(UNIX_EPOCH) {
@@ -47,12 +49,14 @@ pub(crate) fn portable_file_metadata(path: &Path) -> Result<CapturedPortableFile
     let accessed = metadata.accessed().ok().and_then(system_time_to_archive_timestamp);
 
     #[cfg(target_os = "macos")]
-    let captured_macos = tzap_core::macos_metadata::capture_macos_metadata(path, metadata.file_type().is_symlink()).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
+    let captured_macos = tzap_core::macos_metadata::capture_macos_metadata(path, metadata.file_type().is_symlink())
+        .map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
 
     #[cfg(target_os = "macos")]
     let native = captured_macos.native;
     #[cfg(target_os = "linux")]
-    let native = tzap_core::linux_metadata::capture_linux_metadata(path, metadata.file_type().is_symlink()).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
+    let native = tzap_core::linux_metadata::capture_linux_metadata(path, metadata.file_type().is_symlink())
+        .map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
     #[cfg(windows)]
     let native = tzap_core::windows_metadata::capture_windows_metadata(path).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
     #[cfg(all(not(target_os = "macos"), not(target_os = "linux"), not(windows)))]
@@ -108,13 +112,19 @@ fn resolve_posix_name<Structure>(
 #[cfg(unix)]
 #[allow(unsafe_code)]
 fn resolve_uname(uid: u32) -> Option<String> {
-    resolve_posix_name(|structure, buffer, capacity, result| unsafe { libc::getpwuid_r(uid as libc::uid_t, structure, buffer, capacity, result) }, |structure| unsafe { (*structure).pw_name })
+    resolve_posix_name(
+        |structure, buffer, capacity, result| unsafe { libc::getpwuid_r(uid as libc::uid_t, structure, buffer, capacity, result) },
+        |structure| unsafe { (*structure).pw_name },
+    )
 }
 
 #[cfg(unix)]
 #[allow(unsafe_code)]
 fn resolve_gname(gid: u32) -> Option<String> {
-    resolve_posix_name(|structure, buffer, capacity, result| unsafe { libc::getgrgid_r(gid as libc::gid_t, structure, buffer, capacity, result) }, |structure| unsafe { (*structure).gr_name })
+    resolve_posix_name(
+        |structure, buffer, capacity, result| unsafe { libc::getgrgid_r(gid as libc::gid_t, structure, buffer, capacity, result) },
+        |structure| unsafe { (*structure).gr_name },
+    )
 }
 
 #[cfg(unix)]
@@ -229,7 +239,10 @@ pub(crate) fn write_symlink(target: &Path, destination_path: &Path) -> Result<()
 
 #[cfg(not(unix))]
 pub(crate) fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), TzapError> {
-    Err(TzapError::Io { path: destination_path.to_path_buf(), source: std::io::Error::new(std::io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform") })
+    Err(TzapError::Io {
+        path: destination_path.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
+    })
 }
 
 pub(crate) fn write_hardlink(source_path: &Path, destination_path: &Path) -> Result<(), TzapError> {

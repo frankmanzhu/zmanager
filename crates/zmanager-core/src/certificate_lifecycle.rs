@@ -1,16 +1,21 @@
 //! Certificate renewal, revocation, and local device-retirement flows.
 
-use crate::auth_client::{SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord};
+use crate::auth_client::{
+    SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken,
+    TzapSessionRecord,
+};
 use crate::device_identity::csr_fingerprint;
 use crate::enrollment_client::{
-    ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator, TzapEnrollmentError, TzapEnrollmentRequest, canonicalize_local_staging_server_json_bytes,
-    csr_der_to_pem, parse_challenge_response, parse_enrollment_response, requested_validity_days, sign_p256_challenge,
+    ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator, TzapEnrollmentError, TzapEnrollmentRequest,
+    canonicalize_local_staging_server_json_bytes, csr_der_to_pem, parse_challenge_response, parse_enrollment_response, requested_validity_days,
+    sign_p256_challenge,
 };
 use crate::http_client::{require_success, send_json_request};
 use crate::jcs;
 use crate::json_util::{json_object, optional_string};
 use crate::local_identity_store::{
-    TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore, TzapLocalIdentityStoreError, TzapOrganizationDeviceRetirement,
+    TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore, TzapLocalIdentityStoreError,
+    TzapOrganizationDeviceRetirement,
 };
 use crate::trust;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -195,7 +200,8 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
             requested_validity_seconds: request.requested_validity_seconds,
             now_unix_seconds: request.now_unix_seconds,
         };
-        let new_record = payload.into_store_record(&enrollment_request, &new_signing_key.key_id, public_metadata).map_err(TzapCertificateLifecycleError::Enrollment)?;
+        let new_record =
+            payload.into_store_record(&enrollment_request, &new_signing_key.key_id, public_metadata).map_err(TzapCertificateLifecycleError::Enrollment)?;
         let mut inventory = store.load_inventory(&request.account_key)?;
         inventory.enrolled_certificates.push(new_record.clone());
         store.save_inventory(&request.account_key, inventory)?;
@@ -226,7 +232,12 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         revocation_completion(&response)
     }
 
-    pub fn retire_personal_devices(&self, store: &impl TzapLocalIdentityStore, session: &TzapSessionRecord, account_key: &str) -> Result<TzapRetirementReport, TzapCertificateLifecycleError> {
+    pub fn retire_personal_devices(
+        &self,
+        store: &impl TzapLocalIdentityStore,
+        session: &TzapSessionRecord,
+        account_key: &str,
+    ) -> Result<TzapRetirementReport, TzapCertificateLifecycleError> {
         session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
         let inventory = store.load_inventory(account_key)?;
         let sign_device_ids = inventory.active_personal_sign_device_ids().into_iter().map(ToOwned::to_owned).collect::<Vec<_>>();
@@ -245,7 +256,12 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         })
     }
 
-    pub fn retire_organization_devices(&self, store: &impl TzapLocalIdentityStore, session: &TzapSessionRecord, account_key: &str) -> Result<TzapRetirementReport, TzapCertificateLifecycleError> {
+    pub fn retire_organization_devices(
+        &self,
+        store: &impl TzapLocalIdentityStore,
+        session: &TzapSessionRecord,
+        account_key: &str,
+    ) -> Result<TzapRetirementReport, TzapCertificateLifecycleError> {
         session.require_audience(SESSION_AUDIENCE_LOGIN_TZAP)?;
         let inventory = store.load_inventory(account_key)?;
         let routes = inventory.active_organization_device_retirements();
@@ -340,7 +356,10 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         self.send(TzapAuthHttpMethod::Post, &self.sign_base_url, &path, Some(session.access_token.clone()), Some(body))
     }
 
-    fn precheck_renewal(store: &impl TzapLocalIdentityStore, request: &TzapRenewalRequest) -> Result<TzapEnrolledCertificateRecord, TzapCertificateLifecycleError> {
+    fn precheck_renewal(
+        store: &impl TzapLocalIdentityStore,
+        request: &TzapRenewalRequest,
+    ) -> Result<TzapEnrolledCertificateRecord, TzapCertificateLifecycleError> {
         let inventory = store.load_inventory(&request.account_key)?;
         let certificate = inventory
             .enrolled_certificates
@@ -363,11 +382,19 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         Ok(certificate.clone())
     }
 
-    fn lookup_organization_device(&self, session: &TzapSessionRecord, route: &TzapOrganizationDeviceRetirement) -> Result<OrganizationDeviceLookup, TzapCertificateLifecycleError> {
+    fn lookup_organization_device(
+        &self,
+        session: &TzapSessionRecord,
+        route: &TzapOrganizationDeviceRetirement,
+    ) -> Result<OrganizationDeviceLookup, TzapCertificateLifecycleError> {
         // Both values are caller-controlled identifiers and must be encoded
         // before interpolation; a raw value could smuggle query parameters or
         // path segments into the request URL.
-        let path = format!("{LOGIN_ORG_DEVICES_PATH_PREFIX}{}/devices?sign_device_id={}", trust::percent_encode_path_param(&route.org_id), trust::percent_encode_path_param(&route.sign_device_id));
+        let path = format!(
+            "{LOGIN_ORG_DEVICES_PATH_PREFIX}{}/devices?sign_device_id={}",
+            trust::percent_encode_path_param(&route.org_id),
+            trust::percent_encode_path_param(&route.sign_device_id)
+        );
         let response = self.send_raw(TzapAuthHttpMethod::Get, &self.login_base_url, &path, Some(session.access_token.clone()), None)?;
         if response.status_code == 404 {
             return Ok(OrganizationDeviceLookup::Incomplete(format!("{}:not_found", route.sign_device_id)));
@@ -380,11 +407,19 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         }
         let value: Value = serde_json::from_slice(&response.body)?;
         let object = json_object::<TzapCertificateLifecycleError>(&value, "$")?;
-        let login_device_id = optional_string::<TzapCertificateLifecycleError>(object, "organization_device_id")?.unwrap_or_else(|| route.login_organization_device_id.clone());
+        let login_device_id =
+            optional_string::<TzapCertificateLifecycleError>(object, "organization_device_id")?.unwrap_or_else(|| route.login_organization_device_id.clone());
         Ok(OrganizationDeviceLookup::Found(login_device_id))
     }
 
-    fn send(&self, method: TzapAuthHttpMethod, base_url: &str, path: &str, bearer_token: Option<TzapBearerToken>, body: Option<Value>) -> Result<TzapAuthHttpResponse, TzapCertificateLifecycleError> {
+    fn send(
+        &self,
+        method: TzapAuthHttpMethod,
+        base_url: &str,
+        path: &str,
+        bearer_token: Option<TzapBearerToken>,
+        body: Option<Value>,
+    ) -> Result<TzapAuthHttpResponse, TzapCertificateLifecycleError> {
         let response = self.send_raw(method, base_url, path, bearer_token, body)?;
         require_success(response, |status_code, _| TzapCertificateLifecycleError::HttpStatus { status_code })
     }
@@ -441,7 +476,9 @@ fn sign_old_certificate_challenge(
     challenge_payload: &Value,
 ) -> Result<String, TzapCertificateLifecycleError> {
     let canonical = match wire_profile {
-        crate::wire_profile::TzapWireProfile::Spec => jcs::canonicalize_json_bytes(challenge_payload).map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?,
+        crate::wire_profile::TzapWireProfile::Spec => {
+            jcs::canonicalize_json_bytes(challenge_payload).map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?
+        }
         crate::wire_profile::TzapWireProfile::LocalStagingServer => {
             canonicalize_local_staging_server_json_bytes(challenge_payload).map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?
         }
@@ -451,7 +488,8 @@ fn sign_old_certificate_challenge(
 }
 
 fn sign_new_key_challenge_staging(signing_key: &TzapDeviceSigningKeyRecord, challenge_payload: &Value) -> Result<String, TzapCertificateLifecycleError> {
-    let canonical = canonicalize_local_staging_server_json_bytes(challenge_payload).map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?;
+    let canonical =
+        canonicalize_local_staging_server_json_bytes(challenge_payload).map_err(|error| TzapCertificateLifecycleError::Crypto(format!("{error:?}")))?;
     let signature = sign_p256_challenge::<TzapCertificateLifecycleError>(&signing_key.private_key_der, &canonical)?;
     Ok(URL_SAFE_NO_PAD.encode(signature))
 }
@@ -515,17 +553,19 @@ fn expect_optional_string(object: &Map<String, Value>, field: &'static str, expe
 #[cfg(test)]
 mod tests {
     use super::{
-        OrganizationDeviceLookup, RENEW_OPERATION, TzapCertificateLifecycleClient, TzapCertificateLifecycleError, TzapRenewalPolicy, TzapRenewalRequest, TzapRetirementCompletion,
-        revocation_completion,
+        OrganizationDeviceLookup, RENEW_OPERATION, TzapCertificateLifecycleClient, TzapCertificateLifecycleError, TzapRenewalPolicy, TzapRenewalRequest,
+        TzapRetirementCompletion, revocation_completion,
     };
     use crate::auth_client::{
-        SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord,
+        SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport,
+        TzapBearerToken, TzapSessionRecord,
     };
     use crate::device_identity::{TzapDeviceCsrOptions, generate_device_signing_key_and_csr};
     use crate::enrollment_client::{TzapEnrollmentCertificateValidator, TzapEnrollmentError};
     use crate::local_identity_store::{
-        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState,
-        TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapOrganizationDeviceRetirement, TzapSignDeviceRouting,
+        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState,
+        TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapOrganizationDeviceRetirement,
+        TzapSignDeviceRouting,
     };
     use crate::trust::{self, TzapCertificatePublicMetadata};
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -590,8 +630,10 @@ mod tests {
     fn renewal_rejects_pending_linkage_conflict_and_target_mismatch() {
         for (status, expected) in [("device_approval_required", "approval"), ("device_linkage_pending", "pending"), ("device_linkage_conflict", "conflict")] {
             let fixture = LifecycleFixture::new();
-            let transport =
-                FakeLifecycleTransport::new(vec![renewal_challenge_response(&fixture, None), TzapAuthHttpResponse { status_code: 200, body: json!({"status": status}).to_string().into_bytes() }]);
+            let transport = FakeLifecycleTransport::new(vec![
+                renewal_challenge_response(&fixture, None),
+                TzapAuthHttpResponse { status_code: 200, body: json!({"status": status}).to_string().into_bytes() },
+            ]);
             let client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
             let mut store = fixture.store_with_certificate(TzapSignDeviceRouting::Personal);
             let error = client
@@ -691,7 +733,8 @@ mod tests {
     fn revocation_completion_requires_a_result_field() {
         // A 2xx with an unrelated body (e.g. an error JSON) must not count as
         // completion.
-        let error = revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: json!({"error": "internal_error"}).to_string().into_bytes() }).unwrap_err();
+        let error =
+            revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: json!({"error": "internal_error"}).to_string().into_bytes() }).unwrap_err();
         assert!(matches!(error, TzapCertificateLifecycleError::InvalidField { field: "result" }));
 
         // Non-JSON bodies are rejected too.
@@ -699,21 +742,28 @@ mod tests {
 
         // The pending marker stays incomplete and a known completion stays
         // complete.
-        let pending = revocation_completion(&TzapAuthHttpResponse { status_code: 202, body: json!({"result": "revocation_pending_sync"}).to_string().into_bytes() }).unwrap();
+        let pending =
+            revocation_completion(&TzapAuthHttpResponse { status_code: 202, body: json!({"result": "revocation_pending_sync"}).to_string().into_bytes() })
+                .unwrap();
         assert_eq!(pending, TzapRetirementCompletion::Incomplete);
-        let complete = revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: json!({"result": "already_revoked"}).to_string().into_bytes() }).unwrap();
+        let complete =
+            revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: json!({"result": "already_revoked"}).to_string().into_bytes() }).unwrap();
         assert_eq!(complete, TzapRetirementCompletion::Complete);
     }
 
     #[test]
     fn organization_retirement_uses_login_routes_and_keeps_404_and_linkage_pending_incomplete() {
-        for response in
-            [TzapAuthHttpResponse { status_code: 404, body: b"{}".to_vec() }, TzapAuthHttpResponse { status_code: 409, body: json!({"error": "device_linkage_pending"}).to_string().into_bytes() }]
-        {
+        for response in [
+            TzapAuthHttpResponse { status_code: 404, body: b"{}".to_vec() },
+            TzapAuthHttpResponse { status_code: 409, body: json!({"error": "device_linkage_pending"}).to_string().into_bytes() },
+        ] {
             let fixture = LifecycleFixture::new();
             let transport = FakeLifecycleTransport::new(vec![response]);
             let client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
-            let store = fixture.store_with_certificate(TzapSignDeviceRouting::Organization { org_id: "org_123".to_owned(), login_organization_device_id: "login-org-device-1".to_owned() });
+            let store = fixture.store_with_certificate(TzapSignDeviceRouting::Organization {
+                org_id: "org_123".to_owned(),
+                login_organization_device_id: "login-org-device-1".to_owned(),
+            });
 
             let report = client.retire_organization_devices(&store, &fixture.login_session, DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
             assert_eq!(report.completion, TzapRetirementCompletion::Incomplete);
@@ -729,8 +779,11 @@ mod tests {
         let fixture = LifecycleFixture::new();
         let transport = FakeLifecycleTransport::new(vec![TzapAuthHttpResponse { status_code: 200, body: b"{}".to_vec() }]);
         let client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
-        let route =
-            TzapOrganizationDeviceRetirement { org_id: "org/../admin".to_owned(), sign_device_id: "dev?admin=true&x=1".to_owned(), login_organization_device_id: "login-org-device".to_owned() };
+        let route = TzapOrganizationDeviceRetirement {
+            org_id: "org/../admin".to_owned(),
+            sign_device_id: "dev?admin=true&x=1".to_owned(),
+            login_organization_device_id: "login-org-device".to_owned(),
+        };
 
         let lookup = client.lookup_organization_device(&fixture.login_session, &route).unwrap();
         assert!(matches!(lookup, OrganizationDeviceLookup::Found(_)));
@@ -759,7 +812,12 @@ mod tests {
                 created_at_unix_seconds: 100,
                 label: None,
             };
-            Self { sign_session: session(SESSION_AUDIENCE_SIGN_TZAP), login_session: session(SESSION_AUDIENCE_LOGIN_TZAP), signing_key, csr_der: material.csr_der }
+            Self {
+                sign_session: session(SESSION_AUDIENCE_SIGN_TZAP),
+                login_session: session(SESSION_AUDIENCE_LOGIN_TZAP),
+                signing_key,
+                csr_der: material.csr_der,
+            }
         }
 
         fn renewal_request(policy: TzapRenewalPolicy) -> TzapRenewalRequest {

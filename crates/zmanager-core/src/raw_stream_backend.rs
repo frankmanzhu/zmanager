@@ -1,4 +1,6 @@
-use crate::safety::{ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
+use crate::safety::{
+    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver,
+};
 use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
 use std::fmt;
 use std::fs::{self, File};
@@ -207,7 +209,12 @@ pub fn output_name_for_raw_stream(path: impl AsRef<Path>, format: RawStreamForma
 ///
 /// Returns [`RawStreamError`] when the stream cannot be decoded, the output
 /// name is unsafe, or filesystem writes fail.
-pub fn extract_raw_stream(archive_path: impl AsRef<Path>, format: RawStreamFormat, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<RawStreamExtractReport, RawStreamError> {
+pub fn extract_raw_stream(
+    archive_path: impl AsRef<Path>,
+    format: RawStreamFormat,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+) -> Result<RawStreamExtractReport, RawStreamError> {
     extract_raw_stream_inner(archive_path, format, destination, policy, None, None, false)
 }
 
@@ -286,9 +293,11 @@ fn extract_raw_stream_inner(
 ) -> Result<RawStreamExtractReport, RawStreamError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
-    let output_name = output_name_for_raw_stream(archive_path, format).ok_or_else(|| RawStreamError::MissingOutputName { archive_path: archive_path.to_path_buf() })?;
+    let output_name =
+        output_name_for_raw_stream(archive_path, format).ok_or_else(|| RawStreamError::MissingOutputName { archive_path: archive_path.to_path_buf() })?;
 
-    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| RawStreamError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root =
+        crate::safety::prepare_destination_root(destination).map_err(|source| RawStreamError::Io { path: destination.to_path_buf(), source })?;
 
     let max_expanded_bytes = policy.limits.max_expanded_bytes;
     let mut planner = match overwrite_resolver {
@@ -296,11 +305,17 @@ fn extract_raw_stream_inner(
         None => ExtractionSafetyPlanner::new(&destination_root, policy),
     };
     let mut report = RawStreamExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, output_path: None, warnings: Vec::new() };
-    let entry = ExtractionEntry { archive_path: output_name, kind: ExtractionEntryKind::File, uncompressed_size: None, compressed_size: archive_path.metadata().ok().map(|metadata| metadata.len()) };
+    let entry = ExtractionEntry {
+        archive_path: output_name,
+        kind: ExtractionEntryKind::File,
+        uncompressed_size: None,
+        compressed_size: archive_path.metadata().ok().map(|metadata| metadata.len()),
+    };
 
     match planner.validate_entry(&entry)? {
         ExtractionDecision::Write { destination_path, replace_existing, .. } => {
-            let written_bytes = write_raw_stream_to_file(archive_path, format, &destination_path, replace_existing, max_expanded_bytes, on_progress, track_source_progress)?;
+            let written_bytes =
+                write_raw_stream_to_file(archive_path, format, &destination_path, replace_existing, max_expanded_bytes, on_progress, track_source_progress)?;
             report.written_entries = 1;
             report.written_bytes = written_bytes;
             report.output_path = Some(destination_path);
@@ -382,9 +397,9 @@ where
 
 fn open_decoder_from_reader<'a, R: Read + 'a>(reader: R, format: RawStreamFormat, archive_path: &Path) -> Result<Box<dyn Read + 'a>, RawStreamError> {
     match format {
-        RawStreamFormat::Zstd => {
-            zstd::stream::read::Decoder::new(reader).map(|decoder| Box::new(decoder) as Box<dyn Read + 'a>).map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })
-        }
+        RawStreamFormat::Zstd => zstd::stream::read::Decoder::new(reader)
+            .map(|decoder| Box::new(decoder) as Box<dyn Read + 'a>)
+            .map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source }),
         RawStreamFormat::Gzip => Ok(Box::new(flate2::read::MultiGzDecoder::new(reader))),
         RawStreamFormat::Bzip2 => Ok(Box::new(bzip2::read::BzDecoder::new(reader))),
         RawStreamFormat::Xz => Ok(Box::new(lzma_rust2::XzReader::new(reader, true))),
@@ -394,13 +409,21 @@ fn open_decoder_from_reader<'a, R: Read + 'a>(reader: R, format: RawStreamFormat
         RawStreamFormat::Lzip => Ok(Box::new(lzma_rust2::LzipReader::new(reader))),
         RawStreamFormat::Brotli => Ok(Box::new(brotli::Decompressor::new(reader, crate::DEFAULT_IO_BUFFER_BYTES))),
         RawStreamFormat::Lz4 => Ok(Box::new(lz4_flex::frame::FrameDecoder::new(reader))),
-        RawStreamFormat::Lzo | RawStreamFormat::UnixCompress | RawStreamFormat::Lrzip => {
-            Err(RawStreamError::ExternalToolFailed { tool: format.name(), archive_path: archive_path.to_path_buf(), status: None, message: "format is handled by a streaming tool adapter".to_owned() })
-        }
+        RawStreamFormat::Lzo | RawStreamFormat::UnixCompress | RawStreamFormat::Lrzip => Err(RawStreamError::ExternalToolFailed {
+            tool: format.name(),
+            archive_path: archive_path.to_path_buf(),
+            status: None,
+            message: "format is handled by a streaming tool adapter".to_owned(),
+        }),
     }
 }
 
-fn copy_reader_to_writer_with_progress<R: Read, W: Write>(reader: &mut R, output: &mut W, path: &Path, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
+fn copy_reader_to_writer_with_progress<R: Read, W: Write>(
+    reader: &mut R,
+    output: &mut W,
+    path: &Path,
+    on_progress: ProgressCallback<'_>,
+) -> Result<u64, RawStreamError> {
     copy_bytes_with_progress(reader, output, on_progress).map_err(|source| RawStreamError::Io { path: path.to_path_buf(), source })
 }
 
@@ -459,7 +482,8 @@ fn write_raw_stream_to_file(
         }
     }
 
-    let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path).map_err(|source| RawStreamError::Io { path: destination_path.to_path_buf(), source })?;
+    let mut output =
+        crate::atomic_file::AtomicOutputFile::create(destination_path).map_err(|source| RawStreamError::Io { path: destination_path.to_path_buf(), source })?;
     let written = {
         let file = output.file_mut().map_err(|source| RawStreamError::Io { path: destination_path.to_path_buf(), source })?;
         let mut limited_output = SizeLimitWriter::new(file, max_expanded_bytes);
@@ -472,7 +496,8 @@ fn write_raw_stream_to_file(
 
     if let Some(mtime) = mtime_to_restore {
         let system_time = UNIX_EPOCH + std::time::Duration::from_secs(u64::from(mtime));
-        filetime::set_file_mtime(destination_path, filetime::FileTime::from_system_time(system_time)).map_err(|source| RawStreamError::Io { path: destination_path.to_path_buf(), source })?;
+        filetime::set_file_mtime(destination_path, filetime::FileTime::from_system_time(system_time))
+            .map_err(|source| RawStreamError::Io { path: destination_path.to_path_buf(), source })?;
     }
 
     Ok(written)
@@ -535,7 +560,12 @@ struct ExternalStreamTool {
     args: &'static [&'static str],
 }
 
-fn copy_external_tool_to_writer<W: Write>(tool: ExternalStreamTool, archive_path: &Path, output: &mut W, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
+fn copy_external_tool_to_writer<W: Write>(
+    tool: ExternalStreamTool,
+    archive_path: &Path,
+    output: &mut W,
+    on_progress: ProgressCallback<'_>,
+) -> Result<u64, RawStreamError> {
     let mut child = Command::new(tool.name)
         .args(tool.args)
         .arg(archive_path)
@@ -549,7 +579,8 @@ fn copy_external_tool_to_writer<W: Write>(tool: ExternalStreamTool, archive_path
         status: None,
         message: "decoder stdout was not available".to_owned(),
     })?;
-    let written_bytes = copy_bytes_with_progress(&mut stdout, output, on_progress).map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })?;
+    let written_bytes =
+        copy_bytes_with_progress(&mut stdout, output, on_progress).map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })?;
     let process_output = child.wait_with_output().map_err(|source| RawStreamError::ExternalToolUnavailable { tool: tool.name, source })?;
 
     if !process_output.status.success() {
@@ -606,7 +637,11 @@ fn copy_unix_compress_to_writer<W: Write>(archive_path: &Path, output: &mut W, o
     let temp_output = temp_input.with_extension("");
     fs::copy(archive_path, &temp_input).map_err(|source| RawStreamError::Io { path: temp_input.clone(), source })?;
 
-    let process_output = Command::new("uncompress").arg("-f").arg(&temp_input).output().map_err(|source| RawStreamError::ExternalToolUnavailable { tool: "uncompress", source })?;
+    let process_output = Command::new("uncompress")
+        .arg("-f")
+        .arg(&temp_input)
+        .output()
+        .map_err(|source| RawStreamError::ExternalToolUnavailable { tool: "uncompress", source })?;
 
     if !process_output.status.success() {
         let _ = fs::remove_file(&temp_input);
@@ -779,7 +814,8 @@ mod tests {
         let mut encoder = zstd::stream::write::Encoder::new(file, 1).unwrap();
         encoder.write_all(b"0123456789abcdef").unwrap();
         encoder.finish().unwrap();
-        let policy = ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: Some(8), max_entry_expansion_ratio: None }, ..ExtractionPolicy::default() };
+        let policy =
+            ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: Some(8), max_entry_expansion_ratio: None }, ..ExtractionPolicy::default() };
 
         let error = extract_raw_stream(&archive, RawStreamFormat::Zstd, temp.path("out"), policy).unwrap_err();
 

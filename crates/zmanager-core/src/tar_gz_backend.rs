@@ -109,7 +109,11 @@ pub fn create_tar_gz_from_path(source: impl AsRef<Path>, destination: impl AsRef
 ///
 /// Returns [`TarGzError`] when source files cannot be read, tar writing fails,
 /// or gzip compression fails.
-pub fn create_tar_gz_from_manifest(manifest: &ArchiveManifest, destination: impl AsRef<Path>, options: &TarGzCreateOptions) -> Result<TarGzCreateReport, TarGzError> {
+pub fn create_tar_gz_from_manifest(
+    manifest: &ArchiveManifest,
+    destination: impl AsRef<Path>,
+    options: &TarGzCreateOptions,
+) -> Result<TarGzCreateReport, TarGzError> {
     create_tar_gz_from_manifest_inner(manifest, destination, options, None)
 }
 
@@ -186,14 +190,18 @@ fn append_manifest_entry<W: io::Write>(
                 header.set_mode(0o755);
                 header.set_mtime(0);
                 header.set_cksum();
-                builder.append_data(&mut header, &entry.archive_path, io::empty()).map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })?;
+                builder
+                    .append_data(&mut header, &entry.archive_path, io::empty())
+                    .map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })?;
             }
             report.written_entries += 1;
             0
         }
         ManifestFileType::File => {
             if preserve_metadata {
-                builder.append_path_with_name(&entry.source_path, &entry.archive_path).map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })?;
+                builder
+                    .append_path_with_name(&entry.source_path, &entry.archive_path)
+                    .map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })?;
             } else {
                 let mut source = File::open(&entry.source_path).map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })?;
                 let mut header = Header::new_gnu();
@@ -202,7 +210,9 @@ fn append_manifest_entry<W: io::Write>(
                 header.set_mode(0o644);
                 header.set_mtime(0);
                 header.set_cksum();
-                builder.append_data(&mut header, &entry.archive_path, &mut source).map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })?;
+                builder
+                    .append_data(&mut header, &entry.archive_path, &mut source)
+                    .map_err(|source| TarGzError::Io { path: entry.source_path.clone(), source })?;
             }
             report.written_entries += 1;
             report.written_bytes += entry.size;

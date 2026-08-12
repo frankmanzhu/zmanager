@@ -28,7 +28,8 @@ pub const FIELD_CLAIMED_SIGNING_TIME: &str = "claimed_signing_time";
 
 const MVP_SIGNATURE_BYTES: usize = crate::p256_signature::P256_P1363_SIGNATURE_LENGTH;
 
-const REQUIRED_ENVELOPE_FIELDS: &[&str] = &[FIELD_DOCUMENT_PAYLOAD, FIELD_SIGNED_PAYLOAD, FIELD_SIGNATURE, FIELD_LEAF_CERTIFICATE_DER, FIELD_INTERMEDIATE_CHAIN_DER];
+const REQUIRED_ENVELOPE_FIELDS: &[&str] =
+    &[FIELD_DOCUMENT_PAYLOAD, FIELD_SIGNED_PAYLOAD, FIELD_SIGNATURE, FIELD_LEAF_CERTIFICATE_DER, FIELD_INTERMEDIATE_CHAIN_DER];
 const OPTIONAL_ENVELOPE_FIELDS: &[&str] = &[FIELD_TIMESTAMP_TOKEN, FIELD_STATUS_PROOF];
 const REQUIRED_SIGNED_PAYLOAD_FIELDS: &[&str] = &[
     FIELD_ENVELOPE_VERSION,
@@ -192,7 +193,11 @@ pub fn validate_tzap_document_envelope_value(value: &Value) -> Result<TzapDocume
 fn validate_document_payload(payload: &Map<String, Value>) -> Result<(), TzapDocumentEnvelopeError> {
     let version = required_integer_field(payload, FIELD_DOCUMENT_PAYLOAD, FIELD_TZAP_PAYLOAD_VERSION)?;
     if version != u64::from(trust::TZAP_PAYLOAD_VERSION) {
-        return Err(TzapDocumentEnvelopeError::UnsupportedVersion { field: FIELD_TZAP_PAYLOAD_VERSION, actual: version, expected: trust::TZAP_PAYLOAD_VERSION });
+        return Err(TzapDocumentEnvelopeError::UnsupportedVersion {
+            field: FIELD_TZAP_PAYLOAD_VERSION,
+            actual: version,
+            expected: trust::TZAP_PAYLOAD_VERSION,
+        });
     }
 
     for field in payload.keys() {
@@ -210,7 +215,11 @@ fn validate_signed_payload(signed_payload: &Map<String, Value>, expected_payload
 
     let envelope_version = required_integer_field(signed_payload, FIELD_SIGNED_PAYLOAD, FIELD_ENVELOPE_VERSION)?;
     if envelope_version != u64::from(trust::TZAP_ENVELOPE_VERSION) {
-        return Err(TzapDocumentEnvelopeError::UnsupportedVersion { field: FIELD_ENVELOPE_VERSION, actual: envelope_version, expected: trust::TZAP_ENVELOPE_VERSION });
+        return Err(TzapDocumentEnvelopeError::UnsupportedVersion {
+            field: FIELD_ENVELOPE_VERSION,
+            actual: envelope_version,
+            expected: trust::TZAP_ENVELOPE_VERSION,
+        });
     }
 
     let domain_separator = required_string_field(signed_payload, FIELD_SIGNED_PAYLOAD, FIELD_DOMAIN_SEPARATOR)?;
@@ -259,7 +268,9 @@ fn validate_signed_payload(signed_payload: &Map<String, Value>, expected_payload
 }
 
 fn decode_intermediate_chain(envelope: &Map<String, Value>) -> Result<Vec<Vec<u8>>, TzapDocumentEnvelopeError> {
-    let value = required_field(envelope, "$", FIELD_INTERMEDIATE_CHAIN_DER)?.as_array().ok_or(TzapDocumentEnvelopeError::ExpectedArray { path: FIELD_INTERMEDIATE_CHAIN_DER })?;
+    let value = required_field(envelope, "$", FIELD_INTERMEDIATE_CHAIN_DER)?
+        .as_array()
+        .ok_or(TzapDocumentEnvelopeError::ExpectedArray { path: FIELD_INTERMEDIATE_CHAIN_DER })?;
     if value.is_empty() {
         return Err(TzapDocumentEnvelopeError::EmptyIntermediateChain);
     }
@@ -275,7 +286,12 @@ fn decode_intermediate_chain(envelope: &Map<String, Value>) -> Result<Vec<Vec<u8
         .collect()
 }
 
-fn decode_required_non_empty_base64url_der(object: &Map<String, Value>, path: &'static str, field: &'static str, error_field: &'static str) -> Result<Vec<u8>, TzapDocumentEnvelopeError> {
+fn decode_required_non_empty_base64url_der(
+    object: &Map<String, Value>,
+    path: &'static str,
+    field: &'static str,
+    error_field: &'static str,
+) -> Result<Vec<u8>, TzapDocumentEnvelopeError> {
     let encoded = required_string_field(object, path, field)?;
     decode_base64url_der(&encoded, error_field)
 }
@@ -297,7 +313,11 @@ fn decode_base64url(encoded: &str, field: &'static str) -> Result<Vec<u8>, TzapD
     crate::trust::decode_base64url_no_padding(encoded).map_err(|_| TzapDocumentEnvelopeError::InvalidBase64Url { field })
 }
 
-fn required_canonical_sha256(object: &Map<String, Value>, field: &'static str, parser: fn(&str) -> Result<[u8; 32], trust::TrustIdentifierError>) -> Result<String, TzapDocumentEnvelopeError> {
+fn required_canonical_sha256(
+    object: &Map<String, Value>,
+    field: &'static str,
+    parser: fn(&str) -> Result<[u8; 32], trust::TrustIdentifierError>,
+) -> Result<String, TzapDocumentEnvelopeError> {
     let value = required_string_field(object, FIELD_SIGNED_PAYLOAD, field)?;
     parser(&value).map_err(|_| TzapDocumentEnvelopeError::InvalidIdentifier { field })?;
     Ok(value)
@@ -307,7 +327,12 @@ fn require_constant(field: &'static str, actual: &str, expected: &'static str) -
     if actual == expected { Ok(()) } else { Err(TzapDocumentEnvelopeError::InvalidConstant { field, expected }) }
 }
 
-fn validate_known_fields(object: &Map<String, Value>, path: &'static str, required: &[&'static str], optional: &[&'static str]) -> Result<(), TzapDocumentEnvelopeError> {
+fn validate_known_fields(
+    object: &Map<String, Value>,
+    path: &'static str,
+    required: &[&'static str],
+    optional: &[&'static str],
+) -> Result<(), TzapDocumentEnvelopeError> {
     for field in required {
         if !object.contains_key(*field) {
             return Err(TzapDocumentEnvelopeError::MissingField { path, field });
@@ -327,7 +352,11 @@ fn object_at<'a>(value: &'a Value, path: &'static str) -> Result<&'a Map<String,
     value.as_object().ok_or(TzapDocumentEnvelopeError::ExpectedObject { path })
 }
 
-fn required_object_field<'a>(object: &'a Map<String, Value>, path: &'static str, field: &'static str) -> Result<&'a Map<String, Value>, TzapDocumentEnvelopeError> {
+fn required_object_field<'a>(
+    object: &'a Map<String, Value>,
+    path: &'static str,
+    field: &'static str,
+) -> Result<&'a Map<String, Value>, TzapDocumentEnvelopeError> {
     object_at(required_field(object, path, field)?, field)
 }
 
@@ -367,8 +396,8 @@ fn optional_string_field(object: &Map<String, Value>, path: &'static str, field:
 #[cfg(test)]
 mod tests {
     use super::{
-        FIELD_CERTIFICATE_SERIAL_NUMBER, FIELD_DOMAIN_SEPARATOR, FIELD_ENVELOPE_VERSION, FIELD_INTERMEDIATE_CHAIN_DER, FIELD_PAYLOAD_HASH, FIELD_SIGNATURE, FIELD_SIGNED_PAYLOAD,
-        FIELD_TZAP_PAYLOAD_VERSION, TzapDocumentEnvelopeError, parse_tzap_document_envelope_json, validate_tzap_document_envelope_value,
+        FIELD_CERTIFICATE_SERIAL_NUMBER, FIELD_DOMAIN_SEPARATOR, FIELD_ENVELOPE_VERSION, FIELD_INTERMEDIATE_CHAIN_DER, FIELD_PAYLOAD_HASH, FIELD_SIGNATURE,
+        FIELD_SIGNED_PAYLOAD, FIELD_TZAP_PAYLOAD_VERSION, TzapDocumentEnvelopeError, parse_tzap_document_envelope_json, validate_tzap_document_envelope_value,
     };
     use crate::{jcs, trust};
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -380,7 +409,10 @@ mod tests {
         let parsed = validate_tzap_document_envelope_value(&envelope).unwrap();
 
         assert_eq!(parsed.signed_payload.envelope_version, 1);
-        assert_eq!(String::from_utf8(parsed.canonical_document_payload).unwrap(), r#"{"body":{"amount":42,"currency":"USD"},"title":"Invoice","tzap_payload_version":1}"#);
+        assert_eq!(
+            String::from_utf8(parsed.canonical_document_payload).unwrap(),
+            r#"{"body":{"amount":42,"currency":"USD"},"title":"Invoice","tzap_payload_version":1}"#
+        );
         assert_eq!(parsed.signature, vec![0x11; 64]);
         assert_eq!(parsed.leaf_certificate_der, vec![0x30, 0x82, 0x01]);
         assert_eq!(parsed.intermediate_chain_der, vec![vec![0x30, 0x82, 0x02]]);
@@ -474,7 +506,12 @@ mod tests {
         envelope[FIELD_SIGNED_PAYLOAD][FIELD_PAYLOAD_HASH] = json!("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         assert!(matches!(validate_tzap_document_envelope_value(&envelope), Err(TzapDocumentEnvelopeError::PayloadHashMismatch { .. })));
 
-        let cases = [("leaf_certificate_sha256", "sha256:ABCDEF"), ("issuer_certificate_sha256", "not-a-sha"), ("issuer_key_identifier", "abc="), (FIELD_CERTIFICATE_SERIAL_NUMBER, "00")];
+        let cases = [
+            ("leaf_certificate_sha256", "sha256:ABCDEF"),
+            ("issuer_certificate_sha256", "not-a-sha"),
+            ("issuer_key_identifier", "abc="),
+            (FIELD_CERTIFICATE_SERIAL_NUMBER, "00"),
+        ];
         for (field, value) in cases {
             let mut envelope = valid_envelope();
             envelope[FIELD_SIGNED_PAYLOAD][field] = json!(value);

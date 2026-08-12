@@ -53,7 +53,9 @@ pub(crate) fn unique_paths<'a>(left: &'a [PathBuf], right: &'a [PathBuf]) -> Vec
 /// `replace_existing` is set; a missing destination is fine.
 pub(crate) fn ensure_file_destination_available(path: &Path, replace_existing: bool) -> io::Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display()))),
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
+        }
         Ok(_) if !replace_existing => Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("destination already exists: {}", path.display()))),
         Ok(_) => Ok(()),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -79,7 +81,9 @@ pub(crate) fn remove_split_destinations_for_replace(destination: &Path, existing
 /// for a volume it is about to create.
 pub(crate) fn remove_file_destination_for_replace(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display()))),
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
+        }
         Ok(_) => fs::remove_file(path),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(source),

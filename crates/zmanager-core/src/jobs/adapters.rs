@@ -432,7 +432,8 @@ pub fn run_raw_stream_extract_job_with_policy(
     let archive_path = archive_path.as_ref();
     let estimated_total_bytes = raw_stream_backend::estimate_raw_stream_uncompressed_size(archive_path, format);
     let source_size = archive_path.metadata().ok().map(|metadata| metadata.len());
-    let track_source_progress = estimated_total_bytes.is_none() && raw_stream_backend::can_track_source_progress(format) && source_size.is_some_and(|size| size > 0);
+    let track_source_progress =
+        estimated_total_bytes.is_none() && raw_stream_backend::can_track_source_progress(format) && source_size.is_some_and(|size| size > 0);
     let total_bytes = if estimated_total_bytes.is_some() {
         estimated_total_bytes
     } else if track_source_progress {
@@ -447,8 +448,14 @@ pub fn run_raw_stream_extract_job_with_policy(
 
     let mut context = JobContext::new_with_progress_total(token, sink, total_bytes);
     let progress_path = archive_path.to_string_lossy().into_owned();
-    let result =
-        raw_stream_backend::extract_raw_stream_with_progress(archive_path, format, destination, policy, Some(&mut |bytes| context.bytes_processed(Some(&progress_path), bytes)), track_source_progress);
+    let result = raw_stream_backend::extract_raw_stream_with_progress(
+        archive_path,
+        format,
+        destination,
+        policy,
+        Some(&mut |bytes| context.bytes_processed(Some(&progress_path), bytes)),
+        track_source_progress,
+    );
     context.flush_progress();
     finish_raw_stream_extract_result(result, sink)
 }
@@ -471,7 +478,15 @@ pub fn run_tzap_extract_job_with_password_and_policy(
     token: &CancellationToken,
     sink: &mut dyn JobEventSink,
 ) -> Result<tzap_backend::TzapExtractReport, TzapError> {
-    run_tzap_extract_job_with_password_and_policy_and_restore_options(archive_path, destination, password, policy, tzap_backend::TzapRestoreOptions::default(), token, sink)
+    run_tzap_extract_job_with_password_and_policy_and_restore_options(
+        archive_path,
+        destination,
+        password,
+        policy,
+        tzap_backend::TzapRestoreOptions::default(),
+        token,
+        sink,
+    )
 }
 
 /// Runs a TZAP extract job with explicit archive safety and metadata restoration policies.
@@ -499,8 +514,11 @@ pub fn run_tzap_extract_job_with_password_and_policy_and_restore_options(
         Some(password) => tzap_backend::TzapExtractKeySource::Password(password),
         None => tzap_backend::TzapExtractKeySource::None,
     };
-    let result =
-        tzap_backend::extract_tzap(tzap_backend::TzapExtractRequest { key, policy, restore_options, overwrite_resolver: None, context: Some(&mut context), fast: true }, archive_path, destination);
+    let result = tzap_backend::extract_tzap(
+        tzap_backend::TzapExtractRequest { key, policy, restore_options, overwrite_resolver: None, context: Some(&mut context), fast: true },
+        archive_path,
+        destination,
+    );
     context.flush_progress();
     finish_tzap_extract_result(result, sink)
 }

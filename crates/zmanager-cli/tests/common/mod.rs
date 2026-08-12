@@ -58,12 +58,22 @@ pub fn zm_path() -> PathBuf {
 
 /// Asserts that a command invocation succeeded, dumping stdout/stderr on failure.
 pub fn assert_success(label: &str, output: &Output) {
-    assert!(output.status.success(), "{label} failed\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{label} failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// Asserts that a command invocation failed, dumping stdout/stderr on success.
 pub fn assert_failure(label: &str, output: &Output) {
-    assert!(!output.status.success(), "{label} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(
+        !output.status.success(),
+        "{label} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// Removes ANSI escape sequences from a string.

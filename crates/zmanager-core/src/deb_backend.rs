@@ -1,5 +1,7 @@
 use crate::libarchive_backend::{self, LibarchiveError};
-use crate::safety::{ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
+use crate::safety::{
+    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver,
+};
 use crate::tar_zst_backend::{self, TarZstdError};
 use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
 use std::fmt;
@@ -136,7 +138,9 @@ fn extract_deb_nested_inner(
 
     if debian_binary.is_file() {
         match overwrite_resolver {
-            Some(ref mut resolver) => copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), Some(&mut **resolver), &mut report)?,
+            Some(ref mut resolver) => {
+                copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), Some(&mut **resolver), &mut report)?;
+            }
             None => copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), None, &mut report)?,
         }
     } else {
@@ -167,7 +171,12 @@ fn copy_synthetic_file(
 ) -> Result<(), DebError> {
     let source_metadata = source_path.symlink_metadata().map_err(|source| DebError::Io { path: source_path.to_path_buf(), source })?;
     let source_size = source_metadata.len();
-    let entry = ExtractionEntry { archive_path: archive_path.to_owned(), kind: ExtractionEntryKind::File, uncompressed_size: Some(source_size), compressed_size: Some(source_size) };
+    let entry = ExtractionEntry {
+        archive_path: archive_path.to_owned(),
+        kind: ExtractionEntryKind::File,
+        uncompressed_size: Some(source_size),
+        compressed_size: Some(source_size),
+    };
     let mut planner = match overwrite_resolver {
         Some(resolver) => ExtractionSafetyPlanner::new_with_overwrite_resolver(destination, policy, resolver),
         None => ExtractionSafetyPlanner::new(destination, policy),
@@ -175,7 +184,8 @@ fn copy_synthetic_file(
     match planner.validate_entry(&entry)? {
         ExtractionDecision::Write { destination_path, replace_existing, .. } => {
             let mut input = File::open(source_path).map_err(|source| DebError::Io { path: source_path.to_path_buf(), source })?;
-            let mut output = crate::atomic_file::AtomicOutputFile::create(&destination_path).map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
+            let mut output =
+                crate::atomic_file::AtomicOutputFile::create(&destination_path).map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
             let written_bytes = io::copy(&mut input, output.file_mut().map_err(|source| DebError::Io { path: destination_path.clone(), source })?)
                 .map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
             output.commit_with_replace(replace_existing).map_err(|source| DebError::Io { path: destination_path.clone(), source })?;
@@ -205,17 +215,24 @@ fn copy_synthetic_file(
     Ok(())
 }
 
-fn extract_payload_archive(archive_path: &Path, destination: &Path, policy: ExtractionPolicy, overwrite_resolver: Option<&mut dyn OverwriteResolver>) -> Result<ArchiveReport, DebError> {
+fn extract_payload_archive(
+    archive_path: &Path,
+    destination: &Path,
+    policy: ExtractionPolicy,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<ArchiveReport, DebError> {
     if is_tar_zst_archive(archive_path) {
         match overwrite_resolver {
-            Some(resolver) => tar_zst_backend::extract_tar_zst_with_overwrite_resolver(archive_path, destination, policy, resolver).map(ArchiveReport::from).map_err(DebError::from),
+            Some(resolver) => tar_zst_backend::extract_tar_zst_with_overwrite_resolver(archive_path, destination, policy, resolver)
+                .map(ArchiveReport::from)
+                .map_err(DebError::from),
             None => tar_zst_backend::extract_tar_zst(archive_path, destination, policy).map(ArchiveReport::from).map_err(DebError::from),
         }
     } else {
         match overwrite_resolver {
-            Some(resolver) => {
-                libarchive_backend::extract_archive_with_overwrite_resolver_and_password(archive_path, destination, policy, None, resolver).map(ArchiveReport::from).map_err(DebError::from)
-            }
+            Some(resolver) => libarchive_backend::extract_archive_with_overwrite_resolver_and_password(archive_path, destination, policy, None, resolver)
+                .map(ArchiveReport::from)
+                .map_err(DebError::from),
             None => libarchive_backend::extract_archive(archive_path, destination, policy).map(ArchiveReport::from).map_err(DebError::from),
         }
     }
@@ -231,13 +248,23 @@ struct ArchiveReport {
 
 impl From<libarchive_backend::LibarchiveExtractReport> for ArchiveReport {
     fn from(report: libarchive_backend::LibarchiveExtractReport) -> Self {
-        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
+        Self {
+            written_entries: report.written_entries,
+            skipped_entries: report.skipped_entries,
+            written_bytes: report.written_bytes,
+            warnings: report.warnings,
+        }
     }
 }
 
 impl From<tar_zst_backend::TarZstdExtractReport> for ArchiveReport {
     fn from(report: tar_zst_backend::TarZstdExtractReport) -> Self {
-        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
+        Self {
+            written_entries: report.written_entries,
+            skipped_entries: report.skipped_entries,
+            written_bytes: report.written_bytes,
+            warnings: report.warnings,
+        }
     }
 }
 
@@ -249,11 +276,17 @@ fn absorb_archive_report(prefix: &str, source: ArchiveReport, destination: &mut 
 }
 
 fn find_top_level_member(root: &Path, prefix: &str) -> Option<PathBuf> {
-    fs::read_dir(root).ok()?.flatten().map(|entry| entry.path()).find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(prefix)))
+    fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(prefix)))
 }
 
 fn is_tar_zst_archive(path: &Path) -> bool {
-    path.file_name().and_then(|name| name.to_str()).is_some_and(|name| crate::strings::ends_with_ignore_ascii_case(name, ".tar.zst") || crate::strings::ends_with_ignore_ascii_case(name, ".tzst"))
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| crate::strings::ends_with_ignore_ascii_case(name, ".tar.zst") || crate::strings::ends_with_ignore_ascii_case(name, ".tzst"))
 }
 
 impl From<TempDirAllocError> for DebError {

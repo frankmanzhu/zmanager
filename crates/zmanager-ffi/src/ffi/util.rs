@@ -30,7 +30,13 @@ fn sanitize_path_value(value: String, field: &str, provider_hint: &str) -> Resul
     }
 
     if value.contains("://") {
-        return Err(bridge_error(ERROR_INVALID_REQUEST, format!("{field} must be an app-controlled filesystem path"), hint(provider_hint), BridgeSeverity::Warning, false));
+        return Err(bridge_error(
+            ERROR_INVALID_REQUEST,
+            format!("{field} must be an app-controlled filesystem path"),
+            hint(provider_hint),
+            BridgeSeverity::Warning,
+            false,
+        ));
     }
 
     Ok(value)
@@ -49,7 +55,9 @@ pub(crate) fn ensure_destination_root_path(value: String) -> Result<String, Zman
 
     let path = Path::new(&value);
     match fs::metadata(path) {
-        Ok(metadata) if !metadata.is_dir() => Err(bridge_error(ERROR_INVALID_REQUEST, "destinationRoot must point to a directory when it already exists", None, BridgeSeverity::Warning, false)),
+        Ok(metadata) if !metadata.is_dir() => {
+            Err(bridge_error(ERROR_INVALID_REQUEST, "destinationRoot must point to a directory when it already exists", None, BridgeSeverity::Warning, false))
+        }
         Ok(_) => Ok(value),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(value),
         Err(source) => Err(map_io_error(path.to_path_buf(), source)),
@@ -70,7 +78,13 @@ pub(crate) fn ensure_existing_source_path(value: String, field: &str) -> Result<
     let path = Path::new(&value);
     fs::metadata(path).map_err(|source| {
         if source.kind() == io::ErrorKind::NotFound {
-            bridge_error(ERROR_NOT_FOUND, format!("{field} does not exist"), hint("Choose sources that have already been copied into app-controlled storage."), BridgeSeverity::Warning, false)
+            bridge_error(
+                ERROR_NOT_FOUND,
+                format!("{field} does not exist"),
+                hint("Choose sources that have already been copied into app-controlled storage."),
+                BridgeSeverity::Warning,
+                false,
+            )
         } else {
             map_io_error(path.to_path_buf(), source)
         }
@@ -80,7 +94,8 @@ pub(crate) fn ensure_existing_source_path(value: String, field: &str) -> Result<
 }
 
 pub(crate) fn ensure_destination_archive_path(value: String) -> Result<String, ZmanagerGuiError> {
-    let value = sanitize_path_value(value, "destinationArchivePath", "Use an app-controlled staging path for archive creation, then let the native shell commit it.")?;
+    let value =
+        sanitize_path_value(value, "destinationArchivePath", "Use an app-controlled staging path for archive creation, then let the native shell commit it.")?;
 
     let path = Path::new(&value);
     if path.parent().is_none_or(|parent| parent.as_os_str().is_empty()) {
@@ -109,14 +124,21 @@ pub(crate) fn ensure_destination_archive_path(value: String) -> Result<String, Z
     if let Ok(metadata) = fs::metadata(path)
         && metadata.is_dir()
     {
-        return Err(bridge_error(ERROR_INVALID_REQUEST, "destinationArchivePath must point to an archive file, not a directory", None, BridgeSeverity::Warning, false));
+        return Err(bridge_error(
+            ERROR_INVALID_REQUEST,
+            "destinationArchivePath must point to an archive file, not a directory",
+            None,
+            BridgeSeverity::Warning,
+            false,
+        ));
     }
 
     Ok(value)
 }
 
 pub(crate) fn usize_from_u64(value: u64, field: &str) -> Result<usize, ZmanagerGuiError> {
-    usize::try_from(value).map_err(|_| bridge_error(ERROR_INVALID_REQUEST, format!("{field} is too large for this device"), None, BridgeSeverity::Warning, false))
+    usize::try_from(value)
+        .map_err(|_| bridge_error(ERROR_INVALID_REQUEST, format!("{field} is too large for this device"), None, BridgeSeverity::Warning, false))
 }
 
 pub(crate) fn ensure_existing_file_path(value: String, field: &str) -> Result<String, ZmanagerGuiError> {
@@ -125,7 +147,13 @@ pub(crate) fn ensure_existing_file_path(value: String, field: &str) -> Result<St
     let path = Path::new(&value);
     let metadata = fs::metadata(path).map_err(|source| {
         if source.kind() == io::ErrorKind::NotFound {
-            bridge_error(ERROR_NOT_FOUND, format!("{field} does not exist"), hint("Choose an archive that has already been copied into app-controlled storage."), BridgeSeverity::Warning, false)
+            bridge_error(
+                ERROR_NOT_FOUND,
+                format!("{field} does not exist"),
+                hint("Choose an archive that has already been copied into app-controlled storage."),
+                BridgeSeverity::Warning,
+                false,
+            )
         } else {
             map_io_error(path.to_path_buf(), source)
         }

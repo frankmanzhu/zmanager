@@ -24,22 +24,24 @@ use zmanager_core::zip_backend;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
-    ERROR_INVALID_REQUEST, ERROR_OPERATION_FAILED, ERROR_UNSUPPORTED_FORMAT, WARNING_LAUNCH_GATED_FORMAT, bridge_error, bridge_error_from_mobile, bridge_warning, bridge_warning_with_code, hint,
-    map_7z_error, map_archive_browser_error, map_libarchive_error, map_plan_error, map_raw_stream_error, map_tzap_error, map_zip_error,
+    ERROR_INVALID_REQUEST, ERROR_OPERATION_FAILED, ERROR_UNSUPPORTED_FORMAT, WARNING_LAUNCH_GATED_FORMAT, bridge_error, bridge_error_from_mobile,
+    bridge_warning, bridge_warning_with_code, hint, map_7z_error, map_archive_browser_error, map_libarchive_error, map_plan_error, map_raw_stream_error,
+    map_tzap_error, map_zip_error,
 };
 use crate::ffi::ops::jobs::{
-    CreateJobInput, ExtractJobInput, PlanEntryOutcome, RegistryJobEventSink, TestArchiveReport, create_plan_options, create_verify_supported, job_registry, map_collision_policy,
-    map_manifest_file_type, mobile_create_job_kind, mobile_extract_job_kind, plan_browser_entry, run_create_job, run_extract_job,
+    CreateJobInput, ExtractJobInput, PlanEntryOutcome, RegistryJobEventSink, TestArchiveReport, create_plan_options, create_verify_supported, job_registry,
+    map_collision_policy, map_manifest_file_type, mobile_create_job_kind, mobile_extract_job_kind, plan_browser_entry, run_create_job, run_extract_job,
 };
 use crate::ffi::types::{
-    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreatePlanEntry, DetectArchiveRequest,
-    DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntryStatus, HealthcheckResult, ListArchiveRequest, ListArchiveResult, MaterializePreviewRequest, MaterializePreviewResult,
-    PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult, PollJobEventsRequest, PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest,
-    TestArchiveResult, ZmanagerGuiError, usize_to_u64,
+    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreatePlanEntry,
+    DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntryStatus, HealthcheckResult, ListArchiveRequest, ListArchiveResult,
+    MaterializePreviewRequest, MaterializePreviewResult, PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult, PollJobEventsRequest,
+    PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest, TestArchiveResult, ZmanagerGuiError, usize_to_u64,
 };
 use crate::ffi::util::{
-    classify_archive_path, create_format_label, ensure_destination_archive_path, ensure_destination_root_path, ensure_existing_file_path, ensure_existing_source_paths, ensure_non_empty_entry_path,
-    format_capabilities, format_label, map_browser_entry_kind, password_ref, sanitize_password, usize_from_u64,
+    classify_archive_path, create_format_label, ensure_destination_archive_path, ensure_destination_root_path, ensure_existing_file_path,
+    ensure_existing_source_paths, ensure_non_empty_entry_path, format_capabilities, format_label, map_browser_entry_kind, password_ref, sanitize_password,
+    usize_from_u64,
 };
 
 const MAX_RETAINED_EXTRACTION_PLANS: usize = 64;
@@ -152,7 +154,13 @@ fn extraction_password_digest(password: Option<&str>) -> [u8; 32] {
 }
 
 fn invalid_extraction_plan_error() -> ZmanagerGuiError {
-    bridge_error(ERROR_INVALID_REQUEST, "The extraction plan is no longer valid.", hint("Review the extraction plan again before starting."), BridgeSeverity::Warning, true)
+    bridge_error(
+        ERROR_INVALID_REQUEST,
+        "The extraction plan is no longer valid.",
+        hint("Review the extraction plan again before starting."),
+        BridgeSeverity::Warning,
+        true,
+    )
 }
 
 pub fn healthcheck() -> HealthcheckResult {
@@ -174,10 +182,21 @@ pub fn detectArchive(request: DetectArchiveRequest) -> Result<DetectArchiveResul
     let (can_list, can_extract, can_create) = format_capabilities(format);
 
     if matches!(format, ArchiveFormat::Xip) {
-        warnings.push(bridge_warning_with_code(WARNING_LAUNCH_GATED_FORMAT, "This launch-scope format must be handled by zmanager-core before mobile exposes it."));
+        warnings
+            .push(bridge_warning_with_code(WARNING_LAUNCH_GATED_FORMAT, "This launch-scope format must be handled by zmanager-core before mobile exposes it."));
     }
 
-    Ok(DetectArchiveResult { archive_path, format, format_label: format_label(format).to_string(), exists: true, is_file: true, can_list, can_extract, can_create, warnings })
+    Ok(DetectArchiveResult {
+        archive_path,
+        format,
+        format_label: format_label(format).to_string(),
+        exists: true,
+        is_file: true,
+        can_list,
+        can_extract,
+        can_create,
+        warnings,
+    })
 }
 
 #[allow(non_snake_case)]
@@ -248,15 +267,27 @@ pub fn testArchive(request: TestArchiveRequest) -> Result<TestArchiveResult, Zma
 
     let report = if matches!(format, ArchiveFormat::Zip) {
         let selected_paths = selected_paths.as_slice();
-        TestArchiveReport::from_zip(zip_backend::test_zip_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path)).map_err(map_zip_error)?)
+        TestArchiveReport::from_zip(
+            zip_backend::test_zip_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path))
+                .map_err(map_zip_error)?,
+        )
     } else if matches!(format, ArchiveFormat::Tzap) {
         let selected_paths = selected_paths.as_slice();
         TestArchiveReport::from_tzap(
-            tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(path, password, |entry_path| selected_path_matches(selected_paths, entry_path), None).map_err(map_tzap_error)?,
+            tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(
+                path,
+                password,
+                |entry_path| selected_path_matches(selected_paths, entry_path),
+                None,
+            )
+            .map_err(map_tzap_error)?,
         )
     } else if matches!(format, ArchiveFormat::SevenZ) {
         let selected_paths = selected_paths.as_slice();
-        TestArchiveReport::from_7z(sevenz_backend::test_7z_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path)).map_err(map_7z_error)?)
+        TestArchiveReport::from_7z(
+            sevenz_backend::test_7z_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path))
+                .map_err(map_7z_error)?,
+        )
     } else if let Some(report) = maybe_test_apple_archive(format, path, &selected_paths) {
         report?
     } else if let Some(raw_format) = raw_stream_backend::detect_raw_stream_format(path) {
@@ -264,7 +295,8 @@ pub fn testArchive(request: TestArchiveRequest) -> Result<TestArchiveResult, Zma
     } else {
         let selected_paths = selected_paths.as_slice();
         TestArchiveReport::from_libarchive(
-            libarchive_backend::test_archive_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path)).map_err(map_libarchive_error)?,
+            libarchive_backend::test_archive_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path))
+                .map_err(map_libarchive_error)?,
         )
     };
 
@@ -309,7 +341,14 @@ pub fn planExtract(request: PlanExtractRequest) -> Result<PlanExtractResult, Zma
     let strip_components = usize_from_u64(request.strip_components, "stripComponents")?;
     let password = password_ref(&request.password);
     let selected_paths = sanitize_selected_paths(request.selected_paths);
-    let plan_binding = ExtractionPlanBinding::from_request(archive_path.clone(), destination_root.clone(), password, selected_paths.clone(), request.strip_components, request.collision_policy)?;
+    let plan_binding = ExtractionPlanBinding::from_request(
+        archive_path.clone(),
+        destination_root.clone(),
+        password,
+        selected_paths.clone(),
+        request.strip_components,
+        request.collision_policy,
+    )?;
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
     let listing = archive_browser::list_entries_with_options(path, BrowserListOptions { password }).map_err(map_archive_browser_error)?;
@@ -378,7 +417,8 @@ pub fn planCreate(request: PlanCreateRequest) -> Result<PlanCreateResult, Zmanag
     let plan_options = create_plan_options(request.clean_source, &[]);
     let source_path_bufs = source_paths.iter().map(PathBuf::from).collect::<Vec<_>>();
     let manifest = manifest::plan_archives(&source_path_bufs, &plan_options).map_err(map_plan_error)?;
-    let mut warnings = manifest.warnings.iter().map(|warning| bridge_warning(format!("{}: {}", warning.source_path.display(), warning.message))).collect::<Vec<_>>();
+    let mut warnings =
+        manifest.warnings.iter().map(|warning| bridge_warning(format!("{}: {}", warning.source_path.display(), warning.message))).collect::<Vec<_>>();
 
     if output_exists && !request.replace_existing {
         warnings.push(bridge_warning("Destination archive already exists and replaceExisting is false."));
@@ -424,7 +464,13 @@ pub fn startCreate(request: StartCreateRequest) -> Result<StartJobResult, Zmanag
     let source_paths = ensure_existing_source_paths(request.source_paths)?;
     let destination_archive_path = ensure_destination_archive_path(request.destination_archive_path)?;
     if Path::new(&destination_archive_path).exists() && !request.replace_existing {
-        return Err(bridge_error(ERROR_INVALID_REQUEST, "Destination archive already exists.", hint("Choose a different output name or enable replaceExisting."), BridgeSeverity::Warning, false));
+        return Err(bridge_error(
+            ERROR_INVALID_REQUEST,
+            "Destination archive already exists.",
+            hint("Choose a different output name or enable replaceExisting."),
+            BridgeSeverity::Warning,
+            false,
+        ));
     }
 
     let password = sanitize_password(request.password);
@@ -512,15 +558,27 @@ pub fn startExtract(request: StartExtractRequest) -> Result<StartJobResult, Zman
     let strip_components = usize_from_u64(request.strip_components, "stripComponents")?;
     let selected_paths = sanitize_selected_paths(request.selected_paths);
     let password = sanitize_password(request.password);
-    let plan_binding =
-        ExtractionPlanBinding::from_request(archive_path.clone(), destination_root.clone(), password.as_deref(), selected_paths.clone(), request.strip_components, request.collision_policy)?;
+    let plan_binding = ExtractionPlanBinding::from_request(
+        archive_path.clone(),
+        destination_root.clone(),
+        password.as_deref(),
+        selected_paths.clone(),
+        request.strip_components,
+        request.collision_policy,
+    )?;
     consume_extraction_plan(&request.plan_token, plan_binding)?;
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
     let (_, can_extract, _) = format_capabilities(format);
 
     if !can_extract {
-        return Err(bridge_error(ERROR_UNSUPPORTED_FORMAT, format!("{} extraction is not exposed by zmanager-core for mobile yet.", format_label(format)), None, BridgeSeverity::Warning, false));
+        return Err(bridge_error(
+            ERROR_UNSUPPORTED_FORMAT,
+            format!("{} extraction is not exposed by zmanager-core for mobile yet.", format_label(format)),
+            None,
+            BridgeSeverity::Warning,
+            false,
+        ));
     }
 
     let token = CancellationToken::new();
@@ -528,7 +586,8 @@ pub fn startExtract(request: StartExtractRequest) -> Result<StartJobResult, Zman
     let registry = job_registry();
     let result = registry.create_job(kind, token.clone(), password.is_some());
     let job_id = result.job_id.clone();
-    let input = ExtractJobInput { archive_path, destination_root, password, selected_paths, strip_components, collision_policy: request.collision_policy, format };
+    let input =
+        ExtractJobInput { archive_path, destination_root, password, selected_paths, strip_components, collision_policy: request.collision_policy, format };
     let worker_registry = Arc::clone(&registry);
 
     thread::spawn(move || {
@@ -584,7 +643,8 @@ pub(crate) fn selected_path_matches(selected_paths: &[String], entry_path: &str)
 }
 
 fn test_raw_stream(path: &Path, format: raw_stream_backend::RawStreamFormat, selected_paths: &[String]) -> Result<TestArchiveReport, ZmanagerGuiError> {
-    let synthetic_entry = raw_stream_backend::output_name_for_raw_stream(path, format).unwrap_or_else(|| format_label(classify_archive_path(path).0).to_string());
+    let synthetic_entry =
+        raw_stream_backend::output_name_for_raw_stream(path, format).unwrap_or_else(|| format_label(classify_archive_path(path).0).to_string());
 
     if !selected_path_matches(selected_paths, &synthetic_entry) {
         return Ok(TestArchiveReport { tested_entries: 0, skipped_entries: 1, tested_bytes: 0, warnings: Vec::new() });

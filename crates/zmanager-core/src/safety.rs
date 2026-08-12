@@ -269,14 +269,22 @@ impl<'a> ExtractionSafetyPlanner<'a> {
 
     /// Creates a planner that can resolve [`OverwritePolicy::Ask`] conflicts.
     #[must_use]
-    pub fn new_with_overwrite_resolver(destination_root: impl Into<PathBuf>, policy: ExtractionPolicy, overwrite_resolver: &'a mut dyn OverwriteResolver) -> Self {
+    pub fn new_with_overwrite_resolver(
+        destination_root: impl Into<PathBuf>,
+        policy: ExtractionPolicy,
+        overwrite_resolver: &'a mut dyn OverwriteResolver,
+    ) -> Self {
         Self::with_overwrite_resolver(destination_root, policy, Some(overwrite_resolver))
     }
 
     /// Shared constructor: normalizes the destination root and wires up the
     /// optional overwrite resolver, so both public constructors behave
     /// identically.
-    pub fn with_overwrite_resolver(destination_root: impl Into<PathBuf>, policy: ExtractionPolicy, overwrite_resolver: Option<&'a mut dyn OverwriteResolver>) -> Self {
+    pub fn with_overwrite_resolver(
+        destination_root: impl Into<PathBuf>,
+        policy: ExtractionPolicy,
+        overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
+    ) -> Self {
         let destination_root = lexically_normalize(&destination_root.into());
 
         Self { destination_root, policy, seen_paths: HashMap::new(), planned_expanded_bytes: 0, overwrite_resolver }
@@ -402,7 +410,10 @@ impl<'a> ExtractionSafetyPlanner<'a> {
 
     fn resolve_overwrite_conflict(&mut self, entry: &ExtractionEntry, destination_path: &Path) -> Result<OverwriteDecision, ExtractionSafetyError> {
         let Some(resolver) = self.overwrite_resolver.as_deref_mut() else {
-            return Err(ExtractionSafetyError::OverwritePromptUnavailable { archive_path: entry.archive_path.clone(), destination_path: destination_path.to_path_buf() });
+            return Err(ExtractionSafetyError::OverwritePromptUnavailable {
+                archive_path: entry.archive_path.clone(),
+                destination_path: destination_path.to_path_buf(),
+            });
         };
         Ok(resolver.decide(&OverwriteConflict { archive_path: entry.archive_path.clone(), destination_path: destination_path.to_path_buf() }))
     }
@@ -438,9 +449,11 @@ impl<'a> ExtractionSafetyPlanner<'a> {
 
     fn resolve_hardlink_target(&self, target: &Path) -> Result<PathBuf, ExtractionSafetyError> {
         let target_text = target.to_string_lossy();
-        let mut normalized_target = normalize_archive_path(&target_text).map_err(|_| ExtractionSafetyError::LinkTargetEscapes { target: target.to_path_buf() })?;
+        let mut normalized_target =
+            normalize_archive_path(&target_text).map_err(|_| ExtractionSafetyError::LinkTargetEscapes { target: target.to_path_buf() })?;
         if self.policy.strip_components > 0 {
-            normalized_target = strip_archive_components(&normalized_target, self.policy.strip_components).ok_or_else(|| ExtractionSafetyError::LinkTargetEscapes { target: target.to_path_buf() })?;
+            normalized_target = strip_archive_components(&normalized_target, self.policy.strip_components)
+                .ok_or_else(|| ExtractionSafetyError::LinkTargetEscapes { target: target.to_path_buf() })?;
         }
 
         let target_path = lexically_normalize(&self.destination_root.join(normalized_target));
@@ -477,7 +490,11 @@ impl<'a> ExtractionSafetyPlanner<'a> {
         if let Some(total_limit) = self.policy.limits.max_expanded_bytes {
             let attempted = self.planned_expanded_bytes.saturating_add(bytes);
             if attempted > total_limit {
-                return Err(ExtractionSafetyError::ExpandedSizeLimitExceeded { archive_path: archive_path.to_owned(), attempted_bytes: attempted, limit_bytes: total_limit });
+                return Err(ExtractionSafetyError::ExpandedSizeLimitExceeded {
+                    archive_path: archive_path.to_owned(),
+                    attempted_bytes: attempted,
+                    limit_bytes: total_limit,
+                });
             }
             self.planned_expanded_bytes = attempted;
         }
@@ -499,10 +516,16 @@ fn reject_expansion_ratio(archive_path: &str, uncompressed_size: u64, compressed
     let Some(compressed_size) = compressed_size else {
         return Ok(());
     };
-    let exceeds_limit = if compressed_size == 0 { uncompressed_size > 0 } else { u128::from(uncompressed_size) > u128::from(compressed_size) * u128::from(ratio_limit) };
+    let exceeds_limit =
+        if compressed_size == 0 { uncompressed_size > 0 } else { u128::from(uncompressed_size) > u128::from(compressed_size) * u128::from(ratio_limit) };
 
     if exceeds_limit {
-        return Err(ExtractionSafetyError::ExpansionRatioLimitExceeded { archive_path: archive_path.to_owned(), uncompressed_size, compressed_size, ratio_limit });
+        return Err(ExtractionSafetyError::ExpansionRatioLimitExceeded {
+            archive_path: archive_path.to_owned(),
+            uncompressed_size,
+            compressed_size,
+            ratio_limit,
+        });
     }
 
     Ok(())
@@ -592,8 +615,12 @@ impl fmt::Display for ExtractionSafetyError {
             Self::DestinationExists { archive_path, destination_path } => {
                 write!(f, "archive path {archive_path} would overwrite {}", destination_path.display())
             }
-            Self::OverwritePromptUnavailable { archive_path, destination_path } => write!(f, "archive path {archive_path} requires an overwrite decision for {}", destination_path.display()),
-            Self::OverwriteAborted { archive_path, destination_path } => write!(f, "overwrite prompt aborted while handling archive path {archive_path} for {}", destination_path.display()),
+            Self::OverwritePromptUnavailable { archive_path, destination_path } => {
+                write!(f, "archive path {archive_path} requires an overwrite decision for {}", destination_path.display())
+            }
+            Self::OverwriteAborted { archive_path, destination_path } => {
+                write!(f, "overwrite prompt aborted while handling archive path {archive_path} for {}", destination_path.display())
+            }
             Self::DestinationProbe { archive_path, destination_path, message } => {
                 write!(f, "archive path {archive_path} could not check {}: {message}", destination_path.display())
             }
@@ -603,7 +630,9 @@ impl fmt::Display for ExtractionSafetyError {
             Self::LinkTargetEscapes { target } => {
                 write!(f, "link target escapes extraction root: {}", target.display())
             }
-            Self::RenameDestinationExhausted { archive_path, destination_path } => write!(f, "archive path {archive_path} has no available renamed destination for {}", destination_path.display()),
+            Self::RenameDestinationExhausted { archive_path, destination_path } => {
+                write!(f, "archive path {archive_path} has no available renamed destination for {}", destination_path.display())
+            }
             Self::ExpandedSizeLimitExceeded { archive_path, attempted_bytes, limit_bytes } => {
                 write!(f, "archive path {archive_path} would expand extraction to {attempted_bytes} bytes, exceeding the {limit_bytes} byte limit")
             }
@@ -682,8 +711,10 @@ pub fn normalize_archive_path(raw_path: &str) -> Result<String, ExtractionSafety
 /// Both paths are normalized using slash separators and stripped of leading/trailing dots and slashes.
 #[must_use]
 pub fn archive_entry_matches_selected(entry_path: &str, selected_path: &str) -> bool {
-    let norm_entry = entry_path.replace('\\', "/").trim_matches('/').split('/').filter(|segment| !segment.is_empty() && *segment != ".").collect::<Vec<_>>().join("/");
-    let norm_selected = selected_path.replace('\\', "/").trim_matches('/').split('/').filter(|segment| !segment.is_empty() && *segment != ".").collect::<Vec<_>>().join("/");
+    let norm_entry =
+        entry_path.replace('\\', "/").trim_matches('/').split('/').filter(|segment| !segment.is_empty() && *segment != ".").collect::<Vec<_>>().join("/");
+    let norm_selected =
+        selected_path.replace('\\', "/").trim_matches('/').split('/').filter(|segment| !segment.is_empty() && *segment != ".").collect::<Vec<_>>().join("/");
 
     if norm_selected.is_empty() {
         return true;
@@ -727,7 +758,11 @@ fn ensure_inside_destination(destination_root: &Path, destination_path: &Path, a
         return Ok(());
     }
 
-    Err(ExtractionSafetyError::DestinationEscape { archive_path: archive_path.to_owned(), destination_root: destination_root.to_path_buf(), destination_path: destination_path.to_path_buf() })
+    Err(ExtractionSafetyError::DestinationEscape {
+        archive_path: archive_path.to_owned(),
+        destination_root: destination_root.to_path_buf(),
+        destination_path: destination_path.to_path_buf(),
+    })
 }
 
 fn archive_path_selected(path: &str, includes: &[String], excludes: &[String]) -> bool {
@@ -751,7 +786,11 @@ pub fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
     }
 
     let clean_pattern = norm_pattern.trim_end_matches('/');
-    if !clean_pattern.is_empty() && !clean_pattern.contains('*') && !clean_pattern.contains('?') && (norm_path == clean_pattern || norm_path.starts_with(&format!("{clean_pattern}/"))) {
+    if !clean_pattern.is_empty()
+        && !clean_pattern.contains('*')
+        && !clean_pattern.contains('?')
+        && (norm_path == clean_pattern || norm_path.starts_with(&format!("{clean_pattern}/")))
+    {
         return true;
     }
 
@@ -836,7 +875,8 @@ fn next_available_destination_path_with_budget(path: &Path, candidate_budget: u6
 /// exhausted candidate space to an error instead of falling back to the
 /// original (existing) path, which would overwrite in place.
 fn rename_candidate_or_error(entry: &ExtractionEntry, destination_path: PathBuf) -> Result<PathBuf, ExtractionSafetyError> {
-    next_available_destination_path(&destination_path).ok_or_else(|| ExtractionSafetyError::RenameDestinationExhausted { archive_path: entry.archive_path.clone(), destination_path })
+    next_available_destination_path(&destination_path)
+        .ok_or_else(|| ExtractionSafetyError::RenameDestinationExhausted { archive_path: entry.archive_path.clone(), destination_path })
 }
 
 /// Removes an existing destination path before an explicit overwrite write.
@@ -891,9 +931,9 @@ fn lexically_normalize(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionLimits, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteConflict, OverwriteDecision,
-        OverwritePolicy, OverwriteResolver, UnsafeFilePolicy, archive_entry_matches_selected, archive_pattern_matches, deferred_link_dependency_order, next_available_destination_path_with_budget,
-        normalize_archive_path, prepare_destination_root,
+        ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionLimits, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
+        OverwriteConflict, OverwriteDecision, OverwritePolicy, OverwriteResolver, UnsafeFilePolicy, archive_entry_matches_selected, archive_pattern_matches,
+        deferred_link_dependency_order, next_available_destination_path_with_budget, normalize_archive_path, prepare_destination_root,
     };
     use crate::test_support::TestDir;
     use std::fs;
@@ -1081,8 +1121,12 @@ mod tests {
     fn rejects_symlink_escape() {
         let temp = TestDir::new("rejects_symlink_escape");
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), ExtractionPolicy::default());
-        let entry =
-            ExtractionEntry { archive_path: "dir/link".to_owned(), kind: ExtractionEntryKind::Symlink { target: PathBuf::from("../../outside") }, uncompressed_size: None, compressed_size: None };
+        let entry = ExtractionEntry {
+            archive_path: "dir/link".to_owned(),
+            kind: ExtractionEntryKind::Symlink { target: PathBuf::from("../../outside") },
+            uncompressed_size: None,
+            compressed_size: None,
+        };
 
         let error = planner.validate_entry(&entry).unwrap_err();
 
@@ -1093,8 +1137,12 @@ mod tests {
     fn allows_symlink_inside_destination() {
         let temp = TestDir::new("allows_symlink_inside_destination");
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), ExtractionPolicy::default());
-        let entry =
-            ExtractionEntry { archive_path: "dir/link".to_owned(), kind: ExtractionEntryKind::Symlink { target: PathBuf::from("../target.txt") }, uncompressed_size: None, compressed_size: None };
+        let entry = ExtractionEntry {
+            archive_path: "dir/link".to_owned(),
+            kind: ExtractionEntryKind::Symlink { target: PathBuf::from("../target.txt") },
+            uncompressed_size: None,
+            compressed_size: None,
+        };
 
         let decision = planner.validate_entry(&entry).unwrap();
 
@@ -1106,8 +1154,12 @@ mod tests {
         let temp = TestDir::new("skips_symlink_when_ignore_symlinks_enabled");
         let policy = ExtractionPolicy { ignore_symlinks: true, ..ExtractionPolicy::default() };
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), policy);
-        let entry =
-            ExtractionEntry { archive_path: "dir/link".to_owned(), kind: ExtractionEntryKind::Symlink { target: PathBuf::from("../target.txt") }, uncompressed_size: None, compressed_size: None };
+        let entry = ExtractionEntry {
+            archive_path: "dir/link".to_owned(),
+            kind: ExtractionEntryKind::Symlink { target: PathBuf::from("../target.txt") },
+            uncompressed_size: None,
+            compressed_size: None,
+        };
 
         let decision = planner.validate_entry(&entry).unwrap();
 
@@ -1166,8 +1218,12 @@ mod tests {
     fn rejects_hardlink_escape() {
         let temp = TestDir::new("rejects_hardlink_escape");
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), ExtractionPolicy::default());
-        let entry =
-            ExtractionEntry { archive_path: "dir/link".to_owned(), kind: ExtractionEntryKind::Hardlink { target: PathBuf::from("../../outside") }, uncompressed_size: None, compressed_size: None };
+        let entry = ExtractionEntry {
+            archive_path: "dir/link".to_owned(),
+            kind: ExtractionEntryKind::Hardlink { target: PathBuf::from("../../outside") },
+            uncompressed_size: None,
+            compressed_size: None,
+        };
 
         let error = planner.validate_entry(&entry).unwrap_err();
 
@@ -1177,7 +1233,8 @@ mod tests {
     #[test]
     fn rejects_extraction_when_total_expanded_size_exceeds_limit() {
         let temp = TestDir::new("rejects_extraction_when_total_expanded_size_exceeds_limit");
-        let policy = ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: Some(5), max_entry_expansion_ratio: None }, ..ExtractionPolicy::default() };
+        let policy =
+            ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: Some(5), max_entry_expansion_ratio: None }, ..ExtractionPolicy::default() };
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), policy);
 
         planner.validate_entry(&sized_file_entry("one.bin", 3, Some(3))).unwrap();
@@ -1189,7 +1246,8 @@ mod tests {
     #[test]
     fn rejects_entry_when_expansion_ratio_exceeds_limit() {
         let temp = TestDir::new("rejects_entry_when_expansion_ratio_exceeds_limit");
-        let policy = ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: None, max_entry_expansion_ratio: Some(10) }, ..ExtractionPolicy::default() };
+        let policy =
+            ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: None, max_entry_expansion_ratio: Some(10) }, ..ExtractionPolicy::default() };
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), policy);
 
         let error = planner.validate_entry(&sized_file_entry("bomb.bin", 100, Some(1))).unwrap_err();

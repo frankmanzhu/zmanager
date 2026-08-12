@@ -106,7 +106,12 @@ pub mod x509_factory {
         let platform = intermediate_certificate(&platform_key, root.as_ref(), root_key.as_ref(), root.as_ref());
         let leaf = leaf_certificate(&leaf_key, platform.as_ref(), platform_key.as_ref(), platform.as_ref(), config);
         let root_der = root.to_der().unwrap();
-        CertificateFixture { chain_der: vec![leaf.to_der().unwrap(), platform.to_der().unwrap(), root_der.clone()], leaf_key, root_sha256: crate::trust::sha256_identifier(&root_der), root_der }
+        CertificateFixture {
+            chain_der: vec![leaf.to_der().unwrap(), platform.to_der().unwrap(), root_der.clone()],
+            leaf_key,
+            root_sha256: crate::trust::sha256_identifier(&root_der),
+            root_der,
+        }
     }
 
     pub fn root_certificate(key: &PKeyRef<Private>) -> X509 {

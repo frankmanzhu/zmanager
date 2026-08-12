@@ -1,11 +1,16 @@
 use super::TzapCliContext;
-use super::support::{current_unix_seconds, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error, read_json_argument, service_envelope, service_request, write_json_file};
+use super::support::{
+    current_unix_seconds, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error, read_json_argument, service_envelope, service_request,
+    write_json_file,
+};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{CONTACT_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zmanager_core::tzap_service::{tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json, tzap_recipient_key_generate_json};
+use zmanager_core::tzap_service::{
+    tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json, tzap_recipient_key_generate_json,
+};
 
 pub(crate) fn contact_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) || args.is_empty() {

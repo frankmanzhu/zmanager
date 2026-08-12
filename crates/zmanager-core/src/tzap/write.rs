@@ -9,8 +9,9 @@ use crate::manifest::{ArchiveManifest, ManifestFileType};
 use crate::secrets::SecretString;
 use crate::tzap::metadata::{CapturedPortableFileMetadata, portable_file_metadata, system_time_to_archive_timestamp};
 use crate::tzap::x509::{
-    TzapX509SigningOptions, build_recipient_wrap_record_from_certificate_der, build_recipient_wrap_record_from_certificate_path, load_single_x509_certificate_file, load_x509_signer,
-    recipient_wrap_archive_identity_for_writer, synthetic_recipient_certificate_der, validate_recipient_wrap_create_options,
+    TzapX509SigningOptions, build_recipient_wrap_record_from_certificate_der, build_recipient_wrap_record_from_certificate_path,
+    load_single_x509_certificate_file, load_x509_signer, recipient_wrap_archive_identity_for_writer, synthetic_recipient_certificate_der,
+    validate_recipient_wrap_create_options,
 };
 use rand::RngCore as _;
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,8 +20,8 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use tzap_core::format::{AeadAlgo, FormatError, READER_MAX_ARGON2ID_M_COST_KIB, READER_MAX_ARGON2ID_PARALLELISM, READER_MAX_ARGON2ID_T_COST};
 use tzap_core::{
-    ArchiveTimestamp, ArchiveWriteError, ArchiveWritePhase, ArchiveWriteProgressSink, ArchiveWriteSink, KdfParams, MasterKey, PortableFileMetadata, RegularFileSource, RootAuthSigningRequest,
-    SourceEntryKind, WriterOptions,
+    ArchiveTimestamp, ArchiveWriteError, ArchiveWritePhase, ArchiveWriteProgressSink, ArchiveWriteSink, KdfParams, MasterKey, PortableFileMetadata,
+    RegularFileSource, RootAuthSigningRequest, SourceEntryKind, WriterOptions,
     volume_file::{discover_sibling_volume_paths, multi_volume_base_name, volume_output_path},
     write_archive_sources_to_sink_ordered_parallel_with_recipient_wrap_records_and_progress, write_archive_sources_to_sink_with_progress,
 };
@@ -121,7 +122,8 @@ pub fn create_tzap_from_manifest_with_context(
     let destination = destination.as_ref();
     let mut sink = TzapArchiveFileSink::new(destination, options.replace_existing, context.cancellation_token())?;
     let x509_signer = options.x509_signing.as_ref().map(load_x509_signer).transpose()?;
-    let root_auth = x509_signer.as_ref().map(X509RootAuthSigner::root_auth_writer_config).transpose().map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
+    let root_auth =
+        x509_signer.as_ref().map(X509RootAuthSigner::root_auth_writer_config).transpose().map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
     let mut authenticator = |request: &RootAuthSigningRequest| {
         x509_signer
             .as_ref()
@@ -157,7 +159,17 @@ pub fn create_tzap_from_manifest_with_context(
                 &mut progress,
             )
         } else {
-            write_archive_sources_to_sink_with_progress(&file_sources, &master_key, writer_options, None, &kdf_params, root_auth, authenticator, &mut sink, &mut progress)
+            write_archive_sources_to_sink_with_progress(
+                &file_sources,
+                &master_key,
+                writer_options,
+                None,
+                &kdf_params,
+                root_auth,
+                authenticator,
+                &mut sink,
+                &mut progress,
+            )
         };
         progress.flush_pending();
         result
@@ -181,12 +193,23 @@ pub fn create_tzap_from_manifest_with_context(
 
     warnings.extend(manifest.warnings.iter().map(|warning| warning.message.clone()));
 
-    Ok(TzapCreateReport { written_entries: file_sources.len(), written_bytes: summary.archive_bytes, level: options.level, volume_size: options.volume_size, volume_count, warnings })
+    Ok(TzapCreateReport {
+        written_entries: file_sources.len(),
+        written_bytes: summary.archive_bytes,
+        level: options.level,
+        volume_size: options.volume_size,
+        volume_count,
+        warnings,
+    })
 }
 
 /// Builds the recipient-wrap records for the key source, or `None` for
 /// passphrase/no-password archives (CR-143).
-fn build_recipient_records(options: &TzapCreateOptions, master_key: &MasterKey, writer_options: &mut WriterOptions) -> Result<Option<Vec<tzap_core::wire::RecipientRecordV1>>, TzapError> {
+fn build_recipient_records(
+    options: &TzapCreateOptions,
+    master_key: &MasterKey,
+    writer_options: &mut WriterOptions,
+) -> Result<Option<Vec<tzap_core::wire::RecipientRecordV1>>, TzapError> {
     Ok(match &options.key_source {
         TzapKeySource::RecipientCertificate(recipient_certificate) => {
             validate_recipient_wrap_create_options(options)?;
@@ -236,7 +259,12 @@ fn tzap_output_volume_paths(destination: &Path, count: usize) -> Vec<PathBuf> {
     (0..count).map(|index| volume_output_path(destination, index)).collect()
 }
 
-fn ensure_tzap_destinations_available(destination: &Path, volume_paths: &[PathBuf], existing_volume_paths: &[PathBuf], replace_existing: bool) -> Result<(), TzapError> {
+fn ensure_tzap_destinations_available(
+    destination: &Path,
+    volume_paths: &[PathBuf],
+    existing_volume_paths: &[PathBuf],
+    replace_existing: bool,
+) -> Result<(), TzapError> {
     ensure_file_destination_available(destination, replace_existing)?;
     for path in unique_paths(volume_paths, existing_volume_paths) {
         ensure_file_destination_available(path, replace_existing)?;
@@ -251,7 +279,9 @@ fn unique_paths<'a>(left: &'a [PathBuf], right: &'a [PathBuf]) -> Vec<&'a Path> 
 
 fn ensure_file_destination_available(path: &Path, replace_existing: bool) -> Result<(), TzapError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display()))),
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
+        }
         Ok(_) if !replace_existing => Err(io_error(path, io::ErrorKind::AlreadyExists, format!("destination already exists: {}", path.display()))),
         Ok(_) => Ok(()),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -272,7 +302,9 @@ fn remove_tzap_destinations_for_replace(destination: &Path, existing_volume_path
 
 fn remove_file_destination_for_replace(path: &Path) -> Result<(), TzapError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display()))),
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            Err(io_error(path, io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
+        }
         Ok(_) => fs::remove_file(path).map_err(|source| TzapError::Io { path: path.to_path_buf(), source }),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(TzapError::Io { path: path.to_path_buf(), source }),
@@ -289,7 +321,11 @@ fn existing_tzap_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, TzapEr
     discover_sibling_volume_paths(parent, &destination_base_name).map_err(|source| TzapError::Io { path: parent.to_path_buf(), source })
 }
 
-fn collect_archive_sources(manifest: &ArchiveManifest, options: &TzapCreateOptions, context: &mut JobContext<'_>) -> Result<(Vec<TzapRegularFileSource>, Vec<String>), TzapError> {
+fn collect_archive_sources(
+    manifest: &ArchiveManifest,
+    options: &TzapCreateOptions,
+    context: &mut JobContext<'_>,
+) -> Result<(Vec<TzapRegularFileSource>, Vec<String>), TzapError> {
     let mut files = Vec::new();
     let mut warnings = Vec::new();
 
@@ -299,7 +335,8 @@ fn collect_archive_sources(manifest: &ArchiveManifest, options: &TzapCreateOptio
 
         match entry.file_type {
             ManifestFileType::File | ManifestFileType::Directory | ManifestFileType::Symlink => {
-                let captured_metadata = if options.preserve_metadata { portable_file_metadata(&entry.source_path)? } else { CapturedPortableFileMetadata::default() };
+                let captured_metadata =
+                    if options.preserve_metadata { portable_file_metadata(&entry.source_path)? } else { CapturedPortableFileMetadata::default() };
                 files.push(TzapRegularFileSource {
                     archive_path: entry.archive_path.clone(),
                     source_path: entry.source_path.clone(),
@@ -318,7 +355,11 @@ fn collect_archive_sources(manifest: &ArchiveManifest, options: &TzapCreateOptio
                     } else {
                         0o644
                     },
-                    mtime: if options.preserve_metadata { entry.modified.and_then(system_time_to_archive_timestamp).unwrap_or(ArchiveTimestamp::UNIX_EPOCH) } else { ArchiveTimestamp::UNIX_EPOCH },
+                    mtime: if options.preserve_metadata {
+                        entry.modified.and_then(system_time_to_archive_timestamp).unwrap_or(ArchiveTimestamp::UNIX_EPOCH)
+                    } else {
+                        ArchiveTimestamp::UNIX_EPOCH
+                    },
                     portable_metadata: captured_metadata.metadata,
                     #[cfg(target_os = "macos")]
                     macos_metadata_identity: captured_metadata.macos_identity,
@@ -355,7 +396,9 @@ fn create_key_material(key_source: &TzapKeySource) -> Result<(MasterKey, KdfPara
             let master_key = MasterKey::derive_from_passphrase(&kdf_params, passphrase.expose_secret())?;
             Ok((master_key, kdf_params))
         }
-        TzapKeySource::RecipientCertificate(_) | TzapKeySource::RecipientCertificates(_) | TzapKeySource::RecipientPublicKeys(_) => Ok((generate_random_master_key()?, KdfParams::None)),
+        TzapKeySource::RecipientCertificate(_) | TzapKeySource::RecipientCertificates(_) | TzapKeySource::RecipientPublicKeys(_) => {
+            Ok((generate_random_master_key()?, KdfParams::None))
+        }
         TzapKeySource::NoPassword => Ok((placeholder_master_key()?, KdfParams::None)),
     }
 }
@@ -418,8 +461,9 @@ impl RegularFileSource for TzapRegularFileSource {
         if self.kind != SourceEntryKind::Regular {
             return Ok(Box::new(io::empty()));
         }
-        let file = File::open(&self.source_path)
-            .map_err(|source| ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to open TZAP source file {}: {source}", self.source_path.display()))))?;
+        let file = File::open(&self.source_path).map_err(|source| {
+            ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to open TZAP source file {}: {source}", self.source_path.display())))
+        })?;
         Ok(Box::new(CancellationAwareReader { inner: file, token: self.cancellation_token.clone() }))
     }
 
@@ -434,7 +478,8 @@ impl RegularFileSource for TzapRegularFileSource {
                 return Err(FormatError::WriterUnsupported("unsupported streamed macOS auxiliary source").into());
             }
             let identity = self.macos_metadata_identity.ok_or(FormatError::WriterInvariant("macOS metadata identity is missing"))?;
-            tzap_core::macos_metadata::open_macos_resource_fork(&self.source_path, self.kind == SourceEntryKind::Symlink, identity, record.logical_size).map_err(ArchiveWriteError::Io)
+            tzap_core::macos_metadata::open_macos_resource_fork(&self.source_path, self.kind == SourceEntryKind::Symlink, identity, record.logical_size)
+                .map_err(ArchiveWriteError::Io)
         }
         #[cfg(not(target_os = "macos"))]
         Err(FormatError::WriterUnsupported("streamed auxiliary source is unsupported on this platform").into())
@@ -643,7 +688,11 @@ fn commit_bootstrap_sidecar(destination: &Path, bytes: &[u8], replace_existing: 
         ensure_file_destination_available(&sidecar_path, false)?;
     }
     let mut output = AtomicOutputFile::create(&sidecar_path).map_err(|source| TzapError::Io { path: sidecar_path.clone(), source })?;
-    output.file_mut().map_err(|source| TzapError::Io { path: sidecar_path.clone(), source })?.write_all(bytes).map_err(|source| TzapError::Io { path: sidecar_path.clone(), source })?;
+    output
+        .file_mut()
+        .map_err(|source| TzapError::Io { path: sidecar_path.clone(), source })?
+        .write_all(bytes)
+        .map_err(|source| TzapError::Io { path: sidecar_path.clone(), source })?;
     output.commit_with_file_replace(replace_existing).map_err(|source| TzapError::Io { path: sidecar_path, source })
 }
 
@@ -655,14 +704,14 @@ impl ArchiveWriteSink for TzapArchiveFileSink {
         }
 
         let volume_paths = tzap_output_volume_paths(&self.destination, volume_count);
-        ensure_tzap_destinations_available(&self.destination, &volume_paths, &self.existing_volume_paths, self.replace_existing).map_err(tzap_archive_write_error)?;
+        ensure_tzap_destinations_available(&self.destination, &volume_paths, &self.existing_volume_paths, self.replace_existing)
+            .map_err(tzap_archive_write_error)?;
 
         let mut outputs = Vec::with_capacity(volume_paths.len());
         for volume_path in &volume_paths {
-            outputs.push(
-                AtomicOutputFile::create(volume_path)
-                    .map_err(|source| ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to create TZAP output volume {}: {source}", volume_path.display()))))?,
-            );
+            outputs.push(AtomicOutputFile::create(volume_path).map_err(|source| {
+                ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to create TZAP output volume {}: {source}", volume_path.display())))
+            })?);
         }
 
         self.volume_paths = volume_paths;
@@ -676,9 +725,13 @@ impl ArchiveWriteSink for TzapArchiveFileSink {
         let output = self.outputs.get_mut(volume_index).ok_or(FormatError::WriterInvariant("TZAP volume sink index is out of bounds"))?;
         output
             .file_mut()
-            .map_err(|source| ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to access TZAP output volume {}: {source}", volume_path.display()))))?
+            .map_err(|source| {
+                ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to access TZAP output volume {}: {source}", volume_path.display())))
+            })?
             .write_all(bytes)
-            .map_err(|source| ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to write TZAP output volume {}: {source}", volume_path.display()))))
+            .map_err(|source| {
+                ArchiveWriteError::Io(io::Error::new(source.kind(), format!("failed to write TZAP output volume {}: {source}", volume_path.display())))
+            })
     }
 
     fn write_bootstrap_sidecar(&mut self, bytes: &[u8]) -> Result<(), ArchiveWriteError> {
@@ -701,9 +754,12 @@ fn tzap_archive_write_error(error: TzapError) -> ArchiveWriteError {
         TzapError::Format(source) => ArchiveWriteError::Format(source),
         TzapError::Io { source, .. } => ArchiveWriteError::Io(source),
         TzapError::Cancelled => ArchiveWriteError::Io(io::Error::other(JobCancelled)),
-        TzapError::Plan(_) | TzapError::X509RootAuth(_) | TzapError::KeyWrap(_) | TzapError::Safety(_) | TzapError::PasswordRequired | TzapError::RecipientKeyRequired => {
-            ArchiveWriteError::Io(io::Error::other(error))
-        }
+        TzapError::Plan(_)
+        | TzapError::X509RootAuth(_)
+        | TzapError::KeyWrap(_)
+        | TzapError::Safety(_)
+        | TzapError::PasswordRequired
+        | TzapError::RecipientKeyRequired => ArchiveWriteError::Io(io::Error::other(error)),
     }
 }
 

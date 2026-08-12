@@ -106,7 +106,19 @@ fn retry_password_required_fails_if_no_prompt_label() {
 fn create_parser_accepts_tzap_x509_signing_options() {
     let mut request = CreateRequest::default();
     let mut global = GlobalOptions::default();
-    let args = strings(["signed.tzap", "src", "--format", "tzap", "--password-stdin", "--signing-cert", "signer.pem", "--signing-private-key", "signer.key", "--signing-chain", "intermediate.pem"]);
+    let args = strings([
+        "signed.tzap",
+        "src",
+        "--format",
+        "tzap",
+        "--password-stdin",
+        "--signing-cert",
+        "signer.pem",
+        "--signing-private-key",
+        "signer.key",
+        "--signing-chain",
+        "intermediate.pem",
+    ]);
 
     parse_create_request(&args, &mut global, &mut request).unwrap();
 

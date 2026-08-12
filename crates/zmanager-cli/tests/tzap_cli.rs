@@ -29,7 +29,10 @@ fn auth_login_callback_status_and_forget_keep_session_secret_out_of_output() {
     )
     .unwrap();
 
-    let callback = zm().args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"]).output().unwrap();
+    let callback = zm()
+        .args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
     assert_success("auth callback", &callback);
     let callback_stdout = String::from_utf8_lossy(&callback.stdout);
     assert!(callback_stdout.contains("\"authenticated\":true"));
@@ -65,7 +68,10 @@ fn auth_callback_fails_when_session_cannot_be_persisted() {
     )
     .unwrap();
 
-    let callback = zm().args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"]).output().unwrap();
+    let callback = zm()
+        .args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
 
     assert_failure("auth callback with unwritable session path", &callback);
     let stdout = String::from_utf8_lossy(&callback.stdout);
@@ -169,7 +175,17 @@ fn verify_accepts_custom_trust_root_certificate_file() {
     let envelope = temp.path("envelope.json");
     fs::write(&payload, br#"{"tzap_payload_version":1,"title":"Root cert verification"}"#).unwrap();
     let sign = zm()
-        .args(["sign", payload.to_str().unwrap(), "--state-dir", state_dir.to_str().unwrap(), "--certificate-id", certificate_id, "--output", envelope.to_str().unwrap(), "--json"])
+        .args([
+            "sign",
+            payload.to_str().unwrap(),
+            "--state-dir",
+            state_dir.to_str().unwrap(),
+            "--certificate-id",
+            certificate_id,
+            "--output",
+            envelope.to_str().unwrap(),
+            "--json",
+        ])
         .output()
         .unwrap();
     assert_success("sign", &sign);
@@ -178,7 +194,16 @@ fn verify_accepts_custom_trust_root_certificate_file() {
     // concatenated leaf + intermediates, so the root is the last element.
     let catalog: serde_json::Value = serde_json::from_slice(&fs::read(state_dir.join("default.identity-catalog.json")).unwrap()).unwrap();
     let identity = catalog["signing_identities"].as_array().unwrap().iter().find(|identity| identity["certificate_id"].is_string()).unwrap();
-    let root_der: Vec<u8> = identity["certificate_chain_der"].as_array().unwrap().last().unwrap().as_array().unwrap().iter().map(|byte| u8::try_from(byte.as_u64().unwrap()).unwrap()).collect();
+    let root_der: Vec<u8> = identity["certificate_chain_der"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|byte| u8::try_from(byte.as_u64().unwrap()).unwrap())
+        .collect();
     let root_path = temp.path("root.der");
     fs::write(&root_path, root_der).unwrap();
 
@@ -230,6 +255,9 @@ fn sign_in_with_fake_relay(temp: &TestDir, state_dir: &std::path::Path) {
         br#"{"status":"ok","session":{"audience":"sign.tzap.org","access_token":"secret-token","expires_at_unix_seconds":9999999999,"identity_assurance":"oauth_verified_email","selected_org_id":null,"login_session_id":"login-session-1"}}"#,
     )
     .unwrap();
-    let callback = zm().args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"]).output().unwrap();
+    let callback = zm()
+        .args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
     assert_success("auth callback", &callback);
 }

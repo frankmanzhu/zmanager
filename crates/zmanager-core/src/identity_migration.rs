@@ -6,12 +6,13 @@
 //! facade, and the file-backed secret store.
 
 use crate::identity_catalog::{
-    TzapIdentityCatalog, TzapIdentityCatalogError, TzapIdentityCatalogStore, TzapPublicContactRecord, TzapPublicEmergencyBlocklist, TzapPublicRecipientKeyRecord, TzapPublicSigningIdentityRecord,
-    TzapPublicStatusCacheRecord, TzapSecretMaterialStore, TzapSecretPurpose, TzapSecretRef, TzapSecretStoreError,
+    TzapIdentityCatalog, TzapIdentityCatalogError, TzapIdentityCatalogStore, TzapPublicContactRecord, TzapPublicEmergencyBlocklist,
+    TzapPublicRecipientKeyRecord, TzapPublicSigningIdentityRecord, TzapPublicStatusCacheRecord, TzapSecretMaterialStore, TzapSecretPurpose, TzapSecretRef,
+    TzapSecretStoreError,
 };
 use crate::local_identity_store::{
-    TzapCertificateStatusCacheRecord, TzapContactRecord, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory,
-    TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
+    TzapCertificateStatusCacheRecord, TzapContactRecord, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord,
+    TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
 };
 use crate::secrets::SecretBytes;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -85,7 +86,11 @@ pub fn migrate_legacy_inventory(
         if has_pending_legacy_migration(&catalog) {
             return resume_pending_migration(legacy_store, catalog_store, secret_store, account_key, catalog);
         }
-        return Ok(TzapLegacyMigrationReport { migrated: false, signing_identity_count: catalog.signing_identities.len(), recipient_key_count: catalog.recipient_keys.len() });
+        return Ok(TzapLegacyMigrationReport {
+            migrated: false,
+            signing_identity_count: catalog.signing_identities.len(),
+            recipient_key_count: catalog.recipient_keys.len(),
+        });
     }
 
     let inventory = legacy_store.load_inventory(account_key)?;
@@ -93,7 +98,11 @@ pub fn migrate_legacy_inventory(
     commit_migration(catalog_store, secret_store, account_key, catalog, &inventory, &signing_refs, &recipient_refs)?;
 
     let catalog = catalog_store.load_catalog(account_key)?.ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "migration.catalog" })?;
-    Ok(TzapLegacyMigrationReport { migrated: true, signing_identity_count: catalog.signing_identities.len(), recipient_key_count: catalog.recipient_keys.len() })
+    Ok(TzapLegacyMigrationReport {
+        migrated: true,
+        signing_identity_count: catalog.signing_identities.len(),
+        recipient_key_count: catalog.recipient_keys.len(),
+    })
 }
 
 fn has_pending_legacy_migration(catalog: &TzapIdentityCatalog) -> bool {
@@ -115,7 +124,8 @@ fn resume_pending_migration(
 ) -> Result<TzapLegacyMigrationReport, TzapIdentityCatalogError> {
     let inventory = legacy_store.load_inventory(account_key)?;
     let signing_by_id = inventory.device_signing_keys.iter().map(|record| (record.key_id.as_str(), &record.private_key_der)).collect::<HashMap<_, _>>();
-    let signing_by_certificate = inventory.enrolled_certificates.iter().map(|record| (record.certificate_id.as_str(), record.signing_key_id.as_str())).collect::<HashMap<_, _>>();
+    let signing_by_certificate =
+        inventory.enrolled_certificates.iter().map(|record| (record.certificate_id.as_str(), record.signing_key_id.as_str())).collect::<HashMap<_, _>>();
     for identity in &catalog.signing_identities {
         if matches!(secret_store.resolve(TzapSecretPurpose::SigningKey, &identity.signing_key_ref), Err(TzapSecretStoreError::Missing { .. })) {
             let key_id = signing_by_certificate.get(identity.id.as_str()).copied().unwrap_or(identity.id.as_str());
@@ -126,7 +136,8 @@ fn resume_pending_migration(
     let recipient_by_id = inventory.recipient_encryption_keys.iter().map(|record| (record.key_id.as_str(), &record.private_key_der)).collect::<HashMap<_, _>>();
     for key in &catalog.recipient_keys {
         if matches!(secret_store.resolve(TzapSecretPurpose::RecipientKey, &key.private_key_ref), Err(TzapSecretStoreError::Missing { .. })) {
-            let material = recipient_by_id.get(key.id.as_str()).ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "legacy_migration.recipient_key_ref" })?;
+            let material =
+                recipient_by_id.get(key.id.as_str()).ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "legacy_migration.recipient_key_ref" })?;
             secret_store.put_at(TzapSecretPurpose::RecipientKey, &key.private_key_ref, (*material).clone())?;
         }
     }
@@ -140,7 +151,11 @@ fn resume_pending_migration(
     let expected_revision = catalog.revision;
     catalog.revision = catalog.revision.saturating_add(1);
     catalog_store.save_catalog(account_key, Some(expected_revision), catalog.clone())?;
-    Ok(TzapLegacyMigrationReport { migrated: true, signing_identity_count: catalog.signing_identities.len(), recipient_key_count: catalog.recipient_keys.len() })
+    Ok(TzapLegacyMigrationReport {
+        migrated: true,
+        signing_identity_count: catalog.signing_identities.len(),
+        recipient_key_count: catalog.recipient_keys.len(),
+    })
 }
 
 /// Secret references produced while building a catalog, keyed by legacy
@@ -153,7 +168,10 @@ type SecretRefMap = HashMap<String, TzapSecretRef>;
 /// Returns the catalog, the signing-key references, and the recipient-key
 /// references, all keyed by legacy record id.
 #[allow(clippy::too_many_lines)]
-fn build_catalog_from_legacy(inventory: &TzapLocalIdentityInventory, now_unix_seconds: u64) -> Result<(TzapIdentityCatalog, SecretRefMap, SecretRefMap), TzapIdentityCatalogError> {
+fn build_catalog_from_legacy(
+    inventory: &TzapLocalIdentityInventory,
+    now_unix_seconds: u64,
+) -> Result<(TzapIdentityCatalog, SecretRefMap, SecretRefMap), TzapIdentityCatalogError> {
     let mut signing_refs = HashMap::new();
     let mut recipient_refs = HashMap::new();
     for record in &inventory.device_signing_keys {
@@ -168,7 +186,10 @@ fn build_catalog_from_legacy(inventory: &TzapLocalIdentityInventory, now_unix_se
     let mut signing_identities = Vec::new();
     let mut certificate_key_ids = HashSet::new();
     for certificate in &inventory.enrolled_certificates {
-        let signing_key_ref = signing_refs.get(&certificate.signing_key_id).ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "enrolled_certificates.signing_key_id" })?.clone();
+        let signing_key_ref = signing_refs
+            .get(&certificate.signing_key_id)
+            .ok_or(TzapIdentityCatalogError::InvalidCatalog { field: "enrolled_certificates.signing_key_id" })?
+            .clone();
         let backing_key = inventory.device_signing_keys.iter().find(|key| key.key_id == certificate.signing_key_id);
         let signing_key_created_at = backing_key.map(|key| key.created_at_unix_seconds);
         let signing_key_label = backing_key.and_then(|key| key.label.clone());
@@ -338,7 +359,8 @@ fn commit_migration(
 /// Computes the `sha256:` public-key fingerprint of a private key, in the
 /// same form the legacy inventory stores on its key records.
 pub(crate) fn public_key_fingerprint_from_private_key(private_key: &SecretBytes) -> Result<String, TzapIdentityCatalogError> {
-    let key = openssl::pkey::PKey::private_key_from_der(private_key.expose_secret()).map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
+    let key = openssl::pkey::PKey::private_key_from_der(private_key.expose_secret())
+        .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
     let public_der = key.public_key_to_der().map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
     let digest: [u8; 32] = Sha256::digest(public_der).into();
     Ok(crate::trust::format_certificate_sha256(&digest))
@@ -560,7 +582,10 @@ pub(crate) fn load_inventory_from_catalog(
             signing_certificate_sha256: contact.signing_certificate_sha256.clone(),
             recipient_public_key_fingerprint: contact.recipient_public_key_fingerprint.clone(),
             trust_anchor_type: contact.trust_source.parse().map_err(|()| TzapIdentityCatalogError::InvalidCatalog { field: "contacts.trust_source" })?,
-            verification_state: contact.verification_state.parse().map_err(|()| TzapIdentityCatalogError::InvalidCatalog { field: "contacts.verification_state" })?,
+            verification_state: contact
+                .verification_state
+                .parse()
+                .map_err(|()| TzapIdentityCatalogError::InvalidCatalog { field: "contacts.verification_state" })?,
             missing_status_caveat: contact.missing_status_caveat,
             contact_card_payload: contact.contact_card_payload.clone(),
             accepted_at_unix_seconds: contact.accepted_at_unix_seconds,
@@ -585,7 +610,8 @@ pub(crate) fn load_inventory_from_catalog(
 }
 
 fn verify_private_matches_public_key(private_key: &SecretBytes, public_key_der: &[u8]) -> Result<(), TzapIdentityCatalogError> {
-    let key = openssl::pkey::PKey::private_key_from_der(private_key.expose_secret()).map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
+    let key = openssl::pkey::PKey::private_key_from_der(private_key.expose_secret())
+        .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
     let derived = key.public_key_to_der().map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
     if derived != public_key_der {
         return Err(TzapIdentityCatalogError::InvalidCatalog { field: "private_key_public_key_match" });

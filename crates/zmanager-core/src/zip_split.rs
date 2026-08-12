@@ -42,7 +42,8 @@ pub(crate) fn split_zip_temp_archive(archive_path: &Path, destination: &Path, vo
     ensure_split_destinations_available(destination, &volume_paths, &existing_volume_paths, replace_existing)?;
 
     let mut central_directory = read_zip_central_directory(archive_path, &eocd)?;
-    let entries_on_last_disk = patch_split_zip_central_directory(&mut central_directory, volume_size, layout.central_directory_logical_offset, layout.last_disk)?;
+    let entries_on_last_disk =
+        patch_split_zip_central_directory(&mut central_directory, volume_size, layout.central_directory_logical_offset, layout.last_disk)?;
     let mut eocd_bytes = eocd.bytes.clone();
     patch_split_zip_eocd(&mut eocd_bytes, &layout, eocd.total_entries, entries_on_last_disk)?;
 
@@ -75,7 +76,8 @@ struct ZipSplitLayout {
 
 impl ZipSplitLayout {
     fn new(logical_size: u64, volume_size: u64, eocd: &ZipEndOfCentralDirectory) -> Result<Self, ZipBackendError> {
-        let central_directory_logical_offset = eocd.central_directory_offset.checked_add(4u64).ok_or_else(|| unsupported_split_zip("central directory offset overflow"))?;
+        let central_directory_logical_offset =
+            eocd.central_directory_offset.checked_add(4u64).ok_or_else(|| unsupported_split_zip("central directory offset overflow"))?;
         let (central_directory_disk, central_directory_offset_on_disk) = split_zip_location(central_directory_logical_offset, volume_size)?;
         let (last_disk, _) = split_zip_location(logical_size.saturating_sub(1), volume_size)?;
         Ok(Self { central_directory_logical_offset, central_directory_disk, central_directory_offset_on_disk, last_disk })
@@ -106,7 +108,8 @@ fn read_zip_eocd(archive_path: &Path, archive_size: u64) -> Result<ZipEndOfCentr
         if eocd_offset >= 20 {
             let locator_start = eocd_offset - 20;
             if locator_start >= archive_size - tail_size {
-                let relative = usize::try_from(locator_start - (archive_size - tail_size)).map_err(|_| unsupported_split_zip("ZIP64 locator offset overflow"))?;
+                let relative =
+                    usize::try_from(locator_start - (archive_size - tail_size)).map_err(|_| unsupported_split_zip("ZIP64 locator offset overflow"))?;
                 if relative + 4 <= tail.len() && read_u32(&tail[relative..relative + 4]) == ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR_SIGNATURE {
                     return Err(unsupported_split_zip("ZIP64 split metadata is not implemented"));
                 }
@@ -130,12 +133,18 @@ fn read_zip_eocd(archive_path: &Path, archive_size: u64) -> Result<ZipEndOfCentr
         }
         let central_directory_offset = u64::from(central_directory_offset);
         let central_directory_size = u64::from(central_directory_size);
-        let central_directory_end = central_directory_offset.checked_add(central_directory_size).ok_or_else(|| unsupported_split_zip("central directory offset overflow"))?;
+        let central_directory_end =
+            central_directory_offset.checked_add(central_directory_size).ok_or_else(|| unsupported_split_zip("central directory offset overflow"))?;
         if central_directory_end != eocd_offset {
             return Err(unsupported_split_zip("unexpected data between central directory and ZIP end record"));
         }
 
-        return Ok(ZipEndOfCentralDirectory { central_directory_offset, central_directory_size, total_entries, bytes: tail[offset..offset + eocd_len].to_vec() });
+        return Ok(ZipEndOfCentralDirectory {
+            central_directory_offset,
+            central_directory_size,
+            total_entries,
+            bytes: tail[offset..offset + eocd_len].to_vec(),
+        });
     }
 
     Err(unsupported_split_zip("archive is missing ZIP end record"))
@@ -144,12 +153,18 @@ fn read_zip_eocd(archive_path: &Path, archive_size: u64) -> Result<ZipEndOfCentr
 fn read_zip_central_directory(archive_path: &Path, eocd: &ZipEndOfCentralDirectory) -> Result<Vec<u8>, ZipBackendError> {
     let mut file = File::open(archive_path).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
     file.seek(SeekFrom::Start(eocd.central_directory_offset)).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
-    let mut central_directory = vec![0; usize::try_from(eocd.central_directory_size).map_err(|_| { unsupported_split_zip("central directory is too large for this platform") })?];
+    let mut central_directory =
+        vec![0; usize::try_from(eocd.central_directory_size).map_err(|_| { unsupported_split_zip("central directory is too large for this platform") })?];
     file.read_exact(&mut central_directory).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
     Ok(central_directory)
 }
 
-fn patch_split_zip_central_directory(central_directory: &mut [u8], volume_size: u64, central_directory_logical_offset: u64, eocd_disk: u16) -> Result<u16, ZipBackendError> {
+fn patch_split_zip_central_directory(
+    central_directory: &mut [u8],
+    volume_size: u64,
+    central_directory_logical_offset: u64,
+    eocd_disk: u16,
+) -> Result<u16, ZipBackendError> {
     let mut offset = 0usize;
     let mut entries_on_eocd_disk = 0u16;
     while offset < central_directory.len() {
@@ -171,8 +186,9 @@ fn patch_split_zip_central_directory(central_directory: &mut [u8], volume_size: 
         let (disk, relative_offset) = split_zip_location(logical_header_offset, volume_size)?;
         central_directory[offset + 34..offset + 36].copy_from_slice(&disk.to_le_bytes());
         central_directory[offset + 42..offset + 46].copy_from_slice(&relative_offset.to_le_bytes());
-        let central_directory_entry_offset =
-            central_directory_logical_offset.checked_add(u64::try_from(offset).unwrap_or(0)).ok_or_else(|| unsupported_split_zip("central directory entry offset overflow"))?;
+        let central_directory_entry_offset = central_directory_logical_offset
+            .checked_add(u64::try_from(offset).unwrap_or(0))
+            .ok_or_else(|| unsupported_split_zip("central directory entry offset overflow"))?;
         let (central_directory_entry_disk, _) = split_zip_location(central_directory_entry_offset, volume_size)?;
         if central_directory_entry_disk == eocd_disk {
             entries_on_eocd_disk = entries_on_eocd_disk.saturating_add(1);
@@ -235,7 +251,12 @@ fn split_zip_base_path(destination: &Path) -> Result<PathBuf, ZipBackendError> {
     Err(unsupported_split_zip("split ZIP output path must use a .zip extension"))
 }
 
-fn ensure_split_destinations_available(destination: &Path, volume_paths: &[PathBuf], existing_volume_paths: &[PathBuf], replace_existing: bool) -> Result<(), ZipBackendError> {
+fn ensure_split_destinations_available(
+    destination: &Path,
+    volume_paths: &[PathBuf],
+    existing_volume_paths: &[PathBuf],
+    replace_existing: bool,
+) -> Result<(), ZipBackendError> {
     ensure_file_destination_available(destination, replace_existing)?;
     for path in crate::archive_split::unique_paths(volume_paths, existing_volume_paths) {
         ensure_file_destination_available(path, replace_existing)?;
@@ -248,7 +269,8 @@ fn ensure_file_destination_available(path: &Path, replace_existing: bool) -> Res
 }
 
 fn remove_split_destinations_for_replace(destination: &Path, existing_volume_paths: &[PathBuf], replace_existing: bool) -> Result<(), ZipBackendError> {
-    crate::archive_split::remove_split_destinations_for_replace(destination, existing_volume_paths, replace_existing).map_err(|source| ZipBackendError::Io { path: destination.to_path_buf(), source })
+    crate::archive_split::remove_split_destinations_for_replace(destination, existing_volume_paths, replace_existing)
+        .map_err(|source| ZipBackendError::Io { path: destination.to_path_buf(), source })
 }
 
 fn existing_split_zip_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, ZipBackendError> {
@@ -299,7 +321,12 @@ impl<'a> ZipSplitVolumeWriter<'a> {
             let remaining = usize::try_from(self.volume_size - self.current_written).unwrap_or(usize::MAX);
             let to_write = remaining.min(bytes.len());
             let path = self.current_path().to_path_buf();
-            let output = self.current.as_mut().ok_or_else(|| unsupported_split_zip("missing ZIP volume output"))?.file_mut().map_err(|source| ZipBackendError::Io { path: path.clone(), source })?;
+            let output = self
+                .current
+                .as_mut()
+                .ok_or_else(|| unsupported_split_zip("missing ZIP volume output"))?
+                .file_mut()
+                .map_err(|source| ZipBackendError::Io { path: path.clone(), source })?;
             output.write_all(&bytes[..to_write]).map_err(|source| ZipBackendError::Io { path, source })?;
             self.current_written += u64::try_from(to_write).unwrap_or(0);
             bytes = &bytes[to_write..];
@@ -389,9 +416,12 @@ mod tests {
         temp.write_file("project/blob.bin", &payload);
         let archive = temp.path("archive.zip");
 
-        let report =
-            create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions { compression: ZipCompression::Store, volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() })
-                .unwrap();
+        let report = create_zip_fixture(
+            temp.path("project"),
+            &archive,
+            &ZipCreateOptions { compression: ZipCompression::Store, volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() },
+        )
+        .unwrap();
 
         assert_eq!(report.volume_size, Some(MIN_ZIP_VOLUME_SIZE_BYTES));
         assert!(report.volume_count > 1);
@@ -431,8 +461,12 @@ mod tests {
             temp.write_file("project/blob.bin", &payload);
             let archive = temp.path("archive.zip");
 
-            let report = create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions { compression, level, volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() })
-                .unwrap_or_else(|error| panic!("{name}: split create failed: {error}"));
+            let report = create_zip_fixture(
+                temp.path("project"),
+                &archive,
+                &ZipCreateOptions { compression, level, volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() },
+            )
+            .unwrap_or_else(|error| panic!("{name}: split create failed: {error}"));
             assert!(report.volume_count > 1, "{name}: expected multiple volumes");
 
             let extract_report = crate::libarchive_backend::extract_archive_with_password(&archive, temp.path("out"), ExtractionPolicy::default(), None)
@@ -453,7 +487,12 @@ mod tests {
         let report = create_zip_fixture(
             temp.path("project"),
             &archive,
-            &ZipCreateOptions { compression: ZipCompression::Store, password: Some(SecretString::from("correct horse")), volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() },
+            &ZipCreateOptions {
+                compression: ZipCompression::Store,
+                password: Some(SecretString::from("correct horse")),
+                volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES),
+                ..ZipCreateOptions::default()
+            },
         )
         .unwrap();
 
@@ -472,9 +511,12 @@ mod tests {
         temp.write_file("archive.z01", b"stale");
         let archive = temp.path("archive.zip");
 
-        let error =
-            create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions { compression: ZipCompression::Store, volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() })
-                .unwrap_err();
+        let error = create_zip_fixture(
+            temp.path("project"),
+            &archive,
+            &ZipCreateOptions { compression: ZipCompression::Store, volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() },
+        )
+        .unwrap_err();
 
         assert!(matches!(error, ZipBackendError::Io { .. }));
         assert_eq!(fs::read(temp.path("archive.z01")).unwrap(), b"stale");
@@ -483,7 +525,12 @@ mod tests {
         create_zip_fixture(
             temp.path("project"),
             &archive,
-            &ZipCreateOptions { compression: ZipCompression::Store, replace_existing: true, volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES), ..ZipCreateOptions::default() },
+            &ZipCreateOptions {
+                compression: ZipCompression::Store,
+                replace_existing: true,
+                volume_size: Some(MIN_ZIP_VOLUME_SIZE_BYTES),
+                ..ZipCreateOptions::default()
+            },
         )
         .unwrap();
 

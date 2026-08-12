@@ -147,7 +147,12 @@ pub fn extract_dmg_with_overwrite_resolver(
 }
 
 /// Extracts a `.dmg` archive with context.
-pub fn extract_dmg_with_context(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy, context: &mut JobContext<'_>) -> Result<DmgExtractReport, DmgBackendError> {
+pub fn extract_dmg_with_context(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    context: &mut JobContext<'_>,
+) -> Result<DmgExtractReport, DmgBackendError> {
     extract_dmg_inner(archive_path, destination, policy, Some(context), None)
 }
 
@@ -160,7 +165,8 @@ fn extract_dmg_inner(
 ) -> Result<DmgExtractReport, DmgBackendError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
-    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| DmgBackendError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root =
+        crate::safety::prepare_destination_root(destination).map_err(|source| DmgBackendError::Io { path: destination.to_path_buf(), source })?;
 
     let mut pipeline = dpp::DmgPipeline::open(archive_path).map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
     let mut fs = pipeline.open_filesystem().map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
@@ -190,67 +196,74 @@ fn extract_dmg_inner(
 
         let safety_entry = ExtractionEntry { archive_path: archive_entry_path, kind, uncompressed_size: Some(size), compressed_size: None };
 
-        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, mut context| match action {
-            crate::extract_loop::EntryAction::Skip => Ok::<u64, DmgBackendError>(0),
-            crate::extract_loop::EntryAction::Write(decision) => {
-                let replace_existing = decision.replace_existing;
-                let destination_path = decision.destination_path;
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, mut context| {
+            match action {
+                crate::extract_loop::EntryAction::Skip => Ok::<u64, DmgBackendError>(0),
+                crate::extract_loop::EntryAction::Write(decision) => {
+                    let replace_existing = decision.replace_existing;
+                    let destination_path = decision.destination_path;
 
-                if replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
-                    crate::safety::remove_destination_for_replace(destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                }
-
-                match &safety_entry.kind {
-                    ExtractionEntryKind::Directory => {
-                        std::fs::create_dir_all(destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                        Ok::<u64, DmgBackendError>(0)
+                    if replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
+                        crate::safety::remove_destination_for_replace(destination_path)
+                            .map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
                     }
-                    ExtractionEntryKind::File => {
-                        let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                        let mut file = output.file_mut().map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
 
-                        let written_bytes = if context.is_some() {
-                            let mut writer = ProgressWriter { inner: &mut file, context: context.as_deref_mut(), archive_path: &safety_entry.archive_path };
-                            fs.read_file_to(&walk_entry.path, &mut writer).map_err(|e| DmgBackendError::Dpp(e.to_string()))?
-                        } else {
-                            fs.read_file_to(&walk_entry.path, &mut file).map_err(|e| DmgBackendError::Dpp(e.to_string()))?
-                        };
+                    match &safety_entry.kind {
+                        ExtractionEntryKind::Directory => {
+                            std::fs::create_dir_all(destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                            Ok::<u64, DmgBackendError>(0)
+                        }
+                        ExtractionEntryKind::File => {
+                            let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path)
+                                .map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                            let mut file = output.file_mut().map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
 
-                        output.commit_with_replace(replace_existing).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                            let written_bytes = if context.is_some() {
+                                let mut writer = ProgressWriter { inner: &mut file, context: context.as_deref_mut(), archive_path: &safety_entry.archive_path };
+                                fs.read_file_to(&walk_entry.path, &mut writer).map_err(|e| DmgBackendError::Dpp(e.to_string()))?
+                            } else {
+                                fs.read_file_to(&walk_entry.path, &mut file).map_err(|e| DmgBackendError::Dpp(e.to_string()))?
+                            };
 
-                        report.written_entries += 1;
-                        report.written_bytes += written_bytes;
-                        Ok(written_bytes)
+                            output
+                                .commit_with_replace(replace_existing)
+                                .map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+
+                            report.written_entries += 1;
+                            report.written_bytes += written_bytes;
+                            Ok(written_bytes)
+                        }
+                        ExtractionEntryKind::Symlink { target } => {
+                            // HFS+ stores symlink targets in the resource fork, which the
+                            // underlying DPP reader does not expose: read_file returns
+                            // empty for such entries. Skip rather than materialize a
+                            // broken empty symlink.
+                            if target.as_os_str().is_empty() {
+                                crate::extract_loop::skip_entry(
+                                    report,
+                                    context,
+                                    format!("symlink {} skipped: disk image does not expose the symlink target", safety_entry.archive_path),
+                                );
+                                return Ok(0);
+                            }
+                            if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
+                                crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
+                                return Ok(0);
+                            }
+
+                            #[cfg(unix)]
+                            {
+                                crate::extract_materialize::write_symlink(Path::new(target), destination_path)
+                                    .map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                let _ = target;
+                            }
+                            Ok::<u64, DmgBackendError>(0)
+                        }
+                        _ => Ok::<u64, DmgBackendError>(0),
                     }
-                    ExtractionEntryKind::Symlink { target } => {
-                        // HFS+ stores symlink targets in the resource fork, which the
-                        // underlying DPP reader does not expose: read_file returns
-                        // empty for such entries. Skip rather than materialize a
-                        // broken empty symlink.
-                        if target.as_os_str().is_empty() {
-                            crate::extract_loop::skip_entry(
-                                report,
-                                context,
-                                format!("symlink {} skipped: disk image does not expose the symlink target", safety_entry.archive_path),
-                            );
-                            return Ok(0);
-                        }
-                        if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
-                            crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
-                            return Ok(0);
-                        }
-
-                        #[cfg(unix)]
-                        {
-                            crate::extract_materialize::write_symlink(Path::new(target), destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                        }
-                        #[cfg(not(unix))]
-                        {
-                            let _ = target;
-                        }
-                        Ok::<u64, DmgBackendError>(0)
-                    }
-                    _ => Ok::<u64, DmgBackendError>(0),
                 }
             }
         })?;
@@ -290,10 +303,7 @@ mod tests {
         assert!(paths.contains(&"payload/nested/empty-dir"), "{paths:?}");
         assert!(paths.contains(&"payload/dir with spaces/file with spaces.txt"), "{paths:?}");
         assert!(paths.contains(&"payload/unicode/こんにちは.txt"), "{paths:?}");
-        assert!(
-            listing.iter().all(|entry| !entry.path.starts_with('/') && !entry.path.starts_with("./")),
-            "dmg paths must be normalized: {paths:?}"
-        );
+        assert!(listing.iter().all(|entry| !entry.path.starts_with('/') && !entry.path.starts_with("./")), "dmg paths must be normalized: {paths:?}");
 
         let readme = listing.iter().find(|entry| entry.path == "payload/README.txt").unwrap();
         assert_eq!(readme.kind, DmgEntryKind::File);
@@ -308,9 +318,13 @@ mod tests {
         assert!(archive.is_file(), "missing fixture; run scripts/generate_fixtures.sh");
 
         let temp = TestDir::new("checked_in_dmg_fixture_extract");
-        let report =
-            extract_dmg_with_overwrite_resolver(&archive, temp.path("out"), ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() }, &mut AlwaysReplace)
-                .unwrap();
+        let report = extract_dmg_with_overwrite_resolver(
+            &archive,
+            temp.path("out"),
+            ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() },
+            &mut AlwaysReplace,
+        )
+        .unwrap();
 
         assert_eq!(report.written_entries, 4);
         assert_eq!(report.written_bytes, 81);

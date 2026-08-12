@@ -57,7 +57,13 @@ pub(super) fn parse_cert_id_operation_args(args: &[String], global: &mut GlobalO
     Ok((context, certificate_id))
 }
 
-pub(super) fn parse_tzap_context_option(args: &[String], index: &mut usize, context: &mut TzapCliContext, command: &str, global: &GlobalOptions) -> Result<bool, ExitCode> {
+pub(super) fn parse_tzap_context_option(
+    args: &[String],
+    index: &mut usize,
+    context: &mut TzapCliContext,
+    command: &str,
+    global: &GlobalOptions,
+) -> Result<bool, ExitCode> {
     match args[*index].as_str() {
         "--state-dir" => {
             context.state_dir = PathBuf::from(take_value(args, index, "--state-dir").map_err(|error| command_usage_error(command, &error, global))?);
@@ -70,7 +76,12 @@ pub(super) fn parse_tzap_context_option(args: &[String], index: &mut usize, cont
     Ok(true)
 }
 
-pub(super) fn parse_environment_option(args: &[String], index: &mut usize, environment: &mut zmanager_core::auth_client::TzapHostedAuthEnvironment, global: &GlobalOptions) -> Result<(), ExitCode> {
+pub(super) fn parse_environment_option(
+    args: &[String],
+    index: &mut usize,
+    environment: &mut zmanager_core::auth_client::TzapHostedAuthEnvironment,
+    global: &GlobalOptions,
+) -> Result<(), ExitCode> {
     let value = take_value(args, index, "--environment").map_err(|error| command_usage_error("auth", &error, global))?;
     *environment = match value.as_str() {
         "local" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Local,
@@ -157,7 +168,14 @@ pub(super) fn callback_url_parameter(callback_url: &str, key: &str) -> Option<St
     None
 }
 
-pub(super) fn exchange_handoff_code(auth_base_url: &str, client_id: &str, redirect_uri: &str, state: &str, pkce_verifier: &str, handoff_code: &str) -> Result<Vec<u8>, String> {
+pub(super) fn exchange_handoff_code(
+    auth_base_url: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    state: &str,
+    pkce_verifier: &str,
+    handoff_code: &str,
+) -> Result<Vec<u8>, String> {
     let url = format!("{}{}", auth_base_url.trim_end_matches('/'), AUTH_SESSION_EXCHANGE_PATH);
     let exchange = http_post_json(
         &url,
@@ -206,7 +224,10 @@ pub(super) fn http_post_json(url: &str, body: &Value) -> Result<Value, String> {
 pub(super) struct CliHttpJsonTransport;
 
 impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
-    fn send(&self, request: &zmanager_core::auth_client::TzapAuthHttpRequest) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, zmanager_core::auth_client::TzapAuthError> {
+    fn send(
+        &self,
+        request: &zmanager_core::auth_client::TzapAuthHttpRequest,
+    ) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, zmanager_core::auth_client::TzapAuthError> {
         let method = match request.method {
             zmanager_core::auth_client::TzapAuthHttpMethod::Get => "GET",
             zmanager_core::auth_client::TzapAuthHttpMethod::Post => "POST",
@@ -216,7 +237,12 @@ impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport 
     }
 }
 
-pub(super) fn http_json_request(method: &str, url: &str, bearer_token: Option<&str>, body: Option<&Value>) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, String> {
+pub(super) fn http_json_request(
+    method: &str,
+    url: &str,
+    bearer_token: Option<&str>,
+    body: Option<&Value>,
+) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, String> {
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
@@ -230,7 +256,13 @@ pub(super) fn http_json_request(method: &str, url: &str, bearer_token: Option<&s
     Ok(zmanager_core::auth_client::TzapAuthHttpResponse { status_code, body: response_body })
 }
 
-pub(crate) fn build_hosted_http_request(client: &reqwest::blocking::Client, method: &str, url: &str, bearer_token: Option<&str>, body: Option<&Value>) -> Result<reqwest::blocking::Request, String> {
+pub(crate) fn build_hosted_http_request(
+    client: &reqwest::blocking::Client,
+    method: &str,
+    url: &str,
+    bearer_token: Option<&str>,
+    body: Option<&Value>,
+) -> Result<reqwest::blocking::Request, String> {
     let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|error| format!("invalid hosted HTTP method: {error}"))?;
     let mut request = client.request(method, url).header(reqwest::header::ACCEPT, "application/json");
     if let Some(token) = bearer_token {
@@ -301,7 +333,10 @@ pub(super) fn rfc3339_utc_to_unix_seconds(value: &str) -> Result<u64, String> {
         return Err(format!("expires_at second {second} is out of range"));
     }
     let days = days_from_civil(year, month, day);
-    let seconds = days.checked_mul(86_400).and_then(|value| value.checked_add(hour * 3_600 + minute * 60 + second)).ok_or_else(|| "expires_at is out of range".to_owned())?;
+    let seconds = days
+        .checked_mul(86_400)
+        .and_then(|value| value.checked_add(hour * 3_600 + minute * 60 + second))
+        .ok_or_else(|| "expires_at is out of range".to_owned())?;
     u64::try_from(seconds).map_err(|_| "expires_at is before the Unix epoch".to_owned())
 }
 

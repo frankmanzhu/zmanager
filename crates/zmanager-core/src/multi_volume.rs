@@ -167,7 +167,10 @@ fn discover_numbered_archive_volume_paths(directory: &Path, lower_name: &str) ->
 
 fn parse_numbered_archive_volume_name(name: &str) -> Option<(&str, u32)> {
     let (base, number) = name.rsplit_once('.')?;
-    if !NUMBERED_VOLUME_ARCHIVE_SUFFIXES.iter().any(|suffix| base.ends_with(suffix)) || number.len() != NUMBERED_VOLUME_EXTENSION_WIDTH || !number.chars().all(|value| value.is_ascii_digit()) {
+    if !NUMBERED_VOLUME_ARCHIVE_SUFFIXES.iter().any(|suffix| base.ends_with(suffix))
+        || number.len() != NUMBERED_VOLUME_EXTENSION_WIDTH
+        || !number.chars().all(|value| value.is_ascii_digit())
+    {
         return None;
     }
     let part = number.parse().ok()?;
@@ -225,7 +228,12 @@ mod tests {
         temp.write_file("payload/blob.bin", &payload);
         let archive = temp.path("payload.7z");
 
-        create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { solid: false, level: Some(1), volume_size: Some(1_048_576), ..SevenZCreateOptions::default() }).unwrap();
+        create_7z_from_path(
+            temp.path("payload"),
+            &archive,
+            &SevenZCreateOptions { solid: false, level: Some(1), volume_size: Some(1_048_576), ..SevenZCreateOptions::default() },
+        )
+        .unwrap();
 
         let listing = list_archive(temp.path("payload.7z.001")).unwrap();
         let report = extract_archive(temp.path("payload.7z.001"), temp.path("out"), ExtractionPolicy::default()).unwrap();

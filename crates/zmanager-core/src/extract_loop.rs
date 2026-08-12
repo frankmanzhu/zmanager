@@ -142,9 +142,11 @@ where
     }
 
     let processed = match decision {
-        ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => {
-            materialize(EntryAction::Write(WriteDecision { destination_path: &destination_path, replace_existing, link_target_path: link_target_path.as_deref() }), report, context.as_deref_mut())?
-        }
+        ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => materialize(
+            EntryAction::Write(WriteDecision { destination_path: &destination_path, replace_existing, link_target_path: link_target_path.as_deref() }),
+            report,
+            context.as_deref_mut(),
+        )?,
         ExtractionDecision::Skip { reason, .. } => {
             materialize(EntryAction::Skip, report, context.as_deref_mut())?;
             skip_entry(report, context.as_deref_mut(), format!("skipped {}: {reason}", safety_entry.archive_path));
@@ -190,7 +192,11 @@ where
         if read == 0 {
             break;
         }
-        output.file_mut().map_err(|source| io_error(source, destination_path))?.write_all(&io_buffer[..read]).map_err(|source| io_error(source, destination_path))?;
+        output
+            .file_mut()
+            .map_err(|source| io_error(source, destination_path))?
+            .write_all(&io_buffer[..read])
+            .map_err(|source| io_error(source, destination_path))?;
         let read = read as u64;
         written_bytes += read;
         if let Some(context) = context.as_deref_mut() {

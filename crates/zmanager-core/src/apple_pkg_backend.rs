@@ -103,7 +103,12 @@ pub fn extract_pkg_with_overwrite_resolver(
 }
 
 /// Extracts a `.pkg` archive with context.
-pub fn extract_pkg_with_context(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy, context: &mut JobContext<'_>) -> Result<PkgExtractReport, PkgBackendError> {
+pub fn extract_pkg_with_context(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    context: &mut JobContext<'_>,
+) -> Result<PkgExtractReport, PkgBackendError> {
     extract_pkg_inner(archive_path, destination, policy, Some(context), None)
 }
 
@@ -157,11 +162,7 @@ fn decode_payload(payload_bytes: &[u8]) -> Result<dpp::pbzx::Archive, PkgBackend
 fn normalize_cpio_path(path: &str) -> Option<String> {
     let path = path.strip_prefix("./").unwrap_or(path);
     let path = path.strip_prefix('/').unwrap_or(path);
-    if path.is_empty() || path == "." {
-        None
-    } else {
-        Some(path.to_string())
-    }
+    if path.is_empty() || path == "." { None } else { Some(path.to_string()) }
 }
 
 /// Reads every CPIO entry across all package components.
@@ -212,7 +213,8 @@ fn extract_pkg_inner(
 ) -> Result<PkgExtractReport, PkgBackendError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
-    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| PkgBackendError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root =
+        crate::safety::prepare_destination_root(destination).map_err(|source| PkgBackendError::Io { path: destination.to_path_buf(), source })?;
 
     let entries = read_payload_entries(archive_path)?;
 
@@ -240,61 +242,67 @@ fn extract_pkg_inner(
 
         let safety_entry = ExtractionEntry { archive_path: archive_entry_path, kind, uncompressed_size: Some(size), compressed_size: None };
 
-        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, mut context| match action {
-            crate::extract_loop::EntryAction::Skip => Ok::<u64, PkgBackendError>(0),
-            crate::extract_loop::EntryAction::Write(decision) => {
-                let replace_existing = decision.replace_existing;
-                let destination_path = decision.destination_path;
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, mut context| {
+            match action {
+                crate::extract_loop::EntryAction::Skip => Ok::<u64, PkgBackendError>(0),
+                crate::extract_loop::EntryAction::Write(decision) => {
+                    let replace_existing = decision.replace_existing;
+                    let destination_path = decision.destination_path;
 
-                if replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
-                    crate::safety::remove_destination_for_replace(destination_path).map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                }
-
-                match &safety_entry.kind {
-                    ExtractionEntryKind::Directory => {
-                        std::fs::create_dir_all(destination_path).map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                        Ok::<u64, PkgBackendError>(0)
+                    if replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
+                        crate::safety::remove_destination_for_replace(destination_path)
+                            .map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
                     }
-                    ExtractionEntryKind::File => {
-                        let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path).map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                        let file = output.file_mut().map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
 
-                        let written_bytes = match &cpio_entry.data {
-                            Some(data) => {
-                                file.write_all(data).map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-                                data.len() as u64
-                            }
-                            None => 0,
-                        };
-
-                        output.commit_with_replace(replace_existing).map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
-
-                        if let Some(ctx) = context.as_deref_mut() {
-                            ctx.bytes_processed(Some(&safety_entry.archive_path), written_bytes);
+                    match &safety_entry.kind {
+                        ExtractionEntryKind::Directory => {
+                            std::fs::create_dir_all(destination_path).map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                            Ok::<u64, PkgBackendError>(0)
                         }
-
-                        report.written_entries += 1;
-                        report.written_bytes += written_bytes;
-                        Ok(written_bytes)
-                    }
-                    ExtractionEntryKind::Symlink { target } => {
-                        if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
-                            crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
-                            return Ok(0);
-                        }
-
-                        #[cfg(unix)]
-                        {
-                            crate::extract_materialize::write_symlink(Path::new(target), destination_path)
+                        ExtractionEntryKind::File => {
+                            let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path)
                                 .map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                            let file = output.file_mut().map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+
+                            let written_bytes = match &cpio_entry.data {
+                                Some(data) => {
+                                    file.write_all(data).map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                                    data.len() as u64
+                                }
+                                None => 0,
+                            };
+
+                            output
+                                .commit_with_replace(replace_existing)
+                                .map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+
+                            if let Some(ctx) = context.as_deref_mut() {
+                                ctx.bytes_processed(Some(&safety_entry.archive_path), written_bytes);
+                            }
+
+                            report.written_entries += 1;
+                            report.written_bytes += written_bytes;
+                            Ok(written_bytes)
                         }
-                        #[cfg(not(unix))]
-                        {
-                            let _ = target;
+                        ExtractionEntryKind::Symlink { target } => {
+                            if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
+                                crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
+                                return Ok(0);
+                            }
+
+                            #[cfg(unix)]
+                            {
+                                crate::extract_materialize::write_symlink(Path::new(target), destination_path)
+                                    .map_err(|source| PkgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                let _ = target;
+                            }
+                            Ok::<u64, PkgBackendError>(0)
                         }
-                        Ok::<u64, PkgBackendError>(0)
+                        _ => Ok::<u64, PkgBackendError>(0),
                     }
-                    _ => Ok::<u64, PkgBackendError>(0),
                 }
             }
         })?;
@@ -334,10 +342,7 @@ mod tests {
         assert!(paths.contains(&"payload/nested/empty-dir"), "{paths:?}");
         assert!(paths.contains(&"payload/dir with spaces/file with spaces.txt"), "{paths:?}");
         assert!(paths.contains(&"payload/unicode/こんにちは.txt"), "{paths:?}");
-        assert!(
-            listing.iter().all(|entry| !entry.path.starts_with('/') && !entry.path.starts_with("./")),
-            "pkg paths must be normalized: {paths:?}"
-        );
+        assert!(listing.iter().all(|entry| !entry.path.starts_with('/') && !entry.path.starts_with("./")), "pkg paths must be normalized: {paths:?}");
 
         let readme = listing.iter().find(|entry| entry.path == "payload/README.txt").unwrap();
         assert_eq!(readme.kind, PkgEntryKind::File);
@@ -355,9 +360,13 @@ mod tests {
         assert!(archive.is_file(), "missing fixture; run scripts/generate_fixtures.sh");
 
         let temp = TestDir::new("checked_in_pkg_fixture_extract");
-        let report =
-            extract_pkg_with_overwrite_resolver(&archive, temp.path("out"), ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() }, &mut AlwaysReplace)
-                .unwrap();
+        let report = extract_pkg_with_overwrite_resolver(
+            &archive,
+            temp.path("out"),
+            ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() },
+            &mut AlwaysReplace,
+        )
+        .unwrap();
 
         assert_eq!(report.skipped_entries, 0, "warnings: {:?}", report.warnings);
         assert_eq!(fs::read_to_string(temp.path("out/payload/README.txt")).unwrap(), "ZManager fixture payload\n");

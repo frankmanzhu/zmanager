@@ -3,15 +3,15 @@ use crate::cli::extract::{extract_command, extract_command_from_expanded};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::APPLE_ARCHIVE_EXTENSIONS;
 use crate::cli::format::{
-    CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FORMAT_LIBARCHIVE, FormatDescriptor, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS, TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX,
-    ZIP_FAMILY_EXTENSIONS, strip_suffix_ignore_ascii_case,
+    CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FORMAT_LIBARCHIVE, FormatDescriptor, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS,
+    TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX, ZIP_FAMILY_EXTENSIONS, strip_suffix_ignore_ascii_case,
 };
 use crate::cli::open::{list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded};
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_output_mode};
 use crate::cli::tzap::{auth_command, cert_command, contact_command, device_command, me_command, share_command, sign_command, verify_command};
 use crate::cli::usage::{
-    COMPLETION_BASH_SCRIPT, COMPLETION_FISH_SCRIPT, COMPLETION_POWERSHELL_SCRIPT, COMPLETION_ZSH_SCRIPT, COMPLETIONS_HELP, DOCTOR_HELP, FORMATS_HELP, USAGE, command_usage_error, help_command,
-    json_escape, print_help_stderr, print_help_stdout, usage_error, wants_help,
+    COMPLETION_BASH_SCRIPT, COMPLETION_FISH_SCRIPT, COMPLETION_POWERSHELL_SCRIPT, COMPLETION_ZSH_SCRIPT, COMPLETIONS_HELP, DOCTOR_HELP, FORMATS_HELP, USAGE,
+    command_usage_error, help_command, json_escape, print_help_stderr, print_help_stdout, usage_error, wants_help,
 };
 use crate::output::{self, OutputMode, StyleRole};
 use std::env;
@@ -102,7 +102,9 @@ pub(crate) struct ProgressReporter {
 impl ProgressReporter {
     pub(crate) fn from_global(global: Option<&GlobalOptions>) -> Self {
         let stderr_is_terminal = io::stderr().is_terminal();
-        let enabled = global.is_some_and(|global| matches!(global.progress, OutputMode::Always) || matches!(global.progress, OutputMode::Auto) && !global.quiet && stderr_is_terminal);
+        let enabled = global.is_some_and(|global| {
+            matches!(global.progress, OutputMode::Always) || matches!(global.progress, OutputMode::Auto) && !global.quiet && stderr_is_terminal
+        });
         let color = global.map_or(OutputMode::Never, |global| global.color);
 
         Self { enabled, color, total_bytes: None, last_percent: None, last_reported_bytes: 0 }
@@ -143,7 +145,11 @@ impl ProgressReporter {
             JobEvent::Cancelled { message } => {
                 self.emit_line(format_args!("cancelled: {message}"));
             }
-            JobEvent::EntryStarted { .. } | JobEvent::EntryFinished { .. } | JobEvent::PhaseStarted { .. } | JobEvent::PhaseBytesProcessed { .. } | JobEvent::Warning { .. } => {}
+            JobEvent::EntryStarted { .. }
+            | JobEvent::EntryFinished { .. }
+            | JobEvent::PhaseStarted { .. }
+            | JobEvent::PhaseBytesProcessed { .. }
+            | JobEvent::Warning { .. } => {}
         }
     }
 
@@ -214,7 +220,10 @@ where
         let mut answer = String::new();
         loop {
             answer.clear();
-            if write!(self.output, "overwrite {} from {}?{OVERWRITE_PROMPT_SUFFIX}", conflict.destination_path.display(), conflict.archive_path).and_then(|()| self.output.flush()).is_err() {
+            if write!(self.output, "overwrite {} from {}?{OVERWRITE_PROMPT_SUFFIX}", conflict.destination_path.display(), conflict.archive_path)
+                .and_then(|()| self.output.flush())
+                .is_err()
+            {
                 return OverwriteDecision::Quit;
             }
             match self.input.read_line(&mut answer) {
@@ -600,16 +609,25 @@ fn print_formats_table(global: &GlobalOptions) {
     output::stdout_line(global.color, format_args!("{}", output::styled(StyleRole::Heading, format_args!("Create:"))));
     for format in CREATE_FORMATS {
         let padding = " ".repeat(9usize.saturating_sub(format.name.len()));
-        output::stdout_line(global.color, format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")));
+        output::stdout_line(
+            global.color,
+            format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")),
+        );
     }
     output::stdout_line(global.color, format_args!(""));
     output::stdout_line(global.color, format_args!("{}", output::styled(StyleRole::Heading, format_args!("Extract:"))));
     for format in EXTRACT_FORMATS {
         let padding = " ".repeat(9usize.saturating_sub(format.name.len()));
         if format.name == FORMAT_LIBARCHIVE {
-            output::stdout_line(global.color, format_args!("  {}{} fallback for supported archive formats", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding));
+            output::stdout_line(
+                global.color,
+                format_args!("  {}{} fallback for supported archive formats", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding),
+            );
         } else {
-            output::stdout_line(global.color, format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")));
+            output::stdout_line(
+                global.color,
+                format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")),
+            );
         }
     }
 }
