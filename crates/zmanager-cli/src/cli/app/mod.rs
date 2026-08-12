@@ -1,10 +1,8 @@
 use crate::cli::create::{create_command, create_command_from_expanded};
 use crate::cli::extract::{extract_command, extract_command_from_expanded};
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-use crate::cli::format::APPLE_ARCHIVE_EXTENSIONS;
 use crate::cli::format::{
-    CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FORMAT_LIBARCHIVE, FormatDescriptor, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS,
-    TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX, ZIP_FAMILY_EXTENSIONS, strip_suffix_ignore_ascii_case,
+    APPLE_ARCHIVE_EXTENSIONS, CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FORMAT_LIBARCHIVE, FormatDescriptor, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS,
+    TAR_ZST_EXTENSIONS, TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX, ZIP_FAMILY_EXTENSIONS, strip_suffix_ignore_ascii_case,
 };
 use crate::cli::open::{list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded};
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_output_mode};
@@ -20,6 +18,7 @@ use std::io::{self, IsTerminal as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
+use zmanager_core::archive_format::{BackendStatus, format_status};
 use zmanager_core::jobs::{JobEvent, JobKind};
 use zmanager_core::safety::{OverwriteConflict, OverwriteDecision, OverwriteResolver};
 
@@ -188,9 +187,7 @@ fn progress_job_label(kind: JobKind) -> &'static str {
         JobKind::TarZstdExtract => "tar.zst extract",
         JobKind::TzapCreate => "tzap create",
         JobKind::TzapExtract => "tzap extract",
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         JobKind::AppleArchiveCreate => "aar create",
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         JobKind::AppleArchiveExtract => "aar extract",
         JobKind::ArchiveExtract => "archive extract",
         JobKind::RawStreamExtract => "raw stream extract",
@@ -269,7 +266,6 @@ pub(crate) enum ArchiveFormat {
     Zip,
     TarZst,
     Tzap,
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     AppleArchive,
     SevenZ,
     Tgz,
@@ -305,7 +301,6 @@ pub(crate) fn create_progress_kind(format: ArchiveFormat) -> JobKind {
         ArchiveFormat::Zip => JobKind::ZipCreate,
         ArchiveFormat::TarZst => JobKind::TarZstdCreate,
         ArchiveFormat::Tzap => JobKind::TzapCreate,
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveFormat::AppleArchive => JobKind::AppleArchiveCreate,
         ArchiveFormat::SevenZ => JobKind::SevenZCreate,
         ArchiveFormat::Tgz => JobKind::TarGzCreate,
@@ -600,9 +595,23 @@ fn print_format_descriptors_json(formats: &[FormatDescriptor]) {
         }
         print!("{{\"format\":\"{}\",\"extensions\":", json_escape(format.name));
         print!("{}", crate::cli::usage::json_string_array(format.extensions));
-        print!("}}");
+        print!(",\"status\":\"{}\"}}", backend_status_string(format_status(format.kind)));
     }
     print!("]");
+}
+
+fn backend_status_string(status: BackendStatus) -> &'static str {
+    match status {
+        BackendStatus::Available => "available",
+        BackendStatus::UnsupportedPlatform => "unsupported_platform",
+        BackendStatus::Unavailable { .. } => "unavailable",
+    }
+}
+
+/// Annotation appended to recognized-but-unsupported format rows, for example
+/// Apple Archive on platforms without the native framework.
+fn unsupported_annotation(format: &FormatDescriptor) -> &'static str {
+    if format_status(format.kind) == BackendStatus::Available { "" } else { " (not supported on this platform)" }
 }
 
 fn print_formats_table(global: &GlobalOptions) {
@@ -611,7 +620,13 @@ fn print_formats_table(global: &GlobalOptions) {
         let padding = " ".repeat(9usize.saturating_sub(format.name.len()));
         output::stdout_line(
             global.color,
-            format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")),
+            format_args!(
+                "  {}{} {}{}",
+                output::styled(StyleRole::Command, format_args!("{}", format.name)),
+                padding,
+                format.extensions.join(", "),
+                unsupported_annotation(format)
+            ),
         );
     }
     output::stdout_line(global.color, format_args!(""));
@@ -621,12 +636,23 @@ fn print_formats_table(global: &GlobalOptions) {
         if format.name == FORMAT_LIBARCHIVE {
             output::stdout_line(
                 global.color,
-                format_args!("  {}{} fallback for supported archive formats", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding),
+                format_args!(
+                    "  {}{} fallback for supported archive formats{}",
+                    output::styled(StyleRole::Command, format_args!("{}", format.name)),
+                    padding,
+                    unsupported_annotation(format)
+                ),
             );
         } else {
             output::stdout_line(
                 global.color,
-                format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")),
+                format_args!(
+                    "  {}{} {}{}",
+                    output::styled(StyleRole::Command, format_args!("{}", format.name)),
+                    padding,
+                    format.extensions.join(", "),
+                    unsupported_annotation(format)
+                ),
             );
         }
     }
@@ -761,7 +787,6 @@ pub(crate) fn default_extract_destination(archive: &str) -> PathBuf {
 
 fn strip_known_archive_suffix(name: &str) -> Option<&str> {
     let mut extensions: Vec<&str> = TAR_ZST_EXTENSIONS.iter().chain(ZIP_FAMILY_EXTENSIONS).chain(SEVEN_Z_EXTENSIONS).copied().collect();
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     extensions.extend_from_slice(APPLE_ARCHIVE_EXTENSIONS);
     extensions.extend_from_slice(RAR_EXTENSIONS);
     extensions.extend_from_slice(DEB_EXTENSIONS);

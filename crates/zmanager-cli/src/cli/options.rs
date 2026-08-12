@@ -1,6 +1,5 @@
 use crate::cli::app::ArchiveFormat;
 use crate::cli::create::prompt_password_from_stdin;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::{APPLE_ARCHIVE_FORMAT_ALIASES, is_apple_archive};
 use crate::cli::format::{
     FORMAT_SEVEN_Z, FORMAT_ZIP, SEVEN_Z_EXTENSIONS, SIZE_UNIT_GIB, SIZE_UNIT_KIB, SIZE_UNIT_MIB, SIZE_UNIT_TIB, TAR_ZST_FORMAT_ALIASES, TGZ_FORMAT_ALIASES,
@@ -103,7 +102,6 @@ pub(crate) fn parse_archive_format(raw: &str) -> Result<ArchiveFormat, String> {
         FORMAT_ZIP => Ok(ArchiveFormat::Zip),
         raw if TAR_ZST_FORMAT_ALIASES.contains(&raw) => Ok(ArchiveFormat::TarZst),
         raw if TZAP_FORMAT_ALIASES.contains(&raw) => Ok(ArchiveFormat::Tzap),
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         raw if APPLE_ARCHIVE_FORMAT_ALIASES.contains(&raw) => Ok(ArchiveFormat::AppleArchive),
         FORMAT_SEVEN_Z => Ok(ArchiveFormat::SevenZ),
         raw if TGZ_FORMAT_ALIASES.contains(&raw) => Ok(ArchiveFormat::Tgz),
@@ -111,14 +109,8 @@ pub(crate) fn parse_archive_format(raw: &str) -> Result<ArchiveFormat, String> {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn infer_apple_archive_create_format(path: &str) -> Option<ArchiveFormat> {
     if is_apple_archive(path) { Some(ArchiveFormat::AppleArchive) } else { None }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn infer_apple_archive_create_format(_path: &str) -> Option<ArchiveFormat> {
-    None
 }
 
 pub(crate) fn infer_create_format(path: &str) -> Option<ArchiveFormat> {

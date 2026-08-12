@@ -1,5 +1,4 @@
 use super::{CancellationToken, JobContext, JobEvent, JobEventSink, JobKind};
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::apple_archive_backend::{self, AppleArchiveError};
 use crate::manifest::{PlanOptions, plan_archives};
 use crate::safety::ExtractionPolicy;
@@ -277,7 +276,6 @@ pub fn run_tar_zst_extract_job_with_policy(
     finish_tar_zst_extract_result(result, sink)
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 /// Runs an `AppleArchive` extract job with an explicit extraction policy while
 /// emitting lifecycle/progress events.
 ///
@@ -542,7 +540,6 @@ finish_result!(finish_tzap_create_result, TzapCreateReport, TzapError, emit_warn
 
 finish_result!(finish_tzap_extract_result, tzap_backend::TzapExtractReport, TzapError, emit_warnings: false, cancelled: TzapError::Cancelled);
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 finish_result!(finish_apple_archive_extract_result, apple_archive_backend::AppleArchiveExtractReport, AppleArchiveError, emit_warnings: true, cancelled: AppleArchiveError::Cancelled);
 
 finish_result!(finish_zip_extract_result, zip_backend::ZipExtractReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);

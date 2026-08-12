@@ -2,7 +2,6 @@ use crate::cli::app::{
     ExtractOutcome, ExtractRequest, InteractiveOverwriteResolver, ProgressReporter, default_extract_destination, default_raw_stream_destination,
     expand_short_options,
 };
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
     BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP,
@@ -169,15 +168,11 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         // Raw streams are handled before the policy match above.
         ArchiveFormatKind::RawStream => unreachable!("raw streams handled before format dispatch"),
         ArchiveFormatKind::Zip => run_zip_extract_with_policy(request.archive, destination, password.as_deref(), policy, global),
-        // Split ZIP volume sets are read through libarchive, matching the
-        // pre-CR-114 fallthrough behavior.
-        ArchiveFormatKind::SplitZip => run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::SevenZ => run_7z_extract_with_policy(request.archive, destination, password.as_deref(), policy, global),
         // RAR needs a password; without --password-stdin it falls through to
         // the libarchive backend, which can read unencrypted RAR.
         ArchiveFormatKind::Rar if request.password_stdin => run_rar_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::TarZst => run_tar_zst_extract_with_policy(request.archive, destination, policy, global),
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveFormatKind::AppleArchive => run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::Dmg => run_apple_dmg_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::Pkg => run_apple_pkg_extract_with_policy(request.archive, destination, policy, global),
@@ -194,7 +189,10 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
             },
             global,
         ),
-        ArchiveFormatKind::TarGz
+        // Split ZIP volume sets and the remaining formats are read through
+        // libarchive, matching the pre-CR-114 fallthrough behavior.
+        ArchiveFormatKind::SplitZip
+        | ArchiveFormatKind::TarGz
         | ArchiveFormatKind::Deb
         | ArchiveFormatKind::Unknown
         | ArchiveFormatKind::Rar
@@ -322,7 +320,6 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             ArchiveFormatKind::SevenZ => copy_7z_archive_to_stdout(request, password.as_deref(), global),
             ArchiveFormatKind::TarZst => copy_tar_zst_archive_to_stdout(request, global),
             ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
             ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(&request.archive, &request.include, &request.exclude, password.as_deref(), global),
             ArchiveFormatKind::Dmg | ArchiveFormatKind::Pkg => {
                 print_error_line(global, format_args!("extract to stdout failed: DMG and PKG formats do not currently support extracting to stdout"));
@@ -490,7 +487,6 @@ fn extraction_policy(request: &ExtractRequest) -> Result<zmanager_core::safety::
         ..zmanager_core::safety::ExtractionPolicy::default()
     })
 }
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn extract_apple_archive_stdout(archive: &str, include: &[String], exclude: &[String], password: Option<&str>, global: &GlobalOptions) -> ExitCode {
     copy_archive_to_stdout(include, exclude, password, FORMAT_APPLE_ARCHIVE, global, None, |password, selected, stdout| {
         zmanager_core::apple_archive_backend::copy_apple_archive_files_to_writer(archive, selected, stdout, password)
@@ -561,7 +557,6 @@ impl From<zmanager_core::libarchive_backend::LibarchiveExtractReport> for CliExt
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl From<zmanager_core::apple_archive_backend::AppleArchiveExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::apple_archive_backend::AppleArchiveExtractReport) -> Self {
         Self {
@@ -765,7 +760,6 @@ fn run_tar_zst_extract_with_policy(
     )
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn run_apple_archive_extract_with_policy(
     archive: impl AsRef<std::path::Path>,
     destination: impl AsRef<std::path::Path>,

@@ -9,7 +9,6 @@ use std::time::UNIX_EPOCH;
 
 use sha2::{Digest as _, Sha256};
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use zmanager_core::apple_archive_backend;
 use zmanager_core::archive_browser::{self, BrowserExtractOptions, BrowserListOptions};
 use zmanager_core::jobs::CancellationToken;
@@ -21,7 +20,6 @@ use zmanager_core::sevenz_backend;
 use zmanager_core::tzap_backend;
 use zmanager_core::zip_backend;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
     ERROR_INVALID_REQUEST, ERROR_OPERATION_FAILED, ERROR_UNSUPPORTED_FORMAT, WARNING_LAUNCH_GATED_FORMAT, bridge_error, bridge_error_from_mobile,
@@ -240,7 +238,6 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
     })
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn maybe_test_apple_archive(format: ArchiveFormat, path: &Path, selected_paths: &[String]) -> Option<Result<TestArchiveReport, ZmanagerGuiError>> {
     if !matches!(format, ArchiveFormat::AppleArchive) {
         return None;
@@ -250,11 +247,6 @@ fn maybe_test_apple_archive(format: ArchiveFormat, path: &Path, selected_paths: 
             .map_err(map_apple_archive_error)
             .map(TestArchiveReport::from_apple_archive),
     )
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn maybe_test_apple_archive(_format: ArchiveFormat, _path: &Path, _selected_paths: &[String]) -> Option<Result<TestArchiveReport, ZmanagerGuiError>> {
-    None
 }
 
 #[allow(non_snake_case)]

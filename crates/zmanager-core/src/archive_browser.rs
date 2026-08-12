@@ -1,4 +1,3 @@
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::apple_archive_backend::{self, AppleArchiveEntryKind, AppleArchiveError};
 use crate::libarchive_backend::{self, LibarchiveEntryKind, LibarchiveError};
 use crate::rar_backend::{self, RarBackendError, RarListEntryKind};
@@ -169,7 +168,6 @@ pub enum ArchiveBrowserError {
     /// TZAP backend failed.
     Tzap(TzapError),
     /// `AppleArchive` backend failed.
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     AppleArchive(AppleArchiveError),
     /// Libarchive backend failed.
     Libarchive(LibarchiveError),
@@ -196,7 +194,6 @@ impl fmt::Display for ArchiveBrowserError {
             Self::SevenZ(source) => write!(f, "7z browser operation failed: {source}"),
             Self::Rar(source) => write!(f, "RAR browser operation failed: {source}"),
             Self::Tzap(source) => write!(f, "TZAP browser operation failed: {source}"),
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Self::AppleArchive(source) => {
                 write!(f, "AppleArchive browser operation failed: {source}")
             }
@@ -217,6 +214,9 @@ impl fmt::Display for ArchiveBrowserError {
 
 impl std::error::Error for ArchiveBrowserError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // Each variant carries a distinct error type, so the `Some(source)`
+        // arms cannot merge even though their bodies are identical.
+        #[allow(clippy::match_same_arms)]
         match self {
             Self::Cancelled => None,
             Self::Zip(source) => Some(source),
@@ -224,7 +224,6 @@ impl std::error::Error for ArchiveBrowserError {
             Self::SevenZ(source) => Some(source),
             Self::Rar(source) => Some(source),
             Self::Tzap(source) => Some(source),
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
             Self::AppleArchive(source) => Some(source),
             Self::Libarchive(source) => Some(source),
             Self::RawStream(source) => Some(source),
@@ -267,7 +266,6 @@ impl From<TzapError> for ArchiveBrowserError {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl From<AppleArchiveError> for ArchiveBrowserError {
     fn from(source: AppleArchiveError) -> Self {
         Self::AppleArchive(source)
@@ -320,13 +318,10 @@ pub fn list_entries_with_options(path: impl AsRef<Path>, options: BrowserListOpt
         list_tzap_entries(path, options.password)
     } else {
         // Apple Archive runs after TZAP and before raw streams, matching the
-        // old always-present chain; the branch is cfg-gated so non-Apple
-        // builds carry no stubs.
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        {
-            if is_apple_archive_path_browser(path) {
-                return list_apple_archive_entries(path, options.password);
-            }
+        // old always-present chain; off-Apple the backend reports
+        // `AppleArchiveError::Unsupported`.
+        if is_apple_archive_path_browser(path) {
+            return list_apple_archive_entries(path, options.password);
         }
         if let Some(format) = raw_stream_backend::detect_raw_stream_format(path) { list_raw_stream_entry(path, format) } else { list_libarchive_entries(path) }
     }
@@ -444,13 +439,10 @@ pub fn extract_entry_with_options(
         )
     } else {
         // Apple Archive runs after TZAP and before raw streams, matching the
-        // old always-present chain; the branch is cfg-gated so non-Apple
-        // builds carry no stubs.
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        {
-            if is_apple_archive_path_browser(archive_path) {
-                return extract_apple_archive_entry_browser(archive_path, entry_path, &destination_root, destination, &policy, options.password);
-            }
+        // old always-present chain; off-Apple the backend reports
+        // `AppleArchiveError::Unsupported`.
+        if is_apple_archive_path_browser(archive_path) {
+            return extract_apple_archive_entry_browser(archive_path, entry_path, &destination_root, destination, &policy, options.password);
         }
         if let Some(format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
             extract_raw_stream_entry(archive_path, format, entry_path, &destination_root, &policy)
@@ -782,12 +774,10 @@ fn tzap_browser_entry(listing: &crate::tzap_backend::TzapIndexListing, entry: &c
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn is_apple_archive_path_browser(path: &Path) -> bool {
     apple_archive_backend::is_apple_archive_path(path)
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = apple_archive_backend::list_apple_archive(path, password)?;
     // The Apple Archive listing does not expose an encryption flag (the
@@ -824,7 +814,6 @@ fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<Bro
     Ok(BrowserListing { entries })
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn extract_apple_archive_entry_browser(
     archive_path: &Path,
     entry_path: &str,
@@ -1139,7 +1128,6 @@ fn tzap_entry_kind(kind: TzapEntryKind) -> BrowserEntryKind {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn apple_archive_entry_kind(kind: AppleArchiveEntryKind) -> BrowserEntryKind {
     match kind {
         AppleArchiveEntryKind::File => BrowserEntryKind::File,

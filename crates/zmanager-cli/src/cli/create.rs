@@ -2,7 +2,6 @@ use crate::cli::app::{
     ArchiveFormat, CreateOutcome, CreateRequest, ProgressReporter, TestRequest, create_progress_kind, create_test_archive_path, expand_short_options,
     publish_archive, temp_archive_path,
 };
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
     FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TGZ, FORMAT_TZAP, FORMAT_ZIP, TZAP_DEFAULT_RECOVERY_PERCENTAGE, ZIP_CREATE_EXTENSIONS, path_has_known_extension,
@@ -326,7 +325,6 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
             &token,
             global,
         ),
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveFormat::AppleArchive => {
             run_apple_archive_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global)
         }
@@ -583,7 +581,6 @@ fn run_tzap_create_backend(
     .map_err(|error| fail_create(progress, global, temp, split_output, &error))
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[allow(clippy::too_many_arguments)]
 fn run_apple_archive_create_backend(
     request: &CreateRequest,
@@ -808,9 +805,7 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
                     return Err("split ZIP output must use a .zip archive path".to_owned());
                 }
             }
-            ArchiveFormat::SevenZ | ArchiveFormat::Tzap => {}
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            ArchiveFormat::AppleArchive => {}
+            ArchiveFormat::SevenZ | ArchiveFormat::Tzap | ArchiveFormat::AppleArchive => {}
             ArchiveFormat::TarZst | ArchiveFormat::Tgz => {
                 return Err("--volume-size is supported only for ZIP, TZAP, and 7z archives".to_owned());
             }
@@ -822,9 +817,8 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
             (ArchiveFormat::Zip, "deflate" | "store")
             | (ArchiveFormat::TarZst | ArchiveFormat::Tzap, "zstd" | "zst")
             | (ArchiveFormat::SevenZ, "lzma2")
-            | (ArchiveFormat::Tgz, "gzip" | "gz") => {}
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            (ArchiveFormat::AppleArchive, "lzfse" | "lz4" | "zlib" | "lzma" | "raw") => {}
+            | (ArchiveFormat::Tgz, "gzip" | "gz")
+            | (ArchiveFormat::AppleArchive, "lzfse" | "lz4" | "zlib" | "lzma" | "raw") => {}
             _ => {
                 return Err(format!("unsupported method for selected archive format: {method}"));
             }
@@ -839,7 +833,6 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
             ArchiveFormat::Zip if request.compression == zmanager_core::zip_backend::ZipCompression::Store && level != 0 => {
                 return Err(format!("cannot combine ZIP store compression with compression level {level}"));
             }
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
             ArchiveFormat::AppleArchive => {
                 return Err("compression levels are not supported for AAR archives".to_owned());
             }
@@ -850,7 +843,6 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn apple_archive_compression(request: &CreateRequest) -> Result<zmanager_core::apple_archive_backend::AppleArchiveCompression, String> {
     use zmanager_core::apple_archive_backend::AppleArchiveCompression;
 
@@ -924,9 +916,7 @@ fn create_password(format: ArchiveFormat, request: &CreateRequest, global: &Glob
     let prompt = match format {
         ArchiveFormat::SevenZ => "7z password: ",
         ArchiveFormat::Tzap => "tzap password: ",
-        ArchiveFormat::TarZst | ArchiveFormat::Tgz => "archive password: ",
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        ArchiveFormat::AppleArchive => "archive password: ",
+        ArchiveFormat::TarZst | ArchiveFormat::Tgz | ArchiveFormat::AppleArchive => "archive password: ",
         ArchiveFormat::Zip => "ZIP password: ",
     };
     prompt_password(prompt).map(Some)

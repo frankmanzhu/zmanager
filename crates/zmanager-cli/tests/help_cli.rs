@@ -261,6 +261,33 @@ fn no_args_prints_help_successfully() {
 }
 
 #[test]
+fn formats_command_lists_apple_archive_with_platform_annotation() {
+    let supported = zmanager_core::apple_archive_backend::apple_archive_supported();
+    let expected_aar_json = if supported {
+        r#"{"format":"aar","extensions":[".aar",".aea"],"status":"available"}"#
+    } else {
+        r#"{"format":"aar","extensions":[".aar",".aea"],"status":"unsupported_platform"}"#
+    };
+
+    let table = Command::new(zm_path()).arg("formats").output().unwrap();
+    assert_success("zm formats", &table);
+    let table_stdout = String::from_utf8_lossy(&table.stdout);
+    assert_contains(&table_stdout, "aar");
+    if supported {
+        // Apple Archive runs natively here, so no row is annotated.
+        assert_not_contains(&table_stdout, "(not supported on this platform)");
+    } else {
+        // Apple Archive is recognized but its backend cannot run on this platform.
+        assert_contains(&table_stdout, "(not supported on this platform)");
+    }
+
+    let json = Command::new(zm_path()).arg("formats").arg("--json").output().unwrap();
+    assert_success("zm formats --json", &json);
+    let json_stdout = String::from_utf8_lossy(&json.stdout);
+    assert_contains(&json_stdout, expected_aar_json);
+}
+
+#[test]
 fn color_always_styles_help_without_changing_text() {
     let output = Command::new(zm_path()).arg("--color").arg("always").arg("--help").output().unwrap();
     assert_success("zm --color always --help", &output);

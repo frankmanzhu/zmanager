@@ -2,7 +2,6 @@ use std::path::Path;
 pub(crate) const FORMAT_ZIP: &str = "zip";
 pub(crate) const FORMAT_TAR_ZST: &str = "tar.zst";
 pub(crate) const FORMAT_TZAP: &str = "tzap";
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) const FORMAT_APPLE_ARCHIVE: &str = "aar";
 pub(crate) const FORMAT_DMG: &str = "dmg";
 pub(crate) const FORMAT_PKG: &str = "pkg";
@@ -36,18 +35,15 @@ pub(crate) const SIZE_UNIT_TIB: u64 = SIZE_UNIT_GIB * 1024;
 
 pub(crate) const TAR_ZST_FORMAT_ALIASES: &[&str] = &[FORMAT_TAR_ZST, "tzst", "zst"];
 pub(crate) const TZAP_FORMAT_ALIASES: &[&str] = &[FORMAT_TZAP];
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) const APPLE_ARCHIVE_FORMAT_ALIASES: &[&str] = &[FORMAT_APPLE_ARCHIVE, "apple-archive"];
 pub(crate) const TGZ_FORMAT_ALIASES: &[&str] = &[FORMAT_TGZ, "tar.gz", "gz"];
 
 // Extension lists are canonical in `zmanager_core::archive_format` (CR-114);
 // this crate re-exports them for display and option validation.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub(crate) use zmanager_core::archive_format::APPLE_ARCHIVE_EXTENSIONS;
 pub(crate) use zmanager_core::archive_format::{
-    AR_EXTENSIONS, CAB_EXTENSIONS, CPIO_EXTENSIONS, DEB_EXTENSIONS, ISO_EXTENSIONS, LHA_EXTENSIONS, MTREE_EXTENSIONS, RAR_EXTENSIONS, RPM_EXTENSIONS,
-    SEVEN_Z_EXTENSIONS, TAR_BZ2_EXTENSIONS, TAR_EXTENSIONS, TAR_LZMA_EXTENSIONS, TAR_XZ_EXTENSIONS, TAR_ZST_EXTENSIONS, TGZ_EXTENSIONS, TZAP_EXTENSIONS,
-    WARC_EXTENSIONS, XAR_EXTENSIONS, ZIP_FAMILY_EXTENSIONS,
+    APPLE_ARCHIVE_EXTENSIONS, AR_EXTENSIONS, CAB_EXTENSIONS, CPIO_EXTENSIONS, DEB_EXTENSIONS, ISO_EXTENSIONS, LHA_EXTENSIONS, MTREE_EXTENSIONS, RAR_EXTENSIONS,
+    RPM_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_BZ2_EXTENSIONS, TAR_EXTENSIONS, TAR_LZMA_EXTENSIONS, TAR_XZ_EXTENSIONS, TAR_ZST_EXTENSIONS, TGZ_EXTENSIONS,
+    TZAP_EXTENSIONS, WARC_EXTENSIONS, XAR_EXTENSIONS, ZIP_FAMILY_EXTENSIONS,
 };
 
 pub(crate) const ZIP_CREATE_EXTENSIONS: &[&str] = &[".zip"];
@@ -59,41 +55,42 @@ const LIBARCHIVE_FALLBACK_EXTENSIONS: &[&str] = &["fallback"];
 pub(crate) struct FormatDescriptor {
     pub(crate) name: &'static str,
     pub(crate) extensions: &'static [&'static str],
+    /// Core format kind, used to query backend availability for listings.
+    pub(crate) kind: ArchiveFormatKind,
 }
 
 pub(crate) const CREATE_FORMATS: &[FormatDescriptor] = &[
-    FormatDescriptor { name: FORMAT_ZIP, extensions: ZIP_CREATE_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TAR_ZST, extensions: TAR_ZST_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TZAP, extensions: TZAP_EXTENSIONS },
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    FormatDescriptor { name: FORMAT_APPLE_ARCHIVE, extensions: APPLE_ARCHIVE_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_SEVEN_Z, extensions: SEVEN_Z_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TGZ, extensions: TGZ_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_ZIP, extensions: ZIP_CREATE_EXTENSIONS, kind: ArchiveFormatKind::Zip },
+    FormatDescriptor { name: FORMAT_TAR_ZST, extensions: TAR_ZST_EXTENSIONS, kind: ArchiveFormatKind::TarZst },
+    FormatDescriptor { name: FORMAT_TZAP, extensions: TZAP_EXTENSIONS, kind: ArchiveFormatKind::Tzap },
+    FormatDescriptor { name: FORMAT_APPLE_ARCHIVE, extensions: APPLE_ARCHIVE_EXTENSIONS, kind: ArchiveFormatKind::AppleArchive },
+    FormatDescriptor { name: FORMAT_SEVEN_Z, extensions: SEVEN_Z_EXTENSIONS, kind: ArchiveFormatKind::SevenZ },
+    FormatDescriptor { name: FORMAT_TGZ, extensions: TGZ_EXTENSIONS, kind: ArchiveFormatKind::TarGz },
 ];
 
 pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
-    FormatDescriptor { name: FORMAT_ZIP, extensions: ZIP_FAMILY_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TAR_ZST, extensions: TAR_ZST_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TZAP, extensions: TZAP_EXTENSIONS },
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    FormatDescriptor { name: FORMAT_APPLE_ARCHIVE, extensions: APPLE_ARCHIVE_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_SEVEN_Z, extensions: SEVEN_Z_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TGZ, extensions: TGZ_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_BZ2_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_XZ_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_LZMA_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_ISO, extensions: ISO_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_CAB, extensions: CAB_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_CPIO, extensions: CPIO_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_RPM, extensions: RPM_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_XAR, extensions: XAR_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_LHA, extensions: LHA_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_AR, extensions: AR_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_WARC, extensions: WARC_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_MTREE, extensions: MTREE_EXTENSIONS },
-    FormatDescriptor { name: FORMAT_RAW_STREAM, extensions: zmanager_core::raw_stream_backend::RAW_STREAM_SUFFIXES },
-    FormatDescriptor { name: FORMAT_LIBARCHIVE, extensions: LIBARCHIVE_FALLBACK_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_ZIP, extensions: ZIP_FAMILY_EXTENSIONS, kind: ArchiveFormatKind::Zip },
+    FormatDescriptor { name: FORMAT_TAR_ZST, extensions: TAR_ZST_EXTENSIONS, kind: ArchiveFormatKind::TarZst },
+    FormatDescriptor { name: FORMAT_TZAP, extensions: TZAP_EXTENSIONS, kind: ArchiveFormatKind::Tzap },
+    FormatDescriptor { name: FORMAT_APPLE_ARCHIVE, extensions: APPLE_ARCHIVE_EXTENSIONS, kind: ArchiveFormatKind::AppleArchive },
+    FormatDescriptor { name: FORMAT_SEVEN_Z, extensions: SEVEN_Z_EXTENSIONS, kind: ArchiveFormatKind::SevenZ },
+    FormatDescriptor { name: FORMAT_TGZ, extensions: TGZ_EXTENSIONS, kind: ArchiveFormatKind::TarGz },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_EXTENSIONS, kind: ArchiveFormatKind::Tar },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_BZ2_EXTENSIONS, kind: ArchiveFormatKind::TarBz2 },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_XZ_EXTENSIONS, kind: ArchiveFormatKind::TarXz },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_LZMA_EXTENSIONS, kind: ArchiveFormatKind::TarLzma },
+    FormatDescriptor { name: FORMAT_ISO, extensions: ISO_EXTENSIONS, kind: ArchiveFormatKind::Iso },
+    FormatDescriptor { name: FORMAT_CAB, extensions: CAB_EXTENSIONS, kind: ArchiveFormatKind::Cab },
+    FormatDescriptor { name: FORMAT_CPIO, extensions: CPIO_EXTENSIONS, kind: ArchiveFormatKind::Cpio },
+    FormatDescriptor { name: FORMAT_RPM, extensions: RPM_EXTENSIONS, kind: ArchiveFormatKind::Rpm },
+    FormatDescriptor { name: FORMAT_XAR, extensions: XAR_EXTENSIONS, kind: ArchiveFormatKind::Xar },
+    FormatDescriptor { name: FORMAT_LHA, extensions: LHA_EXTENSIONS, kind: ArchiveFormatKind::Lha },
+    FormatDescriptor { name: FORMAT_AR, extensions: AR_EXTENSIONS, kind: ArchiveFormatKind::Ar },
+    FormatDescriptor { name: FORMAT_WARC, extensions: WARC_EXTENSIONS, kind: ArchiveFormatKind::Warc },
+    FormatDescriptor { name: FORMAT_MTREE, extensions: MTREE_EXTENSIONS, kind: ArchiveFormatKind::Mtree },
+    FormatDescriptor { name: FORMAT_RAW_STREAM, extensions: zmanager_core::raw_stream_backend::RAW_STREAM_SUFFIXES, kind: ArchiveFormatKind::RawStream },
+    // Fallback handler: no dedicated format kind, always available.
+    FormatDescriptor { name: FORMAT_LIBARCHIVE, extensions: LIBARCHIVE_FALLBACK_EXTENSIONS, kind: ArchiveFormatKind::Unknown },
 ];
 // Path-based format detection delegates to the core detector (CR-114); the
 // extension predicates no longer live here so consumers cannot drift.
@@ -127,14 +124,8 @@ pub(crate) fn is_tzap_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::Tzap)
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn is_apple_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::AppleArchive)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-pub(crate) fn is_apple_archive(_path: &str) -> bool {
-    false
 }
 
 pub(crate) fn is_dmg_archive(path: &str) -> bool {

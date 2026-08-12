@@ -4,6 +4,11 @@
 //! browser, and the extraction/list/test dispatch chains) carried its own
 //! extension predicates, and they drifted. This is the single detector;
 //! callers dispatch on [`ArchiveFormatKind`].
+//!
+//! This module also owns the compile-time format capability registry: one
+//! row per format with its extension list and backend availability. Adding a
+//! new format is one row in [`FORMAT_CAPABILITIES`]; platform-gated backends
+//! declare their status there instead of sprinkling `cfg` across consumers.
 
 use std::path::Path;
 
@@ -29,9 +34,24 @@ pub const MTREE_EXTENSIONS: &[&str] = &[".mtree"];
 pub const TAR_ZST_EXTENSIONS: &[&str] = &[".tar.zst", ".tzst"];
 pub const TGZ_EXTENSIONS: &[&str] = &[".tgz", ".tar.gz"];
 pub const TZAP_EXTENSIONS: &[&str] = &[".tzap"];
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub const APPLE_ARCHIVE_EXTENSIONS: &[&str] = &[".aar", ".aea"];
 pub const DEB_EXTENSIONS: &[&str] = &[".deb"];
+
+/// Compile-time availability of a format's backend on this target.
+///
+/// Recognition of a format is platform-independent; execution is not. The
+/// capability table answers "can this build actually handle this format?",
+/// and consumers (CLI listings, dispatch, FFI capability queries) use it
+/// instead of carrying their own platform predicates.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum BackendStatus {
+    /// The backend is compiled in and available.
+    Available,
+    /// The backend cannot run on this platform (for example Apple Archive off-Apple).
+    UnsupportedPlatform,
+    /// The backend exists but is currently unavailable at runtime.
+    Unavailable { reason: &'static str },
+}
 
 /// Archive format kind detected from a path.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -81,7 +101,6 @@ pub enum ArchiveFormatKind {
     /// RAR (`.rar`, `.cbr`).
     Rar,
     /// Apple Archive (`.aar`, `.aea`).
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     AppleArchive,
     /// `.deb` package.
     Deb,
@@ -91,10 +110,71 @@ pub enum ArchiveFormatKind {
     Unknown,
 }
 
+/// One row of the compile-time format capability table.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct FormatCapability {
+    /// The detected format kind.
+    pub kind: ArchiveFormatKind,
+    /// Extension suffixes this format is recognized by. Formats detected by
+    /// predicate functions (raw stream, split ZIP, 7z volumes, TZAP) carry
+    /// the empty slice here; those predicates stay in [`detect_archive_format`].
+    pub extensions: &'static [&'static str],
+    /// Backend availability on this target.
+    pub status: BackendStatus,
+}
+
+/// The capability table, ordered by detection priority so that
+/// [`detect_archive_format`] can iterate it directly. Adding a format means
+/// adding one row here (and a variant above); platform-gated backends express
+/// availability through [`apple_archive_status`]-style rows.
+pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
+    FormatCapability { kind: ArchiveFormatKind::RawStream, extensions: crate::raw_stream_backend::RAW_STREAM_SUFFIXES, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Zip, extensions: ZIP_FAMILY_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::SplitZip, extensions: &[], status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::SevenZ, extensions: SEVEN_Z_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Rar, extensions: RAR_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::TarZst, extensions: TAR_ZST_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::TarGz, extensions: TGZ_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Tar, extensions: TAR_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::TarBz2, extensions: TAR_BZ2_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::TarXz, extensions: TAR_XZ_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::TarLzma, extensions: TAR_LZMA_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Iso, extensions: ISO_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Cab, extensions: CAB_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Cpio, extensions: CPIO_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Rpm, extensions: RPM_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Xar, extensions: XAR_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Pkg, extensions: PKG_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Dmg, extensions: DMG_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Lha, extensions: LHA_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Ar, extensions: AR_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Warc, extensions: WARC_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Mtree, extensions: MTREE_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Tzap, extensions: &[], status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::AppleArchive, extensions: APPLE_ARCHIVE_EXTENSIONS, status: apple_archive_status() },
+    FormatCapability { kind: ArchiveFormatKind::Deb, extensions: DEB_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Unknown, extensions: &[], status: BackendStatus::Available },
+];
+
+/// Availability of the native Apple Archive backend on this target.
+const fn apple_archive_status() -> BackendStatus {
+    if cfg!(any(target_os = "macos", target_os = "ios")) { BackendStatus::Available } else { BackendStatus::UnsupportedPlatform }
+}
+
+/// Returns whether the backend for `kind` is available on this platform.
+///
+/// Formats without a table row (or unknown kinds) report as available; the
+/// row is the authoritative source for platform-gated backends.
+#[must_use]
+pub fn format_status(kind: ArchiveFormatKind) -> BackendStatus {
+    FORMAT_CAPABILITIES.iter().find(|capability| capability.kind == kind).map_or(BackendStatus::Available, |capability| capability.status)
+}
+
 /// Detects the archive format from a path.
 ///
 /// Raw-stream detection runs first because it deliberately excludes container
 /// spellings such as `.tar.gz`; the remaining extension sets are disjoint.
+/// The ordered extension checks come from [`FORMAT_CAPABILITIES`].
 #[must_use]
 pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
     let path = path.as_ref();
@@ -107,69 +187,15 @@ pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
     if ends_with_any(path, SEVEN_Z_EXTENSIONS) || crate::sevenz_backend::is_7z_volume_path(path) {
         return ArchiveFormatKind::SevenZ;
     }
-    if ends_with_any(path, RAR_EXTENSIONS) {
-        return ArchiveFormatKind::Rar;
-    }
-    if ends_with_any(path, TAR_ZST_EXTENSIONS) {
-        return ArchiveFormatKind::TarZst;
-    }
-    if ends_with_any(path, TGZ_EXTENSIONS) {
-        return ArchiveFormatKind::TarGz;
-    }
-    if ends_with_any(path, TAR_EXTENSIONS) {
-        return ArchiveFormatKind::Tar;
-    }
-    if ends_with_any(path, TAR_BZ2_EXTENSIONS) {
-        return ArchiveFormatKind::TarBz2;
-    }
-    if ends_with_any(path, TAR_XZ_EXTENSIONS) {
-        return ArchiveFormatKind::TarXz;
-    }
-    if ends_with_any(path, TAR_LZMA_EXTENSIONS) {
-        return ArchiveFormatKind::TarLzma;
-    }
-    if ends_with_any(path, ISO_EXTENSIONS) {
-        return ArchiveFormatKind::Iso;
-    }
-    if ends_with_any(path, CAB_EXTENSIONS) {
-        return ArchiveFormatKind::Cab;
-    }
-    if ends_with_any(path, CPIO_EXTENSIONS) {
-        return ArchiveFormatKind::Cpio;
-    }
-    if ends_with_any(path, RPM_EXTENSIONS) {
-        return ArchiveFormatKind::Rpm;
-    }
-    if ends_with_any(path, XAR_EXTENSIONS) {
-        return ArchiveFormatKind::Xar;
-    }
-    if ends_with_any(path, PKG_EXTENSIONS) {
-        return ArchiveFormatKind::Pkg;
-    }
-    if ends_with_any(path, DMG_EXTENSIONS) {
-        return ArchiveFormatKind::Dmg;
-    }
-    if ends_with_any(path, LHA_EXTENSIONS) {
-        return ArchiveFormatKind::Lha;
-    }
-    if ends_with_any(path, AR_EXTENSIONS) {
-        return ArchiveFormatKind::Ar;
-    }
-    if ends_with_any(path, WARC_EXTENSIONS) {
-        return ArchiveFormatKind::Warc;
-    }
-    if ends_with_any(path, MTREE_EXTENSIONS) {
-        return ArchiveFormatKind::Mtree;
-    }
-    if crate::tzap::is_tzap_archive_path(path) {
-        return ArchiveFormatKind::Tzap;
-    }
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    if ends_with_any(path, APPLE_ARCHIVE_EXTENSIONS) {
-        return ArchiveFormatKind::AppleArchive;
-    }
-    if ends_with_any(path, DEB_EXTENSIONS) {
-        return ArchiveFormatKind::Deb;
+    for capability in FORMAT_CAPABILITIES {
+        match capability.kind {
+            ArchiveFormatKind::RawStream | ArchiveFormatKind::SplitZip | ArchiveFormatKind::SevenZ | ArchiveFormatKind::Unknown => continue,
+            ArchiveFormatKind::Tzap if crate::tzap::is_tzap_archive_path(path) => return ArchiveFormatKind::Tzap,
+            _ => {}
+        }
+        if ends_with_any(path, capability.extensions) {
+            return capability.kind;
+        }
     }
     ArchiveFormatKind::Unknown
 }
@@ -177,4 +203,106 @@ pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
 fn ends_with_any(path: &Path, suffixes: &[&str]) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else { return false };
     suffixes.iter().any(|suffix| crate::strings::ends_with_ignore_ascii_case(name, suffix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestDir;
+    use std::fs;
+
+    fn detect(name: &str) -> ArchiveFormatKind {
+        detect_archive_format(Path::new(name))
+    }
+
+    #[test]
+    fn capability_table_covers_every_format_kind() {
+        let table_kinds: Vec<ArchiveFormatKind> = FORMAT_CAPABILITIES.iter().map(|capability| capability.kind).collect();
+        for kind in [
+            ArchiveFormatKind::Zip,
+            ArchiveFormatKind::SplitZip,
+            ArchiveFormatKind::SevenZ,
+            ArchiveFormatKind::TarZst,
+            ArchiveFormatKind::TarGz,
+            ArchiveFormatKind::Tar,
+            ArchiveFormatKind::TarBz2,
+            ArchiveFormatKind::TarXz,
+            ArchiveFormatKind::TarLzma,
+            ArchiveFormatKind::Iso,
+            ArchiveFormatKind::Cab,
+            ArchiveFormatKind::Cpio,
+            ArchiveFormatKind::Rpm,
+            ArchiveFormatKind::Xar,
+            ArchiveFormatKind::Pkg,
+            ArchiveFormatKind::Dmg,
+            ArchiveFormatKind::Lha,
+            ArchiveFormatKind::Ar,
+            ArchiveFormatKind::Warc,
+            ArchiveFormatKind::Mtree,
+            ArchiveFormatKind::Tzap,
+            ArchiveFormatKind::Rar,
+            ArchiveFormatKind::AppleArchive,
+            ArchiveFormatKind::Deb,
+            ArchiveFormatKind::RawStream,
+        ] {
+            assert!(table_kinds.contains(&kind), "capability table is missing a row for {kind:?}");
+        }
+    }
+
+    #[test]
+    fn apple_archive_status_matches_platform() {
+        let expected = if cfg!(any(target_os = "macos", target_os = "ios")) { BackendStatus::Available } else { BackendStatus::UnsupportedPlatform };
+        assert_eq!(format_status(ArchiveFormatKind::AppleArchive), expected);
+    }
+
+    #[test]
+    fn common_formats_report_available() {
+        assert_eq!(format_status(ArchiveFormatKind::Zip), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::TarZst), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::SevenZ), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::Deb), BackendStatus::Available);
+    }
+
+    #[test]
+    fn detection_order_is_preserved() {
+        // Raw-stream family (non-container spellings) is detected first.
+        assert_eq!(detect("stream.zst"), ArchiveFormatKind::RawStream);
+        // Container spellings still win over raw-stream detection.
+        assert_eq!(detect("archive.tar.zst"), ArchiveFormatKind::TarZst);
+        assert_eq!(detect("archive.tgz"), ArchiveFormatKind::TarGz);
+        assert_eq!(detect("archive.tar.gz"), ArchiveFormatKind::TarGz);
+        assert_eq!(detect("archive.tar"), ArchiveFormatKind::Tar);
+        assert_eq!(detect("archive.tar.bz2"), ArchiveFormatKind::TarBz2);
+        assert_eq!(detect("archive.tar.xz"), ArchiveFormatKind::TarXz);
+        assert_eq!(detect("archive.tar.lzma"), ArchiveFormatKind::TarLzma);
+        assert_eq!(detect("archive.zip"), ArchiveFormatKind::Zip);
+        assert_eq!(detect("archive.7z"), ArchiveFormatKind::SevenZ);
+        assert_eq!(detect("archive.7z.001"), ArchiveFormatKind::SevenZ);
+        assert_eq!(detect("archive.rar"), ArchiveFormatKind::Rar);
+        assert_eq!(detect("archive.iso"), ArchiveFormatKind::Iso);
+        assert_eq!(detect("archive.cab"), ArchiveFormatKind::Cab);
+        assert_eq!(detect("archive.cpio"), ArchiveFormatKind::Cpio);
+        assert_eq!(detect("archive.rpm"), ArchiveFormatKind::Rpm);
+        assert_eq!(detect("archive.xar"), ArchiveFormatKind::Xar);
+        assert_eq!(detect("archive.pkg"), ArchiveFormatKind::Pkg);
+        assert_eq!(detect("archive.dmg"), ArchiveFormatKind::Dmg);
+        assert_eq!(detect("archive.lha"), ArchiveFormatKind::Lha);
+        assert_eq!(detect("archive.ar"), ArchiveFormatKind::Ar);
+        assert_eq!(detect("archive.warc"), ArchiveFormatKind::Warc);
+        assert_eq!(detect("archive.mtree"), ArchiveFormatKind::Mtree);
+        assert_eq!(detect("archive.tzap"), ArchiveFormatKind::Tzap);
+        assert_eq!(detect("archive.aar"), ArchiveFormatKind::AppleArchive);
+        assert_eq!(detect("archive.AEA"), ArchiveFormatKind::AppleArchive);
+        assert_eq!(detect("archive.deb"), ArchiveFormatKind::Deb);
+        assert_eq!(detect("archive.unknown"), ArchiveFormatKind::Unknown);
+    }
+
+    #[test]
+    fn split_zip_volume_set_detects_split_zip() {
+        let dir = TestDir::new("detect-split-zip");
+        fs::write(dir.path("multi.z01"), b"sidecar").unwrap();
+        fs::write(dir.path("multi.zip"), b"final").unwrap();
+        assert_eq!(detect_archive_format(dir.path("multi.zip")), ArchiveFormatKind::SplitZip);
+        assert_eq!(detect_archive_format(dir.path("multi.z01")), ArchiveFormatKind::Unknown);
+    }
 }

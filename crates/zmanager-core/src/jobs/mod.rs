@@ -13,6 +13,7 @@ mod progress;
 #[cfg(test)]
 mod tests;
 
+pub use adapters::run_apple_archive_extract_job_with_policy;
 pub use adapters::{
     run_7z_create_job_from_sources_with_plan_options, run_7z_extract_job_with_password_and_policy, run_libarchive_extract_job_with_password_and_policy,
     run_rar_extract_job_with_password_and_policy, run_raw_stream_extract_job_with_policy, run_tar_zst_create_job_from_sources_with_plan_options,
@@ -20,10 +21,6 @@ pub use adapters::{
     run_tzap_extract_job_with_password_and_policy_and_restore_options, run_zip_create_job_from_sources_with_plan_options,
     run_zip_extract_job_with_password_and_policy,
 };
-// The `AppleArchive` adapter is only defined where its backend module is
-// (macOS/iOS); re-exporting it unconditionally broke every non-Apple build.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub use adapters::run_apple_archive_extract_job_with_policy;
 pub use cancellation::{CancellationToken, JobCancelled};
 pub use progress::{JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT, PROGRESS_RECENT_PATH_LIMIT};
 #[cfg(test)]
@@ -60,10 +57,8 @@ pub enum JobKind {
     /// TZAP extraction.
     TzapExtract,
     /// `AppleArchive` creation.
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     AppleArchiveCreate,
     /// `AppleArchive` extraction.
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     AppleArchiveExtract,
     /// Broad libarchive-backed extraction.
     ArchiveExtract,

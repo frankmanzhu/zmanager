@@ -4,7 +4,6 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use zmanager_core::apple_archive_backend;
 use zmanager_core::archive_browser::{self, BrowserEntry, BrowserEntryKind, BrowserExtractOptions, BrowserListOptions};
 use zmanager_core::jobs::{self, CancellationToken, JobEvent as CoreJobEvent, JobKind as CoreJobKind};
@@ -20,7 +19,6 @@ use zmanager_core::tar_zst_backend::TarZstdCreateOptions;
 use zmanager_core::tzap_backend::{self, TzapCreateOptions, TzapKeySource, TzapTestReport, TzapX509SigningOptions};
 use zmanager_core::zip_backend::{self, ZipCreateOptions, ZipTestReport};
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
     ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error, hint, map_7z_error,
@@ -377,7 +375,6 @@ pub(crate) fn run_extract_job(
     if input.selected_paths.is_empty() { run_full_extract_job(input, token, sink) } else { run_selected_extract_job(input, token, sink) }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn maybe_run_apple_extract_job(
     format: ArchiveFormat,
     archive_path: &Path,
@@ -395,18 +392,6 @@ fn maybe_run_apple_extract_job(
             .map_err(map_apple_archive_error)
             .map(JobTerminalSummary::from),
     )
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn maybe_run_apple_extract_job(
-    _format: ArchiveFormat,
-    _archive_path: &Path,
-    _destination_root: &Path,
-    _policy: &ExtractionPolicy,
-    _token: &CancellationToken,
-    _sink: &mut dyn jobs::JobEventSink,
-) -> Option<Result<JobTerminalSummary, ZmanagerGuiError>> {
-    None
 }
 
 fn run_full_extract_job(input: ExtractJobInput, token: &CancellationToken, sink: &mut dyn jobs::JobEventSink) -> Result<JobTerminalSummary, ZmanagerGuiError> {
@@ -568,7 +553,6 @@ archive_job_report_from!(zmanager_core::tar_zst_backend::TarZstdExtractReport, r
 archive_job_report_from!(zmanager_core::sevenz_backend::SevenZExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(zmanager_core::rar_backend::RarExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(tzap_backend::TzapExtractReport, report, report.skipped_entries, None, None, None);
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 archive_job_report_from!(apple_archive_backend::AppleArchiveExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(raw_stream_backend::RawStreamExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(libarchive_backend::LibarchiveExtractReport, report, report.skipped_entries, None, None, None);
@@ -650,7 +634,6 @@ impl TestArchiveReport {
         }
     }
 
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub(crate) fn from_apple_archive(report: apple_archive_backend::AppleArchiveTestReport) -> Self {
         Self {
             tested_entries: usize_to_u64(report.tested_entries),
@@ -857,14 +840,8 @@ pub(crate) fn mobile_extract_job_kind(path: &Path, format: ArchiveFormat) -> Mob
     mobile_job_kind_from_core(core_extract_job_kind(path, format))
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn maybe_apple_extract_job_kind(format: ArchiveFormat) -> Option<CoreJobKind> {
     matches!(format, ArchiveFormat::AppleArchive).then_some(CoreJobKind::AppleArchiveExtract)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn maybe_apple_extract_job_kind(_format: ArchiveFormat) -> Option<CoreJobKind> {
-    None
 }
 
 fn core_extract_job_kind(path: &Path, format: ArchiveFormat) -> CoreJobKind {
@@ -898,9 +875,7 @@ pub(crate) fn mobile_job_kind_from_core(kind: CoreJobKind) -> MobileJobKind {
         CoreJobKind::TarZstdExtract => MobileJobKind::TarZstdExtract,
         CoreJobKind::TzapCreate => MobileJobKind::TzapCreate,
         CoreJobKind::TzapExtract => MobileJobKind::TzapExtract,
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         CoreJobKind::AppleArchiveCreate => MobileJobKind::AppleArchiveCreate,
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         CoreJobKind::AppleArchiveExtract => MobileJobKind::AppleArchiveExtract,
         CoreJobKind::ArchiveExtract => MobileJobKind::ArchiveExtract,
         CoreJobKind::RawStreamExtract => MobileJobKind::RawStreamExtract,

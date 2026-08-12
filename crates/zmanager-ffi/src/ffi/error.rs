@@ -3,7 +3,6 @@
 use std::io;
 use std::path::PathBuf;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use zmanager_core::apple_archive_backend::AppleArchiveError;
 use zmanager_core::archive_browser::ArchiveBrowserError;
 use zmanager_core::libarchive_backend::LibarchiveError;
@@ -55,7 +54,6 @@ pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerG
         ArchiveBrowserError::SevenZ(source) => map_7z_error(source),
         ArchiveBrowserError::Rar(source) => map_rar_error(source),
         ArchiveBrowserError::Tzap(source) => map_tzap_error(source),
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveBrowserError::AppleArchive(source) => map_apple_archive_error(source),
         ArchiveBrowserError::Libarchive(source) => map_libarchive_error(source),
         ArchiveBrowserError::RawStream(source) => map_raw_stream_error(source),
@@ -165,11 +163,13 @@ pub(crate) fn map_tzap_error(error: TzapError) -> ZmanagerGuiError {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn map_apple_archive_error(error: AppleArchiveError) -> ZmanagerGuiError {
     match error {
         AppleArchiveError::Plan(source) => map_plan_error(source),
-        AppleArchiveError::Native(source) => operation_failed(format!("AppleArchive operation failed: {source}")),
+        AppleArchiveError::Native(message) => operation_failed(format!("AppleArchive operation failed: {message}")),
+        AppleArchiveError::Unsupported => {
+            bridge_error(ERROR_UNSUPPORTED_FORMAT, "Apple Archive is not supported on this platform", None, BridgeSeverity::Warning, false)
+        }
         AppleArchiveError::Io { path, source } => map_io_error(path, source),
         AppleArchiveError::Safety(source) => {
             bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false)

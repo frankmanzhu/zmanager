@@ -1,5 +1,4 @@
 use crate::cli::app::{GenericEntry, ListRequest, PlanRequest, TestRequest, expand_short_options};
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
     FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, TZAP_SINGLE_VOLUME_LOSS_TOLERANCE, TZAP_SPLIT_VOLUME_LOSS_TOLERANCE, is_7z_archive,
@@ -366,7 +365,6 @@ fn run_tar_zst_test(archive: &str, includes: &[String], excludes: &[String], glo
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn run_apple_archive_test(archive: &str, password: Option<&str>, includes: &[String], excludes: &[String], global: &GlobalOptions) -> ExitCode {
     match zmanager_core::apple_archive_backend::test_apple_archive_filter(archive, |name| entry_selected(name, includes, excludes), password) {
         Ok(report) => {
@@ -378,11 +376,6 @@ fn run_apple_archive_test(archive: &str, password: Option<&str>, includes: &[Str
             ExitCode::FAILURE
         }
     }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn run_apple_archive_test(_archive: &str, _password: Option<&str>, _includes: &[String], _excludes: &[String], _global: &GlobalOptions) -> ExitCode {
-    unreachable!()
 }
 
 fn run_7z_test(archive: &str, password: Option<&str>, includes: &[String], excludes: &[String], global: &GlobalOptions) -> ExitCode {
@@ -856,14 +849,12 @@ pub(crate) fn entry_selected(path: &str, includes: &[String], excludes: &[String
 
     matches_include && !matches_exclude
 }
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn list_apple_archive_cli(archive: &str, password: Option<&str>) -> Result<Vec<GenericEntry>, String> {
     zmanager_core::apple_archive_backend::list_apple_archive(archive, password)
         .map(|listing| map_generic_entries(listing.entries, apple_archive_list_entry_to_generic))
         .map_err(|error| error.to_string())
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn apple_archive_list_entry_to_generic(entry: zmanager_core::apple_archive_backend::AppleArchiveListEntry) -> GenericEntry {
     GenericEntry {
         kind: match entry.kind {
@@ -880,9 +871,4 @@ fn apple_archive_list_entry_to_generic(entry: zmanager_core::apple_archive_backe
         compressed_size: None,
         ..GenericEntry::default()
     }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn list_apple_archive_cli(_archive: &str, _password: Option<&str>) -> Result<Vec<GenericEntry>, String> {
-    Err("Apple Archive is not supported on this platform".to_owned())
 }

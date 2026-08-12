@@ -248,7 +248,10 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
 pub(crate) fn format_capabilities(format: ArchiveFormat) -> (bool, bool, bool) {
     match format {
         ArchiveFormat::Xip => (false, false, false),
-        ArchiveFormat::AppleArchive => (true, true, false),
+        ArchiveFormat::AppleArchive => {
+            let supported = zmanager_core::apple_archive_backend::apple_archive_supported();
+            (supported, supported, false)
+        }
         ArchiveFormat::Rar | ArchiveFormat::MultipartRar | ArchiveFormat::SplitZip => (true, true, false),
         ArchiveFormat::Zip | ArchiveFormat::SevenZ | ArchiveFormat::TarZst | ArchiveFormat::Tzap => (true, true, true),
         ArchiveFormat::Tar

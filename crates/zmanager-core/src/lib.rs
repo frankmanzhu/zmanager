@@ -52,7 +52,6 @@ pub mod tzap_service_auth;
 mod wire_profile;
 mod zip_split;
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_archive_backend;
 pub mod apple_dmg_backend;
 pub mod apple_pkg_backend;
