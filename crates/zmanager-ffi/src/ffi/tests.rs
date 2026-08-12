@@ -1172,8 +1172,13 @@ fn approved_refuse_plan_token(archive: &Path, destination: &Path, password: Opti
     plan.plan_token
 }
 
+// Job workers run on a background thread and compete with the other tests in the suite
+// for CPU, so the poll budget needs headroom for slow or loaded machines (the ARM64 CI
+// runners in particular): 500 polls of ~20ms is a ~10s wall-clock budget.
+const JOB_POLL_ATTEMPTS: usize = 500;
+
 fn wait_for_terminal_job(job_id: &str) -> PollJobEventsResult {
-    for _ in 0..100 {
+    for _ in 0..JOB_POLL_ATTEMPTS {
         let poll = pollJobEvents(PollJobEventsRequest { job_id: job_id.to_string(), cursor: 0 }).expect("job should remain pollable");
 
         if poll.is_terminal {
@@ -1187,7 +1192,7 @@ fn wait_for_terminal_job(job_id: &str) -> PollJobEventsResult {
 }
 
 fn wait_for_terminal_summary(job_id: &str, predicate: impl Fn(&JobTerminalSummary) -> bool) -> PollJobEventsResult {
-    for _ in 0..100 {
+    for _ in 0..JOB_POLL_ATTEMPTS {
         let poll = pollJobEvents(PollJobEventsRequest { job_id: job_id.to_string(), cursor: 0 }).expect("job should remain pollable");
 
         if poll.is_terminal && poll.terminal_summary.as_ref().is_some_and(&predicate) {

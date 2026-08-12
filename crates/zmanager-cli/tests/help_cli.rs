@@ -662,7 +662,8 @@ fn package_preview_uploads_artifacts_without_publishing_release() {
         "powershell -ExecutionPolicy Bypass -File scripts/ci-windows.ps1",
         "actions/upload-artifact@v6",
         "name: zm-preview-${{ matrix.target }}",
-        "path: dist/zm-${{ matrix.target }}.*",
+        // Dual artifacts per target: the glob covers both the zm binary and the auth stub.
+        "path: dist/zm*${{ matrix.target }}.*",
         "Linux tarballs are static single-binary artifacts.",
         "if-no-files-found: error",
         "retention-days: 14",
