@@ -39,6 +39,8 @@ zmanager-libarchive = { workspace = true }
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
+udif = "0.3.4"
+dpp = "0.4.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 zmanager-apple-archive = { workspace = true }

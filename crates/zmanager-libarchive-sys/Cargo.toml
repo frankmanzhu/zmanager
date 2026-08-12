@@ -29,5 +29,5 @@ pedantic = "warn"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 lz4-sys = "1.9.4"
-liblzma-sys = { version = "0.1.11", features = ["static"] }
+liblzma-sys = { package = "lzma-sys", version = "0.1", features = ["static"] }
 zstd-sys = "2.0.16"

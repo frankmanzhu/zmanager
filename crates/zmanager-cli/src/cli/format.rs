@@ -4,6 +4,8 @@ pub(crate) const FORMAT_TAR_ZST: &str = "tar.zst";
 pub(crate) const FORMAT_TZAP: &str = "tzap";
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) const FORMAT_APPLE_ARCHIVE: &str = "aar";
+pub(crate) const FORMAT_DMG: &str = "dmg";
+pub(crate) const FORMAT_PKG: &str = "pkg";
 pub(crate) const FORMAT_SEVEN_Z: &str = "7z";
 pub(crate) const FORMAT_TGZ: &str = "tgz";
 pub(crate) const FORMAT_RAR: &str = "rar";

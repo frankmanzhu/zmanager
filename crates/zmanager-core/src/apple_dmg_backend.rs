@@ -1,0 +1,201 @@
+use crate::jobs::JobContext;
+use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
+use std::fmt;
+use std::io;
+use std::path::{Path, PathBuf};
+
+crate::backend_error_from_impls!(DmgBackendError);
+
+/// `.dmg` extraction report.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DmgExtractReport {
+    /// Number of entries written.
+    pub written_entries: usize,
+    /// Number of entries skipped by policy.
+    pub skipped_entries: usize,
+    /// Number of file bytes extracted.
+    pub written_bytes: u64,
+    /// Non-fatal warnings.
+    pub warnings: Vec<String>,
+}
+
+impl crate::extract_loop::ExtractReport for DmgExtractReport {
+    fn skipped_entries_mut(&mut self) -> &mut usize {
+        &mut self.skipped_entries
+    }
+
+    fn warnings_mut(&mut self) -> &mut Vec<String> {
+        &mut self.warnings
+    }
+}
+
+/// `.dmg` backend error.
+#[derive(Debug)]
+pub enum DmgBackendError {
+    /// Manifest planning failed.
+    Plan(crate::manifest::PlanError),
+    /// Filesystem I/O failed.
+    Io { path: PathBuf, source: io::Error },
+    /// Extraction safety rejected an entry.
+    Safety(ExtractionSafetyError),
+    /// Underlying DPP error.
+    Dpp(String),
+    /// Job was cancelled cooperatively.
+    Cancelled,
+}
+
+impl fmt::Display for DmgBackendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Plan(source) => write!(f, "manifest planning failed: {source}"),
+            Self::Io { path, source } => write!(f, "I/O failed for {}: {source}", path.display()),
+            Self::Safety(source) => write!(f, "extraction safety rejected entry: {source}"),
+            Self::Dpp(message) => write!(f, "DMG backend error: {message}"),
+            Self::Cancelled => write!(f, "job cancelled"),
+        }
+    }
+}
+
+impl std::error::Error for DmgBackendError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Plan(source) => Some(source),
+            Self::Io { source, .. } => Some(source),
+            Self::Safety(source) => Some(source),
+            Self::Dpp(_) | Self::Cancelled => None,
+        }
+    }
+}
+
+struct ProgressWriter<'a, 'b, W: io::Write> {
+    inner: W,
+    context: Option<&'a mut JobContext<'b>>,
+    archive_path: &'a str,
+}
+
+impl<W: io::Write> io::Write for ProgressWriter<'_, '_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        if let Some(ctx) = self.context.as_deref_mut() {
+            if ctx.check_cancelled().is_err() {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "job cancelled"));
+            }
+            ctx.bytes_processed(Some(self.archive_path), written as u64);
+        }
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Extracts a `.dmg` archive with an overwrite resolver.
+pub fn extract_dmg_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<DmgExtractReport, DmgBackendError> {
+    extract_dmg_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts a `.dmg` archive with context.
+pub fn extract_dmg_with_context(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy, context: &mut JobContext<'_>) -> Result<DmgExtractReport, DmgBackendError> {
+    extract_dmg_inner(archive_path, destination, policy, Some(context), None)
+}
+
+fn extract_dmg_inner(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    mut context: Option<&mut JobContext<'_>>,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<DmgExtractReport, DmgBackendError> {
+    let archive_path = archive_path.as_ref();
+    let destination = destination.as_ref();
+    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| DmgBackendError::Io { path: destination.to_path_buf(), source })?;
+
+    let mut pipeline = dpp::DmgPipeline::open(archive_path).map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
+    let mut fs = pipeline.open_filesystem().map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
+
+    let entries = fs.walk().map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
+
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
+    let mut report = DmgExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+
+    for walk_entry in entries {
+        let archive_entry_path = walk_entry.path.strip_prefix('/').unwrap_or(&walk_entry.path).to_string();
+        if archive_entry_path.is_empty() {
+            continue;
+        }
+
+        let size = walk_entry.entry.size;
+
+        let kind = match walk_entry.entry.kind {
+            dpp::FsEntryKind::File => ExtractionEntryKind::File,
+            dpp::FsEntryKind::Directory => ExtractionEntryKind::Directory,
+            dpp::FsEntryKind::Symlink => {
+                let target_bytes = fs.read_file(&walk_entry.path).map_err(|e| DmgBackendError::Dpp(e.to_string()))?;
+                let target = PathBuf::from(String::from_utf8_lossy(&target_bytes).into_owned());
+                ExtractionEntryKind::Symlink { target }
+            }
+        };
+
+        let safety_entry = ExtractionEntry { archive_path: archive_entry_path, kind, uncompressed_size: Some(size), compressed_size: None };
+
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, mut context| match action {
+            crate::extract_loop::EntryAction::Skip => Ok::<u64, DmgBackendError>(0),
+            crate::extract_loop::EntryAction::Write(decision) => {
+                let replace_existing = decision.replace_existing;
+                let destination_path = decision.destination_path;
+
+                if replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
+                    crate::safety::remove_destination_for_replace(destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                }
+
+                match &safety_entry.kind {
+                    ExtractionEntryKind::Directory => {
+                        std::fs::create_dir_all(destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                        Ok::<u64, DmgBackendError>(0)
+                    }
+                    ExtractionEntryKind::File => {
+                        let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                        let mut file = output.file_mut().map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+
+                        let written_bytes = if context.is_some() {
+                            let mut writer = ProgressWriter { inner: &mut file, context: context.as_deref_mut(), archive_path: &safety_entry.archive_path };
+                            fs.read_file_to(&walk_entry.path, &mut writer).map_err(|e| DmgBackendError::Dpp(e.to_string()))?
+                        } else {
+                            fs.read_file_to(&walk_entry.path, &mut file).map_err(|e| DmgBackendError::Dpp(e.to_string()))?
+                        };
+
+                        output.commit_with_replace(replace_existing).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+
+                        report.written_entries += 1;
+                        Ok(written_bytes)
+                    }
+                    ExtractionEntryKind::Symlink { target } => {
+                        if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
+                            crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
+                            return Ok(0);
+                        }
+
+                        #[cfg(unix)]
+                        {
+                            crate::extract_materialize::write_symlink(Path::new(target), destination_path).map_err(|source| DmgBackendError::Io { path: destination_path.to_path_buf(), source })?;
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = target;
+                        }
+                        Ok::<u64, DmgBackendError>(0)
+                    }
+                    _ => Ok::<u64, DmgBackendError>(0),
+                }
+            }
+        })?;
+    }
+
+    Ok(report)
+}

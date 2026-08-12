@@ -19,7 +19,9 @@ pub const ISO_EXTENSIONS: &[&str] = &[".iso"];
 pub const CAB_EXTENSIONS: &[&str] = &[".cab"];
 pub const CPIO_EXTENSIONS: &[&str] = &[".cpio"];
 pub const RPM_EXTENSIONS: &[&str] = &[".rpm"];
-pub const XAR_EXTENSIONS: &[&str] = &[".xar", ".pkg"];
+pub const XAR_EXTENSIONS: &[&str] = &[".xar"];
+pub const PKG_EXTENSIONS: &[&str] = &[".pkg"];
+pub const DMG_EXTENSIONS: &[&str] = &[".dmg"];
 pub const LHA_EXTENSIONS: &[&str] = &[".lha", ".lzh"];
 pub const AR_EXTENSIONS: &[&str] = &[".a", ".ar", ".lib"];
 pub const WARC_EXTENSIONS: &[&str] = &[".warc"];
@@ -60,8 +62,12 @@ pub enum ArchiveFormatKind {
     Cpio,
     /// RPM package (`.rpm`).
     Rpm,
-    /// XAR archive (`.xar`, `.pkg`).
+    /// XAR archive (`.xar`).
     Xar,
+    /// Apple Installer Package (`.pkg`).
+    Pkg,
+    /// Apple Disk Image (`.dmg`).
+    Dmg,
     /// LHA/LZH archive.
     Lha,
     /// AR archive (`.a`, `.ar`, `.lib`).
@@ -136,6 +142,12 @@ pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
     }
     if ends_with_any(path, XAR_EXTENSIONS) {
         return ArchiveFormatKind::Xar;
+    }
+    if ends_with_any(path, PKG_EXTENSIONS) {
+        return ArchiveFormatKind::Pkg;
+    }
+    if ends_with_any(path, DMG_EXTENSIONS) {
+        return ArchiveFormatKind::Dmg;
     }
     if ends_with_any(path, LHA_EXTENSIONS) {
         return ArchiveFormatKind::Lha;

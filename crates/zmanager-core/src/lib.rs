@@ -54,6 +54,8 @@ mod zip_split;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_archive_backend;
+pub mod apple_dmg_backend;
+pub mod apple_pkg_backend;
 pub mod archive_browser;
 pub mod auth_client;
 pub mod certificate_lifecycle;

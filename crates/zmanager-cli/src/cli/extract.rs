@@ -1,7 +1,7 @@
 use crate::cli::app::{ExtractOutcome, ExtractRequest, InteractiveOverwriteResolver, ProgressReporter, default_extract_destination, default_raw_stream_destination, expand_short_options};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
-use crate::cli::format::{BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_LIBARCHIVE, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, is_deb_archive};
+use crate::cli::format::{BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, is_deb_archive};
 use crate::cli::open::entry_selected;
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_usize, read_optional_password_stdin, take_value, validate_recipient_key_open_option};
 use crate::cli::usage::{
@@ -172,6 +172,8 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         ArchiveFormatKind::TarZst => run_tar_zst_extract_with_policy(request.archive, destination, policy, global),
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         ArchiveFormatKind::AppleArchive => run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
+        ArchiveFormatKind::Dmg => run_apple_dmg_extract_with_policy(request.archive, destination, policy, global),
+        ArchiveFormatKind::Pkg => run_apple_pkg_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::Tzap => run_tzap_extract_with_policy(
             request.archive,
             destination,
@@ -311,6 +313,10 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(&request.archive, &request.include, &request.exclude, password.as_deref(), global),
+            ArchiveFormatKind::Dmg | ArchiveFormatKind::Pkg => {
+                print_error_line(global, format_args!("extract to stdout failed: DMG and PKG formats do not currently support extracting to stdout"));
+                ExitCode::FAILURE
+            }
             // Split ZIP volume sets, tgz, .deb, RAR, and unrecognized formats
             // are read through libarchive, matching the pre-CR-114
             // fallthrough behavior.
@@ -517,6 +523,18 @@ impl From<zmanager_core::libarchive_backend::LibarchiveExtractReport> for CliExt
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 impl From<zmanager_core::apple_archive_backend::AppleArchiveExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::apple_archive_backend::AppleArchiveExtractReport) -> Self {
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
+    }
+}
+
+impl From<zmanager_core::apple_dmg_backend::DmgExtractReport> for CliExtractReport {
+    fn from(report: zmanager_core::apple_dmg_backend::DmgExtractReport) -> Self {
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
+    }
+}
+
+impl From<zmanager_core::apple_pkg_backend::PkgExtractReport> for CliExtractReport {
+    fn from(report: zmanager_core::apple_pkg_backend::PkgExtractReport) -> Self {
         Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
@@ -857,6 +875,70 @@ fn run_libarchive_extract_with_policy(
             },
             plain: &|archive_path, destination_path, policy, password, _context| {
                 zmanager_core::libarchive_backend::extract_archive_with_password(archive_path, destination_path, policy, password)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+        },
+    )
+}
+
+fn run_apple_dmg_extract_with_policy(
+    archive: impl AsRef<std::path::Path>,
+    destination: impl AsRef<std::path::Path>,
+    policy: zmanager_core::safety::ExtractionPolicy,
+    global: &GlobalOptions,
+) -> ExitCode {
+    run_extract_with_policy(
+        archive,
+        destination,
+        policy,
+        None,
+        global,
+        ExtractBackendSpec {
+            label: FORMAT_DMG,
+            kind: JobKind::ArchiveExtract,
+            error_prefix: "dmg extract failed: ",
+            password_prompt: None,
+            progress: true,
+            ask: &|archive_path, destination_path, policy, _password, resolver| {
+                zmanager_core::apple_dmg_backend::extract_dmg_with_overwrite_resolver(archive_path, destination_path, policy, resolver)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+            plain: &|archive_path, destination_path, policy, _password, context| {
+                zmanager_core::apple_dmg_backend::extract_dmg_with_context(archive_path, destination_path, policy, context)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+        },
+    )
+}
+
+fn run_apple_pkg_extract_with_policy(
+    archive: impl AsRef<std::path::Path>,
+    destination: impl AsRef<std::path::Path>,
+    policy: zmanager_core::safety::ExtractionPolicy,
+    global: &GlobalOptions,
+) -> ExitCode {
+    run_extract_with_policy(
+        archive,
+        destination,
+        policy,
+        None,
+        global,
+        ExtractBackendSpec {
+            label: FORMAT_PKG,
+            kind: JobKind::ArchiveExtract,
+            error_prefix: "pkg extract failed: ",
+            password_prompt: None,
+            progress: true,
+            ask: &|archive_path, destination_path, policy, _password, resolver| {
+                zmanager_core::apple_pkg_backend::extract_pkg_with_overwrite_resolver(archive_path, destination_path, policy, resolver)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+            plain: &|archive_path, destination_path, policy, _password, context| {
+                zmanager_core::apple_pkg_backend::extract_pkg_with_context(archive_path, destination_path, policy, context)
                     .map(CliExtractReport::from)
                     .map_err(|error| CliExtractError::Message(error.to_string()))
             },
