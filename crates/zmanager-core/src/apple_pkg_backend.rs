@@ -385,7 +385,10 @@ mod tests {
         // the AppleDouble entries are written as plain files too.
         let listing = list_pkg(&archive).unwrap();
         let declared_file_bytes: u64 = listing.iter().filter(|entry| entry.kind == PkgEntryKind::File).map(|entry| entry.size).sum();
-        assert_eq!(report.written_entries, listing.iter().filter(|entry| entry.kind == PkgEntryKind::File).count() - if cfg!(unix) { 0 } else { 1 });
+        // The fixture's symlink is not reflected in written_entries on any
+        // platform (materialized on unix, skipped elsewhere; the pkg backend
+        // does not count it), so the File count matches unconditionally.
+        assert_eq!(report.written_entries, listing.iter().filter(|entry| entry.kind == PkgEntryKind::File).count());
         assert_eq!(report.written_bytes, declared_file_bytes, "written bytes must sum the declared sizes of all listed files");
     }
 }
