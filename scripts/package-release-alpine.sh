@@ -38,10 +38,27 @@ if [ ! -d "$TZAP_DIR" ]; then
   exit 1
 fi
 
+# zmanager-core path-depends on the forensic-vfs-engine sibling, which in turn
+# path-depends on the udf-forensic and ntfs-forensic siblings; from the
+# container's /workspace checkout those resolve to /forensic-vfs-engine,
+# /udf-forensic, and /ntfs-forensic, so all three must be mounted.
+FVE_DIR="$ROOT/../forensic-vfs-engine"
+UDF_DIR="$ROOT/../udf-forensic"
+NTFS_DIR="$ROOT/../ntfs-forensic"
+for d in "$FVE_DIR" "$UDF_DIR" "$NTFS_DIR"; do
+  if [ ! -d "$d" ]; then
+    echo "sibling directory not found at $d — clone it first" >&2
+    exit 1
+  fi
+done
+
 docker run --rm \
   --platform "$PLATFORM" \
   -v "$ROOT:/workspace" \
   -v "$(cd "$TZAP_DIR" && pwd):/tzap" \
+  -v "$(cd "$FVE_DIR" && pwd):/forensic-vfs-engine" \
+  -v "$(cd "$UDF_DIR" && pwd):/udf-forensic" \
+  -v "$(cd "$NTFS_DIR" && pwd):/ntfs-forensic" \
   -w /workspace \
   -e TARGET="$TARGET" \
   -e OUT_DIR="$OUT_DIR" \
