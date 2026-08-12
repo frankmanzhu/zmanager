@@ -73,6 +73,10 @@ docker run --rm \
     # git is required: the workspace .cargo/config.toml sets
     # net.git-fetch-with-cli, so cargo shells out to the git CLI for the
     # dpp/tzap/forensic-vfs-engine git dependencies.
+    #
+    # xz-dev/xz-static provide the system liblzma that is the ONLY liblzma
+    # in the static link (see zmanager-libarchive-sys/build.rs: lzma-sys is
+    # non-static on musl, and libarchive has no whole-archive lzma).
     apk add --no-cache \
       bash \
       binutils \

@@ -305,8 +305,10 @@ fn bridge_lists_plans_and_extracts_passworded_multipart_rar() {
     let listing = listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: Some(password.to_string()) })
         .expect("the exact password should list the multipart RAR");
     assert_eq!(listing.format, ArchiveFormat::MultipartRar);
-    assert_eq!(listing.entries.iter().filter(|entry| entry.path == "rar-fixture/data/stream.bin").count(), 1);
-    assert!(listing.entries.iter().any(|entry| entry.path == "rar-fixture/docs/readme.txt"));
+    // RAR listings use the host path separator; normalize for the
+    // platform-independent fixture assertions.
+    assert_eq!(listing.entries.iter().filter(|entry| entry.path.replace('\\', "/") == "rar-fixture/data/stream.bin").count(), 1);
+    assert!(listing.entries.iter().any(|entry| entry.path.replace('\\', "/") == "rar-fixture/docs/readme.txt"));
 
     let plan = planExtract(PlanExtractRequest {
         archive_path: archive.to_string_lossy().to_string(),

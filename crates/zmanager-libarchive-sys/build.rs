@@ -170,6 +170,14 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("ENABLE_LZMA", "ON")
             .define("ENABLE_ZSTD", "ON")
             .define("ENABLE_LZ4", "ON");
+
+        // LZMA has NO whole-archive entry: lzma-sys (configured without its
+        // static feature for musl in Cargo.toml) links the system liblzma via
+        // its own -llzma, and its rlibs (xz2/pbzx) precede that flag so
+        // --as-needed keeps it alive for libarchive's references too. A
+        // whole-archive=lzma entry would make cargo copy the system archive
+        // into its deps dir, and the two copies of liblzma.a would both pull
+        // riscv.o — duplicate lzma_bcj_riscv_* symbols.
     } else if target.contains("apple-darwin") {
         config
             .define("ENABLE_ACL", "ON")
@@ -336,8 +344,13 @@ fn link_bundled_archive_dependencies(target: &str) {
         // keeps every codec in the fully static musl binary.
         println!("cargo:rustc-link-lib=pthread");
         println!("cargo:rustc-link-lib=static:+whole-archive=z");
-        println!("cargo:rustc-link-lib=static:+whole-archive=bz2");
-        println!("cargo:rustc-link-lib=static:+whole-archive=lzma");
+        // No whole-archive entries for bz2/lzma: bzip2-sys and lzma-sys link
+        // their own (bz2) or the system (lzma) archive via -lbz2/-llzma, and
+        // their rlibs precede those flags so --as-needed keeps them alive for
+        // libarchive's references too. A whole-archive entry would make cargo
+        // copy the resolved archive into its deps dir and the two copies of
+        // the archive would both pull the same objects (duplicate
+        // BZ2_bzerror / lzma_bcj_riscv_* symbols).
         println!("cargo:rustc-link-lib=static:+whole-archive=zstd");
         println!("cargo:rustc-link-lib=static:+whole-archive=lz4");
         println!("cargo:rustc-link-lib=static:+whole-archive=nettle");

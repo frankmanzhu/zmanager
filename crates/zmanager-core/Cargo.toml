@@ -55,7 +55,7 @@ dpp = { git = "https://github.com/frankmanzhu/dpp", branch = "fix-apfs-symlink-x
 # locally and pushed to https://github.com/frankmanzhu/forensic-vfs-engine with an
 # upstream PR — the dpp precedent. Switch back to crates.io when the family
 # stabilizes: drop the `path` key and keep `version = "0.1"` (relax the exact pin).
-forensic-vfs-engine = { path = "/Users/frankzhu/IdeaProjects/forensic-vfs-engine", version = "=0.1.10" }
+forensic-vfs-engine = { path = "../../../forensic-vfs-engine", version = "=0.1.10" }
 # The engine does not re-export the contract types (FileSystem, FsKind, ...);
 # same floor as the engine so cargo unifies to one copy.
 forensic-vfs = "0.7"
