@@ -22,9 +22,9 @@
 //! ## Known limitations
 //!
 //! - Only the default data stream is extracted (no NTFS ADS / resource forks).
-//! - NTFS symlinks (reparse points) and UDF symlinks are not surfaced as
-//!   `Symlink` by the family's vfs adapters (they read the target bytes as a
-//!   regular file); fixtures therefore carry no symlinks for these formats.
+//! - Symlinks are supported on NTFS (reparse-point buffers and the ntfs-3g
+//!   `IntxLNK` form, patched in the ntfs-core fork) and UDF (`PATH_COMPONENT`
+//!   decode, patched in the udf-forensic fork); FAT has no symlinks.
 //! - NTFS system metadata files (`$MFT`, `$Bitmap`, …) are filtered from the
 //!   volume root by exact name.
 //! - Deleted/recovered entries (`Allocation::Deleted`/`Orphan`) are skipped with
@@ -594,6 +594,16 @@ mod tests {
             assert_eq!(fs::read_to_string(out.join("payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n", "{name}");
             assert_eq!(fs::read_to_string(out.join("payload/unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n", "{name}");
             assert!(out.join("payload/nested/empty-dir").is_dir(), "{name}");
+            // The NTFS and UDF fixtures carry the symlink (patched adapters
+            // decode reparse/IntxLNK and PATH_COMPONENT targets); FAT strips it.
+            if matches!(name, "basic.vhd" | "basic.udf") {
+                #[cfg(unix)]
+                {
+                    assert_eq!(fs::read_link(out.join("payload/nested/readme-link.txt")).unwrap(), PathBuf::from("../README.txt"), "{name}");
+                }
+            } else {
+                assert!(!out.join("payload/nested/readme-link.txt").exists(), "{name}");
+            }
         }
     }
 

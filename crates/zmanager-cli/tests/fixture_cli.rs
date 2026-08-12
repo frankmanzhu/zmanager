@@ -188,6 +188,8 @@ fn cli_lists_tests_and_extracts_virtual_disk_fixtures() {
         assert!(!list_stdout.contains("payload/./"), "entries must not carry ./ prefixes: {list_stdout}");
         // The NTFS vhd fixture must not surface $MFT-style system metadata.
         assert!(!list_stdout.contains("$MFT"), "NTFS metadata leaked: {list_stdout}");
+        // The UDF fixture carries a symlink; the NTFS/FAT fixtures do not.
+        assert_eq!(list_stdout.contains("payload/nested/readme-link.txt"), matches!(filename, "basic.vhd" | "basic.udf"), "{list_stdout}");
 
         let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
         assert_success(&format!("zm test {filename}"), &test);
@@ -200,9 +202,17 @@ fn cli_lists_tests_and_extracts_virtual_disk_fixtures() {
         assert_eq!(fs::read_to_string(out.join("payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
         assert_eq!(fs::read_to_string(out.join("payload/unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
         assert!(out.join("payload/nested/empty-dir").is_dir());
-        // The vfs adapters read symlink target bytes as regular files, so the
-        // disk fixtures carry no symlink (documented divergence).
-        assert!(!out.join("payload/nested/readme-link.txt").exists(), "{filename}");
+        // The patched NTFS and UDF adapters decode symlinks (reparse/
+        // IntxLNK and PATH_COMPONENT), so those fixtures carry the symlink;
+        // the FAT fixture strips it (FAT has no symlinks).
+        if matches!(filename, "basic.vhd" | "basic.udf") {
+            #[cfg(unix)]
+            {
+                assert_eq!(fs::read_link(out.join("payload/nested/readme-link.txt")).unwrap(), PathBuf::from("../README.txt"), "{filename}");
+            }
+        } else {
+            assert!(!out.join("payload/nested/readme-link.txt").exists(), "{filename}");
+        }
 
         // Selective extraction exercises pattern matching against the resolved paths.
         let out_sel = temp.path("out-sel");
@@ -246,7 +256,14 @@ fn optional_7zz_compares_vhd_vmdk_extraction_when_available() {
         let extract = Command::new(zm_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).output().unwrap();
         assert_success(&format!("zm extract {filename}"), &extract);
 
-        assert_trees_match(&format!("7zz reference vs zm ({filename})"), &reference.join("payload"), &out.join("payload"));
+        // Divergence filter: 7-Zip extracts the NTFS IntxLNK symlink as a
+        // regular file (the raw 34-byte record) while zm materializes the
+        // symlink itself (patched ntfs-core adapter) — documented, so the
+        // entry is skipped on both sides for the VHD comparison. The FAT32
+        // VMDK carries no symlink and the filter is a no-op there.
+        assert_trees_match_filtered(&format!("7zz reference vs zm ({filename})"), &reference.join("payload"), &out.join("payload"), |rel| {
+            rel.file_name().is_some_and(|name| name == "readme-link.txt")
+        });
     }
 }
 

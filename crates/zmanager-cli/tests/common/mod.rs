@@ -123,8 +123,9 @@ pub fn is_apple_double(rel: &Path) -> bool {
     rel.file_name().is_some_and(|name| name.to_string_lossy().starts_with("._"))
 }
 
-/// Recursively collects the relative paths of every entry under `root`.
-pub fn collect_tree_entries(root: &Path) -> Vec<PathBuf> {
+/// Recursively collects the relative paths of every entry under `root`,
+/// skipping `AppleDouble` (`._`) entries and anything `skip` rejects.
+pub fn collect_tree_entries_filtered(root: &Path, skip: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
     let mut entries = Vec::new();
     let mut stack = vec![PathBuf::new()];
     while let Some(dir) = stack.pop() {
@@ -132,7 +133,7 @@ pub fn collect_tree_entries(root: &Path) -> Vec<PathBuf> {
         children.sort();
         for child in children {
             let rel = dir.join(child.file_name().unwrap());
-            if is_apple_double(&rel) {
+            if is_apple_double(&rel) || skip(&rel) {
                 continue;
             }
             entries.push(rel.clone());
@@ -144,11 +145,24 @@ pub fn collect_tree_entries(root: &Path) -> Vec<PathBuf> {
     entries
 }
 
+/// Recursively collects the relative paths of every entry under `root`.
+pub fn collect_tree_entries(root: &Path) -> Vec<PathBuf> {
+    collect_tree_entries_filtered(root, |_| false)
+}
+
 /// Asserts `actual` matches `expected` entry-for-entry: same tree shape,
 /// byte-identical file contents, identical symlink targets.
 pub fn assert_trees_match(label: &str, expected: &Path, actual: &Path) {
-    let expected_entries = collect_tree_entries(expected);
-    let actual_entries = collect_tree_entries(actual);
+    assert_trees_match_filtered(label, expected, actual, |_| false);
+}
+
+/// Asserts `actual` matches `expected` entry-for-entry: same tree shape,
+/// byte-identical file contents, identical symlink targets. Entries `skip`
+/// rejects are ignored on both sides (documented divergences between zm and
+/// the reference tool).
+pub fn assert_trees_match_filtered(label: &str, expected: &Path, actual: &Path, skip: impl Fn(&Path) -> bool) {
+    let expected_entries = collect_tree_entries_filtered(expected, &skip);
+    let actual_entries = collect_tree_entries_filtered(actual, &skip);
 
     for rel in &expected_entries {
         let actual_path = actual.join(rel);

@@ -157,8 +157,10 @@ WXS
 # Virtual-disk fixtures (VHD/VMDK/UDF): block-device formats whose files live
 # inside an inner filesystem. The extraction backend (forensic-vfs-engine)
 # resolves container -> partition table -> filesystem in one call. The symlink
-# is stripped from these payloads: the NTFS/FAT/UDF vfs adapters read symlink
-# target bytes as a regular file, so a symlink would materialize as junk.
+# is stripped from the FAT payload (FAT has no symlinks) but kept for NTFS
+# and UDF: the patched ntfs-core adapter decodes reparse-point/'IntxLNK'
+# symlinks and the patched udf-forensic adapter decodes PATH_COMPONENT links
+# (frankmanzhu forks).
 DISK_SRC="$WORK/disk-src"
 mkdir -p "$DISK_SRC"
 cp -PR "$SRC" "$DISK_SRC/"
@@ -199,7 +201,7 @@ docker run --rm --privileged -v "$WORK:/work" ubuntu:24.04 bash -c '
   LOOP=$(losetup -f); losetup $LOOP /work/ntfs.img
   mkntfs -F -L ZMANAGER $LOOP >/dev/null 2>&1
   mkdir -p /mnt/ntfs && mount -t ntfs-3g $LOOP /mnt/ntfs
-  cp -a /work/disk-src/payload /mnt/ntfs/
+  cp -a /work/payload /mnt/ntfs/
   sync; umount /mnt/ntfs; losetup -d $LOOP
 ' >/dev/null
 dd if=/dev/zero of="$WORK/raw-mbr.img" bs=1m count=257 status=none
@@ -209,9 +211,10 @@ dd if="$WORK/ntfs.img" of="$WORK/raw-mbr.img" bs=1m seek=1 conv=notrunc status=n
 qemu-img convert -f raw -O vpc "$WORK/raw-mbr.img" "$ARCHIVES/basic.vhd"
 
 # UDF fixture: a populated physical-partition UDF 2.01 volume authored inside
-# the same container (mkudffs + loop mount). mkudffs must NOT get --utf8: the
-# volume-recognition-sequence probe in the engine's UDF reader does not match
-# images minted with it (spike finding). The engine mounts this image as UDF;
+# the same container (mkudffs + loop mount). Note: --utf8 is fine for the
+# engine's UDF probe, but mkudffs requires it to be the FIRST argument
+# (else it errors out and leaves a zero-filled file). The engine mounts this
+# image as UDF;
 # macOS reads it natively (hdiutil oracle).
 docker run --rm --privileged -v "$WORK:/work" ubuntu:24.04 bash -c '
   set -e
@@ -222,7 +225,7 @@ docker run --rm --privileged -v "$WORK:/work" ubuntu:24.04 bash -c '
   mkudffs --media-type=hd --udfrev=0x0201 /work/basic.udf >/dev/null 2>&1
   LOOP=$(losetup -f); losetup $LOOP /work/basic.udf
   mkdir -p /mnt/udf && mount -t udf $LOOP /mnt/udf
-  cp -a /work/disk-src/payload /mnt/udf/
+  cp -a /work/payload /mnt/udf/
   sync; umount /mnt/udf; losetup -d $LOOP
 ' >/dev/null
 cp "$WORK/basic.udf" "$ARCHIVES/basic.udf"

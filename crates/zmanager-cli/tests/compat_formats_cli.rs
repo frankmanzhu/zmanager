@@ -1359,6 +1359,12 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
     let work = temp.root();
 
     // NTFS superfloppy VHD (the checked-in fixture already covers MBR+NTFS).
+    // The patched ntfs-core adapter decodes reparse/IntxLNK symlinks, so this
+    // leg keeps the symlink the FAT legs must strip.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("../root_file.txt", temp.path("project/nested/link.txt")).unwrap();
+    }
     let ntfs_vhd = archive_temp.path("project-ntfs.vhd");
     let ntfs_build = Command::new(&docker)
         .arg("run")
@@ -1375,9 +1381,16 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
     );
     assert_zm_extracts_complex_matrix_without_stdout("docker-created ntfs vhd", &ntfs_vhd, &temp);
     assert_zm_extracts_virtual_disk_extra_entries("docker-created ntfs vhd", &ntfs_vhd, &temp);
+    #[cfg(unix)]
+    {
+        let out = temp.path("out_extras_docker_created_ntfs_vhd");
+        assert_eq!(fs::read_link(out.join("project/nested/link.txt")).unwrap(), PathBuf::from("../root_file.txt"));
+    }
 
-    // UDF 2.01 physical partition, populated via loop mount (mkudffs must not
-    // get --utf8: the engine's VRS probe does not match such images).
+    // UDF 2.01 physical partition, populated via loop mount (--utf8 is fine
+    // for the engine's UDF probe; mkudffs just requires it as first argument).
+    // The symlink was already created for the NTFS leg above; `cp -a` carries
+    // it into this volume too.
     let udf_image = work.join("project.udf");
     let udf_build = Command::new(&docker)
         .arg("run")
@@ -1390,6 +1403,11 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
     assert_success("docker authors UDF image", &udf_build);
     assert_zm_extracts_complex_matrix_without_stdout("docker-created udf", &udf_image, &temp);
     assert_zm_extracts_virtual_disk_extra_entries("docker-created udf", &udf_image, &temp);
+    #[cfg(unix)]
+    {
+        let out = temp.path("out_extras_docker_created_udf");
+        assert_eq!(fs::read_link(out.join("project/nested/link.txt")).unwrap(), PathBuf::from("../root_file.txt"));
+    }
 }
 
 /// The virtual-disk formats must handle entries beyond the shared complex
