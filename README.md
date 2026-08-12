@@ -94,7 +94,7 @@ ZManager treats extraction and creation differently:
 - **Create deliberately.** New archives should use practical, well-supported formats:
   ZIP for universal sharing, TZST (`.tar.zst`) for fast compression, TGZ (`.tar.gz`) for compatibility,
   TZAP for encrypted recoverable archives, 7z for high-compression encrypted archives, and Apple Archive (`.aar`/`.aea`) for Apple platforms.
-- **TZAP: A modern Open Source RAR alternative.** The `.tzap` format is designed as a fast, secure, and resilient competitor to RAR, featuring state-of-the-art cryptographic signatures, multi-recipient encryption, and robust error recovery.
+- **TZAP: a modern, open-source RAR alternative.** The `.tzap` format is engineered to be fast, secure, and resilient: state-of-the-art cryptographic signatures, multi-recipient encryption, secure passphrase protection, and self-healing error recovery.
 - **Avoid legacy creation paths.** Old compression methods matter for reading
   existing files, but new archives should use safer and faster defaults.
 - **Use strong password protection.** Encrypted ZIP, TZAP, and 7z creation use
@@ -121,13 +121,14 @@ Passwords are not accepted as command arguments. Use the prompt or
 | Workflow | Formats |
 | --- | --- |
 | Create archives | `.zip` with Deflate/store and AES-256 encryption, `.tzst` (`.tar.zst`) with Zstandard, `.tgz` (`.tar.gz`) with gzip, `.tzap` with Zstandard plus encryption/recovery metadata, `.7z` with LZMA2 and AES-256 encryption, `.aar`/`.aea` (Apple Archive) |
-| ZIP family | `.zip`, `.zipx`, `.jar`, `.war`, `.ipa`, `.apk`, `.appx`, `.xpi`, ZIP-content `.exe` files |
-| 7z | `.7z`, including encrypted 7z archives |
+| ZIP family | `.zip`, `.zipx`, `.jar`, `.war`, `.ipa`, `.apk`, `.appx`, `.xpi`, `.cbz`, `.epub`, split `.z01`… volumes, ZIP-content `.exe` files |
+| 7z | `.7z`, `.cb7`, encrypted 7z archives, numbered `.7z.001` volumes |
 | RAR | `.rar`, `.cbr`, split `.partN.rar` volumes, RAR4/RAR5, passworded RAR data, encrypted RAR5 headers, Unicode paths, symlinks, hardlinks, and file-reference entries |
-| TAR and variants | `.tar`, `.ustar`, `.pax`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.lzma`, `.tzst`, `.tar.zst`, `.tar.lz`, `.tar.lzo`, `.tar.Z`, `.tar.lz4`, `.tar.lrz` |
-| TZAP | `.tzap`, A modern Open Source RAR alternative. passphrase-protected create/list/test/extract |
+| TAR and variants | `.tar`, `.cbt`, `.ustar`, `.pax`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tbz`, `.tar.xz`, `.txz`, `.tar.lzma`, `.tlzma`, `.tzst`, `.tar.zst`, `.tar.lz`, `.tar.lzo`, `.tar.Z`, `.tar.lz4`, `.tar.lrz` |
+| TZAP | `.tzap` — a modern, open-source RAR alternative. Secure passphrase or multi-recipient encryption, cryptographic signatures, and self-healing error recovery; passphrase-protected create/list/test/extract |
 | Raw compressed files | `.zst`, `.gz`, `.bz2`, `.xz`, `.lzma`, `.lz`, `.br`, `.lz4`, `.lzo`, `.Z`, `.lrz` |
-| Packages and containers | `.deb`, `.rpm`, `.ar`, `.cpio`, `.cpgz`, `.spk`, `.iso`, `.xar`, `.cab` |
+| Packages and containers | `.deb`, `.rpm`, `.a`, `.ar`, `.lib`, `.cpio`, `.cpgz`, `.spk`, `.iso`, `.xar`, `.cab`, `.msi`, `.pkg`, `.lha`, `.lzh`, `.warc`, `.mtree` |
+| Disk images | `.dmg` (Apple Disk Image), `.vhd` (Virtual PC/Hyper-V), `.vmdk` (VMware), `.udf` (optical) — extraction resolves MBR/GPT partitions and the inner filesystem (NTFS, FAT/exFAT, ext4, UDF) |
 | Apple Archive | `.aar`, `.aea` encrypted Apple Archives (macOS/iOS) |
 | Passwords | ZIP, 7z, TZAP, Apple Archive, and RAR list/test/extract through prompt or `--password-stdin` |
 
