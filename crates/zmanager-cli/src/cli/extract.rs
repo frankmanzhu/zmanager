@@ -224,7 +224,23 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
             },
             global,
         ),
-        ArchiveFormatKind::TarGz | ArchiveFormatKind::Deb | ArchiveFormatKind::Unknown | ArchiveFormatKind::Rar => {
+        ArchiveFormatKind::TarGz
+        | ArchiveFormatKind::Deb
+        | ArchiveFormatKind::Unknown
+        | ArchiveFormatKind::Rar
+        | ArchiveFormatKind::Tar
+        | ArchiveFormatKind::TarBz2
+        | ArchiveFormatKind::TarXz
+        | ArchiveFormatKind::TarLzma
+        | ArchiveFormatKind::Iso
+        | ArchiveFormatKind::Cab
+        | ArchiveFormatKind::Cpio
+        | ArchiveFormatKind::Rpm
+        | ArchiveFormatKind::Xar
+        | ArchiveFormatKind::Lha
+        | ArchiveFormatKind::Ar
+        | ArchiveFormatKind::Warc
+        | ArchiveFormatKind::Mtree => {
             run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
         }
     }
@@ -376,6 +392,19 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             | ArchiveFormatKind::TarGz
             | ArchiveFormatKind::Deb
             | ArchiveFormatKind::Rar
+            | ArchiveFormatKind::Tar
+            | ArchiveFormatKind::TarBz2
+            | ArchiveFormatKind::TarXz
+            | ArchiveFormatKind::TarLzma
+            | ArchiveFormatKind::Iso
+            | ArchiveFormatKind::Cab
+            | ArchiveFormatKind::Cpio
+            | ArchiveFormatKind::Rpm
+            | ArchiveFormatKind::Xar
+            | ArchiveFormatKind::Lha
+            | ArchiveFormatKind::Ar
+            | ArchiveFormatKind::Warc
+            | ArchiveFormatKind::Mtree
             | ArchiveFormatKind::Unknown => copy_archive_to_stdout(
                 &request.include,
                 &request.exclude,

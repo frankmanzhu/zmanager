@@ -443,8 +443,8 @@ fn competitor_tar_cpio_pax_formats_extract_with_zm() {
     let Some(bsdtar) = find_on_path("bsdtar") else {
         return;
     };
-    let temp = TestDir::new("compat_tar_cpio_pax_shar");
-    create_project_payload(&temp);
+    let temp = TestDir::new("compat_tar_cpio_pax_shar_complex");
+    create_complex_project_payload(&temp);
 
     for (label, format, filename) in [
         ("tar", None, "payload.tar"),
@@ -461,7 +461,7 @@ fn competitor_tar_cpio_pax_formats_extract_with_zm() {
         let create = command.arg("-C").arg(temp.root()).arg("project").output().unwrap();
         assert_success(&format!("bsdtar creates {label}"), &create);
 
-        assert_zm_extracts_payload(&format!("bsdtar-created {label}"), &archive, PAYLOAD);
+        assert_zm_extracts_complex_matrix(&format!("bsdtar-created {label}"), &archive, &temp);
     }
 }
 
@@ -505,8 +505,8 @@ fn competitor_compressed_tar_filters_extract_with_zm() {
     let Some(bsdtar) = find_on_path("bsdtar") else {
         return;
     };
-    let temp = TestDir::new("compat_compressed_tar");
-    create_project_payload(&temp);
+    let temp = TestDir::new("compat_compressed_tar_complex");
+    create_complex_project_payload(&temp);
     let mut archives = Vec::new();
 
     let tar_archive = temp.path("payload.tar");
@@ -612,7 +612,7 @@ fn competitor_compressed_tar_filters_extract_with_zm() {
     }
 
     for (label, archive) in archives {
-        assert_zm_extracts_payload(&label, &archive, PAYLOAD);
+        assert_zm_extracts_complex_matrix(&label, &archive, &temp);
     }
 }
 
@@ -779,15 +779,29 @@ fn raw_stream_extract_without_directory_writes_next_to_archive() {
 
 #[test]
 fn competitor_iso_xar_cab_formats_extract_with_zm() {
-    let temp = TestDir::new("compat_images_packages");
-    create_project_payload(&temp);
+    let temp = TestDir::new("compat_images_packages_complex");
+    create_complex_project_payload(&temp);
 
     if let Some(mkisofs) = find_on_path("mkisofs") {
         let archive = temp.path("payload.iso");
-        let create =
-            Command::new(mkisofs).arg("-quiet").arg("-o").arg(&archive).arg(temp.path("project")).output().unwrap();
+        let iso_root = temp.path("iso_root");
+        fs::create_dir_all(&iso_root).unwrap();
+        // Copy project into iso_root/project so it appears as 'project/...' in the ISO
+        run_optional_tool("cp", "cp project to iso_root", |c| {
+            c.arg("-r").arg(temp.path("project")).arg(&iso_root);
+        });
+
+        let create = Command::new(mkisofs)
+            .arg("-quiet")
+            .arg("-R")
+            .arg("-J")
+            .arg("-o")
+            .arg(&archive)
+            .arg(&iso_root)
+            .output()
+            .unwrap();
         assert_success("mkisofs creates iso", &create);
-        assert_zm_extracts_payload("mkisofs-created iso", &archive, PAYLOAD);
+        assert_zm_extracts_complex_matrix("mkisofs-created iso", &archive, &temp);
     }
 
     if let Some(xar) = find_on_path("xar") {
@@ -795,20 +809,22 @@ fn competitor_iso_xar_cab_formats_extract_with_zm() {
         let create =
             Command::new(xar).current_dir(temp.root()).arg("-cf").arg(&archive).arg("project").output().unwrap();
         assert_success("xar creates xar", &create);
-        assert_zm_extracts_payload("xar-created xar", &archive, PAYLOAD);
+        assert_zm_extracts_complex_matrix("xar-created xar", &archive, &temp);
     }
 
     if let Some(gcab) = find_on_path("gcab") {
         let archive = temp.path("payload.cab");
-        let create = Command::new(gcab)
-            .current_dir(temp.root())
-            .arg("-c")
-            .arg(&archive)
-            .arg("project/file.txt")
-            .output()
-            .unwrap();
+        let create =
+            Command::new(gcab).current_dir(temp.root()).arg("-c").arg(&archive).arg("project").output().unwrap();
         assert_success("gcab creates cab", &create);
-        assert_zm_extracts_payload("gcab-created cab", &archive, PAYLOAD);
+        assert_zm_extracts_complex_matrix("gcab-created cab", &archive, &temp);
+    }
+
+    if let Some(lha) = find_on_path("lha") {
+        let archive = temp.path("payload.lzh");
+        let create = Command::new(lha).current_dir(temp.root()).arg("a").arg(&archive).arg("project").output().unwrap();
+        assert_success("lha creates lzh", &create);
+        assert_zm_extracts_complex_matrix("lha-created lzh", &archive, &temp);
     }
 }
 
@@ -1064,4 +1080,76 @@ fn tree_contains_any_file(root: &Path) -> bool {
     }
 
     false
+}
+
+fn create_complex_project_payload(temp: &TestDir) {
+    fs::create_dir_all(temp.path("project/nested/empty_dir")).unwrap();
+    fs::write(temp.path("project/root_file.txt"), b"root_file_content").unwrap();
+    fs::write(temp.path("project/nested/deep_file.txt"), b"deep_file_content").unwrap();
+    let large_blob = write_deterministic_blob(&temp.path("project/large_blob.bin"), 1024 * 100);
+    fs::write(temp.path("project/large_blob_copy.bin"), large_blob).unwrap();
+}
+
+fn assert_zm_extracts_complex_matrix(label: &str, archive: &Path, temp: &TestDir) {
+    println!("Matrix test for: {label}");
+    // Matrix 1: Full Extract
+    let out = temp.path(format!("out_full_{}", label.replace([' ', '-'], "_")));
+    let output = Command::new(zm_path()).arg("extract").arg(archive).arg("-C").arg(&out).output().unwrap();
+    assert_success(&format!("zm extract {label} (full)"), &output);
+    assert!(out.join("project/root_file.txt").exists(), "missing root file for {label}");
+    assert!(out.join("project/nested/deep_file.txt").exists(), "missing deep file");
+    if !label.contains("cab") {
+        assert!(out.join("project/nested/empty_dir").is_dir(), "missing dir");
+    }
+    assert!(out.join("project/large_blob.bin").exists(), "missing blob");
+
+    // Matrix 2: Selective Extract
+    let out_sel = temp.path(format!("out_sel_{}", label.replace([' ', '-'], "_")));
+    let output = Command::new(zm_path())
+        .arg("extract")
+        .arg(archive)
+        .arg("--include")
+        .arg("project/nested/deep_file.txt")
+        .arg("-C")
+        .arg(&out_sel)
+        .output()
+        .unwrap();
+    assert_success(&format!("zm extract {label} (selective)"), &output);
+    assert!(out_sel.join("project/nested/deep_file.txt").exists(), "missing selective file");
+    assert!(!out_sel.join("project/root_file.txt").exists(), "unexpected root file");
+
+    // Matrix 3: Stdout Extract
+    let output = Command::new(zm_path())
+        .arg("extract")
+        .arg(archive)
+        .arg("--include")
+        .arg("project/root_file.txt")
+        .arg("--to-stdout")
+        .output()
+        .unwrap();
+    assert_success(&format!("zm extract {label} (stdout)"), &output);
+    assert_eq!(output.stdout, b"root_file_content");
+
+    // Matrix 4: Overwrite
+    let out_ow = temp.path(format!("out_ow_{}", label.replace([' ', '-'], "_")));
+    fs::create_dir_all(out_ow.join("project")).unwrap();
+    fs::write(out_ow.join("project/root_file.txt"), b"junk_data").unwrap();
+    let output = Command::new(zm_path())
+        .arg("extract")
+        .arg(archive)
+        .arg("--overwrite")
+        .arg("always")
+        .arg("-C")
+        .arg(&out_ow)
+        .output()
+        .unwrap();
+    assert_success(&format!("zm extract {label} (overwrite)"), &output);
+    assert_eq!(fs::read(out_ow.join("project/root_file.txt")).unwrap(), b"root_file_content");
+
+    // Matrix 5: List Archive
+    let output = Command::new(zm_path()).arg("list").arg(archive).output().unwrap();
+    assert_success(&format!("zm list {label}"), &output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("project/root_file.txt"));
+    assert!(stdout.contains("project/nested/deep_file.txt"));
 }

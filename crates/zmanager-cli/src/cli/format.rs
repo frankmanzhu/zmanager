@@ -8,6 +8,16 @@ pub(crate) const FORMAT_SEVEN_Z: &str = "7z";
 pub(crate) const FORMAT_TGZ: &str = "tgz";
 pub(crate) const FORMAT_RAR: &str = "rar";
 pub(crate) const FORMAT_DEB: &str = "deb";
+pub(crate) const FORMAT_TAR: &str = "tar";
+pub(crate) const FORMAT_ISO: &str = "iso";
+pub(crate) const FORMAT_CAB: &str = "cab";
+pub(crate) const FORMAT_CPIO: &str = "cpio";
+pub(crate) const FORMAT_RPM: &str = "rpm";
+pub(crate) const FORMAT_XAR: &str = "xar";
+pub(crate) const FORMAT_LHA: &str = "lha";
+pub(crate) const FORMAT_AR: &str = "ar";
+pub(crate) const FORMAT_WARC: &str = "warc";
+pub(crate) const FORMAT_MTREE: &str = "mtree";
 pub(crate) const FORMAT_RAW_STREAM: &str = "raw-stream";
 pub(crate) const FORMAT_LIBARCHIVE: &str = "libarchive";
 pub(crate) const BACKEND_DEB_NESTED: &str = "deb-nested";
@@ -33,7 +43,9 @@ pub(crate) const TGZ_FORMAT_ALIASES: &[&str] = &[FORMAT_TGZ, "tar.gz", "gz"];
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) use zmanager_core::archive_format::APPLE_ARCHIVE_EXTENSIONS;
 pub(crate) use zmanager_core::archive_format::{
-    DEB_EXTENSIONS, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS, TGZ_EXTENSIONS, TZAP_EXTENSIONS,
+    AR_EXTENSIONS, CAB_EXTENSIONS, CPIO_EXTENSIONS, DEB_EXTENSIONS, ISO_EXTENSIONS, LHA_EXTENSIONS, MTREE_EXTENSIONS,
+    RAR_EXTENSIONS, RPM_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_BZ2_EXTENSIONS, TAR_EXTENSIONS, TAR_LZMA_EXTENSIONS,
+    TAR_XZ_EXTENSIONS, TAR_ZST_EXTENSIONS, TGZ_EXTENSIONS, TZAP_EXTENSIONS, WARC_EXTENSIONS, XAR_EXTENSIONS,
     ZIP_FAMILY_EXTENSIONS,
 };
 
@@ -66,6 +78,19 @@ pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
     FormatDescriptor { name: FORMAT_APPLE_ARCHIVE, extensions: APPLE_ARCHIVE_EXTENSIONS },
     FormatDescriptor { name: FORMAT_SEVEN_Z, extensions: SEVEN_Z_EXTENSIONS },
     FormatDescriptor { name: FORMAT_TGZ, extensions: TGZ_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_BZ2_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_XZ_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_TAR, extensions: TAR_LZMA_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_ISO, extensions: ISO_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_CAB, extensions: CAB_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_CPIO, extensions: CPIO_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_RPM, extensions: RPM_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_XAR, extensions: XAR_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_LHA, extensions: LHA_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_AR, extensions: AR_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_WARC, extensions: WARC_EXTENSIONS },
+    FormatDescriptor { name: FORMAT_MTREE, extensions: MTREE_EXTENSIONS },
     FormatDescriptor { name: FORMAT_RAW_STREAM, extensions: zmanager_core::raw_stream_backend::RAW_STREAM_SUFFIXES },
     FormatDescriptor { name: FORMAT_LIBARCHIVE, extensions: LIBARCHIVE_FALLBACK_EXTENSIONS },
 ];

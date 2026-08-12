@@ -8,9 +8,23 @@
 use std::path::Path;
 
 /// Canonical extension lists for path-based format detection.
-pub const ZIP_FAMILY_EXTENSIONS: &[&str] = &[".zip", ".zipx", ".jar", ".war", ".ipa", ".apk", ".appx", ".xpi"];
-pub const SEVEN_Z_EXTENSIONS: &[&str] = &[".7z"];
+pub const ZIP_FAMILY_EXTENSIONS: &[&str] =
+    &[".zip", ".zipx", ".jar", ".war", ".ipa", ".apk", ".appx", ".xpi", ".cbz", ".epub"];
+pub const SEVEN_Z_EXTENSIONS: &[&str] = &[".7z", ".cb7"];
 pub const RAR_EXTENSIONS: &[&str] = &[".rar", ".cbr"];
+pub const TAR_EXTENSIONS: &[&str] = &[".tar", ".cbt"];
+pub const TAR_BZ2_EXTENSIONS: &[&str] = &[".tar.bz2", ".tbz2", ".tbz"];
+pub const TAR_XZ_EXTENSIONS: &[&str] = &[".tar.xz", ".txz"];
+pub const TAR_LZMA_EXTENSIONS: &[&str] = &[".tar.lzma", ".tlzma"];
+pub const ISO_EXTENSIONS: &[&str] = &[".iso"];
+pub const CAB_EXTENSIONS: &[&str] = &[".cab"];
+pub const CPIO_EXTENSIONS: &[&str] = &[".cpio"];
+pub const RPM_EXTENSIONS: &[&str] = &[".rpm"];
+pub const XAR_EXTENSIONS: &[&str] = &[".xar", ".pkg"];
+pub const LHA_EXTENSIONS: &[&str] = &[".lha", ".lzh"];
+pub const AR_EXTENSIONS: &[&str] = &[".a", ".ar", ".lib"];
+pub const WARC_EXTENSIONS: &[&str] = &[".warc"];
+pub const MTREE_EXTENSIONS: &[&str] = &[".mtree"];
 pub const TAR_ZST_EXTENSIONS: &[&str] = &[".tar.zst", ".tzst"];
 pub const TGZ_EXTENSIONS: &[&str] = &[".tgz", ".tar.gz"];
 pub const TZAP_EXTENSIONS: &[&str] = &[".tzap"];
@@ -31,6 +45,32 @@ pub enum ArchiveFormatKind {
     TarZst,
     /// `.tgz` / `.tar.gz` — handled by the libarchive backend.
     TarGz,
+    /// Uncompressed `.tar`.
+    Tar,
+    /// `.tar.bz2` / `.tbz2` / `.tbz`.
+    TarBz2,
+    /// `.tar.xz` / `.txz`.
+    TarXz,
+    /// `.tar.lzma` / `.tlzma`.
+    TarLzma,
+    /// ISO disk image (`.iso`).
+    Iso,
+    /// Windows Cabinet (`.cab`).
+    Cab,
+    /// CPIO archive (`.cpio`).
+    Cpio,
+    /// RPM package (`.rpm`).
+    Rpm,
+    /// XAR archive (`.xar`, `.pkg`).
+    Xar,
+    /// LHA/LZH archive.
+    Lha,
+    /// AR archive (`.a`, `.ar`, `.lib`).
+    Ar,
+    /// WARC archive (`.warc`).
+    Warc,
+    /// Mtree hierarchy (`.mtree`).
+    Mtree,
     /// TZAP, including numbered volumes.
     Tzap,
     /// RAR (`.rar`, `.cbr`).
@@ -74,6 +114,45 @@ pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
     }
     if ends_with_any(path, TGZ_EXTENSIONS) {
         return ArchiveFormatKind::TarGz;
+    }
+    if ends_with_any(path, TAR_EXTENSIONS) {
+        return ArchiveFormatKind::Tar;
+    }
+    if ends_with_any(path, TAR_BZ2_EXTENSIONS) {
+        return ArchiveFormatKind::TarBz2;
+    }
+    if ends_with_any(path, TAR_XZ_EXTENSIONS) {
+        return ArchiveFormatKind::TarXz;
+    }
+    if ends_with_any(path, TAR_LZMA_EXTENSIONS) {
+        return ArchiveFormatKind::TarLzma;
+    }
+    if ends_with_any(path, ISO_EXTENSIONS) {
+        return ArchiveFormatKind::Iso;
+    }
+    if ends_with_any(path, CAB_EXTENSIONS) {
+        return ArchiveFormatKind::Cab;
+    }
+    if ends_with_any(path, CPIO_EXTENSIONS) {
+        return ArchiveFormatKind::Cpio;
+    }
+    if ends_with_any(path, RPM_EXTENSIONS) {
+        return ArchiveFormatKind::Rpm;
+    }
+    if ends_with_any(path, XAR_EXTENSIONS) {
+        return ArchiveFormatKind::Xar;
+    }
+    if ends_with_any(path, LHA_EXTENSIONS) {
+        return ArchiveFormatKind::Lha;
+    }
+    if ends_with_any(path, AR_EXTENSIONS) {
+        return ArchiveFormatKind::Ar;
+    }
+    if ends_with_any(path, WARC_EXTENSIONS) {
+        return ArchiveFormatKind::Warc;
+    }
+    if ends_with_any(path, MTREE_EXTENSIONS) {
+        return ArchiveFormatKind::Mtree;
     }
     if crate::tzap::is_tzap_archive_path(path) {
         return ArchiveFormatKind::Tzap;
