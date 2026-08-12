@@ -192,8 +192,10 @@ fn cli_lists_tests_and_extracts_checked_in_multipart_rar_fixtures() {
         let list = run_with_optional_password(list, fixture_password);
         assert_success(&format!("zm list {filename}"), &list);
         let list_stdout = String::from_utf8_lossy(&list.stdout);
-        let normalized_list_stdout = list_stdout.replace('\\', "/");
-        assert_eq!(normalized_list_stdout.matches("rar-fixture/data/stream.bin").count(), 1, "{list_stdout}");
+        let listing: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
+        let normalized_names: Vec<String> =
+            listing["entries"].as_array().into_iter().flatten().filter_map(|entry| entry["name"].as_str().map(|name| name.replace('\\', "/"))).collect();
+        assert_eq!(normalized_names.iter().filter(|name| name.as_str() == "rar-fixture/data/stream.bin").count(), 1, "{list_stdout}");
 
         let mut test = Command::new(cli_path());
         test.arg("test").arg(&archive).arg("--json");
