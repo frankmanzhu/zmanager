@@ -38,7 +38,8 @@ jobs:
       - name: Install cargo-deny
         run: |
           ASSET=$(curl -s https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/latest | python3 -c 'import json,sys; print(next(a["name"] for a in json.load(sys.stdin)["assets"] if a["name"].endswith("x86_64-unknown-linux-musl.tar.gz")))')
-          curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/latest/download/$ASSET" | tar -xz -C /usr/local/bin cargo-deny
+          curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/latest/download/$ASSET" | tar -xz -C /tmp --strip-components=1
+          install -m 0755 /tmp/cargo-deny /usr/local/bin/cargo-deny
 
       - name: Run cargo-deny
         run: cargo deny check licenses
