@@ -37,6 +37,9 @@ pub const TZAP_EXTENSIONS: &[&str] = &[".tzap"];
 pub const APPLE_ARCHIVE_EXTENSIONS: &[&str] = &[".aar", ".aea"];
 pub const DEB_EXTENSIONS: &[&str] = &[".deb"];
 pub const MSI_EXTENSIONS: &[&str] = &[".msi"];
+pub const VHD_EXTENSIONS: &[&str] = &[".vhd"];
+pub const VMDK_EXTENSIONS: &[&str] = &[".vmdk"];
+pub const UDF_EXTENSIONS: &[&str] = &[".udf"];
 
 /// Compile-time availability of a format's backend on this target.
 ///
@@ -107,6 +110,13 @@ pub enum ArchiveFormatKind {
     Deb,
     /// Windows Installer package (`.msi`).
     Msi,
+    /// Microsoft Virtual PC / Hyper-V disk image (`.vhd`).
+    Vhd,
+    /// VMware virtual disk (`.vmdk`).
+    #[allow(clippy::doc_markdown)]
+    Vmdk,
+    /// Universal Disk Format optical image (`.udf`).
+    Udf,
     /// Raw single-file compression stream.
     RawStream,
     /// Not recognized as any archive format.
@@ -157,6 +167,9 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
     FormatCapability { kind: ArchiveFormatKind::AppleArchive, extensions: APPLE_ARCHIVE_EXTENSIONS, status: apple_archive_status() },
     FormatCapability { kind: ArchiveFormatKind::Deb, extensions: DEB_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Msi, extensions: MSI_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Vhd, extensions: VHD_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Vmdk, extensions: VMDK_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Udf, extensions: UDF_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Unknown, extensions: &[], status: BackendStatus::Available },
 ];
 
@@ -248,6 +261,9 @@ mod tests {
             ArchiveFormatKind::AppleArchive,
             ArchiveFormatKind::Deb,
             ArchiveFormatKind::Msi,
+            ArchiveFormatKind::Vhd,
+            ArchiveFormatKind::Vmdk,
+            ArchiveFormatKind::Udf,
             ArchiveFormatKind::RawStream,
         ] {
             assert!(table_kinds.contains(&kind), "capability table is missing a row for {kind:?}");
@@ -301,6 +317,9 @@ mod tests {
         assert_eq!(detect("archive.deb"), ArchiveFormatKind::Deb);
         assert_eq!(detect("archive.msi"), ArchiveFormatKind::Msi);
         assert_eq!(detect("archive.MSI"), ArchiveFormatKind::Msi);
+        assert_eq!(detect("archive.vhd"), ArchiveFormatKind::Vhd);
+        assert_eq!(detect("archive.VMDK"), ArchiveFormatKind::Vmdk);
+        assert_eq!(detect("archive.udf"), ArchiveFormatKind::Udf);
         assert_eq!(detect("archive.unknown"), ArchiveFormatKind::Unknown);
     }
 

@@ -169,6 +169,134 @@ fn cli_lists_tests_and_extracts_msi_fixture() {
 }
 
 #[test]
+fn cli_lists_tests_and_extracts_virtual_disk_fixtures() {
+    for filename in ["basic.vhd", "basic.vmdk", "basic.udf"] {
+        let fixture = archives_dir().join(filename);
+        if !fixture.exists() {
+            continue;
+        }
+        let temp = TestDir::new("fixture-cli-virtual-disk");
+
+        let list = Command::new(cli_path()).arg("list").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm list {filename}"), &list);
+        let list_stdout = String::from_utf8_lossy(&list.stdout);
+        assert!(list_stdout.contains("payload/README.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("payload/nested/file.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("payload/dir with spaces/file with spaces.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("payload/unicode/こんにちは.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("payload/nested/empty-dir"), "{list_stdout}");
+        assert!(!list_stdout.contains("payload/./"), "entries must not carry ./ prefixes: {list_stdout}");
+        // The NTFS vhd fixture must not surface $MFT-style system metadata.
+        assert!(!list_stdout.contains("$MFT"), "NTFS metadata leaked: {list_stdout}");
+
+        let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm test {filename}"), &test);
+
+        let out = temp.path("out");
+        let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
+        assert_success(&format!("zm extract {filename}"), &extract);
+        assert_eq!(fs::read_to_string(out.join("payload/README.txt")).unwrap(), "ZManager fixture payload\n");
+        assert_eq!(fs::read_to_string(out.join("payload/nested/file.txt")).unwrap(), "nested fixture file\n");
+        assert_eq!(fs::read_to_string(out.join("payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
+        assert_eq!(fs::read_to_string(out.join("payload/unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
+        assert!(out.join("payload/nested/empty-dir").is_dir());
+        // The vfs adapters read symlink target bytes as regular files, so the
+        // disk fixtures carry no symlink (documented divergence).
+        assert!(!out.join("payload/nested/readme-link.txt").exists(), "{filename}");
+
+        // Selective extraction exercises pattern matching against the resolved paths.
+        let out_sel = temp.path("out-sel");
+        let selective =
+            Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_sel).arg("--include").arg("payload/nested/file.txt").output().unwrap();
+        assert_success(&format!("zm extract {filename} --include"), &selective);
+        assert!(out_sel.join("payload/nested/file.txt").is_file());
+        assert!(!out_sel.join("payload/README.txt").exists());
+
+        // --to-stdout is explicitly unsupported for the disk formats.
+        let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("payload/README.txt").arg("--to-stdout").output().unwrap();
+        assert_failure(&format!("zm extract {filename} --to-stdout"), &stdout);
+        assert!(
+            String::from_utf8_lossy(&stdout.stderr).contains("do not currently support extracting to stdout"),
+            "stderr:\n{}",
+            String::from_utf8_lossy(&stdout.stderr)
+        );
+    }
+}
+
+/// Extracts the VHD and VMDK fixtures with 7-Zip (which reads VPC and VMDK
+/// containers natively) and compares the payload tree entry-for-entry against
+/// zmanager's extraction. The UDF fixture is excluded: 7-Zip 26.02 fails to
+/// list mkudffs-authored images, so hdiutil is the UDF oracle instead.
+#[test]
+fn optional_7zz_compares_vhd_vmdk_extraction_when_available() {
+    let Some(seven_zip) = find_on_path("7zz") else {
+        return;
+    };
+    for filename in ["basic.vhd", "basic.vmdk"] {
+        let fixture = archives_dir().join(filename);
+        if !fixture.exists() {
+            continue;
+        }
+        let temp = TestDir::new("fixture-cli-7zz-compare");
+        let reference = temp.path("reference");
+        let expand = Command::new(&seven_zip).arg("x").arg("-y").arg(format!("-o{}", reference.display())).arg(&fixture).output().unwrap();
+        assert_success(&format!("7zz x {filename}"), &expand);
+
+        let out = temp.path("zm");
+        let extract = Command::new(zm_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).output().unwrap();
+        assert_success(&format!("zm extract {filename}"), &extract);
+
+        assert_trees_match(&format!("7zz reference vs zm ({filename})"), &reference.join("payload"), &out.join("payload"));
+    }
+}
+
+/// The VHD/VMDK containers must satisfy qemu-img's own integrity check.
+#[test]
+fn optional_qemu_img_info_validates_virtual_disk_fixtures_when_available() {
+    let Some(qemu_img) = find_on_path("qemu-img") else {
+        return;
+    };
+    for filename in ["basic.vhd", "basic.vmdk"] {
+        let fixture = archives_dir().join(filename);
+        if !fixture.exists() {
+            continue;
+        }
+        let info = Command::new(&qemu_img).arg("info").arg(&fixture).output().unwrap();
+        assert_success(&format!("qemu-img info {filename}"), &info);
+        let stdout = String::from_utf8_lossy(&info.stdout);
+        assert!(stdout.contains("file format:"), "{stdout}");
+    }
+}
+
+/// macOS mounts UDF natively; attach the fixture read-only and compare the
+/// mounted tree entry-for-entry against zmanager's extraction.
+#[test]
+fn optional_hdiutil_attach_compares_udf_fixture_when_available() {
+    if cfg!(not(target_os = "macos")) {
+        return;
+    }
+    let fixture = archives_dir().join("basic.udf");
+    if !fixture.exists() {
+        return;
+    }
+    let temp = TestDir::new("fixture-cli-hdiutil-udf-compare");
+    let mountpoint = temp.path("mount");
+    let attach = Command::new("hdiutil").arg("attach").arg("-readonly").arg("-nobrowse").arg("-mountpoint").arg(&mountpoint).arg(&fixture).output().unwrap();
+    if !attach.status.success() {
+        eprintln!("skipping hdiutil UDF compare: attach failed: {}", String::from_utf8_lossy(&attach.stderr));
+        return;
+    }
+    let out = temp.path("zm");
+    let extract = Command::new(zm_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).output().unwrap();
+    assert_success("zm extract basic.udf", &extract);
+
+    let detach = Command::new("hdiutil").arg("detach").arg(&mountpoint).output().unwrap();
+    assert_success("hdiutil detach", &detach);
+
+    assert_trees_match("hdiutil reference vs zm (UDF)", &mountpoint.join("payload"), &out.join("payload"));
+}
+
+#[test]
 fn cli_lists_tests_and_extracts_apple_dmg_pkg_fixtures() {
     for filename in ["basic.dmg", "basic.pkg"] {
         let fixture = archives_dir().join(filename);

@@ -4,8 +4,8 @@ use crate::cli::app::{
 };
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
-    BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_MSI, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP,
-    is_deb_archive,
+    BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_MSI, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_UDF,
+    FORMAT_VHD, FORMAT_VMDK, FORMAT_ZIP, is_deb_archive,
 };
 use crate::cli::open::entry_selected;
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_usize, read_optional_password_stdin, take_value, validate_recipient_key_open_option};
@@ -177,6 +177,9 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         ArchiveFormatKind::Dmg => run_apple_dmg_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::Pkg => run_apple_pkg_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::Msi => run_msi_extract_with_policy(request.archive, destination, policy, global),
+        ArchiveFormatKind::Vhd => run_virtual_disk_extract_with_policy(request.archive, destination, policy, global, FORMAT_VHD, VirtualDiskFormat::Vhd),
+        ArchiveFormatKind::Vmdk => run_virtual_disk_extract_with_policy(request.archive, destination, policy, global, FORMAT_VMDK, VirtualDiskFormat::Vmdk),
+        ArchiveFormatKind::Udf => run_virtual_disk_extract_with_policy(request.archive, destination, policy, global, FORMAT_UDF, VirtualDiskFormat::Udf),
         ArchiveFormatKind::Tzap => run_tzap_extract_with_policy(
             request.archive,
             destination,
@@ -322,8 +325,16 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             ArchiveFormatKind::TarZst => copy_tar_zst_archive_to_stdout(request, global),
             ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
             ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(&request.archive, &request.include, &request.exclude, password.as_deref(), global),
-            ArchiveFormatKind::Dmg | ArchiveFormatKind::Pkg | ArchiveFormatKind::Msi => {
-                print_error_line(global, format_args!("extract to stdout failed: DMG, PKG, and MSI formats do not currently support extracting to stdout"));
+            ArchiveFormatKind::Dmg
+            | ArchiveFormatKind::Pkg
+            | ArchiveFormatKind::Msi
+            | ArchiveFormatKind::Vhd
+            | ArchiveFormatKind::Vmdk
+            | ArchiveFormatKind::Udf => {
+                print_error_line(
+                    global,
+                    format_args!("extract to stdout failed: DMG, PKG, MSI, VHD, VMDK, and UDF formats do not currently support extracting to stdout"),
+                );
                 ExitCode::FAILURE
             }
             // Split ZIP volume sets, tgz, .deb, RAR, and unrecognized formats
@@ -593,6 +604,17 @@ impl From<zmanager_core::apple_pkg_backend::PkgExtractReport> for CliExtractRepo
 
 impl From<zmanager_core::msi_backend::MsiExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::msi_backend::MsiExtractReport) -> Self {
+        Self {
+            written_entries: report.written_entries,
+            skipped_entries: report.skipped_entries,
+            written_bytes: report.written_bytes,
+            warnings: report.warnings,
+        }
+    }
+}
+
+impl From<zmanager_core::virtual_disk_backend::VirtualDiskExtractReport> for CliExtractReport {
+    fn from(report: zmanager_core::virtual_disk_backend::VirtualDiskExtractReport) -> Self {
         Self {
             written_entries: report.written_entries,
             skipped_entries: report.skipped_entries,
@@ -1075,6 +1097,82 @@ fn run_msi_extract_with_policy(
                     .map(CliExtractReport::from)
                     .map_err(|error| CliExtractError::Message(error.to_string()))
             },
+        },
+    )
+}
+
+/// The three disk-image formats routed to the shared virtual-disk runner.
+#[derive(Clone, Copy)]
+enum VirtualDiskFormat {
+    Vhd,
+    Vmdk,
+    Udf,
+}
+
+impl VirtualDiskFormat {
+    fn error_prefix(self) -> &'static str {
+        match self {
+            Self::Vhd => "vhd extract failed: ",
+            Self::Vmdk => "vmdk extract failed: ",
+            Self::Udf => "udf extract failed: ",
+        }
+    }
+
+    fn extract_with_overwrite_resolver(
+        self,
+        archive_path: &std::path::Path,
+        destination_path: &std::path::Path,
+        policy: zmanager_core::safety::ExtractionPolicy,
+        resolver: &mut dyn zmanager_core::safety::OverwriteResolver,
+    ) -> Result<CliExtractReport, CliExtractError> {
+        let result = match self {
+            Self::Vhd => zmanager_core::virtual_disk_backend::extract_vhd_with_overwrite_resolver(archive_path, destination_path, policy, resolver),
+            Self::Vmdk => zmanager_core::virtual_disk_backend::extract_vmdk_with_overwrite_resolver(archive_path, destination_path, policy, resolver),
+            Self::Udf => zmanager_core::virtual_disk_backend::extract_udf_with_overwrite_resolver(archive_path, destination_path, policy, resolver),
+        };
+        result.map(CliExtractReport::from).map_err(|error| CliExtractError::Message(error.to_string()))
+    }
+
+    fn extract_with_context(
+        self,
+        archive_path: &std::path::Path,
+        destination_path: &std::path::Path,
+        policy: zmanager_core::safety::ExtractionPolicy,
+        context: &mut zmanager_core::jobs::JobContext<'_>,
+    ) -> Result<CliExtractReport, CliExtractError> {
+        let result = match self {
+            Self::Vhd => zmanager_core::virtual_disk_backend::extract_vhd_with_context(archive_path, destination_path, policy, context),
+            Self::Vmdk => zmanager_core::virtual_disk_backend::extract_vmdk_with_context(archive_path, destination_path, policy, context),
+            Self::Udf => zmanager_core::virtual_disk_backend::extract_udf_with_context(archive_path, destination_path, policy, context),
+        };
+        result.map(CliExtractReport::from).map_err(|error| CliExtractError::Message(error.to_string()))
+    }
+}
+
+fn run_virtual_disk_extract_with_policy(
+    archive: impl AsRef<std::path::Path>,
+    destination: impl AsRef<std::path::Path>,
+    policy: zmanager_core::safety::ExtractionPolicy,
+    global: &GlobalOptions,
+    label: &'static str,
+    format: VirtualDiskFormat,
+) -> ExitCode {
+    run_extract_with_policy(
+        archive,
+        destination,
+        policy,
+        None,
+        global,
+        ExtractBackendSpec {
+            label,
+            kind: JobKind::ArchiveExtract,
+            error_prefix: format.error_prefix(),
+            password_prompt: None,
+            progress: true,
+            ask: &|archive_path, destination_path, policy, _password, resolver| {
+                format.extract_with_overwrite_resolver(archive_path, destination_path, policy, resolver)
+            },
+            plain: &|archive_path, destination_path, policy, _password, context| format.extract_with_context(archive_path, destination_path, policy, context),
         },
     )
 }

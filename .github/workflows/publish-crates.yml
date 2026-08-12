@@ -27,6 +27,12 @@ jobs:
             liblzma-dev \
             libacl1-dev
 
+      - name: Clone forensic-vfs-engine
+        run: |
+          FVE_REV=$(cat forensic-vfs-engine-rev.txt 2>/dev/null || echo "main")
+          git clone https://github.com/frankmanzhu/forensic-vfs-engine.git ../forensic-vfs-engine
+          git -C ../forensic-vfs-engine checkout "$FVE_REV" || git -C ../forensic-vfs-engine checkout main
+
       - name: Prepare for publish
         run: |
           sed -i '/\[patch\.crates-io\]/,$d' Cargo.toml

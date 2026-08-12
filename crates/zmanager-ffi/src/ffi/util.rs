@@ -301,6 +301,9 @@ pub(crate) fn format_capabilities_for_kind(kind: zmanager_core::archive_format::
         | ArchiveFormatKind::Pkg
         | ArchiveFormatKind::Dmg
         | ArchiveFormatKind::Msi
+        | ArchiveFormatKind::Vhd
+        | ArchiveFormatKind::Vmdk
+        | ArchiveFormatKind::Udf
         | ArchiveFormatKind::Lha
         | ArchiveFormatKind::Ar
         | ArchiveFormatKind::Warc
@@ -333,6 +336,9 @@ pub(crate) fn kind_label(kind: zmanager_core::archive_format::ArchiveFormatKind)
         ArchiveFormatKind::Pkg => "PKG",
         ArchiveFormatKind::Dmg => "DMG",
         ArchiveFormatKind::Msi => "MSI",
+        ArchiveFormatKind::Vhd => "VHD",
+        ArchiveFormatKind::Vmdk => "VMDK",
+        ArchiveFormatKind::Udf => "UDF",
         ArchiveFormatKind::Lha => "LHA",
         ArchiveFormatKind::Ar => "AR",
         ArchiveFormatKind::Warc => "WARC",

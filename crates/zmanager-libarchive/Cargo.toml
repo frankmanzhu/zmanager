@@ -3,6 +3,7 @@ name = "zmanager-libarchive"
 version.workspace = true
 description = "Safe, narrow read-side libarchive wrapper used by zmanager-core and zmanager-cli."
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "README.md"

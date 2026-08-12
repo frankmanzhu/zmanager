@@ -1292,3 +1292,113 @@ fn competitor_msi_formats_extract_with_zm() {
     assert_success("msiextract extracts msi", &extract_ref);
     assert_trees_match("msiextract reference vs zm", &reference.join("project"), &out_extra.join("project"));
 }
+
+/// Builds live VHD/VMDK/UDF disk images with qemu-img, mtools, and (for NTFS
+/// and UDF) a privileged Ubuntu container, then runs the combinatorial matrix
+/// on each. The FAT32 leg runs whenever qemu-img + mtools are present; the
+/// NTFS and UDF legs additionally require a running Docker daemon.
+#[test]
+fn competitor_virtual_disk_formats_extract_with_zm() {
+    let Some(qemu_img) = find_on_path("qemu-img") else {
+        return;
+    };
+    let Some(mformat) = find_on_path("mformat") else {
+        return;
+    };
+    let Some(mcopy) = find_on_path("mcopy") else {
+        return;
+    };
+    let temp = TestDir::new("compat_virtual_disk");
+    let archive_temp = TestDir::new("compat_virtual_disk_archives");
+    create_complex_project_payload(&temp);
+
+    // Extras beyond the shared payload: spaces + unicode (FAT/NTFS/UDF all
+    // preserve them). No symlink: the vfs adapters read symlink target bytes
+    // as a regular file, so it would materialize as junk (documented).
+    fs::write(temp.path("project/file with spaces.txt"), b"spaces_content").unwrap();
+    fs::create_dir_all(temp.path("project/unicode")).unwrap();
+    fs::write(temp.path("project/unicode/こんにちは.txt"), b"unicode_content").unwrap();
+
+    // Superfloppy FAT32 raw built with mtools (no mount, no root), converted
+    // to both VMDK and VHD from one raw image.
+    let raw_fat = archive_temp.path("raw-fat.img");
+    fs::File::create(&raw_fat).unwrap().set_len(64 * 1024 * 1024).unwrap();
+    assert_success("mformat raw image", &Command::new(&mformat).arg("-F").arg("-i").arg(&raw_fat).arg("::").output().unwrap());
+    assert_success(
+        "mcopy payload into raw image",
+        &Command::new(&mcopy).arg("-s").arg("-i").arg(&raw_fat).arg(temp.path("project")).arg("::").output().unwrap(),
+    );
+
+    let project_vmdk = archive_temp.path("project.vmdk");
+    assert_success(
+        "qemu-img converts raw to vmdk",
+        &Command::new(&qemu_img).arg("convert").arg("-f").arg("raw").arg("-O").arg("vmdk").arg(&raw_fat).arg(&project_vmdk).output().unwrap(),
+    );
+    assert_zm_extracts_complex_matrix_without_stdout("qemu-img-created vmdk (FAT32)", &project_vmdk, &temp);
+    assert_zm_extracts_virtual_disk_extra_entries("qemu-img-created vmdk (FAT32)", &project_vmdk, &temp);
+
+    let project_vhd = archive_temp.path("project.vhd");
+    assert_success(
+        "qemu-img converts raw to vpc",
+        &Command::new(&qemu_img).arg("convert").arg("-f").arg("raw").arg("-O").arg("vpc").arg(&raw_fat).arg(&project_vhd).output().unwrap(),
+    );
+    assert_zm_extracts_complex_matrix_without_stdout("qemu-img-created vhd (FAT32)", &project_vhd, &temp);
+    assert_zm_extracts_virtual_disk_extra_entries("qemu-img-created vhd (FAT32)", &project_vhd, &temp);
+
+    // NTFS and UDF legs: authored inside a privileged Ubuntu container (loop
+    // mount + cp -a, no FUSE). Skip when docker is absent or the daemon is
+    // not running.
+    let Some(docker) = find_on_path("docker") else {
+        eprintln!("skipping NTFS/UDF compat legs: docker is not installed");
+        return;
+    };
+    if !Command::new(&docker).arg("info").output().is_ok_and(|output| output.status.success()) {
+        eprintln!("skipping NTFS/UDF compat legs: docker daemon is not running");
+        return;
+    }
+    let work = temp.root();
+
+    // NTFS superfloppy VHD (the checked-in fixture already covers MBR+NTFS).
+    let ntfs_vhd = archive_temp.path("project-ntfs.vhd");
+    let ntfs_build = Command::new(&docker)
+        .arg("run")
+        .args(["--privileged", "-v"])
+        .arg(format!("{}:/work", work.display()))
+        .args(["ubuntu:24.04", "bash", "-c"])
+        .arg("set -e; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq ntfs-3g >/dev/null 2>&1; dd if=/dev/zero of=/work/ntfs.img bs=1M count=64 status=none; LOOP=$(losetup -f); losetup $LOOP /work/ntfs.img; mkntfs -F -L ZCOMPAT $LOOP >/dev/null 2>&1; mkdir -p /mnt/ntfs && mount -t ntfs-3g $LOOP /mnt/ntfs; cp -a /work/project /mnt/ntfs/; sync; umount /mnt/ntfs; losetup -d $LOOP")
+        .output()
+        .unwrap();
+    assert_success("docker authors NTFS image", &ntfs_build);
+    assert_success(
+        "qemu-img converts ntfs raw to vpc",
+        &Command::new(&qemu_img).arg("convert").arg("-f").arg("raw").arg("-O").arg("vpc").arg(work.join("ntfs.img")).arg(&ntfs_vhd).output().unwrap(),
+    );
+    assert_zm_extracts_complex_matrix_without_stdout("docker-created ntfs vhd", &ntfs_vhd, &temp);
+    assert_zm_extracts_virtual_disk_extra_entries("docker-created ntfs vhd", &ntfs_vhd, &temp);
+
+    // UDF 2.01 physical partition, populated via loop mount (mkudffs must not
+    // get --utf8: the engine's VRS probe does not match such images).
+    let udf_image = work.join("project.udf");
+    let udf_build = Command::new(&docker)
+        .arg("run")
+        .args(["--privileged", "-v"])
+        .arg(format!("{}:/work", work.display()))
+        .args(["ubuntu:24.04", "bash", "-c"])
+        .arg("set -e; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq udftools >/dev/null 2>&1; dd if=/dev/zero of=/work/project.udf bs=1M count=16 status=none; mkudffs --media-type=hd --udfrev=0x0201 /work/project.udf >/dev/null 2>&1; LOOP=$(losetup -f); losetup $LOOP /work/project.udf; mkdir -p /mnt/udf && mount -t udf $LOOP /mnt/udf; cp -a /work/project /mnt/udf/; sync; umount /mnt/udf; losetup -d $LOOP")
+        .output()
+        .unwrap();
+    assert_success("docker authors UDF image", &udf_build);
+    assert_zm_extracts_complex_matrix_without_stdout("docker-created udf", &udf_image, &temp);
+    assert_zm_extracts_virtual_disk_extra_entries("docker-created udf", &udf_image, &temp);
+}
+
+/// The virtual-disk formats must handle entries beyond the shared complex
+/// payload: unicode paths and spaces in names. Symlinks are intentionally
+/// absent (see the fixture README divergence note).
+fn assert_zm_extracts_virtual_disk_extra_entries(label: &str, archive: &Path, temp: &TestDir) {
+    let out = temp.path(format!("out_extras_{}", label.replace([' ', '-'], "_")));
+    let output = Command::new(zm_path()).arg("extract").arg(archive).arg("-C").arg(&out).output().unwrap();
+    assert_success(&format!("zm extract {label} (extra entries)"), &output);
+    assert_eq!(fs::read(out.join("project/unicode/こんにちは.txt")).unwrap(), b"unicode_content");
+    assert_eq!(fs::read(out.join("project/file with spaces.txt")).unwrap(), b"spaces_content");
+}

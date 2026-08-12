@@ -24,7 +24,10 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.deb \
   "$ARCHIVES"/basic.dmg \
   "$ARCHIVES"/basic.pkg \
-  "$ARCHIVES"/basic.msi
+  "$ARCHIVES"/basic.msi \
+  "$ARCHIVES"/basic.vhd \
+  "$ARCHIVES"/basic.vmdk \
+  "$ARCHIVES"/basic.udf
 
 mkdir -p "$SRC/nested/empty-dir"
 mkdir -p "$SRC/dir with spaces"
@@ -151,6 +154,80 @@ WXS
   }
 )
 
+# Virtual-disk fixtures (VHD/VMDK/UDF): block-device formats whose files live
+# inside an inner filesystem. The extraction backend (forensic-vfs-engine)
+# resolves container -> partition table -> filesystem in one call. The symlink
+# is stripped from these payloads: the NTFS/FAT/UDF vfs adapters read symlink
+# target bytes as a regular file, so a symlink would materialize as junk.
+DISK_SRC="$WORK/disk-src"
+mkdir -p "$DISK_SRC"
+cp -PR "$SRC" "$DISK_SRC/"
+rm -f "$DISK_SRC/payload/nested/readme-link.txt"
+
+if ! command -v qemu-img >/dev/null 2>&1; then
+  echo "qemu-img not found (brew install qemu); cannot regenerate basic.vhd/basic.vmdk" >&2
+  exit 1
+fi
+if ! command -v mformat >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
+  echo "mtools not found (brew install mtools); cannot regenerate basic.vmdk" >&2
+  exit 1
+fi
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  echo "docker not found or daemon not running (install Docker Desktop and start it); cannot regenerate basic.vhd/basic.udf" >&2
+  exit 1
+fi
+
+# VMDK fixture: superfloppy FAT32 populated with mtools (no mount, no root).
+# 64 MiB clears the FAT32 minimum volume size; mcopy -s preserves the nested
+# tree including the empty directory.
+dd if=/dev/zero of="$WORK/raw-fat.img" bs=1m count=64 status=none
+mformat -F -i "$WORK/raw-fat.img" ::
+mcopy -s -i "$WORK/raw-fat.img" "$DISK_SRC/payload" ::
+qemu-img convert -f raw -O vmdk "$WORK/raw-fat.img" "$ARCHIVES/basic.vmdk"
+
+# VHD fixture: MBR + NTFS. ntfs-3g's tools are Linux-only on recent versions,
+# so the NTFS volume is authored inside a privileged Ubuntu container (loop
+# mount, mkntfs, cp -a — no FUSE). The MBR wrapper is written with printf/dd
+# (one 0x07 partition at LBA 2048, 524288 sectors, 0x55AA signature), then
+# qemu-img converts raw -> VPC (dynamic).
+docker run --rm --privileged -v "$WORK:/work" ubuntu:24.04 bash -c '
+  set -e
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y -qq ntfs-3g >/dev/null 2>&1
+  dd if=/dev/zero of=/work/ntfs.img bs=1M count=256 status=none
+  LOOP=$(losetup -f); losetup $LOOP /work/ntfs.img
+  mkntfs -F -L ZMANAGER $LOOP >/dev/null 2>&1
+  mkdir -p /mnt/ntfs && mount -t ntfs-3g $LOOP /mnt/ntfs
+  cp -a /work/disk-src/payload /mnt/ntfs/
+  sync; umount /mnt/ntfs; losetup -d $LOOP
+' >/dev/null
+dd if=/dev/zero of="$WORK/raw-mbr.img" bs=1m count=257 status=none
+printf '\x80\xfe\xff\xff\x07\xfe\xff\xff\x00\x08\x00\x00\x00\x00\x08\x00' | dd of="$WORK/raw-mbr.img" bs=1 seek=446 conv=notrunc status=none
+printf '\x55\xaa' | dd of="$WORK/raw-mbr.img" bs=1 seek=510 conv=notrunc status=none
+dd if="$WORK/ntfs.img" of="$WORK/raw-mbr.img" bs=1m seek=1 conv=notrunc status=none
+qemu-img convert -f raw -O vpc "$WORK/raw-mbr.img" "$ARCHIVES/basic.vhd"
+
+# UDF fixture: a populated physical-partition UDF 2.01 volume authored inside
+# the same container (mkudffs + loop mount). mkudffs must NOT get --utf8: the
+# volume-recognition-sequence probe in the engine's UDF reader does not match
+# images minted with it (spike finding). The engine mounts this image as UDF;
+# macOS reads it natively (hdiutil oracle).
+docker run --rm --privileged -v "$WORK:/work" ubuntu:24.04 bash -c '
+  set -e
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y -qq udftools >/dev/null 2>&1
+  dd if=/dev/zero of=/work/basic.udf bs=1M count=8 status=none
+  mkudffs --media-type=hd --udfrev=0x0201 /work/basic.udf >/dev/null 2>&1
+  LOOP=$(losetup -f); losetup $LOOP /work/basic.udf
+  mkdir -p /mnt/udf && mount -t udf $LOOP /mnt/udf
+  cp -a /work/disk-src/payload /mnt/udf/
+  sync; umount /mnt/udf; losetup -d $LOOP
+' >/dev/null
+cp "$WORK/basic.udf" "$ARCHIVES/basic.udf"
+
+
 sha256_file() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
@@ -187,5 +264,8 @@ append_manifest "basic.deb" "DEB" "true" "" "Debian ar package fixture"
 append_manifest "basic.dmg" "DMG" "true" "" "Disk image fixture created by hdiutil create -srcfolder"
 append_manifest "basic.pkg" "PKG" "true" "" "Apple package fixture created by pkgbuild"
 append_manifest "basic.msi" "MSI" "true" "" "Windows Installer fixture created by wixl (msitools)"
+append_manifest "basic.vhd" "VHD" "true" "" "VPC disk image fixture: MBR + NTFS, qemu-img -O vpc (docker ntfs-3g populates)"
+append_manifest "basic.vmdk" "VMDK" "true" "" "VMware disk image fixture: superfloppy FAT32, qemu-img -O vmdk (mtools populates)"
+append_manifest "basic.udf" "UDF" "true" "" "UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload"
 
 echo "Generated fixtures in $ARCHIVES"
