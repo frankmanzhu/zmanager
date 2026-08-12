@@ -584,8 +584,23 @@ mod tests {
             let out = temp.path("out");
             let report = extract_all(&archive, name, &out);
 
-            assert_eq!(report.skipped_entries, 0, "{name}: warnings: {:?}", report.warnings);
-            assert_eq!(report.written_entries, listing.iter().filter(|entry| entry.kind != VirtualDiskEntryKind::Directory).count(), "{name}");
+            // The NTFS/UDF fixtures carry one symlink: materialized on unix,
+            // skipped with a warning elsewhere (the FAT vmdk has none). The
+            // NTFS-metadata filter warns but does not count toward
+            // skipped_entries.
+            let skipped_symlink = if cfg!(unix) {
+                0
+            } else if name != "basic.vmdk" {
+                1
+            } else {
+                0
+            };
+            assert_eq!(report.skipped_entries, skipped_symlink, "{name}: warnings: {:?}", report.warnings);
+            assert_eq!(
+                report.written_entries,
+                listing.iter().filter(|entry| entry.kind != VirtualDiskEntryKind::Directory).count() - skipped_symlink,
+                "{name}"
+            );
             let declared_file_bytes: u64 = listing.iter().filter(|entry| entry.kind == VirtualDiskEntryKind::File).map(|entry| entry.size).sum();
             assert_eq!(report.written_bytes, declared_file_bytes, "{name}: written bytes must sum the declared sizes of all listed files");
 

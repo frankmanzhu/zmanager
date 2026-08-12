@@ -368,7 +368,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.skipped_entries, 0, "warnings: {:?}", report.warnings);
+        // The fixture carries one symlink; it is materialized on unix and
+        // skipped with a warning elsewhere.
+        assert_eq!(report.skipped_entries, if cfg!(unix) { 0 } else { 1 }, "warnings: {:?}", report.warnings);
         assert_eq!(fs::read_to_string(temp.path("out/payload/README.txt")).unwrap(), "ZManager fixture payload\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/nested/file.txt")).unwrap(), "nested fixture file\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
@@ -383,7 +385,7 @@ mod tests {
         // the AppleDouble entries are written as plain files too.
         let listing = list_pkg(&archive).unwrap();
         let declared_file_bytes: u64 = listing.iter().filter(|entry| entry.kind == PkgEntryKind::File).map(|entry| entry.size).sum();
-        assert_eq!(report.written_entries, listing.iter().filter(|entry| entry.kind == PkgEntryKind::File).count());
+        assert_eq!(report.written_entries, listing.iter().filter(|entry| entry.kind == PkgEntryKind::File).count() - if cfg!(unix) { 0 } else { 1 });
         assert_eq!(report.written_bytes, declared_file_bytes, "written bytes must sum the declared sizes of all listed files");
     }
 }

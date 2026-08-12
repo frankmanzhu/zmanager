@@ -1366,7 +1366,7 @@ mod tests {
         assert!(!missing_password.contains("libarchive"), "{missing_password}");
 
         let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password") }).unwrap();
-        assert_eq!(listing.entries.iter().filter(|entry| entry.path == "rar-fixture/data/stream.bin").count(), 1);
+        assert_eq!(listing.entries.iter().filter(|entry| entry.path.replace('\\', "/") == "rar-fixture/data/stream.bin").count(), 1);
         assert!(listing.entries.iter().any(|entry| entry.path == "rar-fixture/docs/readme.txt"));
     }
 

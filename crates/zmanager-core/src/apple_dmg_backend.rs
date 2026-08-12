@@ -338,9 +338,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.written_entries, 5);
+        // The fixture carries one symlink; it is materialized on unix and
+        // skipped with a warning elsewhere (no symlink materialization
+        // off-unix), so the written count is platform-aware.
+        assert_eq!(report.written_entries, if cfg!(unix) { 5 } else { 4 });
         assert_eq!(report.written_bytes, 81);
-        assert_eq!(report.skipped_entries, 0, "warnings: {:?}", report.warnings);
+        assert_eq!(report.skipped_entries, if cfg!(unix) { 0 } else { 1 }, "warnings: {:?}", report.warnings);
         assert_eq!(fs::read_to_string(temp.path("out/payload/README.txt")).unwrap(), "ZManager fixture payload\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/nested/file.txt")).unwrap(), "nested fixture file\n");
         assert_eq!(fs::read_to_string(temp.path("out/payload/dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
@@ -348,7 +351,10 @@ mod tests {
         assert!(temp.path("out/payload/nested/empty-dir").is_dir());
         // APFS stores the symlink target in a "com.apple.fs.symlink" xattr,
         // which the reader exposes via read_file; the link is materialized.
-        let link = fs::read_link(temp.path("out/payload/nested/readme-link.txt")).unwrap();
-        assert_eq!(link, PathBuf::from("../README.txt"));
+        #[cfg(unix)]
+        {
+            let link = fs::read_link(temp.path("out/payload/nested/readme-link.txt")).unwrap();
+            assert_eq!(link, PathBuf::from("../README.txt"));
+        }
     }
 }

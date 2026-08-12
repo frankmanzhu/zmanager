@@ -1324,10 +1324,14 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
     let raw_fat = archive_temp.path("raw-fat.img");
     fs::File::create(&raw_fat).unwrap().set_len(64 * 1024 * 1024).unwrap();
     assert_success("mformat raw image", &Command::new(&mformat).arg("-F").arg("-i").arg(&raw_fat).arg("::").output().unwrap());
-    assert_success(
-        "mcopy payload into raw image",
-        &Command::new(&mcopy).arg("-s").arg("-i").arg(&raw_fat).arg(temp.path("project")).arg("::").output().unwrap(),
-    );
+    assert_success("mcopy payload into raw image", &{
+        // mcopy converts source names from the process locale's charset; a
+        // C-locale environment (containers, minimal CI images) mangles the
+        // unicode names, so pin a UTF-8 locale for the copy.
+        let mut cmd = Command::new(&mcopy);
+        cmd.env("LC_ALL", "C.UTF-8").arg("-s").arg("-i").arg(&raw_fat).arg(temp.path("project")).arg("::");
+        cmd.output().unwrap()
+    });
 
     let project_vmdk = archive_temp.path("project.vmdk");
     assert_success(

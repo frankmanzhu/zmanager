@@ -734,12 +734,14 @@ mod tests {
 
     fn assert_complete_multipart_rar_round_trip(archive: &std::path::Path, password: Option<&str>, label: &str) {
         let listing = list_rar_with_password(archive, password).unwrap_or_else(|error| panic!("{label} listing failed: {error}"));
-        let paths = listing.entries.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>();
-        let unique_paths = paths.iter().copied().collect::<HashSet<_>>();
+        // RAR listings use the host separator; normalize so the fixture
+        // assertions are platform-independent (matches the CLI fixture test).
+        let paths = listing.entries.iter().map(|entry| entry.path.replace('\\', "/")).collect::<Vec<_>>();
+        let unique_paths = paths.iter().cloned().collect::<HashSet<_>>();
         assert_eq!(paths.len(), unique_paths.len(), "{label} must not list volume continuations as duplicate entries");
-        assert_eq!(paths.iter().filter(|path| **path == "rar-fixture/data/stream.bin").count(), 1);
-        assert!(paths.contains(&"rar-fixture/docs/readme.txt"));
-        assert!(paths.contains(&"rar-fixture/data/manifest.json"));
+        assert_eq!(paths.iter().filter(|path| path.as_str() == "rar-fixture/data/stream.bin").count(), 1);
+        assert!(paths.contains(&"rar-fixture/docs/readme.txt".to_string()));
+        assert!(paths.contains(&"rar-fixture/data/manifest.json".to_string()));
 
         let temp = TestDir::new("checked_in_rar_fixture_extract");
         let report = extract_rar_with_password(
