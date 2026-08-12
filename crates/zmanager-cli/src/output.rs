@@ -121,8 +121,7 @@ fn is_help_heading(line: &str) -> bool {
 
 fn push_command_line(rendered: &mut String, line: &str) {
     let command_start = line.find(|ch: char| !ch.is_whitespace()).unwrap_or(line.len());
-    let command_end =
-        line[command_start..].find(char::is_whitespace).map_or(line.len(), |offset| command_start + offset);
+    let command_end = line[command_start..].find(char::is_whitespace).map_or(line.len(), |offset| command_start + offset);
 
     rendered.push_str(&line[..command_start]);
     push_styled(rendered, StyleRole::Command, &line[command_start..command_end]);
@@ -132,9 +131,7 @@ fn push_command_line(rendered: &mut String, line: &str) {
 fn push_styled_tokens(rendered: &mut String, line: &str) {
     let mut index = 0usize;
     while index < line.len() {
-        let Some(token_start_offset) =
-            line[index..].char_indices().find_map(|(offset, ch)| (!ch.is_whitespace()).then_some(offset))
-        else {
+        let Some(token_start_offset) = line[index..].char_indices().find_map(|(offset, ch)| (!ch.is_whitespace()).then_some(offset)) else {
             rendered.push_str(&line[index..]);
             break;
         };
@@ -142,10 +139,7 @@ fn push_styled_tokens(rendered: &mut String, line: &str) {
         let token_start = index + token_start_offset;
         rendered.push_str(&line[index..token_start]);
 
-        let token_end = line[token_start..]
-            .char_indices()
-            .find_map(|(offset, ch)| ch.is_whitespace().then_some(token_start + offset))
-            .unwrap_or(line.len());
+        let token_end = line[token_start..].char_indices().find_map(|(offset, ch)| ch.is_whitespace().then_some(token_start + offset)).unwrap_or(line.len());
         let token = &line[token_start..token_end];
         push_styled_token(rendered, token);
         index = token_end;

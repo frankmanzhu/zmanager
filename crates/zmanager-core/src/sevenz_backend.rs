@@ -11,15 +11,9 @@
 
 use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
-use crate::safety::{
-    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
-    ExtractionSafetyPlanner, OverwriteResolver,
-};
+use crate::safety::{ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
 use crate::secrets::SecretString;
-use crate::sevenz_volume::{
-    MIN_VOLUME_SIZE_BYTES, MultiVolumeReader, discover_7z_read_volume_paths, has_7z_extension,
-    parse_7z_volume_file_name, split_7z_temp_archive,
-};
+use crate::sevenz_volume::{MIN_VOLUME_SIZE_BYTES, MultiVolumeReader, discover_7z_read_volume_paths, has_7z_extension, parse_7z_volume_file_name, split_7z_temp_archive};
 use sevenz_rust2::encoder_options::{AesEncoderOptions, Lzma2Options};
 use sevenz_rust2::{Archive, ArchiveEntry, ArchiveReader, ArchiveWriter, EncoderMethod, Password, SourceReader};
 use std::borrow::Cow;
@@ -237,11 +231,7 @@ impl From<sevenz_rust2::Error> for SevenZError {
 /// # Errors
 ///
 /// Returns [`SevenZError`] when planning, filesystem reads, or 7z writing fails.
-pub fn create_7z_from_path(
-    source: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    options: &SevenZCreateOptions,
-) -> Result<SevenZCreateReport, SevenZError> {
+pub fn create_7z_from_path(source: impl AsRef<Path>, destination: impl AsRef<Path>, options: &SevenZCreateOptions) -> Result<SevenZCreateReport, SevenZError> {
     let manifest = plan_archive(source, &PlanOptions::default())?;
 
     create_7z_from_manifest(&manifest, destination, options)
@@ -252,11 +242,7 @@ pub fn create_7z_from_path(
 /// # Errors
 ///
 /// Returns [`SevenZError`] when source files cannot be read or 7z writing fails.
-pub fn create_7z_from_manifest(
-    manifest: &ArchiveManifest,
-    destination: impl AsRef<Path>,
-    options: &SevenZCreateOptions,
-) -> Result<SevenZCreateReport, SevenZError> {
+pub fn create_7z_from_manifest(manifest: &ArchiveManifest, destination: impl AsRef<Path>, options: &SevenZCreateOptions) -> Result<SevenZCreateReport, SevenZError> {
     create_7z_from_manifest_inner(manifest, destination, options, None, None, None)
 }
 
@@ -276,14 +262,7 @@ pub fn create_7z_from_manifest_with_context(
     let progress: SevenZProgressCallback<'_> = Rc::new(RefCell::new(move |path: Option<&str>, bytes: u64| {
         context.bytes_processed(path, bytes);
     }));
-    create_7z_from_manifest_inner(
-        manifest,
-        destination,
-        options,
-        Some(&progress),
-        Some(&cancellation_token),
-        Some(&cancellation_observed),
-    )
+    create_7z_from_manifest_inner(manifest, destination, options, Some(&progress), Some(&cancellation_token), Some(&cancellation_observed))
 }
 
 fn create_7z_from_manifest_inner(
@@ -297,10 +276,8 @@ fn create_7z_from_manifest_inner(
     validate_volume_size(options.volume_size)?;
 
     let destination = destination.as_ref();
-    let mut output = crate::atomic_file::AtomicOutputFile::create(destination)
-        .map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
-    let output_file =
-        output.file_mut().map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
+    let mut output = crate::atomic_file::AtomicOutputFile::create(destination).map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
+    let output_file = output.file_mut().map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
     let mut writer = ArchiveWriter::new(output_file)?;
     writer.set_encrypt_header(options.encrypt_file_names);
     let encrypted = configure_content_methods(&mut writer, options);
@@ -316,49 +293,24 @@ fn create_7z_from_manifest_inner(
     };
 
     let write_result = if options.solid {
-        write_solid_manifest(
-            &mut writer,
-            manifest,
-            options.preserve_metadata,
-            &mut report,
-            progress,
-            cancellation_token,
-            cancellation_observed,
-        )
+        write_solid_manifest(&mut writer, manifest, options.preserve_metadata, &mut report, progress, cancellation_token, cancellation_observed)
     } else {
-        write_non_solid_manifest(
-            &mut writer,
-            manifest,
-            options.preserve_metadata,
-            &mut report,
-            progress,
-            cancellation_token,
-            cancellation_observed,
-        )
+        write_non_solid_manifest(&mut writer, manifest, options.preserve_metadata, &mut report, progress, cancellation_token, cancellation_observed)
     };
     map_cancelled_7z_create_result(write_result, cancellation_observed)?;
 
-    map_cancelled_7z_create_result(
-        writer.finish().map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source }),
-        cancellation_observed,
-    )?;
+    map_cancelled_7z_create_result(writer.finish().map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source }), cancellation_observed)?;
     if let Some(volume_size) = options.volume_size {
         output.close();
-        report.volume_count =
-            split_7z_temp_archive(output.temp_path(), destination, volume_size, options.replace_existing)?;
+        report.volume_count = split_7z_temp_archive(output.temp_path(), destination, volume_size, options.replace_existing)?;
     } else {
-        output
-            .commit_with_file_replace(options.replace_existing)
-            .map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
+        output.commit_with_file_replace(options.replace_existing).map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
     }
 
     Ok(report)
 }
 
-fn map_cancelled_7z_create_result<T>(
-    result: Result<T, SevenZError>,
-    cancellation_observed: Option<&Rc<Cell<bool>>>,
-) -> Result<T, SevenZError> {
+fn map_cancelled_7z_create_result<T>(result: Result<T, SevenZError>, cancellation_observed: Option<&Rc<Cell<bool>>>) -> Result<T, SevenZError> {
     match result {
         Err(_) if cancellation_observed.is_some_and(|observed| observed.get()) => Err(SevenZError::Cancelled),
         result => result,
@@ -407,9 +359,7 @@ impl<R: Read> Read for SevenZProgressReader<'_, R> {
 
 fn validate_volume_size(volume_size: Option<u64>) -> Result<(), SevenZError> {
     match volume_size {
-        Some(size) if size < MIN_VOLUME_SIZE_BYTES => {
-            Err(SevenZError::VolumeSizeTooSmall { size, minimum: MIN_VOLUME_SIZE_BYTES })
-        }
+        Some(size) if size < MIN_VOLUME_SIZE_BYTES => Err(SevenZError::VolumeSizeTooSmall { size, minimum: MIN_VOLUME_SIZE_BYTES }),
         _ => Ok(()),
     }
 }
@@ -429,9 +379,7 @@ fn open_7z_reader(path: &Path) -> Result<SevenZReadSource, SevenZError> {
         MultiVolumeReader::open(volume_paths).map(SevenZReadSource::Multi)
     } else {
         let read_path = volume_paths.first().map_or(path, PathBuf::as_path);
-        File::open(read_path)
-            .map(SevenZReadSource::File)
-            .map_err(|source| SevenZError::Io { path: read_path.to_path_buf(), source })
+        File::open(read_path).map(SevenZReadSource::File).map_err(|source| SevenZError::Io { path: read_path.to_path_buf(), source })
     }
 }
 
@@ -496,11 +444,7 @@ pub fn list_7z(path: impl AsRef<Path>, password: Option<&str>) -> Result<SevenZL
 ///
 /// Returns [`SevenZError`] when the archive cannot be read, or when its
 /// encrypted data requires a missing or incorrect password.
-pub fn test_7z_with_password_filter(
-    archive_path: impl AsRef<Path>,
-    password: Option<&str>,
-    mut selected: impl FnMut(&str) -> bool,
-) -> Result<SevenZTestReport, SevenZError> {
+pub fn test_7z_with_password_filter(archive_path: impl AsRef<Path>, password: Option<&str>, mut selected: impl FnMut(&str) -> bool) -> Result<SevenZTestReport, SevenZError> {
     let archive_path = archive_path.as_ref();
     let password = archive_password(password);
     let source = open_7z_reader(archive_path)?;
@@ -524,10 +468,7 @@ pub fn test_7z_with_password_filter(
             match io::copy(entry_reader, &mut io::sink()) {
                 Ok(copied) => copied,
                 Err(source) => {
-                    return Err(callback_failed_with(
-                        &mut callback_error,
-                        SevenZError::Io { path: PathBuf::from(&path), source },
-                    ));
+                    return Err(callback_failed_with(&mut callback_error, SevenZError::Io { path: PathBuf::from(&path), source }));
                 }
             }
         };
@@ -550,12 +491,7 @@ pub fn test_7z_with_password_filter(
 ///
 /// Returns [`SevenZError`] when the archive cannot be read, an entry is unsafe,
 /// password validation fails, or filesystem writes fail.
-pub fn extract_7z(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    password: Option<&str>,
-    policy: ExtractionPolicy,
-) -> Result<SevenZExtractReport, SevenZError> {
+pub fn extract_7z(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, password: Option<&str>, policy: ExtractionPolicy) -> Result<SevenZExtractReport, SevenZError> {
     extract_7z_inner(archive_path, destination, password, policy, None, None)
 }
 
@@ -603,16 +539,13 @@ fn extract_7z_inner(
 ) -> Result<SevenZExtractReport, SevenZError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
-    let destination_root = crate::safety::prepare_destination_root(destination)
-        .map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })?;
 
     let password = archive_password(password);
     let source = open_7z_reader(archive_path)?;
     let mut reader = ArchiveReader::new(source, password)?;
-    let (decisions, modes) =
-        plan_extraction(reader.archive().files.as_slice(), &destination_root, policy, overwrite_resolver)?;
-    let mut report =
-        SevenZExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let (decisions, modes) = plan_extraction(reader.archive().files.as_slice(), &destination_root, policy, overwrite_resolver)?;
+    let mut report = SevenZExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut callback_error = None;
     let mut deferred_directories: Vec<(PathBuf, Option<u32>, Option<std::time::SystemTime>)> = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
@@ -627,38 +560,21 @@ fn extract_7z_inner(
             return Ok(true);
         }
 
-        let safety_entry = ExtractionEntry {
-            archive_path: path,
-            kind: extraction_kind(entry),
-            uncompressed_size: Some(entry.size()),
-            compressed_size: (entry.compressed_size > 0).then_some(entry.compressed_size),
-        };
+        let safety_entry =
+            ExtractionEntry { archive_path: path, kind: extraction_kind(entry), uncompressed_size: Some(entry.size()), compressed_size: (entry.compressed_size > 0).then_some(entry.compressed_size) };
         let decision = match decisions.get(entry.name()) {
             Some(decision) => decision.clone(),
             None => return Err(callback_failed_with(&mut callback_error, missing_extraction_decision(entry.name()))),
         };
-        match crate::extract_loop::process_planned_entry(
-            &mut report,
-            context.as_deref_mut(),
-            &safety_entry,
-            decision,
-            &mut |action, report, context| match action {
-                crate::extract_loop::EntryAction::Skip => {
-                    drain_reader(entry_reader, entry.name())?;
-                    Ok(0)
-                }
-                crate::extract_loop::EntryAction::Write(decision) => write_sevenz_entry(
-                    entry,
-                    entry_reader,
-                    &decision,
-                    modes.get(entry.name()).copied().flatten(),
-                    &mut deferred_directories,
-                    report,
-                    context,
-                    &mut io_buffer,
-                ),
-            },
-        ) {
+        match crate::extract_loop::process_planned_entry(&mut report, context.as_deref_mut(), &safety_entry, decision, &mut |action, report, context| match action {
+            crate::extract_loop::EntryAction::Skip => {
+                drain_reader(entry_reader, entry.name())?;
+                Ok(0)
+            }
+            crate::extract_loop::EntryAction::Write(decision) => {
+                write_sevenz_entry(entry, entry_reader, &decision, modes.get(entry.name()).copied().flatten(), &mut deferred_directories, report, context, &mut io_buffer)
+            }
+        }) {
             Ok(_) => Ok(true),
             Err(error) => Err(callback_failed_with(&mut callback_error, error)),
         }
@@ -679,18 +595,12 @@ fn extract_7z_inner(
 ///
 /// Returns [`SevenZError`] when the archive cannot be read, a password is
 /// missing/incorrect, or output writing fails.
-pub fn copy_7z_files_to_writer<W: Write>(
-    archive_path: impl AsRef<Path>,
-    password: Option<&str>,
-    mut selected: impl FnMut(&str) -> bool,
-    output: &mut W,
-) -> Result<SevenZExtractReport, SevenZError> {
+pub fn copy_7z_files_to_writer<W: Write>(archive_path: impl AsRef<Path>, password: Option<&str>, mut selected: impl FnMut(&str) -> bool, output: &mut W) -> Result<SevenZExtractReport, SevenZError> {
     let archive_path = archive_path.as_ref();
     let password = archive_password(password);
     let source = open_7z_reader(archive_path)?;
     let mut reader = ArchiveReader::new(source, password)?;
-    let mut report =
-        SevenZExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let mut report = SevenZExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut callback_error = None;
 
     let result = reader.for_each_entries(|entry, entry_reader| {
@@ -708,10 +618,7 @@ pub fn copy_7z_files_to_writer<W: Write>(
                 report.written_bytes += copied;
                 Ok(true)
             }
-            Err(source) => Err(callback_failed_with(
-                &mut callback_error,
-                SevenZError::Io { path: PathBuf::from(entry.name()), source },
-            )),
+            Err(source) => Err(callback_failed_with(&mut callback_error, SevenZError::Io { path: PathBuf::from(entry.name()), source })),
         }
     });
 
@@ -723,26 +630,17 @@ pub fn copy_7z_files_to_writer<W: Write>(
     Ok(report)
 }
 
-fn configure_content_methods<W: io::Write + io::Seek>(
-    writer: &mut ArchiveWriter<W>,
-    options: &SevenZCreateOptions,
-) -> bool {
+fn configure_content_methods<W: io::Write + io::Seek>(writer: &mut ArchiveWriter<W>, options: &SevenZCreateOptions) -> bool {
     let password = options.password.as_ref().map(SecretString::expose_secret).filter(|password| !password.is_empty());
     let lzma2_options = sevenz_lzma2_options(options);
 
     match (password, lzma2_options) {
         (Some(password), Some(lzma2_options)) => {
-            writer.set_content_methods(vec![
-                AesEncoderOptions::new(Password::from(password)).into(),
-                lzma2_options.into(),
-            ]);
+            writer.set_content_methods(vec![AesEncoderOptions::new(Password::from(password)).into(), lzma2_options.into()]);
             true
         }
         (Some(password), None) => {
-            writer.set_content_methods(vec![
-                AesEncoderOptions::new(Password::from(password)).into(),
-                EncoderMethod::LZMA2.into(),
-            ]);
+            writer.set_content_methods(vec![AesEncoderOptions::new(Password::from(password)).into(), EncoderMethod::LZMA2.into()]);
             true
         }
         (None, Some(lzma2_options)) => {
@@ -763,11 +661,7 @@ fn sevenz_lzma2_options(options: &SevenZCreateOptions) -> Option<Lzma2Options> {
         return Some(Lzma2Options::from_level(level));
     }
 
-    Some(Lzma2Options::from_level_mt(
-        level,
-        threads,
-        options.chunk_size.unwrap_or(DEFAULT_SEVENZ_LZMA2_CHUNK_SIZE_BYTES),
-    ))
+    Some(Lzma2Options::from_level_mt(level, threads, options.chunk_size.unwrap_or(DEFAULT_SEVENZ_LZMA2_CHUNK_SIZE_BYTES)))
 }
 
 fn sevenz_threads(options: &SevenZCreateOptions) -> Option<u32> {
@@ -799,16 +693,7 @@ fn write_non_solid_manifest<W: Write + Seek>(
     cancellation_observed: Option<&Rc<Cell<bool>>>,
 ) -> Result<(), SevenZError> {
     for entry in &manifest.entries {
-        append_manifest_entry(
-            writer,
-            entry,
-            preserve_metadata,
-            report,
-            progress,
-            cancellation_token,
-            cancellation_observed,
-            false,
-        )?;
+        append_manifest_entry(writer, entry, preserve_metadata, report, progress, cancellation_token, cancellation_observed, false)?;
     }
 
     Ok(())
@@ -827,16 +712,7 @@ fn write_solid_manifest<W: Write + Seek>(
     let mut solid_readers = Vec::new();
 
     for entry in &manifest.entries {
-        if let Some((archive_entry, reader)) = append_manifest_entry(
-            writer,
-            entry,
-            preserve_metadata,
-            report,
-            progress,
-            cancellation_token,
-            cancellation_observed,
-            true,
-        )? {
+        if let Some((archive_entry, reader)) = append_manifest_entry(writer, entry, preserve_metadata, report, progress, cancellation_token, cancellation_observed, true)? {
             solid_entries.push(archive_entry);
             solid_readers.push(reader);
         }
@@ -873,15 +749,8 @@ fn append_manifest_entry<'a, W: Write + Seek>(
         }
         ManifestFileType::File => {
             let archive_entry = sevenz_archive_entry(entry, preserve_metadata);
-            let file = File::open(&entry.source_path)
-                .map_err(|source| SevenZError::Io { path: entry.source_path.clone(), source })?;
-            let reader = SevenZProgressReader::new(
-                file,
-                entry.archive_path.clone(),
-                progress.cloned(),
-                cancellation_token.cloned(),
-                cancellation_observed.cloned(),
-            );
+            let file = File::open(&entry.source_path).map_err(|source| SevenZError::Io { path: entry.source_path.clone(), source })?;
+            let reader = SevenZProgressReader::new(file, entry.archive_path.clone(), progress.cloned(), cancellation_token.cloned(), cancellation_observed.cloned());
             let pending = if solid {
                 Some((archive_entry, SourceReader::new(reader)))
             } else {
@@ -893,16 +762,10 @@ fn append_manifest_entry<'a, W: Write + Seek>(
             return Ok(pending);
         }
         ManifestFileType::Symlink => {
-            report.warnings.push(format!(
-                "skipped symlink {}: 7z backend does not materialize symlink entries in v1",
-                entry.archive_path
-            ));
+            report.warnings.push(format!("skipped symlink {}: 7z backend does not materialize symlink entries in v1", entry.archive_path));
         }
         ManifestFileType::Other => {
-            report.warnings.push(format!(
-                "skipped unsupported entry {}: 7z backend only writes files and directories in v1",
-                entry.archive_path
-            ));
+            report.warnings.push(format!("skipped unsupported entry {}: 7z backend only writes files and directories in v1", entry.archive_path));
         }
     }
 
@@ -923,9 +786,7 @@ fn sevenz_archive_entry(entry: &ManifestEntry, preserve_metadata: bool) -> Archi
 
     match entry.file_type {
         ManifestFileType::Directory => ArchiveEntry::new_directory(&entry.archive_path),
-        ManifestFileType::File | ManifestFileType::Symlink | ManifestFileType::Other => {
-            ArchiveEntry::new_file(&entry.archive_path)
-        }
+        ManifestFileType::File | ManifestFileType::Symlink | ManifestFileType::Other => ArchiveEntry::new_file(&entry.archive_path),
     }
 }
 
@@ -952,29 +813,16 @@ fn extraction_kind(entry: &ArchiveEntry) -> ExtractionEntryKind {
 }
 
 fn sevenz_unix_mode(entry: &ArchiveEntry) -> Option<u32> {
-    if entry.has_windows_attributes && (entry.windows_attributes() & SEVENZ_UNIX_ATTRIBUTES_FLAG) != 0 {
-        Some((entry.windows_attributes() >> 16) & SEVENZ_MODE_MASK)
-    } else {
-        None
-    }
+    if entry.has_windows_attributes && (entry.windows_attributes() & SEVENZ_UNIX_ATTRIBUTES_FLAG) != 0 { Some((entry.windows_attributes() >> 16) & SEVENZ_MODE_MASK) } else { None }
 }
 
-fn apply_sevenz_metadata(
-    path: &Path,
-    unix_mode: Option<u32>,
-    modified_time: Option<std::time::SystemTime>,
-) -> Result<(), SevenZError> {
+fn apply_sevenz_metadata(path: &Path, unix_mode: Option<u32>, modified_time: Option<std::time::SystemTime>) -> Result<(), SevenZError> {
     let file_time = modified_time.map(filetime::FileTime::from_system_time);
-    crate::extract_materialize::apply_metadata(path, unix_mode, file_time)
-        .map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })
+    crate::extract_materialize::apply_metadata(path, unix_mode, file_time).map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })
 }
 
-fn apply_deferred_sevenz_directory_metadata(
-    directories: &[(PathBuf, Option<u32>, Option<std::time::SystemTime>)],
-) -> Result<(), SevenZError> {
-    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, unix_mode, modified_time)| {
-        apply_sevenz_metadata(path, *unix_mode, *modified_time)
-    })
+fn apply_deferred_sevenz_directory_metadata(directories: &[(PathBuf, Option<u32>, Option<std::time::SystemTime>)]) -> Result<(), SevenZError> {
+    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, unix_mode, modified_time)| apply_sevenz_metadata(path, *unix_mode, *modified_time))
 }
 
 type SevenZExtractionDecisions = HashMap<String, ExtractionDecision>;
@@ -996,12 +844,8 @@ fn plan_extraction(
         }
 
         let kind = extraction_kind(entry);
-        let safety_entry = ExtractionEntry {
-            archive_path: entry.name().to_owned(),
-            kind,
-            uncompressed_size: Some(entry.size()),
-            compressed_size: (entry.compressed_size > 0).then_some(entry.compressed_size),
-        };
+        let safety_entry =
+            ExtractionEntry { archive_path: entry.name().to_owned(), kind, uncompressed_size: Some(entry.size()), compressed_size: (entry.compressed_size > 0).then_some(entry.compressed_size) };
         let decision = planner.validate_entry(&safety_entry)?;
         decisions.insert(entry.name().to_owned(), decision);
         modes.insert(entry.name().to_owned(), sevenz_unix_mode(entry));
@@ -1022,12 +866,10 @@ fn write_sevenz_entry(
     io_buffer: &mut [u8],
 ) -> Result<u64, SevenZError> {
     if decision.replace_existing && entry.is_directory() {
-        crate::safety::remove_destination_for_replace(decision.destination_path)
-            .map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })?;
+        crate::safety::remove_destination_for_replace(decision.destination_path).map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })?;
     }
     if entry.is_directory() {
-        fs::create_dir_all(decision.destination_path)
-            .map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })?;
+        fs::create_dir_all(decision.destination_path).map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })?;
         deferred_directories.push((decision.destination_path.to_path_buf(), unix_mode, sevenz_modified_time(entry)));
         report.written_entries += 1;
         Ok(0)
@@ -1038,11 +880,7 @@ fn write_sevenz_entry(
             Some(entry.name()),
             context,
             io_buffer,
-            |buf| {
-                reader
-                    .read(buf)
-                    .map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source })
-            },
+            |buf| reader.read(buf).map_err(|source| SevenZError::Io { path: decision.destination_path.to_path_buf(), source }),
             |source, path| SevenZError::Io { path: path.to_path_buf(), source },
         )?;
         apply_sevenz_metadata(decision.destination_path, unix_mode, sevenz_modified_time(entry))?;
@@ -1057,14 +895,11 @@ fn sevenz_modified_time(entry: &ArchiveEntry) -> Option<std::time::SystemTime> {
 }
 
 fn missing_extraction_decision(archive_path: &str) -> SevenZError {
-    SevenZError::SevenZ(sevenz_rust2::Error::Other(Cow::Owned(format!(
-        "missing extraction decision for {archive_path}"
-    ))))
+    SevenZError::SevenZ(sevenz_rust2::Error::Other(Cow::Owned(format!("missing extraction decision for {archive_path}"))))
 }
 
 fn drain_reader(reader: &mut dyn Read, archive_path: &str) -> Result<(), SevenZError> {
-    io::copy(reader, &mut io::sink())
-        .map_err(|source| SevenZError::Io { path: PathBuf::from(archive_path), source })?;
+    io::copy(reader, &mut io::sink()).map_err(|source| SevenZError::Io { path: PathBuf::from(archive_path), source })?;
     Ok(())
 }
 
@@ -1087,10 +922,7 @@ fn callback_failed_error() -> sevenz_rust2::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        SevenZCreateOptions, SevenZEntryKind, SevenZError, create_7z_from_path, extract_7z, extraction_kind, list_7z,
-        test_7z_with_password_filter,
-    };
+    use super::{SevenZCreateOptions, SevenZEntryKind, SevenZError, create_7z_from_path, extract_7z, extraction_kind, list_7z, test_7z_with_password_filter};
     use crate::safety::{ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError};
     use crate::secrets::SecretString;
     use crate::test_support::TestDir;
@@ -1110,8 +942,7 @@ mod tests {
         let archive = temp.path("archive.7z");
         create_7z_from_path(temp.path("project"), &archive, &SevenZCreateOptions::default()).unwrap();
 
-        let policy =
-            ExtractionPolicy { exclude_patterns: vec!["**/excluded.txt".to_owned()], ..ExtractionPolicy::default() };
+        let policy = ExtractionPolicy { exclude_patterns: vec!["**/excluded.txt".to_owned()], ..ExtractionPolicy::default() };
         let token = CancellationToken::new();
         let mut warnings = Vec::new();
         let mut sink = |event: JobEvent| {
@@ -1170,12 +1001,7 @@ mod tests {
 
         let archive = temp.path("archive.7z");
 
-        create_7z_from_path(
-            temp.path("project"),
-            &archive,
-            &SevenZCreateOptions { preserve_metadata: true, ..SevenZCreateOptions::default() },
-        )
-        .unwrap();
+        create_7z_from_path(temp.path("project"), &archive, &SevenZCreateOptions { preserve_metadata: true, ..SevenZCreateOptions::default() }).unwrap();
         extract_7z(&archive, temp.path("out"), None, ExtractionPolicy::default()).unwrap();
 
         let out_path = temp.path("out/project/script.sh");
@@ -1219,12 +1045,7 @@ mod tests {
         let report = create_7z_from_path(
             temp.path("payload"),
             &archive,
-            &SevenZCreateOptions {
-                level: Some(1),
-                threads: Some(2),
-                chunk_size: Some(crate::sevenz_volume::MIN_VOLUME_SIZE_BYTES),
-                ..SevenZCreateOptions::default()
-            },
+            &SevenZCreateOptions { level: Some(1), threads: Some(2), chunk_size: Some(crate::sevenz_volume::MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() },
         )
         .unwrap();
 
@@ -1262,12 +1083,7 @@ mod tests {
         temp.write_file("payload/nested/second.txt", b"world");
         let archive = temp.path("payload.7z");
 
-        create_7z_from_path(
-            temp.path("payload"),
-            &archive,
-            &SevenZCreateOptions { solid: false, ..SevenZCreateOptions::default() },
-        )
-        .unwrap();
+        create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { solid: false, ..SevenZCreateOptions::default() }).unwrap();
         let listing = list_7z(&archive, None).unwrap();
         let extract_report = extract_7z(&archive, temp.path("out"), None, ExtractionPolicy::default()).unwrap();
 
@@ -1282,36 +1098,20 @@ mod tests {
         temp.write_file("payload/file.txt", b"secret");
         let archive = temp.path("payload.7z");
 
-        let report = create_7z_from_path(
-            temp.path("payload"),
-            &archive,
-            &SevenZCreateOptions {
-                password: Some(SecretString::from("correct horse")),
-                ..SevenZCreateOptions::default()
-            },
-        )
-        .unwrap();
+        let report = create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { password: Some(SecretString::from("correct horse")), ..SevenZCreateOptions::default() }).unwrap();
 
         assert!(report.encrypted);
         assert!(matches!(list_7z(&archive, None), Err(SevenZError::PasswordRequired)));
-        assert!(matches!(
-            extract_7z(&archive, temp.path("wrong"), Some("wrong password"), ExtractionPolicy::default()),
-            Err(SevenZError::InvalidPassword)
-        ));
+        assert!(matches!(extract_7z(&archive, temp.path("wrong"), Some("wrong password"), ExtractionPolicy::default()), Err(SevenZError::InvalidPassword)));
         assert!(matches!(test_7z_with_password_filter(&archive, None, |_| true), Err(SevenZError::PasswordRequired)));
-        assert!(matches!(
-            test_7z_with_password_filter(&archive, Some("wrong password"), |_| true),
-            Err(SevenZError::InvalidPassword)
-        ));
-        let verification =
-            test_7z_with_password_filter(&archive, Some("correct horse"), |entry| entry == "payload/file.txt").unwrap();
+        assert!(matches!(test_7z_with_password_filter(&archive, Some("wrong password"), |_| true), Err(SevenZError::InvalidPassword)));
+        let verification = test_7z_with_password_filter(&archive, Some("correct horse"), |entry| entry == "payload/file.txt").unwrap();
         assert_eq!(verification.tested_entries, 1);
         assert_eq!(verification.tested_bytes, 6);
         assert_eq!(verification.skipped_entries, 1);
 
         let listing = list_7z(&archive, Some("correct horse")).unwrap();
-        let extract_report =
-            extract_7z(&archive, temp.path("out"), Some("correct horse"), ExtractionPolicy::default()).unwrap();
+        let extract_report = extract_7z(&archive, temp.path("out"), Some("correct horse"), ExtractionPolicy::default()).unwrap();
 
         assert_eq!(listing.entries.len(), 2);
         assert_eq!(extract_report.written_bytes, 6);
@@ -1327,21 +1127,14 @@ mod tests {
         let report = create_7z_from_path(
             temp.path("payload"),
             &archive,
-            &SevenZCreateOptions {
-                password: Some(SecretString::from("correct horse")),
-                encrypt_file_names: false,
-                ..SevenZCreateOptions::default()
-            },
+            &SevenZCreateOptions { password: Some(SecretString::from("correct horse")), encrypt_file_names: false, ..SevenZCreateOptions::default() },
         )
         .unwrap();
 
         assert!(report.encrypted);
         let listing = list_7z(&archive, None).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.name == "payload/file.txt"));
-        assert!(matches!(
-            extract_7z(&archive, temp.path("missing-password"), None, ExtractionPolicy::default()),
-            Err(SevenZError::PasswordRequired | SevenZError::InvalidPassword)
-        ));
+        assert!(matches!(extract_7z(&archive, temp.path("missing-password"), None, ExtractionPolicy::default()), Err(SevenZError::PasswordRequired | SevenZError::InvalidPassword)));
     }
 
     #[test]

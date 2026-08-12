@@ -8,9 +8,8 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest as _, Sha256};
 
 use crate::trust::{
-    PUBLIC_DEVICE_ID_PREFIX, PUBLIC_IDENTIFIER_SUFFIX_MAX_LENGTH, PUBLIC_IDENTIFIER_SUFFIX_MIN_LENGTH,
-    PUBLIC_ORG_ID_PREFIX, PUBLIC_SIGNER_ID_PREFIX, SHA256_IDENTIFIER_HEX_LENGTH, SHA256_IDENTIFIER_PREFIX,
-    STATUS_BY_FINGERPRINT_PATH, STATUS_CRL_PEM_PATH,
+    PUBLIC_DEVICE_ID_PREFIX, PUBLIC_IDENTIFIER_SUFFIX_MAX_LENGTH, PUBLIC_IDENTIFIER_SUFFIX_MIN_LENGTH, PUBLIC_ORG_ID_PREFIX, PUBLIC_SIGNER_ID_PREFIX, SHA256_IDENTIFIER_HEX_LENGTH,
+    SHA256_IDENTIFIER_PREFIX, STATUS_BY_FINGERPRINT_PATH, STATUS_CRL_PEM_PATH,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -252,13 +251,11 @@ fn validate_and_percent_encode(identifier: &str) -> Result<String, TrustIdentifi
 }
 
 pub fn status_certificate_by_fingerprint_path(certificate_sha256: &str) -> Result<String, TrustIdentifierError> {
-    validate_and_percent_encode(certificate_sha256)
-        .map(|encoded| STATUS_BY_FINGERPRINT_PATH.replace("{certificate_sha256}", &encoded))
+    validate_and_percent_encode(certificate_sha256).map(|encoded| STATUS_BY_FINGERPRINT_PATH.replace("{certificate_sha256}", &encoded))
 }
 
 pub fn status_crl_pem_path(issuer_sha256: &str) -> Result<String, TrustIdentifierError> {
-    validate_and_percent_encode(issuer_sha256)
-        .map(|encoded| STATUS_CRL_PEM_PATH.replace("{issuer_certificate_sha256}", &encoded))
+    validate_and_percent_encode(issuer_sha256).map(|encoded| STATUS_CRL_PEM_PATH.replace("{issuer_certificate_sha256}", &encoded))
 }
 
 #[must_use]

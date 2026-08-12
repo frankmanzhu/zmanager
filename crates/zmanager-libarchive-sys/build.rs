@@ -59,10 +59,7 @@ fn link_system_libarchive() {
         return;
     }
 
-    pkg_config::Config::new()
-        .atleast_version("3.8.9")
-        .probe("libarchive")
-        .expect("system libarchive >= 3.8.9 was not found");
+    pkg_config::Config::new().atleast_version("3.8.9").probe("libarchive").expect("system libarchive >= 3.8.9 was not found");
 }
 
 fn build_bundled_libarchive() {
@@ -139,11 +136,7 @@ fn configure_common_libarchive_options(config: &mut cmake::Config) {
 fn configure_target_options(config: &mut cmake::Config, target: &str) {
     if target.contains("windows") {
         let static_crt = windows_msvc_uses_static_crt();
-        let runtime_library = if static_crt {
-            "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        } else {
-            "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
-        };
+        let runtime_library = if static_crt { "MultiThreaded$<$<CONFIG:Debug>:Debug>" } else { "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" };
         config
             .define("ENABLE_ACL", "ON")
             .define("ENABLE_XATTR", "ON")
@@ -178,13 +171,7 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("ENABLE_ZSTD", "ON")
             .define("ENABLE_LZ4", "ON");
     } else if target.contains("apple-darwin") {
-        config
-            .define("ENABLE_ACL", "ON")
-            .define("ENABLE_XATTR", "ON")
-            .define("ENABLE_ICONV", "ON")
-            .define("ENABLE_LIBXML2", "ON")
-            .define("ENABLE_EXPAT", "ON")
-            .define("ENABLE_WIN32_XMLLITE", "OFF");
+        config.define("ENABLE_ACL", "ON").define("ENABLE_XATTR", "ON").define("ENABLE_ICONV", "ON").define("ENABLE_LIBXML2", "ON").define("ENABLE_EXPAT", "ON").define("ENABLE_WIN32_XMLLITE", "OFF");
 
         let lz4_include = find_include_dir("DEP_LZ4_INCLUDE", "DEP_LZ4_ROOT");
         let lz4_lib = find_static_library("DEP_LZ4_ROOT", "liblz4.a");
@@ -222,13 +209,7 @@ fn configure_target_options(config: &mut cmake::Config, target: &str) {
             .define("ENABLE_EXPAT", "ON")
             .define("ENABLE_WIN32_XMLLITE", "OFF");
     } else {
-        config
-            .define("ENABLE_ACL", "ON")
-            .define("ENABLE_XATTR", "ON")
-            .define("ENABLE_ICONV", "ON")
-            .define("ENABLE_LIBXML2", "ON")
-            .define("ENABLE_EXPAT", "ON")
-            .define("ENABLE_WIN32_XMLLITE", "OFF");
+        config.define("ENABLE_ACL", "ON").define("ENABLE_XATTR", "ON").define("ENABLE_ICONV", "ON").define("ENABLE_LIBXML2", "ON").define("ENABLE_EXPAT", "ON").define("ENABLE_WIN32_XMLLITE", "OFF");
     }
 }
 
@@ -279,10 +260,7 @@ fn target_uses_vcpkg(target: &str) -> bool {
 }
 
 fn vcpkg_root() -> Option<PathBuf> {
-    env::var_os(ENV_VCPKG_INSTALLATION_ROOT)
-        .or_else(|| env::var_os(ENV_VCPKG_ROOT))
-        .map(PathBuf::from)
-        .or_else(vcpkg_root_from_toolchain_file)
+    env::var_os(ENV_VCPKG_INSTALLATION_ROOT).or_else(|| env::var_os(ENV_VCPKG_ROOT)).map(PathBuf::from).or_else(vcpkg_root_from_toolchain_file)
 }
 
 fn vcpkg_root_from_toolchain_file() -> Option<PathBuf> {
@@ -442,12 +420,7 @@ fn link_windows_vcpkg_library(search: Option<&VcpkgLinkSearch>, candidates: &[&s
     }
 
     let searched = search.lib_dirs.iter().map(|dir| dir.display().to_string()).collect::<Vec<_>>().join(", ");
-    panic!(
-        "vcpkg library not found for triplet {}. Looked in {} for one of: {}",
-        search.triplet,
-        searched,
-        candidates.join(", ")
-    );
+    panic!("vcpkg library not found for triplet {}. Looked in {} for one of: {}", search.triplet, searched, candidates.join(", "));
 }
 
 fn default_vcpkg_triplet() -> String {
@@ -460,9 +433,7 @@ fn default_vcpkg_triplet() -> String {
 }
 
 fn configured_vcpkg_triplet() -> String {
-    env::var(ENV_VCPKG_TARGET_TRIPLET)
-        .or_else(|_| env::var(ENV_VCPKG_DEFAULT_TRIPLET))
-        .unwrap_or_else(|_| default_vcpkg_triplet())
+    env::var(ENV_VCPKG_TARGET_TRIPLET).or_else(|_| env::var(ENV_VCPKG_DEFAULT_TRIPLET)).unwrap_or_else(|_| default_vcpkg_triplet())
 }
 
 fn windows_msvc_uses_static_crt() -> bool {
@@ -517,8 +488,7 @@ fn generate_bindings() {
     // allowlists (see bindings/linux-musl.rs header for the exact command).
     if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("musl") {
         let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-        std::fs::copy(manifest_dir.join("bindings/linux-musl.rs"), out_path.join("bindings.rs"))
-            .expect("Unable to copy checked-in musl bindings");
+        std::fs::copy(manifest_dir.join("bindings/linux-musl.rs"), out_path.join("bindings.rs")).expect("Unable to copy checked-in musl bindings");
         return;
     }
     // Use the checked-in Windows bindings when available (regenerate with
@@ -529,8 +499,7 @@ fn generate_bindings() {
         let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
         let checked_in = manifest_dir.join("bindings/windows-msvc.rs");
         if checked_in.exists() {
-            std::fs::copy(&checked_in, out_path.join("bindings.rs"))
-                .expect("Unable to copy checked-in Windows bindings");
+            std::fs::copy(&checked_in, out_path.join("bindings.rs")).expect("Unable to copy checked-in Windows bindings");
             return;
         }
     }

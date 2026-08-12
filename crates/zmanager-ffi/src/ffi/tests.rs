@@ -1,7 +1,4 @@
-use super::error::{
-    ERROR_DAMAGED_ARCHIVE, ERROR_INVALID_PASSWORD, ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, ERROR_PASSWORD_REQUIRED,
-    WARNING_LAUNCH_GATED_FORMAT,
-};
+use super::error::{ERROR_DAMAGED_ARCHIVE, ERROR_INVALID_PASSWORD, ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, ERROR_PASSWORD_REQUIRED, WARNING_LAUNCH_GATED_FORMAT};
 use super::ops::jobs::MobileJobRegistry;
 use super::util::{classify_archive_path, password_ref, sanitize_password};
 use super::*;
@@ -73,8 +70,7 @@ fn classify_archive_path_identifies_the_first_volume_of_a_split_7z() {
 
 #[test]
 fn detect_archive_rejects_platform_uri_objects() {
-    let error = detectArchive(DetectArchiveRequest { archive_path: "content://downloads/archive.zip".to_string() })
-        .unwrap_err();
+    let error = detectArchive(DetectArchiveRequest { archive_path: "content://downloads/archive.zip".to_string() }).unwrap_err();
 
     assert_bridge_error_code(error, ERROR_INVALID_REQUEST);
 }
@@ -84,9 +80,7 @@ fn detect_archive_classifies_existing_app_controlled_file() {
     let temp = TestDir::new("detect-existing-file");
     temp.write_file("ARCHIVE.ZIP", b"not parsed during detection");
 
-    let result =
-        detectArchive(DetectArchiveRequest { archive_path: temp.path("ARCHIVE.ZIP").to_string_lossy().to_string() })
-            .expect("detection should classify an existing app-controlled path");
+    let result = detectArchive(DetectArchiveRequest { archive_path: temp.path("ARCHIVE.ZIP").to_string_lossy().to_string() }).expect("detection should classify an existing app-controlled path");
 
     assert_eq!(result.format, ArchiveFormat::Zip);
     assert_eq!(result.format_label, "ZIP");
@@ -102,9 +96,7 @@ fn detect_archive_returns_normalized_launch_gated_warning() {
     let temp = TestDir::new("detect-launch-gated-warning");
     temp.write_file("archive.xip", b"not parsed during detection");
 
-    let result =
-        detectArchive(DetectArchiveRequest { archive_path: temp.path("archive.xip").to_string_lossy().to_string() })
-            .expect("detection should classify launch-gated app-controlled path");
+    let result = detectArchive(DetectArchiveRequest { archive_path: temp.path("archive.xip").to_string_lossy().to_string() }).expect("detection should classify launch-gated app-controlled path");
 
     assert_eq!(result.format, ArchiveFormat::Xip);
     assert!(!result.can_list);
@@ -119,9 +111,7 @@ fn detect_archive_returns_normalized_launch_gated_warning() {
 
 #[test]
 fn list_archive_rejects_missing_path() {
-    let error =
-        listArchive(ListArchiveRequest { archive_path: "/definitely/missing/archive.zip".to_string(), password: None })
-            .unwrap_err();
+    let error = listArchive(ListArchiveRequest { archive_path: "/definitely/missing/archive.zip".to_string(), password: None }).unwrap_err();
 
     assert_bridge_error_code(error, ERROR_NOT_FOUND);
 }
@@ -132,14 +122,10 @@ fn list_archive_reads_real_zip_through_core() {
     temp.create_dir("project");
     temp.write_file("project/readme.txt", b"hello mobile bridge\n");
     let archive = temp.path("archive.zip");
-    let manifest =
-        plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
-    create_zip_from_manifest(&manifest, &archive, &ZipCreateOptions::default())
-        .expect("fixture zip should be created through zmanager-core");
+    let manifest = plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
+    create_zip_from_manifest(&manifest, &archive, &ZipCreateOptions::default()).expect("fixture zip should be created through zmanager-core");
 
-    let result =
-        listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: None })
-            .expect("core-backed listing should succeed");
+    let result = listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: None }).expect("core-backed listing should succeed");
 
     assert_eq!(result.format, ArchiveFormat::Zip);
     assert!(result.entry_count >= 1);
@@ -154,10 +140,8 @@ fn plan_extract_starts_for_a_real_7z_archive() {
     temp.write_file("manifest.json", b"{}\n");
     let archive = temp.path("archive.7z");
     let destination = temp.path("staging");
-    let manifest = plan_archives([temp.path("readme.txt"), temp.path("manifest.json")], &PlanOptions::default())
-        .expect("fixture manifest should be planned");
-    create_7z_from_manifest(&manifest, &archive, &SevenZCreateOptions::default())
-        .expect("fixture archive should be created through zmanager-core");
+    let manifest = plan_archives([temp.path("readme.txt"), temp.path("manifest.json")], &PlanOptions::default()).expect("fixture manifest should be planned");
+    create_7z_from_manifest(&manifest, &archive, &SevenZCreateOptions::default()).expect("fixture archive should be created through zmanager-core");
 
     let plan = planExtract(PlanExtractRequest {
         archive_path: archive.to_string_lossy().to_string(),
@@ -172,10 +156,7 @@ fn plan_extract_starts_for_a_real_7z_archive() {
     assert!(plan.can_start, "7z plan should be startable: {plan:?}");
     assert_eq!(plan.blocked_entries, 0);
     assert!(!plan.plan_token.is_empty());
-    assert!(
-        plan.entries.iter().all(|entry| entry.replace_existing),
-        "replace staging plans must use rename-based commits even for new files: {plan:?}"
-    );
+    assert!(plan.entries.iter().all(|entry| entry.replace_existing), "replace staging plans must use rename-based commits even for new files: {plan:?}");
 }
 
 #[test]
@@ -189,51 +170,33 @@ fn bridge_lists_tests_plans_and_extracts_passworded_split_7z() {
     temp.create_dir("project/empty");
     let archive = temp.path("project.7z");
     let destination = temp.path("out");
-    let manifest =
-        plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
+    let manifest = plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
 
     let created = create_7z_from_manifest(
         &manifest,
         &archive,
-        &SevenZCreateOptions {
-            password: Some(password.into()),
-            encrypt_file_names: true,
-            volume_size: Some(1_048_576),
-            ..SevenZCreateOptions::default()
-        },
+        &SevenZCreateOptions { password: Some(password.into()), encrypt_file_names: true, volume_size: Some(1_048_576), ..SevenZCreateOptions::default() },
     )
     .expect("passworded split 7z fixture should be created");
     assert!(created.encrypted);
     assert!(created.volume_count >= 2);
     let first_volume = temp.path("project.7z.001");
 
-    let missing_password =
-        listArchive(ListArchiveRequest { archive_path: first_volume.to_string_lossy().to_string(), password: None })
-            .expect_err("encrypted header listing must require a password");
+    let missing_password = listArchive(ListArchiveRequest { archive_path: first_volume.to_string_lossy().to_string(), password: None }).expect_err("encrypted header listing must require a password");
     assert_bridge_error_code(missing_password, ERROR_PASSWORD_REQUIRED);
 
-    let wrong_password = listArchive(ListArchiveRequest {
-        archive_path: first_volume.to_string_lossy().to_string(),
-        password: Some("wrong password".to_string()),
-    })
-    .expect_err("an incorrect password must not list the archive");
+    let wrong_password = listArchive(ListArchiveRequest { archive_path: first_volume.to_string_lossy().to_string(), password: Some("wrong password".to_string()) })
+        .expect_err("an incorrect password must not list the archive");
     assert_bridge_error_code(wrong_password, ERROR_INVALID_PASSWORD);
 
-    let listing = listArchive(ListArchiveRequest {
-        archive_path: first_volume.to_string_lossy().to_string(),
-        password: Some(password.to_string()),
-    })
-    .expect("the exact password should list every split 7z entry");
+    let listing = listArchive(ListArchiveRequest { archive_path: first_volume.to_string_lossy().to_string(), password: Some(password.to_string()) })
+        .expect("the exact password should list every split 7z entry");
     assert_eq!(listing.format, ArchiveFormat::SevenZ);
     assert_eq!(listing.entries.iter().filter(|entry| entry.path == "project/blob.bin").count(), 1);
     assert!(listing.entries.iter().any(|entry| entry.path == "project/empty"));
 
-    let verified = testArchive(TestArchiveRequest {
-        archive_path: first_volume.to_string_lossy().to_string(),
-        password: Some(password.to_string()),
-        selected_paths: Vec::new(),
-    })
-    .expect("the split archive should verify through the mobile bridge");
+    let verified = testArchive(TestArchiveRequest { archive_path: first_volume.to_string_lossy().to_string(), password: Some(password.to_string()), selected_paths: Vec::new() })
+        .expect("the split archive should verify through the mobile bridge");
     assert!(verified.verified);
     assert!(verified.tested_entries >= 2);
 
@@ -263,12 +226,7 @@ fn bridge_lists_tests_plans_and_extracts_passworded_split_7z() {
 
     let terminal = wait_for_terminal_job(&started.job_id);
     assert_eq!(terminal.status, MobileJobStatus::Completed);
-    assert!(
-        terminal
-            .terminal_summary
-            .as_ref()
-            .is_some_and(|summary| summary.written_bytes == (payload.len() + b"bridge coverage\n".len()) as u64)
-    );
+    assert!(terminal.terminal_summary.as_ref().is_some_and(|summary| summary.written_bytes == (payload.len() + b"bridge coverage\n".len()) as u64));
     assert!(!format!("{terminal:?}").contains(password), "bridge diagnostics must not retain archive passwords");
     assert_eq!(fs::read(destination.join("project/blob.bin")).unwrap(), payload);
     assert_eq!(fs::read_to_string(destination.join("project/notes/readme.txt")).unwrap(), "bridge coverage\n");
@@ -284,22 +242,15 @@ fn bridge_lists_plans_and_extracts_passworded_multipart_rar() {
     let destination = temp.path("out");
 
     let missing_password =
-        listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: None })
-            .expect_err("passworded multipart RAR must not list without a password");
+        listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: None }).expect_err("passworded multipart RAR must not list without a password");
     assert_bridge_error_code(missing_password, ERROR_INVALID_PASSWORD);
 
-    let wrong_password = listArchive(ListArchiveRequest {
-        archive_path: archive.to_string_lossy().to_string(),
-        password: Some("wrong password".to_string()),
-    })
-    .expect_err("passworded multipart RAR must reject a wrong password");
+    let wrong_password = listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: Some("wrong password".to_string()) })
+        .expect_err("passworded multipart RAR must reject a wrong password");
     assert_bridge_error_code(wrong_password, ERROR_INVALID_PASSWORD);
 
-    let listing = listArchive(ListArchiveRequest {
-        archive_path: archive.to_string_lossy().to_string(),
-        password: Some(password.to_string()),
-    })
-    .expect("the exact password should list the multipart RAR");
+    let listing =
+        listArchive(ListArchiveRequest { archive_path: archive.to_string_lossy().to_string(), password: Some(password.to_string()) }).expect("the exact password should list the multipart RAR");
     assert_eq!(listing.format, ArchiveFormat::MultipartRar);
     assert_eq!(listing.entries.iter().filter(|entry| entry.path == "rar-fixture/data/stream.bin").count(), 1);
     assert!(listing.entries.iter().any(|entry| entry.path == "rar-fixture/docs/readme.txt"));
@@ -340,12 +291,8 @@ fn bridge_lists_plans_and_extracts_passworded_multipart_rar() {
 fn test_archive_reads_real_zip_through_core() {
     let fixture = create_test_zip("test-archive-real-zip");
 
-    let result = testArchive(TestArchiveRequest {
-        archive_path: fixture.archive.to_string_lossy().to_string(),
-        password: None,
-        selected_paths: Vec::new(),
-    })
-    .expect("core-backed archive test should succeed");
+    let result =
+        testArchive(TestArchiveRequest { archive_path: fixture.archive.to_string_lossy().to_string(), password: None, selected_paths: Vec::new() }).expect("core-backed archive test should succeed");
 
     assert_eq!(result.format, ArchiveFormat::Zip);
     assert!(result.verified);
@@ -358,12 +305,8 @@ fn test_archive_reads_real_zip_through_core() {
 fn test_archive_honors_selected_entry_filter() {
     let fixture = create_test_zip("test-archive-selected-filter");
 
-    let result = testArchive(TestArchiveRequest {
-        archive_path: fixture.archive.to_string_lossy().to_string(),
-        password: None,
-        selected_paths: vec!["missing.txt".to_string()],
-    })
-    .expect("skipping all entries is still a successful filtered test");
+    let result = testArchive(TestArchiveRequest { archive_path: fixture.archive.to_string_lossy().to_string(), password: None, selected_paths: vec!["missing.txt".to_string()] })
+        .expect("skipping all entries is still a successful filtered test");
 
     assert_eq!(result.tested_entries, 0);
     assert!(result.skipped_entries >= 1);
@@ -376,12 +319,7 @@ fn test_archive_reports_corrupt_zip_as_damaged_archive() {
     let temp = TestDir::new("test-archive-corrupt-zip");
     temp.write_file("broken.zip", b"this is not a zip archive");
 
-    let error = testArchive(TestArchiveRequest {
-        archive_path: temp.path("broken.zip").to_string_lossy().to_string(),
-        password: None,
-        selected_paths: Vec::new(),
-    })
-    .unwrap_err();
+    let error = testArchive(TestArchiveRequest { archive_path: temp.path("broken.zip").to_string_lossy().to_string(), password: None, selected_paths: Vec::new() }).unwrap_err();
 
     assert_bridge_error_code(error, ERROR_DAMAGED_ARCHIVE);
 }
@@ -399,13 +337,8 @@ fn materialize_preview_extracts_one_entry_to_cleanup_root() {
     let fixture = create_test_zip("materialize-preview-real-zip");
     let entry_path = readme_entry_path(&fixture.archive);
 
-    let result = materializePreview(MaterializePreviewRequest {
-        archive_path: fixture.archive.to_string_lossy().to_string(),
-        entry_path: entry_path.clone(),
-        password: None,
-        strip_components: 0,
-    })
-    .expect("preview should materialize through zmanager-core");
+    let result = materializePreview(MaterializePreviewRequest { archive_path: fixture.archive.to_string_lossy().to_string(), entry_path: entry_path.clone(), password: None, strip_components: 0 })
+        .expect("preview should materialize through zmanager-core");
 
     let cleanup_root = PathBuf::from(&result.cleanup_root);
     let preview_path = PathBuf::from(&result.preview_path);
@@ -423,13 +356,8 @@ fn materialize_preview_extracts_one_entry_to_cleanup_root() {
 fn materialize_preview_rejects_empty_entry_path() {
     let fixture = create_test_zip("materialize-preview-empty-entry");
 
-    let error = materializePreview(MaterializePreviewRequest {
-        archive_path: fixture.archive.to_string_lossy().to_string(),
-        entry_path: String::new(),
-        password: None,
-        strip_components: 0,
-    })
-    .unwrap_err();
+    let error =
+        materializePreview(MaterializePreviewRequest { archive_path: fixture.archive.to_string_lossy().to_string(), entry_path: String::new(), password: None, strip_components: 0 }).unwrap_err();
 
     assert_bridge_error_code(error, ERROR_INVALID_REQUEST);
 }
@@ -454,10 +382,12 @@ fn plan_extract_returns_write_plan_without_creating_destination() {
     assert!(result.writable_entries >= 1);
     assert_eq!(result.blocked_entries, 0);
     assert!(result.estimated_bytes.is_some());
-    assert!(result.entries.iter().any(|entry| {
-        matches!(entry.status, ExtractionPlanEntryStatus::Write)
-            && entry.destination_path.as_deref().is_some_and(|path| Path::new(path).starts_with(&destination))
-    }));
+    assert!(
+        result
+            .entries
+            .iter()
+            .any(|entry| { matches!(entry.status, ExtractionPlanEntryStatus::Write) && entry.destination_path.as_deref().is_some_and(|path| Path::new(path).starts_with(&destination)) })
+    );
 }
 
 #[test]
@@ -466,8 +396,7 @@ fn plan_extract_surfaces_destination_collision_as_blocked_entry() {
     let entry_path = readme_entry_path(&fixture.archive);
     let destination = fixture.temp.path("out");
     let colliding_path = destination.join(&entry_path);
-    fs::create_dir_all(colliding_path.parent().expect("colliding path should have a parent"))
-        .expect("collision parent should be created");
+    fs::create_dir_all(colliding_path.parent().expect("colliding path should have a parent")).expect("collision parent should be created");
     fs::write(&colliding_path, b"existing").expect("collision file should be written");
 
     let result = planExtract(PlanExtractRequest {
@@ -517,11 +446,7 @@ fn plan_create_returns_manifest_without_writing_archive() {
     assert!(result.verify_supported);
     assert!(result.total_entries >= 1);
     assert!(result.total_bytes > 0);
-    assert!(
-        result.entries.iter().any(|entry| {
-            entry.archive_path.ends_with("readme.txt") && matches!(entry.kind, ArchiveEntryKind::File)
-        })
-    );
+    assert!(result.entries.iter().any(|entry| { entry.archive_path.ends_with("readme.txt") && matches!(entry.kind, ArchiveEntryKind::File) }));
 }
 
 #[test]
@@ -573,17 +498,12 @@ fn start_extract_job_extracts_zip_and_reports_terminal_summary() {
     let terminal = wait_for_terminal_job(&started.job_id);
     assert_eq!(terminal.status, MobileJobStatus::Completed);
     assert!(terminal.is_terminal);
-    assert!(terminal.events.iter().any(|event| {
-        matches!(event.event_type, MobileJobEventKind::Started) && event.job_kind == Some(MobileJobKind::ZipExtract)
-    }));
+    assert!(terminal.events.iter().any(|event| { matches!(event.event_type, MobileJobEventKind::Started) && event.job_kind == Some(MobileJobKind::ZipExtract) }));
     assert!(terminal.events.iter().any(|event| matches!(event.event_type, MobileJobEventKind::Completed)));
     let summary = terminal.terminal_summary.expect("completed job should include a terminal summary");
     assert!(summary.written_entries >= 1);
     assert!(summary.written_bytes > 0);
-    assert_eq!(
-        fs::read_to_string(destination.join(entry_path)).expect("extracted file should be readable"),
-        "hello mobile bridge\n"
-    );
+    assert_eq!(fs::read_to_string(destination.join(entry_path)).expect("extracted file should be readable"), "hello mobile bridge\n");
 }
 
 #[test]
@@ -649,9 +569,7 @@ fn start_create_job_creates_zip_and_reports_terminal_summary() {
     assert_eq!(summary.verified, None);
     assert_eq!(summary.output_paths, vec![destination.to_string_lossy().to_string()]);
 
-    let listing =
-        listArchive(ListArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password: None })
-            .expect("created zip should list through the bridge");
+    let listing = listArchive(ListArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password: None }).expect("created zip should list through the bridge");
     assert!(listing.entries.iter().any(|entry| entry.path.ends_with("readme.txt")));
 }
 
@@ -691,9 +609,7 @@ fn start_create_job_honors_clean_source_for_zip() {
     let terminal = wait_for_terminal_job(&started.job_id);
     assert_eq!(terminal.status, MobileJobStatus::Completed);
 
-    let listing =
-        listArchive(ListArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password: None })
-            .expect("created clean-source zip should list");
+    let listing = listArchive(ListArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password: None }).expect("created clean-source zip should list");
     assert!(listing.entries.iter().any(|entry| entry.path.ends_with("src/main.txt")));
     assert!(!listing.entries.iter().any(|entry| entry.path.contains("/target/")));
 }
@@ -736,12 +652,8 @@ fn start_create_job_preserves_encrypted_zip_password_whitespace() {
     assert_eq!(terminal.terminal_summary.as_ref().and_then(|summary| summary.encrypted), Some(true));
     assert_eq!(terminal.terminal_summary.as_ref().and_then(|summary| summary.verified), Some(true));
 
-    let verified = testArchive(TestArchiveRequest {
-        archive_path: destination.to_string_lossy().to_string(),
-        password: Some(password.to_string()),
-        selected_paths: Vec::new(),
-    })
-    .expect("created encrypted zip should verify with the exact password");
+    let verified = testArchive(TestArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password: Some(password.to_string()), selected_paths: Vec::new() })
+        .expect("created encrypted zip should verify with the exact password");
     assert!(verified.verified);
     assert!(verified.tested_entries >= 1);
 }
@@ -766,14 +678,8 @@ fn start_extract_job_honors_selected_paths() {
 
     let terminal = wait_for_terminal_job(&started.job_id);
     assert_eq!(terminal.status, MobileJobStatus::Completed);
-    assert!(terminal.events.iter().any(|event| {
-        matches!(event.event_type, MobileJobEventKind::EntryStarted)
-            && event.path.as_deref() == Some(entry_path.as_str())
-    }));
-    assert_eq!(
-        fs::read_to_string(destination.join(entry_path)).expect("selected file should be extracted"),
-        "hello mobile bridge\n"
-    );
+    assert!(terminal.events.iter().any(|event| { matches!(event.event_type, MobileJobEventKind::EntryStarted) && event.path.as_deref() == Some(entry_path.as_str()) }));
+    assert_eq!(fs::read_to_string(destination.join(entry_path)).expect("selected file should be extracted"), "hello mobile bridge\n");
 }
 
 #[test]
@@ -819,13 +725,10 @@ fn clear_sensitive_state_cancels_and_removes_active_sensitive_jobs() {
     assert!(sensitive_token.is_cancelled());
     assert!(!regular_token.is_cancelled());
 
-    let sensitive_error =
-        registry.poll_events(PollJobEventsRequest { job_id: sensitive_job.job_id, cursor: 0 }).unwrap_err();
+    let sensitive_error = registry.poll_events(PollJobEventsRequest { job_id: sensitive_job.job_id, cursor: 0 }).unwrap_err();
     assert_bridge_error_code(sensitive_error, ERROR_NOT_FOUND);
 
-    let regular_result = registry
-        .poll_events(PollJobEventsRequest { job_id: regular_job.job_id, cursor: 0 })
-        .expect("non-sensitive active job should stay pollable");
+    let regular_result = registry.poll_events(PollJobEventsRequest { job_id: regular_job.job_id, cursor: 0 }).expect("non-sensitive active job should stay pollable");
     assert_eq!(regular_result.status, MobileJobStatus::Queued);
 }
 
@@ -848,8 +751,7 @@ fn poll_job_events_uses_sequence_cursor() {
 
     let terminal = wait_for_terminal_job(&started.job_id);
     assert!(!terminal.events.is_empty());
-    let repeated = pollJobEvents(PollJobEventsRequest { job_id: started.job_id, cursor: terminal.next_cursor })
-        .expect("polling from the latest cursor should succeed");
+    let repeated = pollJobEvents(PollJobEventsRequest { job_id: started.job_id, cursor: terminal.next_cursor }).expect("polling from the latest cursor should succeed");
 
     assert!(repeated.events.is_empty());
     assert_eq!(repeated.next_cursor, terminal.next_cursor);
@@ -986,23 +888,13 @@ VfwBjNLu/eSndu5yGiwpZ+3g
 /// Writes a stripe-N archive whose volumes carry an X.509 `RootAuth` footer
 /// produced by the fixture signer.
 fn write_x509_signed_archive(stripe_width: u32) -> tzap_core::writer::WrittenArchive {
-    let signer = X509RootAuthSigner::from_pem_or_der(
-        TEST_LEAF_CERT_PEM.as_bytes(),
-        TEST_LEAF_KEY_PEM.as_bytes(),
-        Vec::new(),
-        1_700_000_000,
-    )
-    .unwrap();
+    let signer = X509RootAuthSigner::from_pem_or_der(TEST_LEAF_CERT_PEM.as_bytes(), TEST_LEAF_KEY_PEM.as_bytes(), Vec::new(), 1_700_000_000).unwrap();
     write_archive_with_root_auth(
         &[RegularFile::new("payload.txt", b"signed payload")],
         &MasterKey::from_raw_key(&[7u8; 32]).unwrap(),
         WriterOptions { stripe_width, volume_loss_tolerance: 0, ..WriterOptions::default() },
         signer.root_auth_writer_config().unwrap(),
-        |request| {
-            signer
-                .authenticator_value_for_request(request)
-                .map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))
-        },
+        |request| signer.authenticator_value_for_request(request).map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed")),
     )
     .unwrap()
 }
@@ -1028,13 +920,7 @@ fn tzap_public_metadata_display_summary_reports_signed_x509_footer() {
 fn tzap_public_metadata_display_summary_reports_not_authentic_for_tampered_signature() {
     let temp = TestDir::new("tzap-display-not-authentic");
     let archive = temp.path("tampered.tzap");
-    let signer = X509RootAuthSigner::from_pem_or_der(
-        TEST_LEAF_CERT_PEM.as_bytes(),
-        TEST_LEAF_KEY_PEM.as_bytes(),
-        Vec::new(),
-        1_700_000_000,
-    )
-    .unwrap();
+    let signer = X509RootAuthSigner::from_pem_or_der(TEST_LEAF_CERT_PEM.as_bytes(), TEST_LEAF_KEY_PEM.as_bytes(), Vec::new(), 1_700_000_000).unwrap();
     // A real signature with one flipped byte in the signature region: the
     // footer parses but the signature no longer verifies.
     let written = write_archive_with_root_auth(
@@ -1043,9 +929,7 @@ fn tzap_public_metadata_display_summary_reports_not_authentic_for_tampered_signa
         WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
         signer.root_auth_writer_config().unwrap(),
         |request| {
-            let mut value = signer
-                .authenticator_value_for_request(request)
-                .map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))?;
+            let mut value = signer.authenticator_value_for_request(request).map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))?;
             let last = value.len() - 1;
             value[last] ^= 0x01;
             Ok(value)
@@ -1068,12 +952,7 @@ fn tzap_public_metadata_display_summary_reports_unavailable_for_non_x509_footer(
         &[RegularFile::new("plain.txt", b"generic signing profile")],
         &MasterKey::from_raw_key(&[7u8; 32]).unwrap(),
         WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
-        RootAuthWriterConfig {
-            authenticator_id: 0x7777,
-            signer_identity_type: 1,
-            signer_identity: b"test signer",
-            authenticator_value_length: 32,
-        },
+        RootAuthWriterConfig { authenticator_id: 0x7777, signer_identity_type: 1, signer_identity: b"test signer", authenticator_value_length: 32 },
         |request| Ok(request.archive_root.to_vec()),
     )
     .unwrap();
@@ -1111,12 +990,8 @@ fn phase_progress_surfaces_as_bytes_without_spurious_started_events() {
     let registry = MobileJobRegistry::default();
     let job = registry.create_job(MobileJobKind::TzapCreate, CancellationToken::new(), false);
 
-    registry
-        .emit_core_event(&job.job_id, CoreJobEvent::Started { kind: CoreJobKind::TzapCreate, total_bytes: Some(100) });
-    registry.emit_core_event(
-        &job.job_id,
-        CoreJobEvent::PhaseStarted { phase: JobPhase::EmittingPayload, total_bytes: Some(50) },
-    );
+    registry.emit_core_event(&job.job_id, CoreJobEvent::Started { kind: CoreJobKind::TzapCreate, total_bytes: Some(100) });
+    registry.emit_core_event(&job.job_id, CoreJobEvent::PhaseStarted { phase: JobPhase::EmittingPayload, total_bytes: Some(50) });
     registry.emit_core_event(
         &job.job_id,
         CoreJobEvent::PhaseBytesProcessed {
@@ -1149,10 +1024,7 @@ fn phase_progress_surfaces_as_bytes_without_spurious_started_events() {
     // Phase transitions must not emit spurious job-Started events; their
     // byte progress surfaces as regular byte-progress events with the
     // totals intact.
-    assert_eq!(
-        kinds,
-        vec![MobileJobEventKind::Started, MobileJobEventKind::BytesProcessed, MobileJobEventKind::BytesProcessed]
-    );
+    assert_eq!(kinds, vec![MobileJobEventKind::Started, MobileJobEventKind::BytesProcessed, MobileJobEventKind::BytesProcessed]);
     assert_eq!(polled.events[1].bytes, Some(10));
     assert_eq!(polled.events[1].total_bytes_processed, Some(10));
     assert_eq!(polled.events[2].bytes, Some(20));
@@ -1182,12 +1054,7 @@ fn assert_bridge_error_code(error: ZmanagerGuiError, expected: &str) {
     }
 }
 
-fn approved_refuse_plan_token(
-    archive: &Path,
-    destination: &Path,
-    password: Option<&str>,
-    selected_paths: Vec<String>,
-) -> String {
+fn approved_refuse_plan_token(archive: &Path, destination: &Path, password: Option<&str>, selected_paths: Vec<String>) -> String {
     let plan = planExtract(PlanExtractRequest {
         archive_path: archive.to_string_lossy().to_string(),
         destination_root: destination.to_string_lossy().to_string(),
@@ -1205,8 +1072,7 @@ fn approved_refuse_plan_token(
 
 fn wait_for_terminal_job(job_id: &str) -> PollJobEventsResult {
     for _ in 0..100 {
-        let poll = pollJobEvents(PollJobEventsRequest { job_id: job_id.to_string(), cursor: 0 })
-            .expect("job should remain pollable");
+        let poll = pollJobEvents(PollJobEventsRequest { job_id: job_id.to_string(), cursor: 0 }).expect("job should remain pollable");
 
         if poll.is_terminal {
             return poll;
@@ -1220,8 +1086,7 @@ fn wait_for_terminal_job(job_id: &str) -> PollJobEventsResult {
 
 fn wait_for_terminal_summary(job_id: &str, predicate: impl Fn(&JobTerminalSummary) -> bool) -> PollJobEventsResult {
     for _ in 0..100 {
-        let poll = pollJobEvents(PollJobEventsRequest { job_id: job_id.to_string(), cursor: 0 })
-            .expect("job should remain pollable");
+        let poll = pollJobEvents(PollJobEventsRequest { job_id: job_id.to_string(), cursor: 0 }).expect("job should remain pollable");
 
         if poll.is_terminal && poll.terminal_summary.as_ref().is_some_and(&predicate) {
             return poll;
@@ -1262,10 +1127,8 @@ fn create_test_zip(name: &str) -> TestArchiveFixture {
     temp.create_dir("project");
     temp.write_file("project/readme.txt", b"hello mobile bridge\n");
     let archive = temp.path("archive.zip");
-    let manifest =
-        plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
-    create_zip_from_manifest(&manifest, &archive, &ZipCreateOptions::default())
-        .expect("fixture zip should be created through zmanager-core");
+    let manifest = plan_archive(temp.path("project"), &PlanOptions::default()).expect("fixture manifest should be planned");
+    create_zip_from_manifest(&manifest, &archive, &ZipCreateOptions::default()).expect("fixture zip should be created through zmanager-core");
     TestArchiveFixture { temp, archive }
 }
 

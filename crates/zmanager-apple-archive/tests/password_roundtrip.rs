@@ -16,12 +16,7 @@ mod tests {
 
         // Create an encrypted archive
         {
-            let mut writer = ArchiveWriter::create_encrypted(
-                &temp_path,
-                CreateOptions { compression: CompressionAlgorithm::Lzfse, ..Default::default() },
-                password,
-            )
-            .expect("create encrypted writer");
+            let mut writer = ArchiveWriter::create_encrypted(&temp_path, CreateOptions { compression: CompressionAlgorithm::Lzfse, ..Default::default() }, password).expect("create encrypted writer");
             writer.append_directory("secret_dir", EntryMetadata::default()).expect("append directory");
             writer.finish().expect("finish writer");
         }

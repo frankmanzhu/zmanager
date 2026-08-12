@@ -25,30 +25,16 @@ pub fn tzapPublicMetadataDisplaySummary(archive_path: String) -> String {
 }
 
 #[allow(non_snake_case)]
-pub fn verifyTzapX509(
-    archive_path: String,
-    password: Option<String>,
-    trusted_ca_certs: Vec<String>,
-    trusted_system_roots: bool,
-) -> String {
+pub fn verifyTzapX509(archive_path: String, password: Option<String>, trusted_ca_certs: Vec<String>, trusted_system_roots: bool) -> String {
     let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
         Ok(path) => path,
         Err(envelope) => return envelope,
     };
-    zmanager_core::tzap_service::verify_tzap_x509(
-        &archive_path,
-        password_ref(&password),
-        &trusted_ca_certs,
-        trusted_system_roots,
-    )
+    zmanager_core::tzap_service::verify_tzap_x509(&archive_path, password_ref(&password), &trusted_ca_certs, trusted_system_roots)
 }
 
 #[allow(non_snake_case)]
-pub fn verifyTzapX509PublicNoKey(
-    archive_path: String,
-    trusted_ca_certs: Vec<String>,
-    trusted_system_roots: bool,
-) -> String {
+pub fn verifyTzapX509PublicNoKey(archive_path: String, trusted_ca_certs: Vec<String>, trusted_system_roots: bool) -> String {
     let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
         Ok(path) => path,
         Err(envelope) => return envelope,
@@ -75,18 +61,8 @@ pub fn inspectTzapX509PublicNoKeySigner(archive_path: String) -> String {
 }
 
 #[allow(non_snake_case)]
-pub fn createTzapSelfSignedIdentity(
-    identity_path: String,
-    public_certificate_path: String,
-    common_name: String,
-    password: String,
-) -> String {
-    zmanager_core::tzap_service::create_tzap_self_signed_identity(
-        &identity_path,
-        Some(&public_certificate_path),
-        &common_name,
-        &password,
-    )
+pub fn createTzapSelfSignedIdentity(identity_path: String, public_certificate_path: String, common_name: String, password: String) -> String {
+    zmanager_core::tzap_service::create_tzap_self_signed_identity(&identity_path, Some(&public_certificate_path), &common_name, &password)
 }
 
 pub fn tzap_auth_login_json(request_json: String) -> String {

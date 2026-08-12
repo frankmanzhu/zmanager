@@ -49,13 +49,7 @@ impl TzapDocumentVerificationResult {
     }
 
     fn invalid(trust_anchor_type: TzapTrustAnchorType, reason: impl Into<String>) -> Self {
-        Self {
-            state: TzapVerificationState::Invalid,
-            trust_anchor_type,
-            reason: Some(reason.into()),
-            root_certificate_sha256: None,
-            public_metadata: None,
-        }
+        Self { state: TzapVerificationState::Invalid, trust_anchor_type, reason: Some(reason.into()), root_certificate_sha256: None, public_metadata: None }
     }
 }
 
@@ -85,43 +79,27 @@ impl fmt::Display for TzapOfflineVerificationError {
 }
 
 #[must_use]
-pub fn verify_tzap_document_envelope_offline_json(
-    bytes: &[u8],
-    options: &TzapOfflineVerificationOptions<'_>,
-) -> TzapDocumentVerificationResult {
+pub fn verify_tzap_document_envelope_offline_json(bytes: &[u8], options: &TzapOfflineVerificationOptions<'_>) -> TzapDocumentVerificationResult {
     match document_envelope::parse_tzap_document_envelope_json(bytes) {
         Ok(envelope) => verify_tzap_document_envelope_offline(&envelope, options),
-        Err(error) => TzapDocumentVerificationResult::invalid(
-            TzapTrustAnchorType::Untrusted,
-            TzapOfflineVerificationError::Envelope(error).to_string(),
-        ),
+        Err(error) => TzapDocumentVerificationResult::invalid(TzapTrustAnchorType::Untrusted, TzapOfflineVerificationError::Envelope(error).to_string()),
     }
 }
 
 #[must_use]
-pub fn verify_tzap_document_envelope_offline(
-    envelope: &TzapDocumentEnvelope,
-    options: &TzapOfflineVerificationOptions<'_>,
-) -> TzapDocumentVerificationResult {
+pub fn verify_tzap_document_envelope_offline(envelope: &TzapDocumentEnvelope, options: &TzapOfflineVerificationOptions<'_>) -> TzapDocumentVerificationResult {
     match verify_offline_inner(envelope, options) {
         Ok(result) => result,
         Err(error) => TzapDocumentVerificationResult::invalid(TzapTrustAnchorType::Untrusted, error.to_string()),
     }
 }
 
-fn verify_offline_inner(
-    envelope: &TzapDocumentEnvelope,
-    options: &TzapOfflineVerificationOptions<'_>,
-) -> Result<TzapDocumentVerificationResult, TzapOfflineVerificationError> {
+fn verify_offline_inner(envelope: &TzapDocumentEnvelope, options: &TzapOfflineVerificationOptions<'_>) -> Result<TzapDocumentVerificationResult, TzapOfflineVerificationError> {
     let embedded_chain_der = envelope_chain_der(envelope);
-    let leaf = X509::from_der(&envelope.leaf_certificate_der)
-        .map_err(|error| TzapOfflineVerificationError::CertificateParse(error.to_string()))?;
+    let leaf = X509::from_der(&envelope.leaf_certificate_der).map_err(|error| TzapOfflineVerificationError::CertificateParse(error.to_string()))?;
     let parsed_leaf = parse_certificate(&envelope.leaf_certificate_der, "leaf")?;
-    let parsed_issuer = envelope
-        .intermediate_chain_der
-        .first()
-        .ok_or(TzapOfflineVerificationError::CertificateReference("intermediate_chain_der"))
-        .and_then(|issuer| parse_certificate(issuer, "issuer"))?;
+    let parsed_issuer =
+        envelope.intermediate_chain_der.first().ok_or(TzapOfflineVerificationError::CertificateReference("intermediate_chain_der")).and_then(|issuer| parse_certificate(issuer, "issuer"))?;
 
     validate_certificate_references(envelope, &parsed_leaf, &parsed_issuer)?;
     validate_leaf_current_validity(&parsed_leaf, options.verifier_time_unix_seconds)?;
@@ -136,45 +114,25 @@ fn envelope_chain_der(envelope: &TzapDocumentEnvelope) -> Vec<Vec<u8>> {
     chain_der
 }
 
-fn parse_certificate<'a>(
-    der: &'a [u8],
-    label: &'static str,
-) -> Result<X509Certificate<'a>, TzapOfflineVerificationError> {
-    let (remaining, certificate) = X509Certificate::from_der(der)
-        .map_err(|error| TzapOfflineVerificationError::CertificateParse(format!("{label}: {error}")))?;
-    if remaining.is_empty() {
-        Ok(certificate)
-    } else {
-        Err(TzapOfflineVerificationError::CertificateParse(format!("{label}: trailing DER bytes")))
-    }
+fn parse_certificate<'a>(der: &'a [u8], label: &'static str) -> Result<X509Certificate<'a>, TzapOfflineVerificationError> {
+    let (remaining, certificate) = X509Certificate::from_der(der).map_err(|error| TzapOfflineVerificationError::CertificateParse(format!("{label}: {error}")))?;
+    if remaining.is_empty() { Ok(certificate) } else { Err(TzapOfflineVerificationError::CertificateParse(format!("{label}: trailing DER bytes"))) }
 }
 
-fn validate_certificate_references(
-    envelope: &TzapDocumentEnvelope,
-    leaf: &X509Certificate<'_>,
-    issuer: &X509Certificate<'_>,
-) -> Result<(), TzapOfflineVerificationError> {
-    if crate::trust::sha256_identifier(&envelope.leaf_certificate_der)
-        != envelope.signed_payload.leaf_certificate_sha256
-    {
+fn validate_certificate_references(envelope: &TzapDocumentEnvelope, leaf: &X509Certificate<'_>, issuer: &X509Certificate<'_>) -> Result<(), TzapOfflineVerificationError> {
+    if crate::trust::sha256_identifier(&envelope.leaf_certificate_der) != envelope.signed_payload.leaf_certificate_sha256 {
         return Err(TzapOfflineVerificationError::CertificateReference("leaf_certificate_sha256"));
     }
-    if crate::trust::sha256_identifier(&envelope.intermediate_chain_der[0])
-        != envelope.signed_payload.issuer_certificate_sha256
-    {
+    if crate::trust::sha256_identifier(&envelope.intermediate_chain_der[0]) != envelope.signed_payload.issuer_certificate_sha256 {
         return Err(TzapOfflineVerificationError::CertificateReference("issuer_certificate_sha256"));
     }
-    if trust::canonical_serial_hex(leaf.raw_serial())
-        .map_err(|_| TzapOfflineVerificationError::CertificateReference("certificate_serial_number"))?
-        != envelope.signed_payload.certificate_serial_number
+    if trust::canonical_serial_hex(leaf.raw_serial()).map_err(|_| TzapOfflineVerificationError::CertificateReference("certificate_serial_number"))? != envelope.signed_payload.certificate_serial_number
     {
         return Err(TzapOfflineVerificationError::CertificateReference("certificate_serial_number"));
     }
 
-    let leaf_aki = authority_key_identifier(leaf)
-        .ok_or(TzapOfflineVerificationError::CertificateReference("issuer_key_identifier"))?;
-    let issuer_ski = subject_key_identifier(issuer)
-        .ok_or(TzapOfflineVerificationError::CertificateReference("issuer_key_identifier"))?;
+    let leaf_aki = authority_key_identifier(leaf).ok_or(TzapOfflineVerificationError::CertificateReference("issuer_key_identifier"))?;
+    let issuer_ski = subject_key_identifier(issuer).ok_or(TzapOfflineVerificationError::CertificateReference("issuer_key_identifier"))?;
     if leaf_aki != issuer_ski || URL_SAFE_NO_PAD.encode(&leaf_aki) != envelope.signed_payload.issuer_key_identifier {
         return Err(TzapOfflineVerificationError::CertificateReference("issuer_key_identifier"));
     }
@@ -182,10 +140,7 @@ fn validate_certificate_references(
     Ok(())
 }
 
-fn validate_leaf_current_validity(
-    leaf: &X509Certificate<'_>,
-    verifier_time_unix_seconds: i64,
-) -> Result<(), TzapOfflineVerificationError> {
+fn validate_leaf_current_validity(leaf: &X509Certificate<'_>, verifier_time_unix_seconds: i64) -> Result<(), TzapOfflineVerificationError> {
     let validity = leaf.validity();
     if verifier_time_unix_seconds < validity.not_before.timestamp() {
         return Err(TzapOfflineVerificationError::CertificateValidity("leaf not yet valid"));
@@ -198,23 +153,15 @@ fn validate_leaf_current_validity(
 
 fn verify_document_signature(envelope: &TzapDocumentEnvelope, leaf: &X509) -> Result<(), TzapOfflineVerificationError> {
     let public_key = leaf.public_key().map_err(|error| TzapOfflineVerificationError::Signature(error.to_string()))?;
-    let verified =
-        p256_signature::verify_p256_sha256_p1363(&public_key, &envelope.canonical_signed_payload, &envelope.signature)
-            .map_err(|error| TzapOfflineVerificationError::Signature(format!("{error:?}")))?;
+    let verified = p256_signature::verify_p256_sha256_p1363(&public_key, &envelope.canonical_signed_payload, &envelope.signature)
+        .map_err(|error| TzapOfflineVerificationError::Signature(format!("{error:?}")))?;
     if verified { Ok(()) } else { Err(TzapOfflineVerificationError::Signature("signature did not verify".to_owned())) }
 }
 
-fn verify_chain_trust(
-    embedded_chain_der: &[Vec<u8>],
-    options: &TzapOfflineVerificationOptions<'_>,
-) -> Result<TzapDocumentVerificationResult, TzapOfflineVerificationError> {
+fn verify_chain_trust(embedded_chain_der: &[Vec<u8>], options: &TzapOfflineVerificationOptions<'_>) -> Result<TzapDocumentVerificationResult, TzapOfflineVerificationError> {
     let mut official_error = None;
     for chain_der in crate::trust::candidate_chains(embedded_chain_der, &options.official_root_certificates_der) {
-        match trust::validate_official_tzap_certificate_chain_der(
-            &chain_der,
-            options.official_root_pins,
-            &options.certificate_profile_options,
-        ) {
+        match trust::validate_official_tzap_certificate_chain_der(&chain_der, options.official_root_pins, &options.certificate_profile_options) {
             Ok(validation) => {
                 return Ok(TzapDocumentVerificationResult {
                     state: TzapVerificationState::CryptographicallyIntactOffline,
@@ -250,40 +197,25 @@ fn verify_chain_trust(
         }
     }
 
-    let reason = custom_error
-        .map(|error| error.to_string())
-        .or_else(|| official_error.map(|error| error.to_string()))
-        .unwrap_or_else(|| "root is not pinned official or configured custom trust".to_owned());
+    let reason =
+        custom_error.map(|error| error.to_string()).or_else(|| official_error.map(|error| error.to_string())).unwrap_or_else(|| "root is not pinned official or configured custom trust".to_owned());
     Err(TzapOfflineVerificationError::Untrusted(reason))
 }
 
 // See `crate::trust::sha256_identifier` (CR-124).
 fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
     certificate.iter_extensions().find_map(|extension| {
-        if let ParsedExtension::AuthorityKeyIdentifier(identifier) = extension.parsed_extension() {
-            identifier.key_identifier.as_ref().map(|key_identifier| key_identifier.0.to_vec())
-        } else {
-            None
-        }
+        if let ParsedExtension::AuthorityKeyIdentifier(identifier) = extension.parsed_extension() { identifier.key_identifier.as_ref().map(|key_identifier| key_identifier.0.to_vec()) } else { None }
     })
 }
 
 fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
-    certificate.iter_extensions().find_map(|extension| {
-        if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() {
-            Some(identifier.0.to_vec())
-        } else {
-            None
-        }
-    })
+    certificate.iter_extensions().find_map(|extension| if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() { Some(identifier.0.to_vec()) } else { None })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        TzapOfflineVerificationOptions, verify_tzap_document_envelope_offline,
-        verify_tzap_document_envelope_offline_json,
-    };
+    use super::{TzapOfflineVerificationOptions, verify_tzap_document_envelope_offline, verify_tzap_document_envelope_offline_json};
     use crate::document_envelope::validate_tzap_document_envelope_value;
     use crate::jcs;
     use crate::p256_signature::sign_p256_sha256_p1363;
@@ -331,25 +263,17 @@ mod tests {
 
         let mut bad_signature = fixture.envelope.clone();
         bad_signature["signature"] = json!(URL_SAFE_NO_PAD.encode([0_u8; 64]));
-        let result = verify_tzap_document_envelope_offline_json(
-            serde_json::to_string(&bad_signature).unwrap().as_bytes(),
-            &options,
-        );
+        let result = verify_tzap_document_envelope_offline_json(serde_json::to_string(&bad_signature).unwrap().as_bytes(), &options);
         assert_eq!(result.state, TzapVerificationState::Invalid);
 
         let mut bad_hash = fixture.envelope.clone();
-        bad_hash["signed_payload"]["payload_hash"] =
-            json!("sha256:0000000000000000000000000000000000000000000000000000000000000000");
-        let result =
-            verify_tzap_document_envelope_offline_json(serde_json::to_string(&bad_hash).unwrap().as_bytes(), &options);
+        bad_hash["signed_payload"]["payload_hash"] = json!("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        let result = verify_tzap_document_envelope_offline_json(serde_json::to_string(&bad_hash).unwrap().as_bytes(), &options);
         assert_eq!(result.state, TzapVerificationState::Invalid);
 
         let mut unknown_version = fixture.envelope;
         unknown_version["document_payload"]["tzap_payload_version"] = json!(2);
-        let result = verify_tzap_document_envelope_offline_json(
-            serde_json::to_string(&unknown_version).unwrap().as_bytes(),
-            &options,
-        );
+        let result = verify_tzap_document_envelope_offline_json(serde_json::to_string(&unknown_version).unwrap().as_bytes(), &options);
         assert_eq!(result.state, TzapVerificationState::Invalid);
     }
 
@@ -360,24 +284,16 @@ mod tests {
         let verify_options = options(&pins, &fixture.root_der);
 
         let mut wrong_issuer = fixture.envelope.clone();
-        wrong_issuer["signed_payload"]["issuer_certificate_sha256"] =
-            json!("sha256:0000000000000000000000000000000000000000000000000000000000000000");
-        let result = verify_tzap_document_envelope_offline_json(
-            serde_json::to_string(&wrong_issuer).unwrap().as_bytes(),
-            &verify_options,
-        );
+        wrong_issuer["signed_payload"]["issuer_certificate_sha256"] = json!("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        let result = verify_tzap_document_envelope_offline_json(serde_json::to_string(&wrong_issuer).unwrap().as_bytes(), &verify_options);
         assert_eq!(result.state, TzapVerificationState::Invalid);
 
         let bad_policy = SignedEnvelopeFixture::new(ChainConfig { omit_leaf_policy: true });
         let bad_policy_pins = pin_set(&bad_policy.root_sha256);
-        let result = verify_tzap_document_envelope_offline(
-            &bad_policy.parsed_envelope,
-            &options(&bad_policy_pins, &bad_policy.root_der),
-        );
+        let result = verify_tzap_document_envelope_offline(&bad_policy.parsed_envelope, &options(&bad_policy_pins, &bad_policy.root_der));
         assert_eq!(result.state, TzapVerificationState::Invalid);
 
-        let result =
-            verify_tzap_document_envelope_offline(&fixture.parsed_envelope, &expired_options(&pins, &fixture.root_der));
+        let result = verify_tzap_document_envelope_offline(&fixture.parsed_envelope, &expired_options(&pins, &fixture.root_der));
         assert_eq!(result.state, TzapVerificationState::Invalid);
     }
 
@@ -443,13 +359,7 @@ mod tests {
     }
 
     fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
-        certificate.iter_extensions().find_map(|extension| {
-            if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() {
-                Some(identifier.0.to_vec())
-            } else {
-                None
-            }
-        })
+        certificate.iter_extensions().find_map(|extension| if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() { Some(identifier.0.to_vec()) } else { None })
     }
 
     fn pin_set(root_sha256: &str) -> TzapRootPinSet {

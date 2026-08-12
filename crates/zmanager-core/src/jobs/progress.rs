@@ -36,14 +36,7 @@ impl JobProgressState {
         match event {
             JobEvent::Started { total_bytes, .. } => self.total_bytes = *total_bytes,
             JobEvent::EntryStarted { path, .. } => self.record_path(path),
-            JobEvent::BytesProcessed {
-                path,
-                recent_paths,
-                recent_path_identities,
-                total_bytes_processed,
-                total_entries_processed,
-                ..
-            } => {
+            JobEvent::BytesProcessed { path, recent_paths, recent_path_identities, total_bytes_processed, total_entries_processed, .. } => {
                 self.processed_bytes = self.processed_bytes.max(*total_bytes_processed);
                 self.processed_entries = self.processed_entries.max(*total_entries_processed);
                 self.record_paths(path.as_deref(), recent_paths, recent_path_identities);
@@ -53,15 +46,7 @@ impl JobProgressState {
                 self.phase_processed_bytes = 0;
                 self.phase_total_bytes = *total_bytes;
             }
-            JobEvent::PhaseBytesProcessed {
-                phase,
-                path,
-                recent_paths,
-                recent_path_identities,
-                total_bytes_processed,
-                total_bytes,
-                ..
-            } => {
+            JobEvent::PhaseBytesProcessed { phase, path, recent_paths, recent_path_identities, total_bytes_processed, total_bytes, .. } => {
                 if self.active_phase != Some(*phase) {
                     self.active_phase = Some(*phase);
                     self.phase_processed_bytes = 0;
@@ -90,12 +75,7 @@ impl JobProgressState {
             self.record_path_with_identity(path, identities.get(index).copied().unwrap_or_else(|| path_identity(path)));
         }
         if let Some(path) = current {
-            let identity = recent
-                .iter()
-                .rposition(|candidate| candidate == path)
-                .and_then(|index| identities.get(index))
-                .copied()
-                .unwrap_or_else(|| path_identity(path));
+            let identity = recent.iter().rposition(|candidate| candidate == path).and_then(|index| identities.get(index)).copied().unwrap_or_else(|| path_identity(path));
             self.record_path_with_identity(path, identity);
         }
     }
@@ -172,16 +152,7 @@ impl ProgressCoalescer {
     }
 
     pub(crate) fn new_at(total_bytes: Option<u64>, now: Instant) -> Self {
-        Self {
-            total_bytes,
-            pending_bytes: 0,
-            pending_entries: 0,
-            latest_path: None,
-            recent_paths: VecDeque::new(),
-            last_emitted: now,
-            emitted_once: false,
-            recent_paths_truncated: false,
-        }
+        Self { total_bytes, pending_bytes: 0, pending_entries: 0, latest_path: None, recent_paths: VecDeque::new(), last_emitted: now, emitted_once: false, recent_paths_truncated: false }
     }
 
     pub(crate) fn reset(&mut self, total_bytes: Option<u64>) {
@@ -207,13 +178,7 @@ impl ProgressCoalescer {
         self.record_activity_at(path, bytes, entries, Instant::now())
     }
 
-    pub(crate) fn record_activity_at(
-        &mut self,
-        path: Option<&str>,
-        bytes: u64,
-        entries: u64,
-        now: Instant,
-    ) -> Option<ProgressBatch> {
+    pub(crate) fn record_activity_at(&mut self, path: Option<&str>, bytes: u64, entries: u64, now: Instant) -> Option<ProgressBatch> {
         if bytes == 0 && entries == 0 {
             return None;
         }
@@ -227,18 +192,14 @@ impl ProgressCoalescer {
                 self.latest_path = Some(display_path.clone());
             }
             if self.recent_paths.back().is_none_or(|(recent_identity, _)| *recent_identity != identity) {
-                if let Some(position) =
-                    self.recent_paths.iter().position(|(recent_identity, _)| *recent_identity == identity)
-                {
+                if let Some(position) = self.recent_paths.iter().position(|(recent_identity, _)| *recent_identity == identity) {
                     self.recent_paths.remove(position);
                 }
                 self.recent_paths.push_back((identity, display_path));
                 if self.recent_paths.len() > PROGRESS_RECENT_PATH_LIMIT {
                     self.recent_paths.pop_front();
                 }
-                while self.recent_paths.iter().map(|(_, path)| path.len()).sum::<usize>()
-                    > PROGRESS_RECENT_PATH_BYTES_LIMIT
-                {
+                while self.recent_paths.iter().map(|(_, path)| path.len()).sum::<usize>() > PROGRESS_RECENT_PATH_BYTES_LIMIT {
                     self.recent_paths.pop_front();
                     self.recent_paths_truncated = true;
                 }
@@ -247,11 +208,7 @@ impl ProgressCoalescer {
 
         let one_percent = self.total_bytes.unwrap_or_default().div_ceil(100);
         let byte_step = PROGRESS_MIN_BYTE_STEP.max(one_percent);
-        if !self.emitted_once
-            || self.pending_bytes >= byte_step
-            || self.pending_entries >= PROGRESS_ENTRY_STEP
-            || now.saturating_duration_since(self.last_emitted) >= PROGRESS_INTERVAL
-        {
+        if !self.emitted_once || self.pending_bytes >= byte_step || self.pending_entries >= PROGRESS_ENTRY_STEP || now.saturating_duration_since(self.last_emitted) >= PROGRESS_INTERVAL {
             self.flush_at(now)
         } else {
             None

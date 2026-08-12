@@ -15,34 +15,21 @@ use std::path::{Path, PathBuf};
 pub(crate) const MIN_VOLUME_SIZE_BYTES: u64 = 1_048_576;
 const SEVENZ_VOLUME_EXTENSION_WIDTH: usize = 3;
 
-pub(crate) fn split_7z_temp_archive(
-    archive_path: &Path,
-    destination: &Path,
-    volume_size: u64,
-    replace_existing: bool,
-) -> Result<usize, SevenZError> {
-    let archive_size = fs::metadata(archive_path)
-        .map_err(|source| SevenZError::Io { path: archive_path.to_path_buf(), source })?
-        .len();
-    let volume_count = crate::archive_split::split_volume_count(archive_size, volume_size)
-        .ok_or_else(|| io_error(destination, io::ErrorKind::InvalidInput, "too many 7z volumes"))?;
+pub(crate) fn split_7z_temp_archive(archive_path: &Path, destination: &Path, volume_size: u64, replace_existing: bool) -> Result<usize, SevenZError> {
+    let archive_size = fs::metadata(archive_path).map_err(|source| SevenZError::Io { path: archive_path.to_path_buf(), source })?.len();
+    let volume_count = crate::archive_split::split_volume_count(archive_size, volume_size).ok_or_else(|| io_error(destination, io::ErrorKind::InvalidInput, "too many 7z volumes"))?;
     let volume_paths = sevenz_volume_paths(destination, volume_count)?;
 
     let existing_volume_paths = existing_7z_volume_paths(destination)?;
     ensure_split_destinations_available(destination, &volume_paths, &existing_volume_paths, replace_existing)?;
 
-    let archive_file =
-        File::open(archive_path).map_err(|source| SevenZError::Io { path: archive_path.to_path_buf(), source })?;
+    let archive_file = File::open(archive_path).map_err(|source| SevenZError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = BufReader::new(archive_file);
     let mut volume_outputs = Vec::with_capacity(volume_paths.len());
 
     for (index, volume_path) in volume_paths.iter().enumerate() {
-        let mut output = crate::atomic_file::AtomicOutputFile::create(volume_path)
-            .map_err(|source| SevenZError::Io { path: volume_path.clone(), source })?;
-        let offset = u64::try_from(index)
-            .ok()
-            .and_then(|index| index.checked_mul(volume_size))
-            .ok_or_else(|| io_error(volume_path, io::ErrorKind::InvalidInput, "7z volume offset overflow"))?;
+        let mut output = crate::atomic_file::AtomicOutputFile::create(volume_path).map_err(|source| SevenZError::Io { path: volume_path.clone(), source })?;
+        let offset = u64::try_from(index).ok().and_then(|index| index.checked_mul(volume_size)).ok_or_else(|| io_error(volume_path, io::ErrorKind::InvalidInput, "7z volume offset overflow"))?;
         let bytes_to_copy = archive_size.saturating_sub(offset).min(volume_size);
         let output_file = output.file_mut().map_err(|source| SevenZError::Io { path: volume_path.clone(), source })?;
         copy_exact_volume_bytes(&mut archive, output_file, bytes_to_copy, volume_path)?;
@@ -53,9 +40,7 @@ pub(crate) fn split_7z_temp_archive(
     let created_volume_count = volume_paths.len();
     remove_split_destinations_for_replace(destination, &existing_volume_paths, replace_existing)?;
     for (output, volume_path) in volume_outputs.into_iter().zip(volume_paths) {
-        output
-            .commit_with_file_replace(replace_existing)
-            .map_err(|source| SevenZError::Io { path: volume_path, source })?;
+        output.commit_with_file_replace(replace_existing).map_err(|source| SevenZError::Io { path: volume_path, source })?;
     }
 
     Ok(created_volume_count)
@@ -64,8 +49,7 @@ pub(crate) fn split_7z_temp_archive(
 fn sevenz_volume_paths(destination: &Path, count: usize) -> Result<Vec<PathBuf>, SevenZError> {
     let mut paths = Vec::with_capacity(count);
     for index in 1..=count {
-        let index = u64::try_from(index)
-            .map_err(|_| io_error(destination, io::ErrorKind::InvalidInput, "too many 7z volumes"))?;
+        let index = u64::try_from(index).map_err(|_| io_error(destination, io::ErrorKind::InvalidInput, "too many 7z volumes"))?;
         paths.push(sevenz_volume_path(destination, index));
     }
     Ok(paths)
@@ -77,12 +61,7 @@ fn sevenz_volume_path(destination: &Path, one_based_index: u64) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn ensure_split_destinations_available(
-    destination: &Path,
-    volume_paths: &[PathBuf],
-    existing_volume_paths: &[PathBuf],
-    replace_existing: bool,
-) -> Result<(), SevenZError> {
+fn ensure_split_destinations_available(destination: &Path, volume_paths: &[PathBuf], existing_volume_paths: &[PathBuf], replace_existing: bool) -> Result<(), SevenZError> {
     ensure_file_destination_available(destination, replace_existing)?;
     for path in crate::archive_split::unique_paths(volume_paths, existing_volume_paths) {
         ensure_file_destination_available(path, replace_existing)?;
@@ -91,17 +70,11 @@ fn ensure_split_destinations_available(
 }
 
 fn ensure_file_destination_available(path: &Path, replace_existing: bool) -> Result<(), SevenZError> {
-    crate::archive_split::ensure_file_destination_available(path, replace_existing)
-        .map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })
+    crate::archive_split::ensure_file_destination_available(path, replace_existing).map_err(|source| SevenZError::Io { path: path.to_path_buf(), source })
 }
 
-fn remove_split_destinations_for_replace(
-    destination: &Path,
-    existing_volume_paths: &[PathBuf],
-    replace_existing: bool,
-) -> Result<(), SevenZError> {
-    crate::archive_split::remove_split_destinations_for_replace(destination, existing_volume_paths, replace_existing)
-        .map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })
+fn remove_split_destinations_for_replace(destination: &Path, existing_volume_paths: &[PathBuf], replace_existing: bool) -> Result<(), SevenZError> {
+    crate::archive_split::remove_split_destinations_for_replace(destination, existing_volume_paths, replace_existing).map_err(|source| SevenZError::Io { path: destination.to_path_buf(), source })
 }
 
 fn existing_7z_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, SevenZError> {
@@ -110,9 +83,7 @@ fn existing_7z_volume_paths(destination: &Path) -> Result<Vec<PathBuf>, SevenZEr
     };
     let directory = destination.parent().unwrap_or_else(|| Path::new("."));
     crate::archive_split::existing_volume_paths(directory, &mut |candidate_name| {
-        parse_7z_volume_file_name(candidate_name)
-            .filter(|(base_name, _)| *base_name == destination_name)
-            .map(|(_, part)| part)
+        parse_7z_volume_file_name(candidate_name).filter(|(base_name, _)| *base_name == destination_name).map(|(_, part)| part)
     })
     .map_err(|source| SevenZError::Io { path: directory.to_path_buf(), source })
 }
@@ -204,9 +175,7 @@ impl MultiVolumeReader {
             let file = File::open(&path).map_err(|source| SevenZError::Io { path: path.clone(), source })?;
             let len = file.metadata().map_err(|source| SevenZError::Io { path: path.clone(), source })?.len();
             parts.push(MultiVolumePart { path, file, file_position: 0, start: total_len, len });
-            total_len = total_len.checked_add(len).ok_or_else(|| {
-                io_error(Path::new("archive.7z.001"), io::ErrorKind::InvalidInput, "7z volume set is too large")
-            })?;
+            total_len = total_len.checked_add(len).ok_or_else(|| io_error(Path::new("archive.7z.001"), io::ErrorKind::InvalidInput, "7z volume set is too large"))?;
         }
         Ok(Self { parts, total_len, position: 0 })
     }
@@ -231,31 +200,19 @@ impl Read for MultiVolumeReader {
             };
             let part = &mut self.parts[index];
             let offset = self.position.saturating_sub(part.start);
-            let remaining_in_part =
-                usize::try_from(part.len.saturating_sub(offset)).unwrap_or(usize::MAX).min(buffer.len());
+            let remaining_in_part = usize::try_from(part.len.saturating_sub(offset)).unwrap_or(usize::MAX).min(buffer.len());
             if part.file_position != offset {
                 part.file.seek(SeekFrom::Start(offset))?;
                 part.file_position = offset;
             }
             let read = part.file.read(&mut buffer[..remaining_in_part])?;
             if read == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    format!("unexpected EOF in {}", part.path.display()),
-                ));
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, format!("unexpected EOF in {}", part.path.display())));
             }
-            let read = u64::try_from(read)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
-            self.position = self
-                .position
-                .checked_add(read)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume position overflow"))?;
-            part.file_position = part
-                .file_position
-                .checked_add(read)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume file position overflow"))?;
-            let read = usize::try_from(read)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
+            let read = u64::try_from(read).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
+            self.position = self.position.checked_add(read).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume position overflow"))?;
+            part.file_position = part.file_position.checked_add(read).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume file position overflow"))?;
+            let read = usize::try_from(read).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
             copied += read;
             buffer = &mut buffer[read..];
         }
@@ -273,27 +230,16 @@ impl Seek for MultiVolumeReader {
         if target < 0 {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot seek before start of 7z volume set"));
         }
-        self.position = u64::try_from(target)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume seek target overflow"))?;
+        self.position = u64::try_from(target).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume seek target overflow"))?;
         Ok(self.position)
     }
 }
 
-fn copy_exact_volume_bytes<R: Read, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    bytes_to_copy: u64,
-    volume_path: &Path,
-) -> Result<(), SevenZError> {
+fn copy_exact_volume_bytes<R: Read, W: Write>(reader: &mut R, writer: &mut W, bytes_to_copy: u64, volume_path: &Path) -> Result<(), SevenZError> {
     let mut limited = reader.take(bytes_to_copy);
-    let copied =
-        io::copy(&mut limited, writer).map_err(|source| SevenZError::Io { path: volume_path.to_path_buf(), source })?;
+    let copied = io::copy(&mut limited, writer).map_err(|source| SevenZError::Io { path: volume_path.to_path_buf(), source })?;
     if copied != bytes_to_copy {
-        return Err(io_error(
-            volume_path,
-            io::ErrorKind::UnexpectedEof,
-            "7z temp archive ended before volume was filled",
-        ));
+        return Err(io_error(volume_path, io::ErrorKind::UnexpectedEof, "7z temp archive ended before volume was filled"));
     }
     Ok(())
 }
@@ -308,9 +254,7 @@ mod tests {
     use crate::manifest::{PlanOptions, plan_archives};
     use crate::safety::{ExtractionPolicy, OverwritePolicy};
     use crate::secrets::SecretString;
-    use crate::sevenz_backend::{
-        SevenZCreateOptions, SevenZError, create_7z_from_manifest, create_7z_from_path, extract_7z, list_7z,
-    };
+    use crate::sevenz_backend::{SevenZCreateOptions, SevenZError, create_7z_from_manifest, create_7z_from_path, extract_7z, list_7z};
     use crate::test_support::TestDir;
     use std::fs;
     use std::io::{Read as _, Seek as _, SeekFrom};
@@ -322,17 +266,9 @@ mod tests {
         temp.write_file("payload/blob.bin", &payload);
         let archive = temp.path("payload.7z");
 
-        let report = create_7z_from_path(
-            temp.path("payload"),
-            &archive,
-            &SevenZCreateOptions {
-                solid: false,
-                level: Some(1),
-                volume_size: Some(MIN_VOLUME_SIZE_BYTES),
-                ..SevenZCreateOptions::default()
-            },
-        )
-        .unwrap();
+        let report =
+            create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { solid: false, level: Some(1), volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() })
+                .unwrap();
 
         assert_eq!(report.volume_size, Some(MIN_VOLUME_SIZE_BYTES));
         assert!(report.volume_count >= 2);
@@ -350,8 +286,7 @@ mod tests {
 
         let listing = list_7z(temp.path("joined.7z"), None).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.name == "payload/blob.bin"));
-        let extract_report =
-            extract_7z(temp.path("joined.7z"), temp.path("out"), None, ExtractionPolicy::default()).unwrap();
+        let extract_report = extract_7z(temp.path("joined.7z"), temp.path("out"), None, ExtractionPolicy::default()).unwrap();
 
         assert_eq!(extract_report.written_bytes, payload.len() as u64);
         assert_eq!(fs::read(temp.path("out/payload/blob.bin")).unwrap(), payload);
@@ -385,8 +320,7 @@ mod tests {
 
         let listing = list_7z(&first_volume, Some("correct horse")).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.name == "payload/blob.bin"));
-        let extract_report =
-            extract_7z(&first_volume, temp.path("out"), Some("correct horse"), ExtractionPolicy::default()).unwrap();
+        let extract_report = extract_7z(&first_volume, temp.path("out"), Some("correct horse"), ExtractionPolicy::default()).unwrap();
 
         assert_eq!(extract_report.written_bytes, payload.len() as u64);
         assert_eq!(fs::read(temp.path("out/payload/blob.bin")).unwrap(), payload);
@@ -401,24 +335,13 @@ mod tests {
         let first_volume = temp.path("payload.7z.001");
 
         let manifest = plan_archives([temp.path("payload")], &PlanOptions::default()).unwrap();
-        let create_report = create_7z_from_manifest(
-            &manifest,
-            &archive,
-            &SevenZCreateOptions { volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() },
-        )
-        .unwrap();
+        let create_report = create_7z_from_manifest(&manifest, &archive, &SevenZCreateOptions { volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() }).unwrap();
         assert!(create_report.volume_count >= 2);
 
         let listing = list_7z(&first_volume, None).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.name == "payload/blob.bin"));
 
-        let report = extract_7z(
-            &first_volume,
-            temp.path("out"),
-            None,
-            ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() },
-        )
-        .unwrap();
+        let report = extract_7z(&first_volume, temp.path("out"), None, ExtractionPolicy { overwrite: OverwritePolicy::Replace, ..ExtractionPolicy::default() }).unwrap();
 
         assert_eq!(report.written_bytes, payload.len() as u64);
         assert_eq!(fs::read(temp.path("out/payload/blob.bin")).unwrap(), payload);
@@ -430,17 +353,9 @@ mod tests {
         temp.write_file("payload/file.txt", b"small payload");
         let archive = temp.path("payload.7z");
 
-        let report = create_7z_from_path(
-            temp.path("payload"),
-            &archive,
-            &SevenZCreateOptions {
-                solid: false,
-                level: Some(1),
-                volume_size: Some(MIN_VOLUME_SIZE_BYTES),
-                ..SevenZCreateOptions::default()
-            },
-        )
-        .unwrap();
+        let report =
+            create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { solid: false, level: Some(1), volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() })
+                .unwrap();
 
         assert_eq!(report.volume_count, 1);
         assert!(!archive.exists());
@@ -474,17 +389,9 @@ mod tests {
         temp.write_file("payload.7z.001", b"old");
         let archive = temp.path("payload.7z");
 
-        let error = create_7z_from_path(
-            temp.path("payload"),
-            &archive,
-            &SevenZCreateOptions {
-                solid: false,
-                level: Some(1),
-                volume_size: Some(MIN_VOLUME_SIZE_BYTES),
-                ..SevenZCreateOptions::default()
-            },
-        )
-        .unwrap_err();
+        let error =
+            create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { solid: false, level: Some(1), volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() })
+                .unwrap_err();
 
         assert!(error.to_string().contains("destination already exists"));
         assert_eq!(fs::read(temp.path("payload.7z.001")).unwrap(), b"old");
@@ -496,30 +403,14 @@ mod tests {
         temp.write_file("payload/blob.bin", &deterministic_bytes(2 * 1024 * 1024));
         let archive = temp.path("payload.7z");
 
-        create_7z_from_path(
-            temp.path("payload"),
-            &archive,
-            &SevenZCreateOptions {
-                solid: false,
-                level: Some(1),
-                volume_size: Some(MIN_VOLUME_SIZE_BYTES),
-                ..SevenZCreateOptions::default()
-            },
-        )
-        .unwrap();
+        create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { solid: false, level: Some(1), volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() }).unwrap();
         assert!(temp.path("payload.7z.002").exists());
 
         temp.write_file("payload/blob.bin", b"small");
         create_7z_from_path(
             temp.path("payload"),
             &archive,
-            &SevenZCreateOptions {
-                solid: false,
-                level: Some(1),
-                replace_existing: true,
-                volume_size: Some(MIN_VOLUME_SIZE_BYTES),
-                ..SevenZCreateOptions::default()
-            },
+            &SevenZCreateOptions { solid: false, level: Some(1), replace_existing: true, volume_size: Some(MIN_VOLUME_SIZE_BYTES), ..SevenZCreateOptions::default() },
         )
         .unwrap();
 

@@ -1,7 +1,4 @@
-use super::{
-    ArchiveFormat, CreateRequest, ExtractRequest, InteractiveOverwriteResolver, ListRequest, TestRequest,
-    publish_archive,
-};
+use super::{ArchiveFormat, CreateRequest, ExtractRequest, InteractiveOverwriteResolver, ListRequest, TestRequest, publish_archive};
 use crate::cli::create::*;
 use crate::cli::extract::*;
 use crate::cli::open::*;
@@ -33,13 +30,7 @@ fn hosted_http_transport_accepts_https_urls() {
 #[test]
 fn contact_keygen_persists_a_distinct_recipient_key() {
     let temp = TestDir::new("contact-keygen");
-    let args = vec![
-        "--state-dir".to_owned(),
-        temp.root.display().to_string(),
-        "--label".to_owned(),
-        "Test recipient".to_owned(),
-        "--json".to_owned(),
-    ];
+    let args = vec!["--state-dir".to_owned(), temp.root.display().to_string(), "--label".to_owned(), "Test recipient".to_owned(), "--json".to_owned()];
 
     let _ = contact_keygen_command(&args, GlobalOptions::default());
 
@@ -96,13 +87,7 @@ fn password_prompt_preserves_utf8_encoding() {
 fn retry_password_required_fails_if_prompts_disabled() {
     let global = GlobalOptions { no_password_prompt: true, ..Default::default() };
     let mut reported = String::new();
-    let code = retry_password_required(
-        &global,
-        "test: ",
-        Some("password: "),
-        |msg| reported = msg.to_owned(),
-        |_| std::process::ExitCode::SUCCESS,
-    );
+    let code = retry_password_required(&global, "test: ", Some("password: "), |msg| reported = msg.to_owned(), |_| std::process::ExitCode::SUCCESS);
     // 2 is usage error
     assert_eq!(format!("{code:?}"), format!("{:?}", std::process::ExitCode::from(2)));
     assert_eq!(reported, "test: password required and prompts are disabled");
@@ -112,13 +97,7 @@ fn retry_password_required_fails_if_prompts_disabled() {
 fn retry_password_required_fails_if_no_prompt_label() {
     let global = GlobalOptions::default();
     let mut reported = String::new();
-    let code = retry_password_required(
-        &global,
-        "test: ",
-        None,
-        |msg| reported = msg.to_owned(),
-        |_| std::process::ExitCode::SUCCESS,
-    );
+    let code = retry_password_required(&global, "test: ", None, |msg| reported = msg.to_owned(), |_| std::process::ExitCode::SUCCESS);
     assert_eq!(format!("{code:?}"), format!("{:?}", std::process::ExitCode::from(2)));
     assert_eq!(reported, "test: password required but no prompt is available");
 }
@@ -127,19 +106,7 @@ fn retry_password_required_fails_if_no_prompt_label() {
 fn create_parser_accepts_tzap_x509_signing_options() {
     let mut request = CreateRequest::default();
     let mut global = GlobalOptions::default();
-    let args = strings([
-        "signed.tzap",
-        "src",
-        "--format",
-        "tzap",
-        "--password-stdin",
-        "--signing-cert",
-        "signer.pem",
-        "--signing-private-key",
-        "signer.key",
-        "--signing-chain",
-        "intermediate.pem",
-    ]);
+    let args = strings(["signed.tzap", "src", "--format", "tzap", "--password-stdin", "--signing-cert", "signer.pem", "--signing-private-key", "signer.key", "--signing-chain", "intermediate.pem"]);
 
     parse_create_request(&args, &mut global, &mut request).unwrap();
 
@@ -245,14 +212,7 @@ fn tzap_split_create_defaults_to_one_volume_loss_tolerance() {
 fn test_parser_accepts_tzap_x509_trust_options() {
     let mut request = TestRequest::default();
     let mut global = GlobalOptions::default();
-    let args = strings([
-        "signed.tzap",
-        "--password-stdin",
-        "--public-no-key",
-        "--trusted-ca-cert",
-        "root.pem",
-        "--trusted-system-roots",
-    ]);
+    let args = strings(["signed.tzap", "--password-stdin", "--public-no-key", "--trusted-ca-cert", "root.pem", "--trusted-system-roots"]);
 
     parse_test_request(&args, &mut global, &mut request).unwrap();
 

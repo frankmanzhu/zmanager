@@ -15,32 +15,21 @@ mod x509;
 #[cfg(test)]
 mod tests;
 
-pub use display::{
-    TzapPublicDisplaySummary, TzapPublicSignatureStatus, inspect_tzap_public_footer_signature,
-    summarize_tzap_public_display,
-};
+pub use display::{TzapPublicDisplaySummary, TzapPublicSignatureStatus, inspect_tzap_public_footer_signature, summarize_tzap_public_display};
 pub use extract::{
-    TzapExtractKeySource, TzapExtractReport, TzapExtractRequest, TzapFileExtractReport, TzapRestoreOptions,
-    TzapRestorePolicy, copy_tzap_file_to_writer, copy_tzap_files_to_writer, extract_tzap,
+    TzapExtractKeySource, TzapExtractReport, TzapExtractRequest, TzapFileExtractReport, TzapRestoreOptions, TzapRestorePolicy, copy_tzap_file_to_writer, copy_tzap_files_to_writer, extract_tzap,
     extract_tzap_file_to_destination,
 };
 pub use listing::{
-    TzapEntry, TzapEntryKind, TzapIndexEntry, TzapIndexListing, TzapListing,
-    list_tzap_directory_with_optional_password, list_tzap_index_with_optional_password,
-    list_tzap_index_with_recipient_key, list_tzap_with_optional_password, list_tzap_with_password,
-    list_tzap_with_recipient_key,
+    TzapEntry, TzapEntryKind, TzapIndexEntry, TzapIndexListing, TzapListing, list_tzap_directory_with_optional_password, list_tzap_index_with_optional_password, list_tzap_index_with_recipient_key,
+    list_tzap_with_optional_password, list_tzap_with_password, list_tzap_with_recipient_key,
 };
 pub use open::is_tzap_archive_path;
-pub use open::{
-    TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume,
-    summarize_tzap_public_metadata,
-};
+pub use open::{TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume, summarize_tzap_public_metadata};
 pub use write::{TzapCreateOptions, TzapCreateReport, TzapKeySource, create_tzap_from_manifest_with_context};
 pub use x509::{
-    TzapTestReport, TzapX509SignerInspection, TzapX509SigningOptions, TzapX509TrustOptions, TzapX509VerificationReport,
-    inspect_tzap_x509_public_no_key_signer, inspect_tzap_x509_signer,
-    test_tzap_with_optional_password_filter_and_x509_trust, test_tzap_with_password_filter,
-    test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust,
+    TzapTestReport, TzapX509SignerInspection, TzapX509SigningOptions, TzapX509TrustOptions, TzapX509VerificationReport, inspect_tzap_x509_public_no_key_signer, inspect_tzap_x509_signer,
+    test_tzap_with_optional_password_filter_and_x509_trust, test_tzap_with_password_filter, test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust,
     tzap_x509_signing_options_from_inventory, verify_tzap_x509_public_no_key,
 };
 
@@ -89,11 +78,7 @@ impl std::error::Error for TzapError {
             Self::Io { source, .. } => Some(source),
             Self::Format(source) => Some(source),
             Self::Safety(source) => Some(source),
-            Self::X509RootAuth(_)
-            | Self::KeyWrap(_)
-            | Self::PasswordRequired
-            | Self::RecipientKeyRequired
-            | Self::Cancelled => None,
+            Self::X509RootAuth(_) | Self::KeyWrap(_) | Self::PasswordRequired | Self::RecipientKeyRequired | Self::Cancelled => None,
         }
     }
 }

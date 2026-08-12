@@ -20,9 +20,7 @@ use zmanager_core::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_
 use zmanager_core::zip_backend::{ZipCompression, ZipCreateOptions, create_zip_from_manifest};
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use zmanager_core::apple_archive_backend::{
-    AppleArchiveCompression, AppleArchiveCreateOptions, create_apple_archive_from_path, extract_apple_archive,
-};
+use zmanager_core::apple_archive_backend::{AppleArchiveCompression, AppleArchiveCreateOptions, create_apple_archive_from_path, extract_apple_archive};
 
 fn create_nested_tree(root: &Path) {
     fs::create_dir_all(root.join("folder/sub1/sub2")).unwrap();
@@ -45,11 +43,7 @@ fn create_tgz_fixture(source: &Path, archive: &Path, level: Option<u32>) {
 
 fn create_zip_fixture(source: &Path, archive: &Path, level: Option<u32>, store_only: bool) {
     let manifest = plan_archive(source, &PlanOptions::default()).unwrap();
-    let options = ZipCreateOptions {
-        compression: if store_only { ZipCompression::Store } else { ZipCompression::Deflate },
-        level: level.map(i64::from),
-        ..Default::default()
-    };
+    let options = ZipCreateOptions { compression: if store_only { ZipCompression::Store } else { ZipCompression::Deflate }, level: level.map(i64::from), ..Default::default() };
     create_zip_from_manifest(&manifest, archive, &options).unwrap();
 }
 
@@ -93,26 +87,12 @@ fn create_aar_fixture(source: &Path, archive: &Path, options: &AppleArchiveCreat
 
 #[test]
 fn test_matrix_archive_pattern_matches_exact_and_directory_prefixes() {
-    let patterns = vec![
-        "folder",
-        "folder/",
-        "folder\\",
-        "folder/sub1",
-        "folder\\sub1",
-        "folder\\sub1\\",
-        "folder/sub1/sub2",
-        "dir1",
-        "dir1/",
-        "file1.txt",
-    ];
+    let patterns = vec!["folder", "folder/", "folder\\", "folder/sub1", "folder\\sub1", "folder\\sub1\\", "folder/sub1/sub2", "dir1", "dir1/", "file1.txt"];
 
     let test_paths = vec![
         ("folder/a.txt", vec!["folder", "folder/", "folder\\"]),
         ("folder/sub1/c.txt", vec!["folder", "folder/", "folder\\", "folder/sub1", "folder\\sub1", "folder\\sub1\\"]),
-        (
-            "folder/sub1/sub2/d.txt",
-            vec!["folder", "folder/", "folder\\", "folder/sub1", "folder\\sub1", "folder\\sub1\\", "folder/sub1/sub2"],
-        ),
+        ("folder/sub1/sub2/d.txt", vec!["folder", "folder/", "folder\\", "folder/sub1", "folder\\sub1", "folder\\sub1\\", "folder/sub1/sub2"]),
         ("dir1/e.txt", vec!["dir1", "dir1/"]),
         ("file1.txt", vec!["file1.txt"]),
     ];
@@ -134,10 +114,7 @@ fn test_matrix_archive_entry_matches_selected_slashes_and_backslashes() {
 
     for entry in &entry_paths {
         for selected in &selected_variants {
-            assert!(
-                archive_entry_matches_selected(entry, selected),
-                "Expected entry={entry:?} to match selected={selected:?}"
-            );
+            assert!(archive_entry_matches_selected(entry, selected), "Expected entry={entry:?} to match selected={selected:?}");
         }
     }
 }
@@ -156,18 +133,9 @@ fn test_tgz_combinatorial_folder_extraction_variants() {
     create_tgz_fixture(&source_dir, &archive, Some(6));
 
     let selection_variants = vec![
-        (
-            "src/folder",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
-        (
-            "src/folder/",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
-        (
-            "src/folder\\",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
+        ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+        ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+        ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/folder/sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/folder\\sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/folder\\sub1\\", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
@@ -231,18 +199,9 @@ fn test_zip_combinatorial_folder_extraction_variants() {
     create_zip_fixture(&source_dir, &archive, Some(6), false);
 
     let selection_variants = [
-        (
-            "src/folder",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
-        (
-            "src/folder/",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
-        (
-            "src/folder\\",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
+        ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+        ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+        ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/folder/sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/dir1", vec!["src/dir1/e.txt"]),
         ("src/file1.txt", vec!["src/file1.txt"]),
@@ -360,18 +319,9 @@ fn test_tzap_combinatorial_folder_extraction_variants() {
     create_tzap_fixture(&source_dir, &archive, 0);
 
     let selection_variants = [
-        (
-            "src/folder",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
-        (
-            "src/folder/",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
-        (
-            "src/folder\\",
-            vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"],
-        ),
+        ("src/folder", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+        ("src/folder/", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
+        ("src/folder\\", vec!["src/folder/a.txt", "src/folder/b.txt", "src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/folder/sub1", vec!["src/folder/sub1/c.txt", "src/folder/sub1/sub2/d.txt"]),
         ("src/dir1", vec!["src/dir1/e.txt"]),
         ("src/file1.txt", vec!["src/file1.txt"]),
@@ -550,18 +500,11 @@ fn test_apple_archive_custom_flags_and_metadata() {
     create_nested_tree(&source_dir);
 
     let archive = scenario.path("test_flags.aar");
-    let options = AppleArchiveCreateOptions {
-        block_size: 1_048_576,
-        threads: 2,
-        preserve_metadata: true,
-        replace_existing: true,
-        ..Default::default()
-    };
+    let options = AppleArchiveCreateOptions { block_size: 1_048_576, threads: 2, preserve_metadata: true, replace_existing: true, ..Default::default() };
     create_aar_fixture(&source_dir, &archive, &options);
 
     let out_dir = scenario.path("out");
-    let report =
-        extract_apple_archive(&archive, &out_dir, zmanager_core::safety::ExtractionPolicy::default(), None).unwrap();
+    let report = extract_apple_archive(&archive, &out_dir, zmanager_core::safety::ExtractionPolicy::default(), None).unwrap();
     assert!(report.written_bytes > 0);
     assert!(out_dir.join("src/folder/sub1/c.txt").exists());
 }

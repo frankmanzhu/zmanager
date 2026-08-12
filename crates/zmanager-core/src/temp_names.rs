@@ -68,13 +68,7 @@ impl TemporaryDirectory {
             }
         }
 
-        Err(TempDirAllocError {
-            path: parent,
-            source: io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("could not allocate temporary directory for {label}"),
-            ),
-        })
+        Err(TempDirAllocError { path: parent, source: io::Error::new(io::ErrorKind::AlreadyExists, format!("could not allocate temporary directory for {label}")) })
     }
 
     pub(crate) fn path(&self) -> &Path {

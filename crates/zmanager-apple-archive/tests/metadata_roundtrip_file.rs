@@ -20,9 +20,7 @@ mod tests {
 
         // Write archive to the temporary file.
         {
-            let mut writer =
-                ArchiveWriter::create(&temp_path, CreateOptions { compression: algo, ..Default::default() })
-                    .expect("create writer");
+            let mut writer = ArchiveWriter::create(&temp_path, CreateOptions { compression: algo, ..Default::default() }).expect("create writer");
             writer.append_directory("test_dir", metadata).expect("append directory");
             writer.finish().expect("finish writer");
         }
@@ -48,14 +46,7 @@ mod tests {
             uid: Some(501),
             gid: Some(20),
         };
-        for algo in [
-            CompressionAlgorithm::None,
-            CompressionAlgorithm::Lz4,
-            CompressionAlgorithm::Zlib,
-            CompressionAlgorithm::Lzma,
-            CompressionAlgorithm::Lzfse,
-            CompressionAlgorithm::Lzbitmap,
-        ] {
+        for algo in [CompressionAlgorithm::None, CompressionAlgorithm::Lz4, CompressionAlgorithm::Zlib, CompressionAlgorithm::Lzma, CompressionAlgorithm::Lzfse, CompressionAlgorithm::Lzbitmap] {
             let round = roundtrip(original, algo);
             assert_eq!(original, round, "metadata mismatch for {algo:?}");
         }

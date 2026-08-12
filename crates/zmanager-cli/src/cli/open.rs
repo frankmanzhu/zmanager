@@ -2,19 +2,14 @@ use crate::cli::app::{GenericEntry, ListRequest, PlanRequest, TestRequest, expan
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
-    FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, TZAP_SINGLE_VOLUME_LOSS_TOLERANCE,
-    TZAP_SPLIT_VOLUME_LOSS_TOLERANCE, is_7z_archive, is_apple_archive, is_rar_archive, is_split_zip_archive_path,
-    is_tar_zst_archive, is_tzap_archive, is_zip_family_archive,
+    FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, TZAP_SINGLE_VOLUME_LOSS_TOLERANCE, TZAP_SPLIT_VOLUME_LOSS_TOLERANCE, is_7z_archive, is_apple_archive, is_rar_archive,
+    is_split_zip_archive_path, is_tar_zst_archive, is_tzap_archive, is_zip_family_archive,
 };
-use crate::cli::options::{
-    GlobalOptions, parse_archive_format, parse_global_option, read_optional_password_stdin, resolve_input_path,
-    take_value, validate_recipient_key_open_option,
-};
+use crate::cli::options::{GlobalOptions, parse_archive_format, parse_global_option, read_optional_password_stdin, resolve_input_path, take_value, validate_recipient_key_open_option};
 use crate::cli::planning::{append_files_from, append_stdin_paths, apply_manifest_filters, plan_sources};
 use crate::cli::usage::{
-    LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json,
-    print_entries_tree, print_error_line, print_help_stdout, print_manifest, print_success_line, print_warning_stderr,
-    retry_password_required, tzap_timestamp_string, usage_failure, wants_help,
+    LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json, print_entries_tree, print_error_line, print_help_stdout, print_manifest, print_success_line,
+    print_warning_stderr, retry_password_required, tzap_timestamp_string, usage_failure, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::fs;
@@ -43,11 +38,7 @@ pub(crate) fn list_command_from_expanded(args: &[String], mut global: GlobalOpti
     }
 }
 
-pub(crate) fn parse_list_request(
-    args: &[String],
-    global: &mut GlobalOptions,
-    request: &mut ListRequest,
-) -> Result<(), String> {
+pub(crate) fn parse_list_request(args: &[String], global: &mut GlobalOptions, request: &mut ListRequest) -> Result<(), String> {
     let mut index = 0usize;
     let mut positional = Vec::new();
     while index < args.len() {
@@ -107,17 +98,10 @@ pub(crate) fn parse_list_request(
 
 #[allow(clippy::too_many_lines)]
 fn run_list_request(request: &ListRequest, global: &GlobalOptions) -> ExitCode {
-    if let Some(code) = validate_recipient_key_open_option(
-        "list",
-        &request.archive,
-        request.password_stdin,
-        request.recipient_key.as_ref(),
-        global,
-    ) {
+    if let Some(code) = validate_recipient_key_open_option("list", &request.archive, request.password_stdin, request.recipient_key.as_ref(), global) {
         return code;
     }
-    if request.password_stdin && zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some()
-    {
+    if request.password_stdin && zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() {
         print_error_line(global, format_args!("list failed: raw streams are not encrypted; remove --password-stdin"));
         return ExitCode::from(2);
     }
@@ -148,16 +132,7 @@ fn run_list_request(request: &ListRequest, global: &GlobalOptions) -> ExitCode {
                     println!("{}", entry.name);
                 }
             } else if request.long {
-                output::stdout_line(
-                    global.color,
-                    format_args!(
-                        "{}",
-                        output::styled(
-                            StyleRole::Heading,
-                            format_args!("TYPE\tMODE\tSIZE\tCOMPRESSED\tMODIFIED\tPATH")
-                        )
-                    ),
-                );
+                output::stdout_line(global.color, format_args!("{}", output::styled(StyleRole::Heading, format_args!("TYPE\tMODE\tSIZE\tCOMPRESSED\tMODIFIED\tPATH"))));
                 for entry in entries {
                     output::stdout_line(
                         global.color,
@@ -176,12 +151,7 @@ fn run_list_request(request: &ListRequest, global: &GlobalOptions) -> ExitCode {
                 for entry in entries {
                     output::stdout_line(
                         global.color,
-                        format_args!(
-                            "{}\t{}\t{} bytes",
-                            output::styled(StyleRole::Label, format_args!("{}", entry.kind)),
-                            output::styled(StyleRole::Path, format_args!("{}", entry.name)),
-                            entry.size
-                        ),
+                        format_args!("{}\t{}\t{} bytes", output::styled(StyleRole::Label, format_args!("{}", entry.kind)), output::styled(StyleRole::Path, format_args!("{}", entry.name)), entry.size),
                     );
                 }
             }
@@ -214,11 +184,7 @@ pub(crate) fn test_command_from_expanded(args: &[String], mut global: GlobalOpti
     }
 }
 
-pub(crate) fn parse_test_request(
-    args: &[String],
-    global: &mut GlobalOptions,
-    request: &mut TestRequest,
-) -> Result<(), String> {
+pub(crate) fn parse_test_request(args: &[String], global: &mut GlobalOptions, request: &mut TestRequest) -> Result<(), String> {
     let mut index = 0usize;
     let mut positional = Vec::new();
     while index < args.len() {
@@ -276,44 +242,25 @@ pub(crate) fn run_test_request(request: &TestRequest, global: &GlobalOptions) ->
     if request.public_no_key && !is_tzap_archive(&request.archive) {
         return usage_failure(global, format_args!("test failed: --public-no-key is supported only for TZAP archives"));
     }
-    if let Some(code) = validate_recipient_key_open_option(
-        "test",
-        &request.archive,
-        request.password_stdin,
-        request.recipient_key.as_ref(),
-        global,
-    ) {
+    if let Some(code) = validate_recipient_key_open_option("test", &request.archive, request.password_stdin, request.recipient_key.as_ref(), global) {
         return code;
     }
     if test_request_has_x509_trust(request) && !is_tzap_archive(&request.archive) {
-        return usage_failure(
-            global,
-            format_args!("test failed: X.509 trust options are supported only for TZAP archives"),
-        );
+        return usage_failure(global, format_args!("test failed: X.509 trust options are supported only for TZAP archives"));
     }
     if request.public_no_key && request.password_stdin {
-        return usage_failure(
-            global,
-            format_args!("test failed: --public-no-key cannot be combined with --password-stdin"),
-        );
+        return usage_failure(global, format_args!("test failed: --public-no-key cannot be combined with --password-stdin"));
     }
     if request.public_no_key && request.recipient_key.is_some() {
-        return usage_failure(
-            global,
-            format_args!("test failed: --public-no-key cannot be combined with --recipient-key"),
-        );
+        return usage_failure(global, format_args!("test failed: --public-no-key cannot be combined with --recipient-key"));
     }
     if request.public_no_key && (!request.include.is_empty() || !request.exclude.is_empty()) {
-        return usage_failure(
-            global,
-            format_args!("test failed: --public-no-key cannot be combined with path filters"),
-        );
+        return usage_failure(global, format_args!("test failed: --public-no-key cannot be combined with path filters"));
     }
     if request.public_no_key {
         return run_tzap_public_no_key_test(&request.archive, request, global);
     }
-    if request.password_stdin && zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some()
-    {
+    if request.password_stdin && zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() {
         print_error_line(global, format_args!("test failed: raw streams are not encrypted; remove --password-stdin"));
         return ExitCode::from(2);
     }
@@ -330,21 +277,11 @@ pub(crate) fn run_test_request(request: &TestRequest, global: &GlobalOptions) ->
         return run_zip_test(&request.archive, password.as_deref(), &request.include, &request.exclude, global);
     }
     if is_split_zip_archive_path(&request.archive) {
-        return run_libarchive_data_test(
-            &request.archive,
-            password.as_deref(),
-            &request.include,
-            &request.exclude,
-            FORMAT_ZIP,
-            global,
-        );
+        return run_libarchive_data_test(&request.archive, password.as_deref(), &request.include, &request.exclude, FORMAT_ZIP, global);
     }
     if let Some(format) = zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive) {
         if password.is_some() {
-            print_error_line(
-                global,
-                format_args!("test failed: raw streams are not encrypted; remove --password-stdin"),
-            );
+            print_error_line(global, format_args!("test failed: raw streams are not encrypted; remove --password-stdin"));
             return ExitCode::from(2);
         }
         return run_raw_stream_test(&request.archive, format, &request.include, &request.exclude, global);
@@ -353,26 +290,13 @@ pub(crate) fn run_test_request(request: &TestRequest, global: &GlobalOptions) ->
         return run_tar_zst_test(&request.archive, &request.include, &request.exclude, global);
     }
     if is_apple_archive(&request.archive) {
-        return run_apple_archive_test(
-            &request.archive,
-            password.as_deref(),
-            &request.include,
-            &request.exclude,
-            global,
-        );
+        return run_apple_archive_test(&request.archive, password.as_deref(), &request.include, &request.exclude, global);
     }
     if is_7z_archive(&request.archive) {
         return run_7z_test(&request.archive, password.as_deref(), &request.include, &request.exclude, global);
     }
     if is_tzap_archive(&request.archive) {
-        return run_tzap_test(
-            &request.archive,
-            password.as_deref(),
-            &request.include,
-            &request.exclude,
-            request,
-            global,
-        );
+        return run_tzap_test(&request.archive, password.as_deref(), &request.include, &request.exclude, request, global);
     }
 
     match list_entries_with_password(&request.archive, password.as_deref(), None) {
@@ -391,10 +315,7 @@ pub(crate) fn run_test_request(request: &TestRequest, global: &GlobalOptions) ->
             } else if skipped_entries == 0 {
                 print_success_line(global, format_args!("archive readable: {} entries", entries.len()));
             } else {
-                print_success_line(
-                    global,
-                    format_args!("archive readable: {} entries, {} skipped", entries.len(), skipped_entries),
-                );
+                print_success_line(global, format_args!("archive readable: {} entries, {} skipped", entries.len(), skipped_entries));
             }
             ExitCode::SUCCESS
         }
@@ -423,19 +344,9 @@ fn test_request_x509_trust(request: &TestRequest) -> zmanager_core::tzap_backend
 
 fn run_tar_zst_test(archive: &str, includes: &[String], excludes: &[String], global: &GlobalOptions) -> ExitCode {
     let mut sink = io::sink();
-    match zmanager_core::tar_zst_backend::copy_tar_zst_files_to_writer(
-        archive,
-        |name| entry_selected(name, includes, excludes),
-        &mut sink,
-    ) {
+    match zmanager_core::tar_zst_backend::copy_tar_zst_files_to_writer(archive, |name| entry_selected(name, includes, excludes), &mut sink) {
         Ok(report) => {
-            print_data_test_success(
-                FORMAT_TAR_ZST,
-                report.written_entries,
-                report.skipped_entries,
-                report.written_bytes,
-                global,
-            );
+            print_data_test_success(FORMAT_TAR_ZST, report.written_entries, report.skipped_entries, report.written_bytes, global);
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -446,26 +357,10 @@ fn run_tar_zst_test(archive: &str, includes: &[String], excludes: &[String], glo
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-fn run_apple_archive_test(
-    archive: &str,
-    password: Option<&str>,
-    includes: &[String],
-    excludes: &[String],
-    global: &GlobalOptions,
-) -> ExitCode {
-    match zmanager_core::apple_archive_backend::test_apple_archive_filter(
-        archive,
-        |name| entry_selected(name, includes, excludes),
-        password,
-    ) {
+fn run_apple_archive_test(archive: &str, password: Option<&str>, includes: &[String], excludes: &[String], global: &GlobalOptions) -> ExitCode {
+    match zmanager_core::apple_archive_backend::test_apple_archive_filter(archive, |name| entry_selected(name, includes, excludes), password) {
         Ok(report) => {
-            print_data_test_success(
-                FORMAT_APPLE_ARCHIVE,
-                report.tested_entries,
-                report.skipped_entries,
-                report.tested_bytes,
-                global,
-            );
+            print_data_test_success(FORMAT_APPLE_ARCHIVE, report.tested_entries, report.skipped_entries, report.tested_bytes, global);
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -476,38 +371,15 @@ fn run_apple_archive_test(
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn run_apple_archive_test(
-    _archive: &str,
-    _password: Option<&str>,
-    _includes: &[String],
-    _excludes: &[String],
-    _global: &GlobalOptions,
-) -> ExitCode {
+fn run_apple_archive_test(_archive: &str, _password: Option<&str>, _includes: &[String], _excludes: &[String], _global: &GlobalOptions) -> ExitCode {
     unreachable!()
 }
 
-fn run_7z_test(
-    archive: &str,
-    password: Option<&str>,
-    includes: &[String],
-    excludes: &[String],
-    global: &GlobalOptions,
-) -> ExitCode {
+fn run_7z_test(archive: &str, password: Option<&str>, includes: &[String], excludes: &[String], global: &GlobalOptions) -> ExitCode {
     let mut sink = io::sink();
-    match zmanager_core::sevenz_backend::copy_7z_files_to_writer(
-        archive,
-        password,
-        |name| entry_selected(name, includes, excludes),
-        &mut sink,
-    ) {
+    match zmanager_core::sevenz_backend::copy_7z_files_to_writer(archive, password, |name| entry_selected(name, includes, excludes), &mut sink) {
         Ok(report) => {
-            print_data_test_success(
-                FORMAT_SEVEN_Z,
-                report.written_entries,
-                report.skipped_entries,
-                report.written_bytes,
-                global,
-            );
+            print_data_test_success(FORMAT_SEVEN_Z, report.written_entries, report.skipped_entries, report.written_bytes, global);
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -517,29 +389,12 @@ fn run_7z_test(
     }
 }
 
-fn run_tzap_test(
-    archive: &str,
-    password: Option<&str>,
-    includes: &[String],
-    excludes: &[String],
-    request: &TestRequest,
-    global: &GlobalOptions,
-) -> ExitCode {
+fn run_tzap_test(archive: &str, password: Option<&str>, includes: &[String], excludes: &[String], request: &TestRequest, global: &GlobalOptions) -> ExitCode {
     let x509_trust = is_tzap_archive(archive).then(|| test_request_x509_trust(request));
     let result = if let Some(recipient_key) = request.recipient_key.as_deref() {
-        zmanager_core::tzap_backend::test_tzap_with_recipient_key_filter_and_x509_trust(
-            archive,
-            recipient_key,
-            |name| entry_selected(name, includes, excludes),
-            x509_trust.as_ref(),
-        )
+        zmanager_core::tzap_backend::test_tzap_with_recipient_key_filter_and_x509_trust(archive, recipient_key, |name| entry_selected(name, includes, excludes), x509_trust.as_ref())
     } else {
-        zmanager_core::tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(
-            archive,
-            password,
-            |name| entry_selected(name, includes, excludes),
-            x509_trust.as_ref(),
-        )
+        zmanager_core::tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(archive, password, |name| entry_selected(name, includes, excludes), x509_trust.as_ref())
     };
     match result {
         Ok(report) => {
@@ -567,17 +422,8 @@ fn run_tzap_public_no_key_test(archive: &str, request: &TestRequest, global: &Gl
     }
 }
 
-fn run_libarchive_data_test(
-    archive: &str,
-    password: Option<&str>,
-    includes: &[String],
-    excludes: &[String],
-    format: &str,
-    global: &GlobalOptions,
-) -> ExitCode {
-    match zmanager_core::libarchive_backend::test_archive_with_password_filter(archive, password, |name| {
-        entry_selected(name, includes, excludes)
-    }) {
+fn run_libarchive_data_test(archive: &str, password: Option<&str>, includes: &[String], excludes: &[String], format: &str, global: &GlobalOptions) -> ExitCode {
+    match zmanager_core::libarchive_backend::test_archive_with_password_filter(archive, password, |name| entry_selected(name, includes, excludes)) {
         Ok(report) => {
             print_data_test_success(format, report.tested_entries, report.skipped_entries, report.tested_bytes, global);
             ExitCode::SUCCESS
@@ -589,13 +435,7 @@ fn run_libarchive_data_test(
     }
 }
 
-fn print_data_test_success(
-    format: &str,
-    tested_entries: usize,
-    skipped_entries: usize,
-    bytes: u64,
-    global: &GlobalOptions,
-) {
+fn print_data_test_success(format: &str, tested_entries: usize, skipped_entries: usize, bytes: u64, global: &GlobalOptions) {
     if global.json {
         println!(
             "{{\"status\":\"ok\",\"format\":\"{}\",\"entries\":{},\"tested_entries\":{},\"skipped_entries\":{},\"bytes\":{bytes}}}",
@@ -607,10 +447,7 @@ fn print_data_test_success(
     } else if skipped_entries == 0 {
         print_success_line(global, format_args!("{format} test ok: {tested_entries} entries, {bytes} bytes"));
     } else {
-        print_success_line(
-            global,
-            format_args!("{format} test ok: {tested_entries} entries, {skipped_entries} skipped, {bytes} bytes"),
-        );
+        print_success_line(global, format_args!("{format} test ok: {tested_entries} entries, {skipped_entries} skipped, {bytes} bytes"));
     }
 }
 
@@ -626,39 +463,22 @@ fn print_tzap_test_success(report: &zmanager_core::tzap_backend::TzapTestReport,
         }
         println!("}}");
     } else {
-        print_data_test_success(
-            FORMAT_TZAP,
-            report.tested_entries,
-            report.skipped_entries,
-            report.tested_bytes,
-            global,
-        );
+        print_data_test_success(FORMAT_TZAP, report.tested_entries, report.skipped_entries, report.tested_bytes, global);
         if let Some(root_auth) = &report.x509_root_auth {
             print_tzap_x509_root_auth_text(root_auth, false, global);
         }
     }
 }
 
-fn print_tzap_public_no_key_success(
-    root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport,
-    archive: &str,
-    global: &GlobalOptions,
-) {
+fn print_tzap_public_no_key_success(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport, archive: &str, global: &GlobalOptions) {
     if global.json {
-        print!(
-            "{{\"status\":\"ok\",\"format\":\"{}\",\"verification_mode\":\"public-no-key\",\"archive\":\"{}\",\"root_auth\":",
-            FORMAT_TZAP,
-            json_escape(archive)
-        );
+        print!("{{\"status\":\"ok\",\"format\":\"{}\",\"verification_mode\":\"public-no-key\",\"archive\":\"{}\",\"root_auth\":", FORMAT_TZAP, json_escape(archive));
         print_tzap_x509_root_auth_json(root_auth);
         print!(",\"public_diagnostics\":");
         print!("{}", crate::cli::usage::json_string_array(&root_auth.diagnostics));
         println!("}}");
     } else {
-        print_success_line(
-            global,
-            format_args!("{FORMAT_TZAP} test ok: public no-key, {} data blocks", root_auth.total_data_block_count),
-        );
+        print_success_line(global, format_args!("{FORMAT_TZAP} test ok: public no-key, {} data blocks", root_auth.total_data_block_count));
         print_tzap_x509_root_auth_text(root_auth, true, global);
         print_tzap_x509_diagnostics_text(root_auth, "public-no-key", global);
     }
@@ -694,11 +514,7 @@ fn print_tzap_x509_root_auth_json(root_auth: &zmanager_core::tzap_backend::TzapX
     print!("}}");
 }
 
-fn print_tzap_x509_root_auth_text(
-    root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport,
-    public_no_key: bool,
-    global: &GlobalOptions,
-) {
+fn print_tzap_x509_root_auth_text(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport, public_no_key: bool, global: &GlobalOptions) {
     let mode = if public_no_key { "public-no-key x509" } else { "x509" };
     print_success_line(global, format_args!("root-auth: OK {mode} {}", hex_lower(&root_auth.archive_root)));
     print_success_line(global, format_args!("root-auth signer: {}", root_auth.subject));
@@ -709,31 +525,17 @@ fn print_tzap_x509_root_auth_text(
     print_tzap_x509_diagnostics_text(root_auth, "root-auth", global);
 }
 
-fn print_tzap_x509_diagnostics_text(
-    root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport,
-    prefix: &str,
-    global: &GlobalOptions,
-) {
+fn print_tzap_x509_diagnostics_text(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport, prefix: &str, global: &GlobalOptions) {
     for diagnostic in &root_auth.diagnostics {
         print_success_line(global, format_args!("{prefix}: {diagnostic}"));
     }
 }
 
-fn run_raw_stream_test(
-    archive: &str,
-    format: zmanager_core::raw_stream_backend::RawStreamFormat,
-    includes: &[String],
-    excludes: &[String],
-    global: &GlobalOptions,
-) -> ExitCode {
-    let output_name = zmanager_core::raw_stream_backend::output_name_for_raw_stream(archive, format)
-        .unwrap_or_else(|| archive.to_owned());
+fn run_raw_stream_test(archive: &str, format: zmanager_core::raw_stream_backend::RawStreamFormat, includes: &[String], excludes: &[String], global: &GlobalOptions) -> ExitCode {
+    let output_name = zmanager_core::raw_stream_backend::output_name_for_raw_stream(archive, format).unwrap_or_else(|| archive.to_owned());
     if !entry_selected(&output_name, includes, excludes) {
         if global.json {
-            println!(
-                "{{\"status\":\"ok\",\"entries\":1,\"tested_entries\":0,\"skipped_entries\":1,\"archive\":\"{}\"}}",
-                json_escape(archive)
-            );
+            println!("{{\"status\":\"ok\",\"entries\":1,\"tested_entries\":0,\"skipped_entries\":1,\"archive\":\"{}\"}}", json_escape(archive));
         } else {
             print_success_line(global, format_args!("archive readable: 0 entries, 1 skipped"));
         }
@@ -742,10 +544,7 @@ fn run_raw_stream_test(
     match zmanager_core::raw_stream_backend::test_raw_stream(archive, format) {
         Ok(bytes) => {
             if global.json {
-                println!(
-                    "{{\"status\":\"ok\",\"entries\":1,\"tested_entries\":1,\"skipped_entries\":0,\"bytes\":{bytes},\"archive\":\"{}\"}}",
-                    json_escape(archive)
-                );
+                println!("{{\"status\":\"ok\",\"entries\":1,\"tested_entries\":1,\"skipped_entries\":0,\"bytes\":{bytes},\"archive\":\"{}\"}}", json_escape(archive));
             } else {
                 print_success_line(global, format_args!("archive readable: 1 entry, {bytes} bytes"));
             }
@@ -758,16 +557,8 @@ fn run_raw_stream_test(
     }
 }
 
-fn run_zip_test(
-    archive: &str,
-    password: Option<&str>,
-    includes: &[String],
-    excludes: &[String],
-    global: &GlobalOptions,
-) -> ExitCode {
-    match zmanager_core::zip_backend::test_zip_with_password_filter(archive, password, |name| {
-        entry_selected(name, includes, excludes)
-    }) {
+fn run_zip_test(archive: &str, password: Option<&str>, includes: &[String], excludes: &[String], global: &GlobalOptions) -> ExitCode {
+    match zmanager_core::zip_backend::test_zip_with_password_filter(archive, password, |name| entry_selected(name, includes, excludes)) {
         Ok(report) => {
             if global.json {
                 println!(
@@ -775,30 +566,19 @@ fn run_zip_test(
                     report.tested_entries, report.tested_entries, report.skipped_entries, report.tested_bytes
                 );
             } else if report.skipped_entries == 0 {
-                print_success_line(
-                    global,
-                    format_args!("zip test ok: {} entries, {} bytes", report.tested_entries, report.tested_bytes),
-                );
+                print_success_line(global, format_args!("zip test ok: {} entries, {} bytes", report.tested_entries, report.tested_bytes));
             } else {
-                print_success_line(
-                    global,
-                    format_args!(
-                        "zip test ok: {} entries, {} skipped, {} bytes",
-                        report.tested_entries, report.skipped_entries, report.tested_bytes
-                    ),
-                );
+                print_success_line(global, format_args!("zip test ok: {} entries, {} skipped, {} bytes", report.tested_entries, report.skipped_entries, report.tested_bytes));
             }
             ExitCode::SUCCESS
         }
-        Err(zmanager_core::zip_backend::ZipBackendError::PasswordRequired) if password.is_none() => {
-            retry_password_required(
-                global,
-                "zip test failed: ",
-                Some("ZIP password: "),
-                |message| print_error_line(global, format_args!("{message}")),
-                |password| run_zip_test(archive, Some(password.expose_secret()), includes, excludes, global),
-            )
-        }
+        Err(zmanager_core::zip_backend::ZipBackendError::PasswordRequired) if password.is_none() => retry_password_required(
+            global,
+            "zip test failed: ",
+            Some("ZIP password: "),
+            |message| print_error_line(global, format_args!("{message}")),
+            |password| run_zip_test(archive, Some(password.expose_secret()), includes, excludes, global),
+        ),
         Err(error) => {
             print_error_line(global, format_args!("zip test failed: {error}"));
             ExitCode::FAILURE
@@ -880,9 +660,7 @@ fn parse_plan_request(args: &[String], global: &mut GlobalOptions, request: &mut
 fn run_plan_request(request: &PlanRequest, global: &GlobalOptions) -> ExitCode {
     match plan_sources(&request.sources, request.clean, request.no_ignore, false) {
         Ok(mut manifest) => {
-            if let Err(error) =
-                apply_manifest_filters(&mut manifest, &request.include, &request.exclude, &request.exclude_from, false)
-            {
+            if let Err(error) = apply_manifest_filters(&mut manifest, &request.include, &request.exclude, &request.exclude_from, false) {
                 print_error_line(global, format_args!("plan failed: {error}"));
                 return ExitCode::FAILURE;
             }
@@ -895,24 +673,14 @@ fn run_plan_request(request: &PlanRequest, global: &GlobalOptions) -> ExitCode {
         }
     }
 }
-fn list_entries_with_password(
-    archive: &str,
-    password: Option<&str>,
-    recipient_key: Option<&Path>,
-) -> Result<Vec<GenericEntry>, String> {
+fn list_entries_with_password(archive: &str, password: Option<&str>, recipient_key: Option<&Path>) -> Result<Vec<GenericEntry>, String> {
     if is_zip_family_archive(archive) && !is_split_zip_archive_path(archive) {
-        zmanager_core::zip_backend::list_zip(archive)
-            .map(|listing| map_generic_entries(listing.entries, zip_list_entry_to_generic))
-            .map_err(|error| error.to_string())
+        zmanager_core::zip_backend::list_zip(archive).map(|listing| map_generic_entries(listing.entries, zip_list_entry_to_generic)).map_err(|error| error.to_string())
     } else if is_7z_archive(archive) {
-        zmanager_core::sevenz_backend::list_7z(archive, password)
-            .map(|listing| map_generic_entries(listing.entries, seven_z_list_entry_to_generic))
-            .map_err(|error| error.to_string())
+        zmanager_core::sevenz_backend::list_7z(archive, password).map(|listing| map_generic_entries(listing.entries, seven_z_list_entry_to_generic)).map_err(|error| error.to_string())
     } else if let Some(format) = zmanager_core::raw_stream_backend::detect_raw_stream_format(archive) {
-        let name = zmanager_core::raw_stream_backend::output_name_for_raw_stream(archive, format)
-            .ok_or_else(|| "could not derive raw stream output name".to_owned())?;
-        let size =
-            zmanager_core::raw_stream_backend::test_raw_stream(archive, format).map_err(|error| error.to_string())?;
+        let name = zmanager_core::raw_stream_backend::output_name_for_raw_stream(archive, format).ok_or_else(|| "could not derive raw stream output name".to_owned())?;
+        let size = zmanager_core::raw_stream_backend::test_raw_stream(archive, format).map_err(|error| error.to_string())?;
         let compressed_size = fs::metadata(archive).ok().map(|metadata| metadata.len());
 
         Ok(vec![GenericEntry { kind: "file".to_owned(), name, size, compressed_size, ..GenericEntry::default() }])
@@ -931,9 +699,7 @@ fn list_entries_with_password(
     } else if is_apple_archive(archive) {
         list_apple_archive_cli(archive, password)
     } else if is_rar_archive(archive) && password.is_some() {
-        zmanager_core::rar_backend::list_rar_with_password(archive, password)
-            .map(|listing| map_generic_entries(listing.entries, rar_list_entry_to_generic))
-            .map_err(|error| error.to_string())
+        zmanager_core::rar_backend::list_rar_with_password(archive, password).map(|listing| map_generic_entries(listing.entries, rar_list_entry_to_generic)).map_err(|error| error.to_string())
     } else {
         zmanager_core::libarchive_backend::list_archive_with_password(archive, password)
             .map(|listing| map_generic_entries(listing.entries, libarchive_list_entry_to_generic))
@@ -941,10 +707,7 @@ fn list_entries_with_password(
     }
 }
 
-fn map_generic_entries<Entry>(
-    entries: impl IntoIterator<Item = Entry>,
-    map: impl Fn(Entry) -> GenericEntry,
-) -> Vec<GenericEntry> {
+fn map_generic_entries<Entry>(entries: impl IntoIterator<Item = Entry>, map: impl Fn(Entry) -> GenericEntry) -> Vec<GenericEntry> {
     entries.into_iter().map(map).collect()
 }
 
@@ -1011,23 +774,11 @@ fn tzap_index_entry_to_generic(entry: zmanager_core::tzap_backend::TzapIndexEntr
 }
 
 fn rar_list_entry_to_generic(entry: zmanager_core::rar_backend::RarListEntry) -> GenericEntry {
-    GenericEntry {
-        kind: format!("{:?}", entry.kind).to_lowercase(),
-        name: entry.path,
-        size: entry.size,
-        compressed_size: None,
-        ..GenericEntry::default()
-    }
+    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
 }
 
 fn libarchive_list_entry_to_generic(entry: zmanager_core::libarchive_backend::LibarchiveListEntry) -> GenericEntry {
-    GenericEntry {
-        kind: format!("{:?}", entry.kind).to_lowercase(),
-        name: entry.path,
-        size: u64::try_from(entry.size).unwrap_or(0),
-        compressed_size: None,
-        ..GenericEntry::default()
-    }
+    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: u64::try_from(entry.size).unwrap_or(0), compressed_size: None, ..GenericEntry::default() }
 }
 
 fn filter_entries(entries: &mut Vec<GenericEntry>, includes: &[String], excludes: &[String]) {
@@ -1048,16 +799,13 @@ fn list_apple_archive_cli(archive: &str, password: Option<&str>) -> Result<Vec<G
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-fn apple_archive_list_entry_to_generic(
-    entry: zmanager_core::apple_archive_backend::AppleArchiveListEntry,
-) -> GenericEntry {
+fn apple_archive_list_entry_to_generic(entry: zmanager_core::apple_archive_backend::AppleArchiveListEntry) -> GenericEntry {
     GenericEntry {
         kind: match entry.kind {
             zmanager_core::apple_archive_backend::AppleArchiveEntryKind::File => "file",
             zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Directory => "directory",
             zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Symlink => "symlink",
-            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Device
-            | zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Special => "special",
+            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Device | zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Special => "special",
         }
         .to_owned(),
         name: entry.path,

@@ -40,10 +40,7 @@ impl From<ErrorStack> for P256SignatureError {
 ///
 /// The SHA-256 hashing step is intentionally inside this helper to avoid callers
 /// accidentally hashing payloads twice.
-pub fn sign_p256_sha256_p1363(
-    private_key: &PKey<Private>,
-    payload: &[u8],
-) -> Result<[u8; P256_P1363_SIGNATURE_LENGTH], P256SignatureError> {
+pub fn sign_p256_sha256_p1363(private_key: &PKey<Private>, payload: &[u8]) -> Result<[u8; P256_P1363_SIGNATURE_LENGTH], P256SignatureError> {
     let private_key = private_key.ec_key()?;
     ensure_p256_key(&private_key)?;
 
@@ -60,11 +57,7 @@ pub fn sign_p256_sha256_p1363(
 ///
 /// The SHA-256 hashing step is intentionally inside this helper to avoid callers
 /// accidentally hashing payloads twice.
-pub fn verify_p256_sha256_p1363(
-    public_key: &PKey<Public>,
-    payload: &[u8],
-    signature: &[u8],
-) -> Result<bool, P256SignatureError> {
+pub fn verify_p256_sha256_p1363(public_key: &PKey<Public>, payload: &[u8], signature: &[u8]) -> Result<bool, P256SignatureError> {
     let public_key = public_key.ec_key()?;
     ensure_p256_key(&public_key)?;
 
@@ -80,9 +73,7 @@ pub fn verify_p256_sha256_p1363(
 }
 
 /// Encodes an OpenSSL ECDSA signature as fixed-width P-1363 `r || s` bytes.
-pub fn encode_p256_p1363_signature(
-    signature: &EcdsaSig,
-) -> Result<[u8; P256_P1363_SIGNATURE_LENGTH], P256SignatureError> {
+pub fn encode_p256_p1363_signature(signature: &EcdsaSig) -> Result<[u8; P256_P1363_SIGNATURE_LENGTH], P256SignatureError> {
     let mut out = [0_u8; P256_P1363_SIGNATURE_LENGTH];
     out[..P256_COORDINATE_LENGTH].copy_from_slice(&signature.r().to_vec_padded(P256_COORDINATE_LENGTH_I32)?);
     out[P256_COORDINATE_LENGTH..].copy_from_slice(&signature.s().to_vec_padded(P256_COORDINATE_LENGTH_I32)?);
@@ -142,10 +133,7 @@ fn is_low_s(s: &BigNumRef, order: &BigNumRef, half_order: &BigNumRef) -> bool {
 #[cfg(test)]
 mod tests {
     use super::P256SignatureError;
-    use super::{
-        P256_P1363_SIGNATURE_LENGTH, curve_orders, decode_p256_p1363_signature, encode_p256_p1363_signature,
-        sign_p256_sha256_p1363, verify_p256_sha256_p1363,
-    };
+    use super::{P256_P1363_SIGNATURE_LENGTH, curve_orders, decode_p256_p1363_signature, encode_p256_p1363_signature, sign_p256_sha256_p1363, verify_p256_sha256_p1363};
     use openssl::bn::BigNum;
     use openssl::ec::EcGroup;
     use openssl::ec::EcKey;
@@ -243,13 +231,7 @@ mod tests {
         let public_key = PKey::from_ec_key(public).unwrap();
 
         let signature = [0_u8; P256_P1363_SIGNATURE_LENGTH];
-        assert!(matches!(
-            super::sign_p256_sha256_p1363(&private_key, b"payload"),
-            Err(P256SignatureError::UnsupportedCurve)
-        ));
-        assert!(matches!(
-            super::verify_p256_sha256_p1363(&public_key, b"payload", &signature),
-            Err(P256SignatureError::UnsupportedCurve)
-        ));
+        assert!(matches!(super::sign_p256_sha256_p1363(&private_key, b"payload"), Err(P256SignatureError::UnsupportedCurve)));
+        assert!(matches!(super::verify_p256_sha256_p1363(&public_key, b"payload", &signature), Err(P256SignatureError::UnsupportedCurve)));
     }
 }

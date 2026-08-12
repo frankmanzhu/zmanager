@@ -1,9 +1,6 @@
 use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::{JobCancelled, JobContext};
-use crate::safety::{
-    ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
-    OverwriteResolver,
-};
+use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Seek, SeekFrom, Write};
@@ -141,11 +138,7 @@ impl std::error::Error for LibarchiveError {
             Self::RawStream(source) => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::Safety(source) => Some(source),
-            Self::MissingPath
-            | Self::MissingLinkTarget { .. }
-            | Self::EntryNotFound { .. }
-            | Self::Cancelled
-            | Self::StdoutSelectionNotSingleFile { .. } => None,
+            Self::MissingPath | Self::MissingLinkTarget { .. } | Self::EntryNotFound { .. } | Self::Cancelled | Self::StdoutSelectionNotSingleFile { .. } => None,
         }
     }
 }
@@ -183,10 +176,7 @@ pub fn list_archive(path: impl AsRef<Path>) -> Result<LibarchiveListing, Libarch
 /// # Errors
 ///
 /// Returns [`LibarchiveError`] when libarchive cannot open or read the archive.
-pub fn list_archive_with_password(
-    path: impl AsRef<Path>,
-    password: Option<&str>,
-) -> Result<LibarchiveListing, LibarchiveError> {
+pub fn list_archive_with_password(path: impl AsRef<Path>, password: Option<&str>) -> Result<LibarchiveListing, LibarchiveError> {
     let mut archive = open_archive(path.as_ref(), password)?;
     let mut entries = Vec::new();
 
@@ -218,11 +208,7 @@ pub fn list_archive_with_password(
 ///
 /// Returns [`LibarchiveError`] when libarchive cannot read the archive, an entry
 /// is unsafe, or filesystem writes fail.
-pub fn extract_archive(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-) -> Result<LibarchiveExtractReport, LibarchiveError> {
+pub fn extract_archive(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<LibarchiveExtractReport, LibarchiveError> {
     extract_archive_with_password(archive_path, destination, policy, None)
 }
 
@@ -282,12 +268,7 @@ pub fn extract_archive_with_overwrite_resolver_and_password(
 ///
 /// Returns [`LibarchiveError`] when libarchive cannot read the archive, the
 /// entry is unsafe, the selected entry is not found, or filesystem writes fail.
-pub fn extract_archive_entry(
-    archive_path: impl AsRef<Path>,
-    entry_path: &str,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-) -> Result<LibarchiveExtractReport, LibarchiveError> {
+pub fn extract_archive_entry(archive_path: impl AsRef<Path>, entry_path: &str, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<LibarchiveExtractReport, LibarchiveError> {
     extract_archive_entry_with_password(archive_path, entry_path, destination, policy, None)
 }
 
@@ -323,8 +304,7 @@ pub fn copy_archive_files_to_writer<W: Write>(
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
     let archive_path = archive_path.as_ref();
     let mut archive = open_archive(archive_path, password)?;
-    let mut report =
-        LibarchiveExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let mut report = LibarchiveExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut selected_files = 0_usize;
     let mut staged_file = None;
 
@@ -343,8 +323,7 @@ pub fn copy_archive_files_to_writer<W: Write>(
             continue;
         }
 
-        let mut staged = crate::atomic_file::TemporaryFile::create("libarchive-stdout")
-            .map_err(|source| LibarchiveError::Io { path: std::env::temp_dir(), source })?;
+        let mut staged = crate::atomic_file::TemporaryFile::create("libarchive-stdout").map_err(|source| LibarchiveError::Io { path: std::env::temp_dir(), source })?;
         let copied = copy_file_entry_to_writer(&mut archive, staged.file_mut(), &owned_entry.path)?;
         report.written_entries += 1;
         report.written_bytes += copied;
@@ -356,12 +335,8 @@ pub fn copy_archive_files_to_writer<W: Write>(
     }
 
     let mut staged = staged_file.ok_or(LibarchiveError::StdoutSelectionNotSingleFile { selected_files: 0 })?;
-    staged
-        .file_mut()
-        .seek(SeekFrom::Start(0))
-        .map_err(|source| LibarchiveError::Io { path: staged.path().to_path_buf(), source })?;
-    io::copy(staged.file_mut(), output)
-        .map_err(|source| LibarchiveError::Io { path: staged.path().to_path_buf(), source })?;
+    staged.file_mut().seek(SeekFrom::Start(0)).map_err(|source| LibarchiveError::Io { path: staged.path().to_path_buf(), source })?;
+    io::copy(staged.file_mut(), output).map_err(|source| LibarchiveError::Io { path: staged.path().to_path_buf(), source })?;
 
     Ok(report)
 }
@@ -371,11 +346,7 @@ pub fn copy_archive_files_to_writer<W: Write>(
 /// # Errors
 ///
 /// Returns [`LibarchiveError`] when libarchive cannot open or read the archive.
-pub fn test_archive_with_password_filter(
-    archive_path: impl AsRef<Path>,
-    password: Option<&str>,
-    mut selected: impl FnMut(&str) -> bool,
-) -> Result<LibarchiveTestReport, LibarchiveError> {
+pub fn test_archive_with_password_filter(archive_path: impl AsRef<Path>, password: Option<&str>, mut selected: impl FnMut(&str) -> bool) -> Result<LibarchiveTestReport, LibarchiveError> {
     let archive_path = archive_path.as_ref();
     let mut archive = open_archive(archive_path, password)?;
     let mut report = LibarchiveTestReport { tested_entries: 0, skipped_entries: 0, tested_bytes: 0 };
@@ -411,13 +382,11 @@ fn extract_archive_inner(
     mut context: Option<&mut JobContext<'_>>,
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
     let destination = destination.as_ref();
-    let destination_root = crate::safety::prepare_destination_root(destination)
-        .map_err(|source| LibarchiveError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| LibarchiveError::Io { path: destination.to_path_buf(), source })?;
 
     let mut archive = open_archive(archive_path.as_ref(), password)?;
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
-    let mut report =
-        LibarchiveExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let mut report = LibarchiveExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut found_selected_entry = selected_entry.is_none();
     let mut deferred_directories = Vec::new();
     let mut deferred_hardlinks = Vec::new();
@@ -432,37 +401,27 @@ fn extract_archive_inner(
             continue;
         }
         found_selected_entry = true;
-        let safety_entry = ExtractionEntry {
-            archive_path: owned_entry.path.clone(),
-            kind: owned_entry.extraction_kind.clone(),
-            uncompressed_size: nonnegative_size(owned_entry.size),
-            compressed_size: None,
-        };
+        let safety_entry =
+            ExtractionEntry { archive_path: owned_entry.path.clone(), kind: owned_entry.extraction_kind.clone(), uncompressed_size: nonnegative_size(owned_entry.size), compressed_size: None };
 
-        crate::extract_loop::process_extraction_entry(
-            &mut report,
-            context.as_deref_mut(),
-            &mut planner,
-            &safety_entry,
-            &mut |action, report, context| match action {
-                crate::extract_loop::EntryAction::Skip => {
-                    archive.skip_data()?;
-                    Ok(0)
-                }
-                crate::extract_loop::EntryAction::Write(decision) => write_entry(
-                    &mut archive,
-                    &owned_entry,
-                    decision.destination_path,
-                    decision.replace_existing,
-                    decision.link_target_path,
-                    report,
-                    context,
-                    &mut deferred_directories,
-                    &mut deferred_hardlinks,
-                    &mut io_buffer,
-                ),
-            },
-        )?;
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, context| match action {
+            crate::extract_loop::EntryAction::Skip => {
+                archive.skip_data()?;
+                Ok(0)
+            }
+            crate::extract_loop::EntryAction::Write(decision) => write_entry(
+                &mut archive,
+                &owned_entry,
+                decision.destination_path,
+                decision.replace_existing,
+                decision.link_target_path,
+                report,
+                context,
+                &mut deferred_directories,
+                &mut deferred_hardlinks,
+                &mut io_buffer,
+            ),
+        })?;
     }
 
     if !found_selected_entry && let Some(path) = selected_entry {
@@ -481,13 +440,9 @@ fn open_archive(path: &Path, password: Option<&str>) -> Result<OpenedArchive, Li
     let parts = crate::multi_volume::discover_multi_volume_paths(input.path());
 
     match (parts.len() > 1, password) {
-        (true, Some(password)) => {
-            Ok(OpenedArchive::new(ReadArchive::open_filenames_with_passphrase(parts.as_slice(), password)?, input))
-        }
+        (true, Some(password)) => Ok(OpenedArchive::new(ReadArchive::open_filenames_with_passphrase(parts.as_slice(), password)?, input)),
         (true, None) => Ok(OpenedArchive::new(ReadArchive::open_filenames(parts.as_slice())?, input)),
-        (false, Some(password)) => {
-            Ok(OpenedArchive::new(ReadArchive::open_with_passphrase(input.path(), password)?, input))
-        }
+        (false, Some(password)) => Ok(OpenedArchive::new(ReadArchive::open_with_passphrase(input.path(), password)?, input)),
         (false, None) => Ok(OpenedArchive::new(ReadArchive::open(input.path())?, input)),
     }
 }
@@ -529,14 +484,8 @@ impl ArchiveReadInput {
         }
 
         let decoded_path = temporary_decoded_tar_path();
-        let mut decoded =
-            File::create(&decoded_path).map_err(|source| LibarchiveError::Io { path: decoded_path.clone(), source })?;
-        crate::raw_stream_backend::copy_raw_stream_to_writer(
-            path,
-            crate::raw_stream_backend::RawStreamFormat::Brotli,
-            &mut decoded,
-        )
-        .map_err(|source| {
+        let mut decoded = File::create(&decoded_path).map_err(|source| LibarchiveError::Io { path: decoded_path.clone(), source })?;
+        crate::raw_stream_backend::copy_raw_stream_to_writer(path, crate::raw_stream_backend::RawStreamFormat::Brotli, &mut decoded).map_err(|source| {
             let _ = fs::remove_file(&decoded_path);
             LibarchiveError::RawStream(source)
         })?;
@@ -562,9 +511,7 @@ impl Drop for ArchiveReadInput {
 }
 
 fn is_tar_brotli_archive(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.to_ascii_lowercase().ends_with(TAR_BROTLI_SUFFIX))
+    path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.to_ascii_lowercase().ends_with(TAR_BROTLI_SUFFIX))
 }
 
 fn temporary_decoded_tar_path() -> PathBuf {
@@ -598,13 +545,7 @@ impl OwnedEntry {
         let kind = entry_kind(entry);
         let extraction_kind = extraction_kind(entry, kind, &path)?;
 
-        Ok(Self {
-            path,
-            kind,
-            extraction_kind,
-            size: entry.size(),
-            metadata: LibarchiveEntryMetadata { mode: archive_entry_mode(entry.mode(), kind), modified: entry.mtime() },
-        })
+        Ok(Self { path, kind, extraction_kind, size: entry.size(), metadata: LibarchiveEntryMetadata { mode: archive_entry_mode(entry.mode(), kind), modified: entry.mtime() } })
     }
 }
 
@@ -617,11 +558,7 @@ fn archive_entry_mode(mode: u32, kind: LibarchiveEntryKind) -> Option<u32> {
     // Some formats without POSIX modes (notably 7z) are synthesized by
     // libarchive as 0644 for every entry. Treat an unsearchable directory mode
     // as absent rather than making the extracted tree inaccessible.
-    if permissions == 0 || (matches!(kind, LibarchiveEntryKind::Directory) && permissions & 0o111 == 0) {
-        None
-    } else {
-        Some(permissions)
-    }
+    if permissions == 0 || (matches!(kind, LibarchiveEntryKind::Directory) && permissions & 0o111 == 0) { None } else { Some(permissions) }
 }
 
 fn entry_kind(entry: &zmanager_libarchive::Entry) -> LibarchiveEntryKind {
@@ -638,11 +575,7 @@ fn entry_kind(entry: &zmanager_libarchive::Entry) -> LibarchiveEntryKind {
     }
 }
 
-fn extraction_kind(
-    entry: &zmanager_libarchive::Entry,
-    kind: LibarchiveEntryKind,
-    path: &str,
-) -> Result<ExtractionEntryKind, LibarchiveError> {
+fn extraction_kind(entry: &zmanager_libarchive::Entry, kind: LibarchiveEntryKind, path: &str) -> Result<ExtractionEntryKind, LibarchiveError> {
     match kind {
         LibarchiveEntryKind::File => Ok(ExtractionEntryKind::File),
         LibarchiveEntryKind::Directory => Ok(ExtractionEntryKind::Directory),
@@ -651,8 +584,7 @@ fn extraction_kind(
             Ok(ExtractionEntryKind::Symlink { target: PathBuf::from(target) })
         }
         LibarchiveEntryKind::Hardlink => {
-            let target =
-                entry.hardlink().ok_or_else(|| LibarchiveError::MissingLinkTarget { path: path.to_owned() })?;
+            let target = entry.hardlink().ok_or_else(|| LibarchiveError::MissingLinkTarget { path: path.to_owned() })?;
             Ok(ExtractionEntryKind::Hardlink { target: PathBuf::from(target) })
         }
         LibarchiveEntryKind::Device => Ok(ExtractionEntryKind::Device),
@@ -674,29 +606,19 @@ fn write_entry(
     io_buffer: &mut [u8],
 ) -> Result<u64, LibarchiveError> {
     if replace_existing && !matches!(entry.extraction_kind, ExtractionEntryKind::File) {
-        crate::safety::remove_destination_for_replace(destination_path)
-            .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
+        crate::safety::remove_destination_for_replace(destination_path).map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
     }
 
     match &entry.extraction_kind {
         ExtractionEntryKind::Directory => {
             archive.skip_data()?;
-            fs::create_dir_all(destination_path)
-                .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
+            fs::create_dir_all(destination_path).map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })?;
             deferred_directories.push((destination_path.to_path_buf(), entry.metadata));
             report.written_entries += 1;
             Ok(0)
         }
         ExtractionEntryKind::File => {
-            let written_bytes = write_file_entry(
-                archive,
-                &entry.path,
-                destination_path,
-                replace_existing,
-                entry.metadata,
-                context,
-                io_buffer,
-            )?;
+            let written_bytes = write_file_entry(archive, &entry.path, destination_path, replace_existing, entry.metadata, context, io_buffer)?;
             report.written_entries += 1;
             report.written_bytes += written_bytes;
             Ok(written_bytes)
@@ -704,11 +626,7 @@ fn write_entry(
         ExtractionEntryKind::Symlink { target } => {
             archive.skip_data()?;
             if crate::safety::should_skip_symlink_materialization(&entry.extraction_kind) {
-                crate::extract_loop::skip_entry(
-                    report,
-                    context,
-                    crate::safety::unsupported_symlink_warning(&entry.path),
-                );
+                crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&entry.path));
                 Ok(0)
             } else {
                 write_symlink(target, destination_path)?;
@@ -719,36 +637,21 @@ fn write_entry(
         }
         ExtractionEntryKind::Hardlink { .. } => {
             archive.skip_data()?;
-            let source_path = link_target_path.ok_or_else(|| LibarchiveError::Io {
-                path: destination_path.to_path_buf(),
-                source: crate::extract_loop::unresolved_hardlink_target(),
-            })?;
-            deferred_hardlinks.push(DeferredHardlink {
-                source_path: source_path.to_path_buf(),
-                destination_path: destination_path.to_path_buf(),
-            });
+            let source_path = link_target_path.ok_or_else(|| LibarchiveError::Io { path: destination_path.to_path_buf(), source: crate::extract_loop::unresolved_hardlink_target() })?;
+            deferred_hardlinks.push(DeferredHardlink { source_path: source_path.to_path_buf(), destination_path: destination_path.to_path_buf() });
             Ok(0)
         }
         ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
             archive.skip_data()?;
-            crate::extract_loop::skip_entry(
-                report,
-                context,
-                format!("skipped unsupported special entry {}", entry.path),
-            );
+            crate::extract_loop::skip_entry(report, context, format!("skipped unsupported special entry {}", entry.path));
             Ok(0)
         }
     }
 }
 
-fn materialize_deferred_hardlinks(
-    hardlinks: &[DeferredHardlink],
-    report: &mut LibarchiveExtractReport,
-) -> Result<(), LibarchiveError> {
-    crate::extract_materialize::materialize_deferred_hardlinks(hardlinks).map_err(|source| LibarchiveError::Io {
-        path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()),
-        source,
-    })?;
+fn materialize_deferred_hardlinks(hardlinks: &[DeferredHardlink], report: &mut LibarchiveExtractReport) -> Result<(), LibarchiveError> {
+    crate::extract_materialize::materialize_deferred_hardlinks(hardlinks)
+        .map_err(|source| LibarchiveError::Io { path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()), source })?;
     report.written_entries += hardlinks.len();
     Ok(())
 }
@@ -776,35 +679,22 @@ fn write_file_entry(
     Ok(written_bytes)
 }
 
-fn apply_deferred_directory_metadata(
-    directories: &[(PathBuf, LibarchiveEntryMetadata)],
-) -> Result<(), LibarchiveError> {
-    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, metadata)| {
-        apply_metadata(path, *metadata)
-    })
+fn apply_deferred_directory_metadata(directories: &[(PathBuf, LibarchiveEntryMetadata)]) -> Result<(), LibarchiveError> {
+    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, metadata)| apply_metadata(path, *metadata))
 }
 
 fn apply_metadata(path: &Path, metadata: LibarchiveEntryMetadata) -> Result<(), LibarchiveError> {
-    crate::extract_materialize::apply_metadata(
-        path,
-        metadata.mode,
-        metadata.modified.map(filetime::FileTime::from_system_time),
-    )
-    .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
+    crate::extract_materialize::apply_metadata(path, metadata.mode, metadata.modified.map(filetime::FileTime::from_system_time))
+        .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
 }
 
 /// Uses `set_symlink_file_times` to avoid following the link. Errors are
 /// reported so extraction cannot claim metadata was restored when it was not.
 fn apply_symlink_mtime(path: &Path, modified: Option<SystemTime>) -> Result<(), LibarchiveError> {
-    crate::extract_materialize::apply_symlink_mtime(path, modified.map(filetime::FileTime::from_system_time))
-        .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
+    crate::extract_materialize::apply_symlink_mtime(path, modified.map(filetime::FileTime::from_system_time)).map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
 }
 
-fn copy_file_entry_to_writer<W: Write>(
-    archive: &mut ReadArchive,
-    output: &mut W,
-    entry_path: &str,
-) -> Result<u64, LibarchiveError> {
+fn copy_file_entry_to_writer<W: Write>(archive: &mut ReadArchive, output: &mut W, entry_path: &str) -> Result<u64, LibarchiveError> {
     let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
     let mut written_bytes = 0_u64;
 
@@ -813,9 +703,7 @@ fn copy_file_entry_to_writer<W: Write>(
         if read == 0 {
             break;
         }
-        output
-            .write_all(&buffer[..read])
-            .map_err(|source| LibarchiveError::Io { path: PathBuf::from(entry_path), source })?;
+        output.write_all(&buffer[..read]).map_err(|source| LibarchiveError::Io { path: PathBuf::from(entry_path), source })?;
         written_bytes += read as u64;
     }
 
@@ -824,16 +712,12 @@ fn copy_file_entry_to_writer<W: Write>(
 
 #[cfg(unix)]
 fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), LibarchiveError> {
-    crate::extract_materialize::write_symlink(target, destination_path)
-        .map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })
+    crate::extract_materialize::write_symlink(target, destination_path).map_err(|source| LibarchiveError::Io { path: destination_path.to_path_buf(), source })
 }
 
 #[cfg(not(unix))]
 fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), LibarchiveError> {
-    Err(LibarchiveError::Io {
-        path: destination_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
-    })
+    Err(LibarchiveError::Io { path: destination_path.to_path_buf(), source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform") })
 }
 
 #[cfg(test)]
@@ -877,19 +761,7 @@ mod tests {
 
         let temp = TestDir::new("extracts_tar_gz_permissions_and_modification_times");
         let archive = temp.path("archive.tar.gz");
-        write_tar_gz_with_metadata(
-            &archive,
-            "payload",
-            0o1750,
-            DIRECTORY_MTIME,
-            "payload/run.sh",
-            0o751,
-            FILE_MTIME,
-            b"#!/bin/sh\n",
-            "payload/link.sh",
-            "run.sh",
-            FILE_MTIME,
-        );
+        write_tar_gz_with_metadata(&archive, "payload", 0o1750, DIRECTORY_MTIME, "payload/run.sh", 0o751, FILE_MTIME, b"#!/bin/sh\n", "payload/link.sh", "run.sh", FILE_MTIME);
 
         extract_archive(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
@@ -954,10 +826,7 @@ mod tests {
     fn copy_to_writer_rejects_multiple_selected_files_without_partial_output() {
         let temp = TestDir::new("copy_to_writer_rejects_multiple_selected_files");
         let archive = temp.path("archive.tar.br");
-        write_tar_brotli_with_files(
-            &archive,
-            &[("payload/a.txt", b"first".as_slice()), ("payload/b.txt", b"second".as_slice())],
-        );
+        write_tar_brotli_with_files(&archive, &[("payload/a.txt", b"first".as_slice()), ("payload/b.txt", b"second".as_slice())]);
         let mut output = Vec::new();
 
         let error = copy_archive_files_to_writer(&archive, None, |_| true, &mut output).unwrap_err();
@@ -970,10 +839,7 @@ mod tests {
     fn copy_to_writer_streams_single_selected_file_after_validation() {
         let temp = TestDir::new("copy_to_writer_streams_single_selected_file");
         let archive = temp.path("archive.tar.br");
-        write_tar_brotli_with_files(
-            &archive,
-            &[("payload/a.txt", b"first".as_slice()), ("payload/b.txt", b"second".as_slice())],
-        );
+        write_tar_brotli_with_files(&archive, &[("payload/a.txt", b"first".as_slice()), ("payload/b.txt", b"second".as_slice())]);
         let mut output = Vec::new();
 
         let report = copy_archive_files_to_writer(&archive, None, |path| path == "payload/b.txt", &mut output).unwrap();
@@ -1026,23 +892,14 @@ mod tests {
         }
         let temp = TestDir::new("lists_common_non_zip_formats");
         temp.write_file("payload/file.txt", b"hello");
-        let formats = [
-            ("archive.tar", "-cf"),
-            ("archive.tar.gz", "-czf"),
-            ("archive.tar.bz2", "-cjf"),
-            ("archive.tar.xz", "-cJf"),
-            ("archive.cpio", "--format=cpio -cf"),
-        ];
+        let formats = [("archive.tar", "-cf"), ("archive.tar.gz", "-czf"), ("archive.tar.bz2", "-cjf"), ("archive.tar.xz", "-cJf"), ("archive.cpio", "--format=cpio -cf")];
 
         for (archive_name, flags) in formats {
             let archive = temp.path(archive_name);
             create_bsdtar_archive(temp.root(), "payload", &archive, flags);
             let listing = list_archive(&archive).unwrap();
 
-            assert!(
-                listing.entries.iter().any(|entry| entry.path == "payload/file.txt"),
-                "missing payload file in {archive_name}"
-            );
+            assert!(listing.entries.iter().any(|entry| entry.path == "payload/file.txt"), "missing payload file in {archive_name}");
         }
     }
 

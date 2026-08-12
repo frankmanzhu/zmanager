@@ -1,9 +1,7 @@
 //! Local TZAP identity inventory and storage abstraction.
 
 use crate::secrets::SecretBytes;
-use crate::trust::{
-    self, TzapCertificatePublicMetadata, TzapCertificateStatus, is_valid_public_device_id, is_valid_public_signer_id,
-};
+use crate::trust::{self, TzapCertificatePublicMetadata, TzapCertificateStatus, is_valid_public_device_id, is_valid_public_signer_id};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -40,18 +38,9 @@ impl TzapLocalIdentityInventory {
     }
 
     pub fn validate(&self) -> Result<(), TzapLocalIdentityStoreError> {
-        validate_unique(
-            "device_signing_keys.key_id",
-            self.device_signing_keys.iter().map(|record| record.key_id.as_str()),
-        )?;
-        validate_unique(
-            "recipient_encryption_keys.key_id",
-            self.recipient_encryption_keys.iter().map(|record| record.key_id.as_str()),
-        )?;
-        validate_unique(
-            "enrolled_certificates.certificate_sha256",
-            self.enrolled_certificates.iter().map(|record| record.certificate_sha256.as_str()),
-        )?;
+        validate_unique("device_signing_keys.key_id", self.device_signing_keys.iter().map(|record| record.key_id.as_str()))?;
+        validate_unique("recipient_encryption_keys.key_id", self.recipient_encryption_keys.iter().map(|record| record.key_id.as_str()))?;
+        validate_unique("enrolled_certificates.certificate_sha256", self.enrolled_certificates.iter().map(|record| record.certificate_sha256.as_str()))?;
         validate_unique("contacts.contact_id", self.contacts.iter().map(|record| record.contact_id.as_str()))?;
 
         for record in &self.device_signing_keys {
@@ -65,14 +54,8 @@ impl TzapLocalIdentityInventory {
             validate_sha256("recipient_encryption_keys.public_key_fingerprint", &record.public_key_fingerprint)?;
             validate_secret_bytes("recipient_encryption_keys.private_key_der", &record.private_key_der)?;
             validate_non_empty_bytes("recipient_encryption_keys.public_key_der", &record.public_key_der)?;
-            if self
-                .device_signing_keys
-                .iter()
-                .any(|signing_key| signing_key.public_key_fingerprint == record.public_key_fingerprint)
-            {
-                return Err(TzapLocalIdentityStoreError::InvalidField {
-                    field: "recipient_encryption_keys.public_key_fingerprint",
-                });
+            if self.device_signing_keys.iter().any(|signing_key| signing_key.public_key_fingerprint == record.public_key_fingerprint) {
+                return Err(TzapLocalIdentityStoreError::InvalidField { field: "recipient_encryption_keys.public_key_fingerprint" });
             }
         }
         for record in &self.enrolled_certificates {
@@ -109,11 +92,7 @@ impl TzapLocalIdentityInventory {
             .filter_map(|record| match &record.sign_device_routing {
                 TzapSignDeviceRouting::Personal => None,
                 TzapSignDeviceRouting::Organization { org_id, login_organization_device_id } => {
-                    Some(TzapOrganizationDeviceRetirement {
-                        org_id: org_id.clone(),
-                        login_organization_device_id: login_organization_device_id.clone(),
-                        sign_device_id: record.sign_device_id.clone(),
-                    })
+                    Some(TzapOrganizationDeviceRetirement { org_id: org_id.clone(), login_organization_device_id: login_organization_device_id.clone(), sign_device_id: record.sign_device_id.clone() })
                 }
             })
             .collect()
@@ -236,10 +215,7 @@ impl TzapEnrolledCertificateRecord {
             TzapSignDeviceRouting::Personal => {}
             TzapSignDeviceRouting::Organization { org_id, login_organization_device_id } => {
                 validate_non_empty_id("sign_device_routing.org_id", org_id)?;
-                validate_non_empty_id(
-                    "sign_device_routing.login_organization_device_id",
-                    login_organization_device_id,
-                )?;
+                validate_non_empty_id("sign_device_routing.login_organization_device_id", login_organization_device_id)?;
             }
         }
         validate_non_empty_id("signing_key_id", &self.signing_key_id)?;
@@ -259,9 +235,7 @@ impl TzapCertificateStatusCacheRecord {
     pub fn validate(&self) -> Result<(), TzapLocalIdentityStoreError> {
         validate_sha256("certificate_status_cache.certificate_sha256", &self.certificate_sha256)?;
         if self.this_update_unix_seconds >= self.next_update_unix_seconds {
-            return Err(TzapLocalIdentityStoreError::InvalidField {
-                field: "certificate_status_cache.freshness_window",
-            });
+            return Err(TzapLocalIdentityStoreError::InvalidField { field: "certificate_status_cache.freshness_window" });
         }
         Ok(())
     }
@@ -276,14 +250,8 @@ pub struct TzapEmergencyBlocklistState {
 
 impl TzapEmergencyBlocklistState {
     pub fn validate(&self) -> Result<(), TzapLocalIdentityStoreError> {
-        validate_unique(
-            "emergency_blocklist.blocked_root_sha256",
-            self.blocked_root_sha256.iter().map(String::as_str),
-        )?;
-        validate_unique(
-            "emergency_blocklist.blocked_issuer_sha256",
-            self.blocked_issuer_sha256.iter().map(String::as_str),
-        )?;
+        validate_unique("emergency_blocklist.blocked_root_sha256", self.blocked_root_sha256.iter().map(String::as_str))?;
+        validate_unique("emergency_blocklist.blocked_issuer_sha256", self.blocked_issuer_sha256.iter().map(String::as_str))?;
         for fingerprint in &self.blocked_root_sha256 {
             validate_sha256("emergency_blocklist.blocked_root_sha256", fingerprint)?;
         }
@@ -326,11 +294,7 @@ impl TzapContactRecord {
 pub trait TzapLocalIdentityStore {
     fn load_inventory(&self, account_key: &str) -> Result<TzapLocalIdentityInventory, TzapLocalIdentityStoreError>;
 
-    fn save_inventory(
-        &mut self,
-        account_key: &str,
-        inventory: TzapLocalIdentityInventory,
-    ) -> Result<(), TzapLocalIdentityStoreError>;
+    fn save_inventory(&mut self, account_key: &str, inventory: TzapLocalIdentityInventory) -> Result<(), TzapLocalIdentityStoreError>;
 
     fn clear_inventory(&mut self, account_key: &str) -> Result<(), TzapLocalIdentityStoreError>;
 }
@@ -363,10 +327,7 @@ impl FileTzapLocalIdentityStore {
 
 impl TzapLocalIdentityStore for FileTzapLocalIdentityStore {
     fn load_inventory(&self, account_key: &str) -> Result<TzapLocalIdentityInventory, TzapLocalIdentityStoreError> {
-        use crate::identity_catalog::{
-            FileTzapIdentityCatalogStore, FileTzapSecretMaterialStore, load_inventory_from_catalog,
-            store_inventory_as_catalog,
-        };
+        use crate::identity_catalog::{FileTzapIdentityCatalogStore, FileTzapSecretMaterialStore, load_inventory_from_catalog, store_inventory_as_catalog};
 
         let catalog_store = FileTzapIdentityCatalogStore::new(&self.root);
         let secret_store = FileTzapSecretMaterialStore::new(&self.root, account_key);
@@ -395,14 +356,8 @@ impl TzapLocalIdentityStore for FileTzapLocalIdentityStore {
         Ok(inventory)
     }
 
-    fn save_inventory(
-        &mut self,
-        account_key: &str,
-        inventory: TzapLocalIdentityInventory,
-    ) -> Result<(), TzapLocalIdentityStoreError> {
-        use crate::identity_catalog::{
-            FileTzapIdentityCatalogStore, FileTzapSecretMaterialStore, store_inventory_as_catalog,
-        };
+    fn save_inventory(&mut self, account_key: &str, inventory: TzapLocalIdentityInventory) -> Result<(), TzapLocalIdentityStoreError> {
+        use crate::identity_catalog::{FileTzapIdentityCatalogStore, FileTzapSecretMaterialStore, store_inventory_as_catalog};
 
         inventory.validate()?;
         store_inventory_as_catalog(
@@ -447,11 +402,7 @@ impl TzapLocalIdentityStore for InMemoryTzapLocalIdentityStore {
         Ok(self.inventories.get(account_key).cloned().unwrap_or_else(TzapLocalIdentityInventory::empty))
     }
 
-    fn save_inventory(
-        &mut self,
-        account_key: &str,
-        inventory: TzapLocalIdentityInventory,
-    ) -> Result<(), TzapLocalIdentityStoreError> {
+    fn save_inventory(&mut self, account_key: &str, inventory: TzapLocalIdentityInventory) -> Result<(), TzapLocalIdentityStoreError> {
         validate_non_empty_id("account_key", account_key)?;
         inventory.validate()?;
         self.inventories.insert(account_key.to_owned(), inventory);
@@ -566,22 +517,10 @@ fn inventory_from_json(value: &Value) -> Result<TzapLocalIdentityInventory, Tzap
     }
 
     let inventory = TzapLocalIdentityInventory {
-        device_signing_keys: required_array(object, "device_signing_keys")?
-            .iter()
-            .map(device_signing_key_from_json)
-            .collect::<Result<Vec<_>, _>>()?,
-        recipient_encryption_keys: required_array(object, "recipient_encryption_keys")?
-            .iter()
-            .map(recipient_encryption_key_from_json)
-            .collect::<Result<Vec<_>, _>>()?,
-        enrolled_certificates: required_array(object, "enrolled_certificates")?
-            .iter()
-            .map(enrolled_certificate_from_json)
-            .collect::<Result<Vec<_>, _>>()?,
-        certificate_status_cache: required_array(object, "certificate_status_cache")?
-            .iter()
-            .map(status_cache_from_json)
-            .collect::<Result<Vec<_>, _>>()?,
+        device_signing_keys: required_array(object, "device_signing_keys")?.iter().map(device_signing_key_from_json).collect::<Result<Vec<_>, _>>()?,
+        recipient_encryption_keys: required_array(object, "recipient_encryption_keys")?.iter().map(recipient_encryption_key_from_json).collect::<Result<Vec<_>, _>>()?,
+        enrolled_certificates: required_array(object, "enrolled_certificates")?.iter().map(enrolled_certificate_from_json).collect::<Result<Vec<_>, _>>()?,
+        certificate_status_cache: required_array(object, "certificate_status_cache")?.iter().map(status_cache_from_json).collect::<Result<Vec<_>, _>>()?,
         emergency_blocklist: emergency_blocklist_from_json(required_field(object, "emergency_blocklist")?)?,
         contacts: required_array(object, "contacts")?.iter().map(contact_from_json).collect::<Result<Vec<_>, _>>()?,
     };
@@ -594,28 +533,20 @@ fn device_signing_key_from_json(value: &Value) -> Result<TzapDeviceSigningKeyRec
     Ok(TzapDeviceSigningKeyRecord {
         key_id: required_string(object, "key_id")?,
         public_key_fingerprint: required_string(object, "public_key_fingerprint")?,
-        private_key_der: SecretBytes::from(decode_base64url(
-            required_string(object, "private_key_der")?,
-            "private_key_der",
-        )?),
+        private_key_der: SecretBytes::from(decode_base64url(required_string(object, "private_key_der")?, "private_key_der")?),
         created_at_unix_seconds: required_u64(object, "created_at_unix_seconds")?,
         label: optional_string(object, "label")?,
     })
 }
 
-fn recipient_encryption_key_from_json(
-    value: &Value,
-) -> Result<TzapRecipientEncryptionKeyRecord, TzapLocalIdentityStoreError> {
+fn recipient_encryption_key_from_json(value: &Value) -> Result<TzapRecipientEncryptionKeyRecord, TzapLocalIdentityStoreError> {
     let object = json_object(value, "recipient_encryption_keys[]")?;
     Ok(TzapRecipientEncryptionKeyRecord {
         key_id: required_string(object, "key_id")?,
         algorithm: required_string(object, "algorithm")?,
         public_key_fingerprint: required_string(object, "public_key_fingerprint")?,
         public_key_der: decode_base64url(required_string(object, "public_key_der")?, "public_key_der")?,
-        private_key_der: SecretBytes::from(decode_base64url(
-            required_string(object, "private_key_der")?,
-            "private_key_der",
-        )?),
+        private_key_der: SecretBytes::from(decode_base64url(required_string(object, "private_key_der")?, "private_key_der")?),
         created_at_unix_seconds: required_u64(object, "created_at_unix_seconds")?,
         label: optional_string(object, "label")?,
     })
@@ -629,15 +560,10 @@ fn enrolled_certificate_from_json(value: &Value) -> Result<TzapEnrolledCertifica
         issuer_certificate_sha256: required_string(object, "issuer_certificate_sha256")?,
         issuer_key_identifier: required_string(object, "issuer_key_identifier")?,
         serial_number: required_string(object, "serial_number")?,
-        leaf_certificate_der: decode_base64url(
-            required_string(object, "leaf_certificate_der")?,
-            "leaf_certificate_der",
-        )?,
+        leaf_certificate_der: decode_base64url(required_string(object, "leaf_certificate_der")?, "leaf_certificate_der")?,
         intermediate_chain_der: required_array(object, "intermediate_chain_der")?
             .iter()
-            .map(|value| {
-                decode_base64url(required_string_value(value, "intermediate_chain_der[]")?, "intermediate_chain_der")
-            })
+            .map(|value| decode_base64url(required_string_value(value, "intermediate_chain_der[]")?, "intermediate_chain_der"))
             .collect::<Result<Vec<_>, _>>()?,
         not_before_unix_seconds: required_u64(object, "not_before_unix_seconds")?,
         not_after_unix_seconds: required_u64(object, "not_after_unix_seconds")?,
@@ -645,8 +571,7 @@ fn enrolled_certificate_from_json(value: &Value) -> Result<TzapEnrolledCertifica
         sign_device_id: required_string(object, "sign_device_id")?,
         sign_device_routing: routing_from_json(required_field(object, "sign_device_routing")?)?,
         signing_key_id: required_string(object, "signing_key_id")?,
-        state: TzapLocalCertificateState::from_wire_value(&required_string(object, "state")?)
-            .ok_or(TzapLocalIdentityStoreError::InvalidField { field: "state" })?,
+        state: TzapLocalCertificateState::from_wire_value(&required_string(object, "state")?).ok_or(TzapLocalIdentityStoreError::InvalidField { field: "state" })?,
     })
 }
 
@@ -654,9 +579,7 @@ fn status_cache_from_json(value: &Value) -> Result<TzapCertificateStatusCacheRec
     let object = json_object(value, "certificate_status_cache[]")?;
     Ok(TzapCertificateStatusCacheRecord {
         certificate_sha256: required_string(object, "certificate_sha256")?,
-        status: required_string(object, "status")?
-            .parse::<TzapCertificateStatus>()
-            .map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "status" })?,
+        status: required_string(object, "status")?.parse::<TzapCertificateStatus>().map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "status" })?,
         this_update_unix_seconds: required_u64(object, "this_update_unix_seconds")?,
         next_update_unix_seconds: required_u64(object, "next_update_unix_seconds")?,
     })
@@ -665,14 +588,8 @@ fn status_cache_from_json(value: &Value) -> Result<TzapCertificateStatusCacheRec
 fn emergency_blocklist_from_json(value: &Value) -> Result<TzapEmergencyBlocklistState, TzapLocalIdentityStoreError> {
     let object = json_object(value, "emergency_blocklist")?;
     Ok(TzapEmergencyBlocklistState {
-        blocked_root_sha256: required_array(object, "blocked_root_sha256")?
-            .iter()
-            .map(|value| required_string_value(value, "blocked_root_sha256[]"))
-            .collect::<Result<Vec<_>, _>>()?,
-        blocked_issuer_sha256: required_array(object, "blocked_issuer_sha256")?
-            .iter()
-            .map(|value| required_string_value(value, "blocked_issuer_sha256[]"))
-            .collect::<Result<Vec<_>, _>>()?,
+        blocked_root_sha256: required_array(object, "blocked_root_sha256")?.iter().map(|value| required_string_value(value, "blocked_root_sha256[]")).collect::<Result<Vec<_>, _>>()?,
+        blocked_issuer_sha256: required_array(object, "blocked_issuer_sha256")?.iter().map(|value| required_string_value(value, "blocked_issuer_sha256[]")).collect::<Result<Vec<_>, _>>()?,
         updated_at_unix_seconds: optional_u64(object, "updated_at_unix_seconds")?,
     })
 }
@@ -681,9 +598,7 @@ fn contact_from_json(value: &Value) -> Result<TzapContactRecord, TzapLocalIdenti
     let object = json_object(value, "contacts[]")?;
     let trust_anchor_type = match object.get("trust_anchor_type") {
         Some(Value::Null) | None => trust::TzapTrustAnchorType::Untrusted,
-        Some(_) => required_string(object, "trust_anchor_type")?
-            .parse::<trust::TzapTrustAnchorType>()
-            .map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "trust_anchor_type" })?,
+        Some(_) => required_string(object, "trust_anchor_type")?.parse::<trust::TzapTrustAnchorType>().map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "trust_anchor_type" })?,
     };
     let verification_state = match object.get("verification_state") {
         // Records written before verification-state tracking existed have no
@@ -691,9 +606,7 @@ fn contact_from_json(value: &Value) -> Result<TzapContactRecord, TzapLocalIdenti
         // claim evidence of offline verification that never happened, so
         // treat the state as unknown instead.
         Some(Value::Null) | None => trust::TzapVerificationState::NotRecorded,
-        Some(_) => required_string(object, "verification_state")?
-            .parse::<trust::TzapVerificationState>()
-            .map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "verification_state" })?,
+        Some(_) => required_string(object, "verification_state")?.parse::<trust::TzapVerificationState>().map_err(|()| TzapLocalIdentityStoreError::InvalidField { field: "verification_state" })?,
     };
     let missing_status_caveat = match object.get("missing_status_caveat") {
         Some(Value::Null) | None => true,
@@ -719,8 +632,7 @@ fn public_metadata_from_json(value: &Value) -> Result<TzapCertificatePublicMetad
         public_signer_id: required_string(object, "public_signer_id")?,
         public_org_id: optional_string(object, "public_org_id")?,
         public_device_id: required_string(object, "public_device_id")?,
-        assurance_level: trust::TzapIdentityAssurance::parse(&required_string(object, "assurance_level")?)
-            .ok_or(TzapLocalIdentityStoreError::InvalidField { field: "assurance_level" })?,
+        assurance_level: trust::TzapIdentityAssurance::parse(&required_string(object, "assurance_level")?).ok_or(TzapLocalIdentityStoreError::InvalidField { field: "assurance_level" })?,
         policy_oid: required_string(object, "policy_oid")?,
     })
 }
@@ -729,10 +641,9 @@ fn routing_from_json(value: &Value) -> Result<TzapSignDeviceRouting, TzapLocalId
     let object = json_object(value, "sign_device_routing")?;
     match required_string(object, "kind")?.as_str() {
         "personal" => Ok(TzapSignDeviceRouting::Personal),
-        "organization" => Ok(TzapSignDeviceRouting::Organization {
-            org_id: required_string(object, "org_id")?,
-            login_organization_device_id: required_string(object, "login_organization_device_id")?,
-        }),
+        "organization" => {
+            Ok(TzapSignDeviceRouting::Organization { org_id: required_string(object, "org_id")?, login_organization_device_id: required_string(object, "login_organization_device_id")? })
+        }
         _ => Err(TzapLocalIdentityStoreError::InvalidField { field: "sign_device_routing.kind" }),
     }
 }
@@ -741,11 +652,7 @@ fn validate_account_key(account_key: &str) -> Result<(), TzapLocalIdentityStoreE
     // Shared with the identity catalog so both stores accept the same
     // account keys: non-empty and free of path separators and traversal
     // markers, but otherwise unrestricted.
-    if crate::identity_catalog::validate_account_key(account_key) {
-        Ok(())
-    } else {
-        Err(TzapLocalIdentityStoreError::InvalidField { field: "account_key" })
-    }
+    if crate::identity_catalog::validate_account_key(account_key) { Ok(()) } else { Err(TzapLocalIdentityStoreError::InvalidField { field: "account_key" }) }
 }
 
 fn decode_base64url(value: String, field: &'static str) -> Result<Vec<u8>, TzapLocalIdentityStoreError> {
@@ -787,10 +694,7 @@ fn validate_non_empty_bytes(field: &'static str, value: &[u8]) -> Result<(), Tza
     if value.is_empty() { Err(TzapLocalIdentityStoreError::InvalidField { field }) } else { Ok(()) }
 }
 
-fn validate_unique<'a>(
-    field: &'static str,
-    values: impl Iterator<Item = &'a str>,
-) -> Result<(), TzapLocalIdentityStoreError> {
+fn validate_unique<'a>(field: &'static str, values: impl Iterator<Item = &'a str>) -> Result<(), TzapLocalIdentityStoreError> {
     let mut seen = HashSet::new();
     for value in values {
         if !seen.insert(value) {
@@ -803,15 +707,11 @@ fn validate_unique<'a>(
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, FileTzapLocalIdentityStore, InMemoryTzapLocalIdentityStore,
-        TzapCertificateStatusCacheRecord, TzapContactRecord, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState,
-        TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore,
-        TzapLocalIdentityStoreError, TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
+        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, FileTzapLocalIdentityStore, InMemoryTzapLocalIdentityStore, TzapCertificateStatusCacheRecord, TzapContactRecord, TzapDeviceSigningKeyRecord,
+        TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapLocalIdentityStoreError,
+        TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
     };
-    use crate::device_identity::{
-        TzapDeviceCsrOptions, ensure_recipient_key_is_distinct_from_signing_key, generate_device_signing_key_and_csr,
-        generate_recipient_encryption_key,
-    };
+    use crate::device_identity::{TzapDeviceCsrOptions, ensure_recipient_key_is_distinct_from_signing_key, generate_device_signing_key_and_csr, generate_recipient_encryption_key};
     use crate::secrets::SecretBytes;
     use crate::test_support::TestDir;
     use crate::trust::{self, TzapCertificatePublicMetadata, TzapCertificateStatus};
@@ -831,10 +731,7 @@ mod tests {
         assert_eq!(format!("{:?}", loaded.device_signing_keys[0].private_key_der), "SecretBytes([redacted])");
 
         store.clear_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
-        assert_eq!(
-            store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap(),
-            TzapLocalIdentityInventory::empty()
-        );
+        assert_eq!(store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap(), TzapLocalIdentityInventory::empty());
     }
 
     #[test]
@@ -843,11 +740,7 @@ mod tests {
         let mut store = FileTzapLocalIdentityStore::new(temp_dir.path(""));
         let signing_key = generate_device_signing_key_and_csr(&TzapDeviceCsrOptions::default()).unwrap();
         let recipient_key = generate_recipient_encryption_key().unwrap();
-        ensure_recipient_key_is_distinct_from_signing_key(
-            &signing_key.public_key_fingerprint,
-            &recipient_key.public_key_fingerprint,
-        )
-        .unwrap();
+        ensure_recipient_key_is_distinct_from_signing_key(&signing_key.public_key_fingerprint, &recipient_key.public_key_fingerprint).unwrap();
 
         let inventory = TzapLocalIdentityInventory {
             device_signing_keys: vec![TzapDeviceSigningKeyRecord {
@@ -918,12 +811,8 @@ mod tests {
 
         assert_eq!(store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap(), expected);
 
-        let leftovers = fs::read_dir(temp_dir.path(""))
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains("tmp-"))
-            .collect::<Vec<_>>();
+        let leftovers =
+            fs::read_dir(temp_dir.path("")).unwrap().filter_map(Result::ok).map(|entry| entry.file_name().to_string_lossy().into_owned()).filter(|name| name.contains("tmp-")).collect::<Vec<_>>();
         assert!(leftovers.is_empty(), "temporary sibling files should be cleaned up: {leftovers:?}");
     }
 
@@ -1010,8 +899,7 @@ mod tests {
     #[test]
     fn identity_inventory_rejects_recipient_key_reusing_signing_key_fingerprint() {
         let mut inventory = valid_inventory();
-        inventory.recipient_encryption_keys[0].public_key_fingerprint =
-            inventory.device_signing_keys[0].public_key_fingerprint.clone();
+        inventory.recipient_encryption_keys[0].public_key_fingerprint = inventory.device_signing_keys[0].public_key_fingerprint.clone();
 
         assert!(matches!(
             inventory.validate(),
@@ -1035,10 +923,7 @@ mod tests {
             not_after_unix_seconds: 200,
             public_metadata: public_metadata(),
             sign_device_id: "org-sign-device-1".to_owned(),
-            sign_device_routing: TzapSignDeviceRouting::Organization {
-                org_id: "org_123".to_owned(),
-                login_organization_device_id: "login-org-device-1".to_owned(),
-            },
+            sign_device_routing: TzapSignDeviceRouting::Organization { org_id: "org_123".to_owned(), login_organization_device_id: "login-org-device-1".to_owned() },
             signing_key_id: "device-key-1".to_owned(),
             state: TzapLocalCertificateState::Active,
         });
@@ -1112,11 +997,7 @@ mod tests {
                 this_update_unix_seconds: 120,
                 next_update_unix_seconds: 180,
             }],
-            emergency_blocklist: TzapEmergencyBlocklistState {
-                blocked_root_sha256: vec![canonical_sha(0x05)],
-                blocked_issuer_sha256: vec![canonical_sha(0x06)],
-                updated_at_unix_seconds: Some(110),
-            },
+            emergency_blocklist: TzapEmergencyBlocklistState { blocked_root_sha256: vec![canonical_sha(0x05)], blocked_issuer_sha256: vec![canonical_sha(0x06)], updated_at_unix_seconds: Some(110) },
             contacts: vec![TzapContactRecord {
                 contact_id: "contact-1".to_owned(),
                 display_name: "Ada".to_owned(),

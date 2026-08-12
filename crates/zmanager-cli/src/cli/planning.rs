@@ -3,11 +3,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use zmanager_core::safety::archive_pattern_matches;
-pub(crate) fn append_files_from(
-    sources: &mut Vec<PathBuf>,
-    files_from: &[String],
-    null_paths: bool,
-) -> Result<(), String> {
+pub(crate) fn append_files_from(sources: &mut Vec<PathBuf>, files_from: &[String], null_paths: bool) -> Result<(), String> {
     for list in files_from {
         if list == "-" {
             append_stdin_paths(sources, null_paths)?;
@@ -21,9 +17,7 @@ pub(crate) fn append_files_from(
 
 pub(crate) fn append_stdin_paths(sources: &mut Vec<PathBuf>, null_paths: bool) -> Result<(), String> {
     let mut bytes = Vec::new();
-    io::read_to_string(io::stdin())
-        .map(|value| bytes = value.into_bytes())
-        .map_err(|error| format!("failed to read path list from stdin: {error}"))?;
+    io::read_to_string(io::stdin()).map(|value| bytes = value.into_bytes()).map_err(|error| format!("failed to read path list from stdin: {error}"))?;
     append_path_bytes(sources, &bytes, null_paths)
 }
 
@@ -45,12 +39,7 @@ fn append_path_bytes(sources: &mut Vec<PathBuf>, bytes: &[u8], null_paths: bool)
     Ok(())
 }
 
-pub(crate) fn plan_sources(
-    sources: &[PathBuf],
-    clean: bool,
-    no_ignore: bool,
-    follow_symlinks: bool,
-) -> Result<zmanager_core::manifest::ArchiveManifest, zmanager_core::manifest::PlanError> {
+pub(crate) fn plan_sources(sources: &[PathBuf], clean: bool, no_ignore: bool, follow_symlinks: bool) -> Result<zmanager_core::manifest::ArchiveManifest, zmanager_core::manifest::PlanError> {
     use zmanager_core::manifest::{ExclusionProfile, PlanOptions};
 
     let mut options = if no_ignore {
@@ -77,32 +66,19 @@ pub(crate) fn apply_manifest_filters(
 ) -> Result<(), String> {
     let mut exclude_patterns = excludes.to_vec();
     for file in exclude_from {
-        let contents =
-            fs::read_to_string(file).map_err(|error| format!("failed to read {}: {error}", file.display()))?;
-        exclude_patterns.extend(
-            contents
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(ToOwned::to_owned),
-        );
+        let contents = fs::read_to_string(file).map_err(|error| format!("failed to read {}: {error}", file.display()))?;
+        exclude_patterns.extend(contents.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with('#')).map(ToOwned::to_owned));
     }
 
     manifest.entries.retain(|entry| {
         let path = &entry.archive_path;
-        let explicitly_included =
-            !includes.is_empty() && includes.iter().any(|pattern| archive_pattern_matches(pattern, path));
+        let explicitly_included = !includes.is_empty() && includes.iter().any(|pattern| archive_pattern_matches(pattern, path));
         let matches_include = includes.is_empty() || explicitly_included;
         let matches_exclude = exclude_patterns.iter().any(|pattern| archive_pattern_matches(pattern, path));
         let hidden_excluded = exclude_hidden && archive_path_has_hidden_component(path) && !explicitly_included;
         matches_include && !matches_exclude && !hidden_excluded
     });
-    manifest.total_bytes = manifest
-        .entries
-        .iter()
-        .filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File)
-        .map(|entry| entry.size)
-        .sum();
+    manifest.total_bytes = manifest.entries.iter().filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File).map(|entry| entry.size).sum();
     Ok(())
 }
 
@@ -123,9 +99,7 @@ pub(crate) fn apply_junk_paths(manifest: &mut zmanager_core::manifest::ArchiveMa
             continue;
         }
 
-        let Some(name) =
-            entry.archive_path.trim_end_matches('/').rsplit('/').find(|part| !part.is_empty()).map(ToOwned::to_owned)
-        else {
+        let Some(name) = entry.archive_path.trim_end_matches('/').rsplit('/').find(|part| !part.is_empty()).map(ToOwned::to_owned) else {
             return Err(format!("cannot derive junk path for archive entry {}", entry.archive_path));
         };
         let source_path = entry.source_path.display().to_string();
@@ -138,11 +112,6 @@ pub(crate) fn apply_junk_paths(manifest: &mut zmanager_core::manifest::ArchiveMa
 
     flattened.sort_by(|left, right| left.archive_path.cmp(&right.archive_path));
     manifest.entries = flattened;
-    manifest.total_bytes = manifest
-        .entries
-        .iter()
-        .filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File)
-        .map(|entry| entry.size)
-        .sum();
+    manifest.total_bytes = manifest.entries.iter().filter(|entry| entry.file_type == zmanager_core::manifest::ManifestFileType::File).map(|entry| entry.size).sum();
     Ok(())
 }

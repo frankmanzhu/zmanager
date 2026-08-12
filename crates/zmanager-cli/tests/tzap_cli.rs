@@ -13,17 +13,13 @@ fn auth_login_callback_status_and_forget_keep_session_secret_out_of_output() {
     let temp = TestDir::new("zm_tzap_auth");
     let state_dir = temp.path("state");
 
-    let login = zm()
-        .args(["auth", "login", "--environment", "local", "--state-dir", state_dir.to_str().unwrap(), "--json"])
-        .output()
-        .unwrap();
+    let login = zm().args(["auth", "login", "--environment", "local", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
     assert_success("auth login", &login);
     let login_stdout = String::from_utf8_lossy(&login.stdout);
     assert!(login_stdout.contains("\"status\":\"pending\""));
     assert!(login_stdout.contains("http://localhost:8787/auth/launch"));
 
-    let pending: serde_json::Value =
-        serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
+    let pending: serde_json::Value = serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
     assert_owner_only_file(state_dir.join("auth-pending.json"));
     let state = pending["state"].as_str().unwrap();
     let relay = temp.path("relay.json");
@@ -33,20 +29,7 @@ fn auth_login_callback_status_and_forget_keep_session_secret_out_of_output() {
     )
     .unwrap();
 
-    let callback = zm()
-        .args([
-            "auth",
-            "callback",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "--state",
-            state,
-            "--relay-body",
-            relay.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
+    let callback = zm().args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"]).output().unwrap();
     assert_success("auth callback", &callback);
     let callback_stdout = String::from_utf8_lossy(&callback.stdout);
     assert!(callback_stdout.contains("\"authenticated\":true"));
@@ -69,13 +52,9 @@ fn auth_callback_fails_when_session_cannot_be_persisted() {
     let temp = TestDir::new("zm_tzap_auth_store_failure");
     let state_dir = temp.path("state");
 
-    let login = zm()
-        .args(["auth", "login", "--environment", "local", "--state-dir", state_dir.to_str().unwrap(), "--json"])
-        .output()
-        .unwrap();
+    let login = zm().args(["auth", "login", "--environment", "local", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
     assert_success("auth login", &login);
-    let pending: serde_json::Value =
-        serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
+    let pending: serde_json::Value = serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
     let state = pending["state"].as_str().unwrap();
     fs::create_dir_all(state_dir.join("auth-session.json")).unwrap();
 
@@ -86,20 +65,7 @@ fn auth_callback_fails_when_session_cannot_be_persisted() {
     )
     .unwrap();
 
-    let callback = zm()
-        .args([
-            "auth",
-            "callback",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "--state",
-            state,
-            "--relay-body",
-            relay.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
+    let callback = zm().args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"]).output().unwrap();
 
     assert_failure("auth callback with unwritable session path", &callback);
     let stdout = String::from_utf8_lossy(&callback.stdout);
@@ -156,12 +122,7 @@ fn auth_callback_exchanges_handoff_code_without_printing_session_secret() {
         assert!(request.contains("\"handoff_code\":\"handoff-123\""));
         assert!(request.contains("\"client_id\":\"test-client\""));
         let body = br#"{"user_id":"user-1","session_id":"login-session-2","session_token":"exchanged-secret-token","audience":"sign.tzap.org","expires_at":"2099-01-01T00:00:00Z","identity_assurance_level":"oauth_verified_email"}"#;
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )
-        .unwrap();
+        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
         stream.write_all(body).unwrap();
     });
 
@@ -182,23 +143,11 @@ fn auth_callback_exchanges_handoff_code_without_printing_session_secret() {
         .output()
         .unwrap();
     assert_success("auth login", &login);
-    let pending: serde_json::Value =
-        serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
+    let pending: serde_json::Value = serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
     let state = pending["state"].as_str().unwrap();
     let callback_url = format!("tzap://auth/email/callback?state={state}&handoff_code=handoff-123");
 
-    let callback = zm()
-        .args([
-            "auth",
-            "callback",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "--callback-url",
-            &callback_url,
-            "--json",
-        ])
-        .output()
-        .unwrap();
+    let callback = zm().args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--callback-url", &callback_url, "--json"]).output().unwrap();
     assert_success("auth callback exchange", &callback);
     server.join().unwrap();
     let stdout = String::from_utf8_lossy(&callback.stdout);
@@ -220,48 +169,20 @@ fn verify_accepts_custom_trust_root_certificate_file() {
     let envelope = temp.path("envelope.json");
     fs::write(&payload, br#"{"tzap_payload_version":1,"title":"Root cert verification"}"#).unwrap();
     let sign = zm()
-        .args([
-            "sign",
-            payload.to_str().unwrap(),
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "--certificate-id",
-            certificate_id,
-            "--output",
-            envelope.to_str().unwrap(),
-            "--json",
-        ])
+        .args(["sign", payload.to_str().unwrap(), "--state-dir", state_dir.to_str().unwrap(), "--certificate-id", certificate_id, "--output", envelope.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
     assert_success("sign", &sign);
 
     // The identity store now persists through the catalog; the chain is the
     // concatenated leaf + intermediates, so the root is the last element.
-    let catalog: serde_json::Value =
-        serde_json::from_slice(&fs::read(state_dir.join("default.identity-catalog.json")).unwrap()).unwrap();
-    let identity = catalog["signing_identities"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|identity| identity["certificate_id"].is_string())
-        .unwrap();
-    let root_der: Vec<u8> = identity["certificate_chain_der"]
-        .as_array()
-        .unwrap()
-        .last()
-        .unwrap()
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|byte| u8::try_from(byte.as_u64().unwrap()).unwrap())
-        .collect();
+    let catalog: serde_json::Value = serde_json::from_slice(&fs::read(state_dir.join("default.identity-catalog.json")).unwrap()).unwrap();
+    let identity = catalog["signing_identities"].as_array().unwrap().iter().find(|identity| identity["certificate_id"].is_string()).unwrap();
+    let root_der: Vec<u8> = identity["certificate_chain_der"].as_array().unwrap().last().unwrap().as_array().unwrap().iter().map(|byte| u8::try_from(byte.as_u64().unwrap()).unwrap()).collect();
     let root_path = temp.path("root.der");
     fs::write(&root_path, root_der).unwrap();
 
-    let verify = zm()
-        .args(["verify", envelope.to_str().unwrap(), "--custom-trust-root-cert", root_path.to_str().unwrap(), "--json"])
-        .output()
-        .unwrap();
+    let verify = zm().args(["verify", envelope.to_str().unwrap(), "--custom-trust-root-cert", root_path.to_str().unwrap(), "--json"]).output().unwrap();
     assert_success("verify with root cert", &verify);
     let stdout = String::from_utf8_lossy(&verify.stdout);
     assert!(stdout.contains("\"state\":\"cryptographically_intact_offline\""));
@@ -283,8 +204,7 @@ fn verify_json_reports_invalid_without_claiming_official_validity() {
 }
 
 fn request_is_complete(request: &[u8]) -> bool {
-    let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n").map(|position| position + 4)
-    else {
+    let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n").map(|position| position + 4) else {
         return false;
     };
     let headers = String::from_utf8_lossy(&request[..header_end]);
@@ -300,13 +220,9 @@ fn zm() -> Command {
 }
 
 fn sign_in_with_fake_relay(temp: &TestDir, state_dir: &std::path::Path) {
-    let login = zm()
-        .args(["auth", "login", "--environment", "local", "--state-dir", state_dir.to_str().unwrap(), "--json"])
-        .output()
-        .unwrap();
+    let login = zm().args(["auth", "login", "--environment", "local", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
     assert_success("auth login", &login);
-    let pending: serde_json::Value =
-        serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
+    let pending: serde_json::Value = serde_json::from_slice(&fs::read(state_dir.join("auth-pending.json")).unwrap()).unwrap();
     let state = pending["state"].as_str().unwrap();
     let relay = temp.path("relay.json");
     fs::write(
@@ -314,19 +230,6 @@ fn sign_in_with_fake_relay(temp: &TestDir, state_dir: &std::path::Path) {
         br#"{"status":"ok","session":{"audience":"sign.tzap.org","access_token":"secret-token","expires_at_unix_seconds":9999999999,"identity_assurance":"oauth_verified_email","selected_org_id":null,"login_session_id":"login-session-1"}}"#,
     )
     .unwrap();
-    let callback = zm()
-        .args([
-            "auth",
-            "callback",
-            "--state-dir",
-            state_dir.to_str().unwrap(),
-            "--state",
-            state,
-            "--relay-body",
-            relay.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
+    let callback = zm().args(["auth", "callback", "--state-dir", state_dir.to_str().unwrap(), "--state", state, "--relay-body", relay.to_str().unwrap(), "--json"]).output().unwrap();
     assert_success("auth callback", &callback);
 }

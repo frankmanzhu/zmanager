@@ -1,6 +1,4 @@
-use crate::gitignore::{
-    GitignoreRule, gitignore_decision, gitignore_has_later_negated_descendant, read_gitignore_rules,
-};
+use crate::gitignore::{GitignoreRule, gitignore_decision, gitignore_has_later_negated_descendant, read_gitignore_rules};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, Metadata};
@@ -41,13 +39,7 @@ impl ArchiveManifest {
     /// Formats a compact summary suitable for CLI output.
     #[must_use]
     pub fn summary(&self) -> String {
-        format!(
-            "planned {} entries, {} bytes, {} excluded, {} warnings",
-            self.included_count(),
-            self.total_bytes,
-            self.excluded_count(),
-            self.warnings.len()
-        )
+        format!("planned {} entries, {} bytes, {} excluded, {} warnings", self.included_count(), self.total_bytes, self.excluded_count(), self.warnings.len())
     }
 }
 
@@ -245,19 +237,8 @@ where
     plan_archive_roots(roots, manifest_root, options)
 }
 
-fn plan_archive_roots(
-    roots: impl IntoIterator<Item = PathBuf>,
-    manifest_root: PathBuf,
-    options: &PlanOptions,
-) -> Result<ArchiveManifest, PlanError> {
-    let mut planner = ManifestPlanner {
-        options,
-        entries: Vec::new(),
-        excluded_entries: Vec::new(),
-        warnings: Vec::new(),
-        total_bytes: 0,
-        excluded_bytes: 0,
-    };
+fn plan_archive_roots(roots: impl IntoIterator<Item = PathBuf>, manifest_root: PathBuf, options: &PlanOptions) -> Result<ArchiveManifest, PlanError> {
+    let mut planner = ManifestPlanner { options, entries: Vec::new(), excluded_entries: Vec::new(), warnings: Vec::new(), total_bytes: 0, excluded_bytes: 0 };
 
     for root in roots {
         let root_name = archive_file_name(&root)?;
@@ -281,11 +262,7 @@ fn plan_archive_roots(
 
 fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
     let first_parent = paths.first()?.parent()?.to_path_buf();
-    if paths.iter().all(|path| path.parent().is_some_and(|parent| parent == first_parent)) {
-        Some(first_parent)
-    } else {
-        None
-    }
+    if paths.iter().all(|path| path.parent().is_some_and(|parent| parent == first_parent)) { Some(first_parent) } else { None }
 }
 
 struct ManifestPlanner<'a> {
@@ -298,20 +275,11 @@ struct ManifestPlanner<'a> {
 }
 
 impl ManifestPlanner<'_> {
-    fn walk(
-        &mut self,
-        source_path: &Path,
-        archive_path: String,
-        depth: usize,
-        gitignore_rules: &[GitignoreRule],
-        active_dirs: &mut Vec<PathBuf>,
-    ) -> Result<(), PlanError> {
+    fn walk(&mut self, source_path: &Path, archive_path: String, depth: usize, gitignore_rules: &[GitignoreRule], active_dirs: &mut Vec<PathBuf>) -> Result<(), PlanError> {
         let metadata = if self.options.follow_symlinks {
-            fs::metadata(source_path)
-                .map_err(|source| PlanError::Metadata { path: source_path.to_path_buf(), source })?
+            fs::metadata(source_path).map_err(|source| PlanError::Metadata { path: source_path.to_path_buf(), source })?
         } else {
-            fs::symlink_metadata(source_path)
-                .map_err(|source| PlanError::Metadata { path: source_path.to_path_buf(), source })?
+            fs::symlink_metadata(source_path).map_err(|source| PlanError::Metadata { path: source_path.to_path_buf(), source })?
         };
         let file_type = manifest_file_type(&metadata);
 
@@ -320,12 +288,7 @@ impl ManifestPlanner<'_> {
         {
             let size = estimate_regular_file_bytes(&metadata, file_type);
             self.excluded_bytes = self.excluded_bytes.saturating_add(size);
-            self.excluded_entries.push(ExcludedEntry {
-                archive_path,
-                source_path: source_path.to_path_buf(),
-                reason,
-                size,
-            });
+            self.excluded_entries.push(ExcludedEntry { archive_path, source_path: source_path.to_path_buf(), reason, size });
             return Ok(());
         }
 
@@ -341,10 +304,7 @@ impl ManifestPlanner<'_> {
             let active_dir_marker = if self.options.follow_symlinks {
                 match fs::canonicalize(source_path) {
                     Ok(canonical) if active_dirs.contains(&canonical) => {
-                        self.warnings.push(ManifestWarning {
-                            source_path: source_path.to_path_buf(),
-                            message: "skipped symlink directory loop".to_owned(),
-                        });
+                        self.warnings.push(ManifestWarning { source_path: source_path.to_path_buf(), message: "skipped symlink directory loop".to_owned() });
                         return Ok(());
                     }
                     Ok(canonical) => {
@@ -386,13 +346,7 @@ impl ManifestPlanner<'_> {
         Ok(())
     }
 
-    fn exclusion_reason(
-        &self,
-        source_path: &Path,
-        archive_path: &str,
-        file_type: ManifestFileType,
-        gitignore_rules: &[GitignoreRule],
-    ) -> Option<String> {
+    fn exclusion_reason(&self, source_path: &Path, archive_path: &str, file_type: ManifestFileType, gitignore_rules: &[GitignoreRule]) -> Option<String> {
         let file_name = source_path.file_name()?.to_string_lossy();
 
         if self.is_explicitly_included(archive_path) {
@@ -427,9 +381,7 @@ impl ManifestPlanner<'_> {
             && let Some((ignored, rule_index)) = gitignore_decision(archive_path, file_type, gitignore_rules)
             && ignored
         {
-            if file_type == ManifestFileType::Directory
-                && gitignore_has_later_negated_descendant(archive_path, gitignore_rules, rule_index)
-            {
+            if file_type == ManifestFileType::Directory && gitignore_has_later_negated_descendant(archive_path, gitignore_rules, rule_index) {
                 return None;
             }
             return Some("ignored by .gitignore".to_owned());
@@ -503,22 +455,14 @@ fn archive_file_name(path: &Path) -> Result<String, PlanError> {
     Ok(file_name.to_string_lossy().into_owned())
 }
 
-fn build_entry(
-    source_path: &Path,
-    archive_path: String,
-    metadata: &Metadata,
-    warnings: &mut Vec<ManifestWarning>,
-) -> ManifestEntry {
+fn build_entry(source_path: &Path, archive_path: String, metadata: &Metadata, warnings: &mut Vec<ManifestWarning>) -> ManifestEntry {
     let file_type = manifest_file_type(metadata);
     let size = if file_type == ManifestFileType::File { metadata.len() } else { 0 };
     let symlink_target = if file_type == ManifestFileType::Symlink {
         match fs::read_link(source_path) {
             Ok(target) => Some(target),
             Err(error) => {
-                warnings.push(ManifestWarning {
-                    source_path: source_path.to_path_buf(),
-                    message: format!("failed to read symlink target: {error}"),
-                });
+                warnings.push(ManifestWarning { source_path: source_path.to_path_buf(), message: format!("failed to read symlink target: {error}") });
                 None
             }
         }
@@ -526,15 +470,7 @@ fn build_entry(
         None
     };
 
-    ManifestEntry {
-        archive_path,
-        source_path: source_path.to_path_buf(),
-        file_type,
-        size,
-        modified: metadata.modified().ok(),
-        permissions: permission_snapshot(metadata),
-        symlink_target,
-    }
+    ManifestEntry { archive_path, source_path: source_path.to_path_buf(), file_type, size, modified: metadata.modified().ok(), permissions: permission_snapshot(metadata), symlink_target }
 }
 
 fn manifest_file_type(metadata: &Metadata) -> ManifestFileType {
@@ -571,20 +507,14 @@ fn record_archive_path_collisions(entries: &[ManifestEntry], warnings: &mut Vec<
         // the manifest warns about the same collisions extraction rejects.
         let collision_key = crate::safety::case_collision_key(&entry.archive_path);
         if let Some(previous_path) = seen_paths.insert(collision_key, &entry.archive_path) {
-            warnings.push(ManifestWarning {
-                source_path: entry.source_path.clone(),
-                message: format!("archive path may collide with {previous_path} on case-insensitive file systems"),
-            });
+            warnings.push(ManifestWarning { source_path: entry.source_path.clone(), message: format!("archive path may collide with {previous_path} on case-insensitive file systems") });
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ManifestEntry, ManifestFileType, PermissionSnapshot, PlanOptions, plan_archive, plan_archives,
-        record_archive_path_collisions,
-    };
+    use super::{ManifestEntry, ManifestFileType, PermissionSnapshot, PlanOptions, plan_archive, plan_archives, record_archive_path_collisions};
     use crate::test_support::TestDir;
     use std::path::PathBuf;
 
@@ -622,11 +552,7 @@ mod tests {
         temp.write_file("project/cache/b.txt", b"b");
         temp.write_file("project/keep.txt", b"k");
 
-        let options = PlanOptions {
-            exclude_names: vec!["a.log".to_owned()],
-            exclude_archive_paths: vec!["project/cache".to_owned()],
-            ..PlanOptions::default()
-        };
+        let options = PlanOptions { exclude_names: vec!["a.log".to_owned()], exclude_archive_paths: vec!["project/cache".to_owned()], ..PlanOptions::default() };
         let manifest = plan_archive(temp.path("project"), &options).unwrap();
 
         assert_eq!(manifest_paths(&manifest), vec!["project", "project/keep.txt"]);
@@ -648,12 +574,8 @@ mod tests {
         assert_eq!(manifest_paths(&manifest), vec!["project", "project/src", "project/src/main.rs"]);
         assert_eq!(manifest.excluded_count(), 5);
         assert_eq!(manifest.excluded_bytes, 5);
-        assert!(manifest.excluded_entries.iter().any(|entry| {
-            entry.archive_path == "project/node_modules" && entry.reason.contains("clean source") && entry.size == 0
-        }));
-        assert!(manifest.excluded_entries.iter().any(|entry| {
-            entry.archive_path == "project/.DS_Store" && entry.reason.contains("default macOS") && entry.size == 5
-        }));
+        assert!(manifest.excluded_entries.iter().any(|entry| { entry.archive_path == "project/node_modules" && entry.reason.contains("clean source") && entry.size == 0 }));
+        assert!(manifest.excluded_entries.iter().any(|entry| { entry.archive_path == "project/.DS_Store" && entry.reason.contains("default macOS") && entry.size == 5 }));
     }
 
     #[test]
@@ -669,28 +591,9 @@ mod tests {
 
         let manifest = plan_archive(temp.path("project"), &PlanOptions::clean_source()).unwrap();
 
-        assert_eq!(
-            manifest_paths(&manifest),
-            vec![
-                "project",
-                "project/.gitignore",
-                "project/keep.log",
-                "project/src",
-                "project/src/.gitignore",
-                "project/src/lib.rs"
-            ]
-        );
-        assert!(
-            manifest
-                .excluded_entries
-                .iter()
-                .any(|entry| { entry.archive_path == "project/debug.log" && entry.reason == "ignored by .gitignore" })
-        );
-        assert!(
-            manifest.excluded_entries.iter().any(|entry| {
-                entry.archive_path == "project/src/generated" && entry.reason == "ignored by .gitignore"
-            })
-        );
+        assert_eq!(manifest_paths(&manifest), vec!["project", "project/.gitignore", "project/keep.log", "project/src", "project/src/.gitignore", "project/src/lib.rs"]);
+        assert!(manifest.excluded_entries.iter().any(|entry| { entry.archive_path == "project/debug.log" && entry.reason == "ignored by .gitignore" }));
+        assert!(manifest.excluded_entries.iter().any(|entry| { entry.archive_path == "project/src/generated" && entry.reason == "ignored by .gitignore" }));
     }
 
     #[test]
@@ -712,20 +615,12 @@ mod tests {
         let temp = TestDir::new("clean_source_explicit_include_overrides_default_exclusion");
         temp.write_file("project/node_modules/drop/index.js", b"drop");
         temp.write_file("project/node_modules/kept/index.js", b"keep");
-        let options = PlanOptions {
-            include_archive_paths: vec!["project/node_modules/kept/index.js".to_owned()],
-            ..PlanOptions::clean_source()
-        };
+        let options = PlanOptions { include_archive_paths: vec!["project/node_modules/kept/index.js".to_owned()], ..PlanOptions::clean_source() };
 
         let manifest = plan_archive(temp.path("project"), &options).unwrap();
 
-        assert_eq!(
-            manifest_paths(&manifest),
-            vec!["project", "project/node_modules", "project/node_modules/kept", "project/node_modules/kept/index.js"]
-        );
-        assert!(manifest.excluded_entries.iter().any(|entry| {
-            entry.archive_path == "project/node_modules/drop" && entry.reason.contains("clean source")
-        }));
+        assert_eq!(manifest_paths(&manifest), vec!["project", "project/node_modules", "project/node_modules/kept", "project/node_modules/kept/index.js"]);
+        assert!(manifest.excluded_entries.iter().any(|entry| { entry.archive_path == "project/node_modules/drop" && entry.reason.contains("clean source") }));
     }
 
     #[test]
@@ -777,13 +672,8 @@ mod tests {
         let paths = manifest_paths(&manifest);
 
         assert!(paths.contains(&"project/dir/back"), "{paths:?}");
-        assert!(
-            !paths.iter().any(|path| path.contains("back/dir/back")),
-            "symlink directory loop should not recurse indefinitely: {paths:?}"
-        );
-        assert!(manifest.warnings.iter().any(|warning| {
-            warning.source_path == temp.path("project/dir/back") && warning.message == "skipped symlink directory loop"
-        }));
+        assert!(!paths.iter().any(|path| path.contains("back/dir/back")), "symlink directory loop should not recurse indefinitely: {paths:?}");
+        assert!(manifest.warnings.iter().any(|warning| { warning.source_path == temp.path("project/dir/back") && warning.message == "skipped symlink directory loop" }));
     }
 
     #[cfg(unix)]
@@ -815,10 +705,7 @@ mod tests {
 
         let manifest = plan_archive(temp.path("project"), &PlanOptions::default()).unwrap();
 
-        assert_eq!(
-            manifest_paths(&manifest),
-            vec!["project", "project/a.txt", "project/nested", "project/nested/b.txt", "project/z.txt"]
-        );
+        assert_eq!(manifest_paths(&manifest), vec!["project", "project/a.txt", "project/nested", "project/nested/b.txt", "project/z.txt"]);
     }
 
     #[test]
@@ -836,8 +723,7 @@ mod tests {
 
     #[test]
     fn warns_about_duplicate_names_on_case_insensitive_file_systems() {
-        let entries =
-            vec![test_entry("project/README.md"), test_entry("project/between.txt"), test_entry("project/readme.md")];
+        let entries = vec![test_entry("project/README.md"), test_entry("project/between.txt"), test_entry("project/readme.md")];
         let mut warnings = Vec::new();
 
         record_archive_path_collisions(&entries, &mut warnings);

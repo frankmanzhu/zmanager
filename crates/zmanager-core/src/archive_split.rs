@@ -20,10 +20,7 @@ pub(crate) fn split_volume_count(archive_size: u64, volume_size: u64) -> Option<
 /// Collects sibling paths in `directory` whose names `matcher` recognizes,
 /// ordered by the parsed part number. Shared by the zip and 7z volume splits
 /// (CR-122): both previously shipped their own `read_dir` + map skeletons.
-pub(crate) fn existing_volume_paths(
-    directory: &Path,
-    matcher: &mut impl FnMut(&str) -> Option<u32>,
-) -> io::Result<Vec<PathBuf>> {
+pub(crate) fn existing_volume_paths(directory: &Path, matcher: &mut impl FnMut(&str) -> Option<u32>) -> io::Result<Vec<PathBuf>> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -46,10 +43,7 @@ pub(crate) fn existing_volume_paths(
 #[must_use]
 pub(crate) fn unique_paths<'a>(left: &'a [PathBuf], right: &'a [PathBuf]) -> Vec<&'a Path> {
     let mut seen = BTreeSet::new();
-    left.iter()
-        .chain(right.iter())
-        .filter_map(|path| if seen.insert(path.clone()) { Some(path.as_path()) } else { None })
-        .collect()
+    left.iter().chain(right.iter()).filter_map(|path| if seen.insert(path.clone()) { Some(path.as_path()) } else { None }).collect()
 }
 
 /// Returns an error when `path` exists and must not be replaced.
@@ -59,12 +53,8 @@ pub(crate) fn unique_paths<'a>(left: &'a [PathBuf], right: &'a [PathBuf]) -> Vec
 /// `replace_existing` is set; a missing destination is fine.
 pub(crate) fn ensure_file_destination_available(path: &Path, replace_existing: bool) -> io::Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
-        }
-        Ok(_) if !replace_existing => {
-            Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("destination already exists: {}", path.display())))
-        }
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display()))),
+        Ok(_) if !replace_existing => Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("destination already exists: {}", path.display()))),
         Ok(_) => Ok(()),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(source),
@@ -72,11 +62,7 @@ pub(crate) fn ensure_file_destination_available(path: &Path, replace_existing: b
 }
 
 /// Removes every existing volume destination before an overwrite write.
-pub(crate) fn remove_split_destinations_for_replace(
-    destination: &Path,
-    existing_volume_paths: &[PathBuf],
-    replace_existing: bool,
-) -> io::Result<()> {
+pub(crate) fn remove_split_destinations_for_replace(destination: &Path, existing_volume_paths: &[PathBuf], replace_existing: bool) -> io::Result<()> {
     if !replace_existing {
         return Ok(());
     }
@@ -93,9 +79,7 @@ pub(crate) fn remove_split_destinations_for_replace(
 /// for a volume it is about to create.
 pub(crate) fn remove_file_destination_for_replace(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())))
-        }
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display()))),
         Ok(_) => fs::remove_file(path),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(source),

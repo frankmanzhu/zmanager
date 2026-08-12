@@ -75,11 +75,7 @@ pub(crate) enum EntryAction<'a> {
 ///
 /// This is the single skip-warning path — every backend used to inline its
 /// own copy, and 7z's copy dropped the `context.warning` call (CR-121).
-pub(crate) fn skip_entry<R: ExtractReport>(
-    report: &mut R,
-    context: Option<&mut JobContext<'_>>,
-    warning: impl Into<String>,
-) {
+pub(crate) fn skip_entry<R: ExtractReport>(report: &mut R, context: Option<&mut JobContext<'_>>, warning: impl Into<String>) {
     *report.skipped_entries_mut() += 1;
     let warning = warning.into();
     report.warnings_mut().push(warning.clone());
@@ -146,15 +142,9 @@ where
     }
 
     let processed = match decision {
-        ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => materialize(
-            EntryAction::Write(WriteDecision {
-                destination_path: &destination_path,
-                replace_existing,
-                link_target_path: link_target_path.as_deref(),
-            }),
-            report,
-            context.as_deref_mut(),
-        )?,
+        ExtractionDecision::Write { destination_path, replace_existing, link_target_path, .. } => {
+            materialize(EntryAction::Write(WriteDecision { destination_path: &destination_path, replace_existing, link_target_path: link_target_path.as_deref() }), report, context.as_deref_mut())?
+        }
         ExtractionDecision::Skip { reason, .. } => {
             materialize(EntryAction::Skip, report, context.as_deref_mut())?;
             skip_entry(report, context.as_deref_mut(), format!("skipped {}: {reason}", safety_entry.archive_path));
@@ -189,8 +179,7 @@ pub(crate) fn copy_file_entry<E>(
 where
     E: From<JobCancelled>,
 {
-    let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path)
-        .map_err(|source| io_error(source, destination_path))?;
+    let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path).map_err(|source| io_error(source, destination_path))?;
     let mut written_bytes = 0_u64;
 
     loop {
@@ -201,11 +190,7 @@ where
         if read == 0 {
             break;
         }
-        output
-            .file_mut()
-            .map_err(|source| io_error(source, destination_path))?
-            .write_all(&io_buffer[..read])
-            .map_err(|source| io_error(source, destination_path))?;
+        output.file_mut().map_err(|source| io_error(source, destination_path))?.write_all(&io_buffer[..read]).map_err(|source| io_error(source, destination_path))?;
         let read = read as u64;
         written_bytes += read;
         if let Some(context) = context.as_deref_mut() {
@@ -223,10 +208,7 @@ where
 /// `M` is each backend's per-directory record (a `(path, …)` tuple or a
 /// small metadata struct); the backend's `apply` closure destructures it and
 /// maps errors into its own error type.
-pub(crate) fn apply_deferred_directory_metadata<M, E>(
-    directories: &[M],
-    mut apply: impl FnMut(&M) -> Result<(), E>,
-) -> Result<(), E> {
+pub(crate) fn apply_deferred_directory_metadata<M, E>(directories: &[M], mut apply: impl FnMut(&M) -> Result<(), E>) -> Result<(), E> {
     for metadata in directories.iter().rev() {
         apply(metadata)?;
     }

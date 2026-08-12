@@ -82,9 +82,7 @@ pub mod x509_factory {
     use openssl::hash::MessageDigest;
     use openssl::nid::Nid;
     use openssl::pkey::{PKey, PKeyRef, Private};
-    use openssl::x509::extension::{
-        AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectKeyIdentifier,
-    };
+    use openssl::x509::extension::{AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectKeyIdentifier};
     use openssl::x509::{X509, X509Extension, X509Ref};
     use serde_json::json;
 
@@ -108,12 +106,7 @@ pub mod x509_factory {
         let platform = intermediate_certificate(&platform_key, root.as_ref(), root_key.as_ref(), root.as_ref());
         let leaf = leaf_certificate(&leaf_key, platform.as_ref(), platform_key.as_ref(), platform.as_ref(), config);
         let root_der = root.to_der().unwrap();
-        CertificateFixture {
-            chain_der: vec![leaf.to_der().unwrap(), platform.to_der().unwrap(), root_der.clone()],
-            leaf_key,
-            root_sha256: crate::trust::sha256_identifier(&root_der),
-            root_der,
-        }
+        CertificateFixture { chain_der: vec![leaf.to_der().unwrap(), platform.to_der().unwrap(), root_der.clone()], leaf_key, root_sha256: crate::trust::sha256_identifier(&root_der), root_der }
     }
 
     pub fn root_certificate(key: &PKeyRef<Private>) -> X509 {
@@ -125,35 +118,19 @@ pub mod x509_factory {
         builder.build()
     }
 
-    pub fn intermediate_certificate(
-        key: &PKeyRef<Private>,
-        issuer_cert: &X509Ref,
-        issuer_key: &PKeyRef<Private>,
-        aki_source: &X509Ref,
-    ) -> X509 {
+    pub fn intermediate_certificate(key: &PKeyRef<Private>, issuer_cert: &X509Ref, issuer_key: &PKeyRef<Private>, aki_source: &X509Ref) -> X509 {
         let mut builder = base_certificate_builder("TZAP Platform Intermediate", key, Some(issuer_cert));
         builder.append_extension(BasicConstraints::new().critical().ca().pathlen(0).build().unwrap()).unwrap();
         builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build().unwrap()).unwrap();
         append_subject_key_identifier(&mut builder, None);
         append_authority_key_identifier(&mut builder, aki_source);
-        append_der_extension(
-            &mut builder,
-            "2.5.29.32",
-            false,
-            &certificate_policies_der(&[crate::trust::TZAP_OID_CA_POLICY]),
-        );
+        append_der_extension(&mut builder, "2.5.29.32", false, &certificate_policies_der(&[crate::trust::TZAP_OID_CA_POLICY]));
         append_der_extension(&mut builder, "2.5.29.31", false, &[0x30, 0x00]);
         builder.sign(issuer_key, MessageDigest::sha256()).unwrap();
         builder.build()
     }
 
-    pub fn leaf_certificate(
-        key: &PKeyRef<Private>,
-        issuer_cert: &X509Ref,
-        issuer_key: &PKeyRef<Private>,
-        aki_source: &X509Ref,
-        config: ChainConfig,
-    ) -> X509 {
+    pub fn leaf_certificate(key: &PKeyRef<Private>, issuer_cert: &X509Ref, issuer_key: &PKeyRef<Private>, aki_source: &X509Ref, config: ChainConfig) -> X509 {
         let mut builder = base_certificate_builder("TZAP Test Signer", key, Some(issuer_cert));
         builder.set_not_after(&Asn1Time::days_from_now(90).unwrap()).unwrap();
         builder.append_extension(BasicConstraints::new().critical().build().unwrap()).unwrap();
@@ -161,28 +138,14 @@ pub mod x509_factory {
         builder.append_extension(leaf_eku()).unwrap();
         append_authority_key_identifier(&mut builder, aki_source);
         if !config.omit_leaf_policy {
-            append_der_extension(
-                &mut builder,
-                "2.5.29.32",
-                false,
-                &certificate_policies_der(&[crate::trust::TZAP_OID_LEAF_POLICY]),
-            );
+            append_der_extension(&mut builder, "2.5.29.32", false, &certificate_policies_der(&[crate::trust::TZAP_OID_LEAF_POLICY]));
         }
-        append_der_extension(
-            &mut builder,
-            crate::trust::TZAP_OID_METADATA_EXTENSION,
-            false,
-            &metadata_extension_bytes(),
-        );
+        append_der_extension(&mut builder, crate::trust::TZAP_OID_METADATA_EXTENSION, false, &metadata_extension_bytes());
         builder.sign(issuer_key, MessageDigest::sha256()).unwrap();
         builder.build()
     }
 
-    pub fn base_certificate_builder(
-        common_name: &str,
-        key: &PKeyRef<Private>,
-        issuer: Option<&X509Ref>,
-    ) -> openssl::x509::X509Builder {
+    pub fn base_certificate_builder(common_name: &str, key: &PKeyRef<Private>, issuer: Option<&X509Ref>) -> openssl::x509::X509Builder {
         let mut name = openssl::x509::X509NameBuilder::new().unwrap();
         name.append_entry_by_text("CN", common_name).unwrap();
         let name = name.build();

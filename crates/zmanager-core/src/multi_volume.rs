@@ -167,10 +167,7 @@ fn discover_numbered_archive_volume_paths(directory: &Path, lower_name: &str) ->
 
 fn parse_numbered_archive_volume_name(name: &str) -> Option<(&str, u32)> {
     let (base, number) = name.rsplit_once('.')?;
-    if !NUMBERED_VOLUME_ARCHIVE_SUFFIXES.iter().any(|suffix| base.ends_with(suffix))
-        || number.len() != NUMBERED_VOLUME_EXTENSION_WIDTH
-        || !number.chars().all(|value| value.is_ascii_digit())
-    {
+    if !NUMBERED_VOLUME_ARCHIVE_SUFFIXES.iter().any(|suffix| base.ends_with(suffix)) || number.len() != NUMBERED_VOLUME_EXTENSION_WIDTH || !number.chars().all(|value| value.is_ascii_digit()) {
         return None;
     }
     let part = number.parse().ok()?;
@@ -213,10 +210,7 @@ fn parse_old_rar_part_name(name: &str, base: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        discover_multi_volume_paths, is_split_zip_path, parse_numbered_7z_volume_name,
-        parse_numbered_archive_volume_name,
-    };
+    use super::{discover_multi_volume_paths, is_split_zip_path, parse_numbered_7z_volume_name, parse_numbered_archive_volume_name};
     use crate::libarchive_backend::{extract_archive, list_archive};
     use crate::safety::ExtractionPolicy;
     use crate::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
@@ -231,21 +225,10 @@ mod tests {
         temp.write_file("payload/blob.bin", &payload);
         let archive = temp.path("payload.7z");
 
-        create_7z_from_path(
-            temp.path("payload"),
-            &archive,
-            &SevenZCreateOptions {
-                solid: false,
-                level: Some(1),
-                volume_size: Some(1_048_576),
-                ..SevenZCreateOptions::default()
-            },
-        )
-        .unwrap();
+        create_7z_from_path(temp.path("payload"), &archive, &SevenZCreateOptions { solid: false, level: Some(1), volume_size: Some(1_048_576), ..SevenZCreateOptions::default() }).unwrap();
 
         let listing = list_archive(temp.path("payload.7z.001")).unwrap();
-        let report =
-            extract_archive(temp.path("payload.7z.001"), temp.path("out"), ExtractionPolicy::default()).unwrap();
+        let report = extract_archive(temp.path("payload.7z.001"), temp.path("out"), ExtractionPolicy::default()).unwrap();
 
         assert!(listing.entries.iter().any(|entry| entry.path == "payload/blob.bin"));
         assert_eq!(report.written_bytes, payload.len() as u64);
@@ -262,10 +245,7 @@ mod tests {
         let from_first = discover_multi_volume_paths(&temp.path("payload.7z.001"));
         let from_middle = discover_multi_volume_paths(&temp.path("payload.7z.002"));
 
-        assert_eq!(
-            relative_names(temp.root(), &from_first),
-            vec!["payload.7z.001", "payload.7z.002", "payload.7z.003"]
-        );
+        assert_eq!(relative_names(temp.root(), &from_first), vec!["payload.7z.001", "payload.7z.002", "payload.7z.003"]);
         assert_eq!(from_middle, from_first);
     }
 
@@ -279,10 +259,7 @@ mod tests {
         let from_first = discover_multi_volume_paths(&temp.path("payload.zip.001"));
         let from_middle = discover_multi_volume_paths(&temp.path("payload.zip.002"));
 
-        assert_eq!(
-            relative_names(temp.root(), &from_first),
-            vec!["payload.zip.001", "payload.zip.002", "payload.zip.003"]
-        );
+        assert_eq!(relative_names(temp.root(), &from_first), vec!["payload.zip.001", "payload.zip.002", "payload.zip.003"]);
         assert_eq!(from_middle, from_first);
     }
 

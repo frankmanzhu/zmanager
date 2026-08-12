@@ -615,15 +615,7 @@ pub(crate) fn print_entries_tree(entries: &[GenericEntry], global: &GlobalOption
             }
             let is_leaf = depth + 1 == parts.len();
             let is_directory = !is_leaf || entry.kind == "directory";
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "{}{}{}",
-                    "  ".repeat(depth),
-                    output::styled(StyleRole::Path, format_args!("{}", parts[depth])),
-                    if is_directory { "/" } else { "" }
-                ),
-            );
+            output::stdout_line(global.color, format_args!("{}{}{}", "  ".repeat(depth), output::styled(StyleRole::Path, format_args!("{}", parts[depth])), if is_directory { "/" } else { "" }));
         }
     }
 }
@@ -718,12 +710,7 @@ pub(crate) fn print_create_summary_json(archive: &Path, outcome: &CreateOutcome)
     println!("}}");
 }
 
-pub(crate) fn print_extract_summary(
-    archive: &Path,
-    destination: &Path,
-    outcome: &ExtractOutcome,
-    global: &GlobalOptions,
-) {
+pub(crate) fn print_extract_summary(archive: &Path, destination: &Path, outcome: &ExtractOutcome, global: &GlobalOptions) {
     if global.json {
         print_extract_summary_json(archive, destination, outcome);
     } else if !global.quiet {
@@ -732,13 +719,7 @@ pub(crate) fn print_extract_summary(
 }
 
 pub(crate) fn print_extract_summary_text(outcome: &ExtractOutcome, global: &GlobalOptions) {
-    print_success_line(
-        global,
-        format_args!(
-            "{} extract ok: {} written, {} skipped, {} bytes",
-            outcome.label, outcome.written_entries, outcome.skipped_entries, outcome.written_bytes
-        ),
-    );
+    print_success_line(global, format_args!("{} extract ok: {} written, {} skipped, {} bytes", outcome.label, outcome.written_entries, outcome.skipped_entries, outcome.written_bytes));
     for warning in &outcome.warnings {
         print_warning_stdout(global, format_args!("warning\t{warning}"));
     }
@@ -793,15 +774,7 @@ pub(crate) fn print_raw_stream_extract_summary(
                 ),
             );
         } else {
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "{} {} stream: {} entries skipped",
-                    output::styled(StyleRole::Success, format_args!("extracted")),
-                    format.name(),
-                    report.skipped_entries
-                ),
-            );
+            output::stdout_line(global.color, format_args!("{} {} stream: {} entries skipped", output::styled(StyleRole::Success, format_args!("extracted")), format.name(), report.skipped_entries));
         }
         for warning in &report.warnings {
             print_warning_stdout(global, format_args!("warning\t{warning}"));
@@ -831,12 +804,7 @@ pub(crate) fn print_manifest(manifest: &zmanager_core::manifest::ArchiveManifest
         for entry in &manifest.entries {
             output::stdout_line(
                 global.color,
-                format_args!(
-                    "{}\t{}\t{} bytes",
-                    output::styled(StyleRole::Label, format_args!("include")),
-                    output::styled(StyleRole::Path, format_args!("{}", entry.archive_path)),
-                    entry.size
-                ),
+                format_args!("{}\t{}\t{} bytes", output::styled(StyleRole::Label, format_args!("include")), output::styled(StyleRole::Path, format_args!("{}", entry.archive_path)), entry.size),
             );
         }
         for excluded in &manifest.excluded_entries {
@@ -852,10 +820,7 @@ pub(crate) fn print_manifest(manifest: &zmanager_core::manifest::ArchiveManifest
             );
         }
         for warning in &manifest.warnings {
-            print_warning_stdout(
-                global,
-                format_args!("warning\t{}\t{}", warning.source_path.display(), warning.message),
-            );
+            print_warning_stdout(global, format_args!("warning\t{}\t{}", warning.source_path.display(), warning.message));
         }
     }
 }
@@ -893,30 +858,15 @@ pub(crate) fn command_usage_error(command: &str, message: &str, global: &GlobalO
         && let Some(suggestion) = option_suggestion(command, option)
     {
         output::stderr_line(global.color, format_args!(""));
-        output::stderr_line(
-            global.color,
-            format_args!("Did you mean '{}'?", output::styled(StyleRole::Option, format_args!("{suggestion}"))),
-        );
+        output::stderr_line(global.color, format_args!("Did you mean '{}'?", output::styled(StyleRole::Option, format_args!("{suggestion}"))));
     }
     output::stderr_line(global.color, format_args!(""));
     output::stderr_write(global.color, format_args!("{}", output::render_help(command_usage_snippet(command))));
     output::stderr_line(global.color, format_args!(""));
     if unknown_option.is_some() {
-        output::stderr_line(
-            global.color,
-            format_args!(
-                "Try '{}' for usage.",
-                output::styled(StyleRole::Command, format_args!("zm {command} --help"))
-            ),
-        );
+        output::stderr_line(global.color, format_args!("Try '{}' for usage.", output::styled(StyleRole::Command, format_args!("zm {command} --help"))));
     } else {
-        output::stderr_line(
-            global.color,
-            format_args!(
-                "Try '{}' for examples.",
-                output::styled(StyleRole::Command, format_args!("zm {command} --help"))
-            ),
-        );
+        output::stderr_line(global.color, format_args!("Try '{}' for examples.", output::styled(StyleRole::Command, format_args!("zm {command} --help"))));
     }
     ExitCode::from(2)
 }
@@ -1081,53 +1031,13 @@ const EXTRACT_OPTIONS: &[&str] = &[
     "--recipient-key",
 ];
 
-const LIST_OPTIONS: &[&str] = &[
-    "-t",
-    "--list",
-    "-f",
-    "--file",
-    "-l",
-    "--long",
-    "--name-only",
-    "--tree",
-    "-i",
-    "--include",
-    "--exclude",
-    "--password-stdin",
-    "--recipient-key",
-    "--trusted-ca-cert",
-    "--trusted-system-roots",
-];
+const LIST_OPTIONS: &[&str] =
+    &["-t", "--list", "-f", "--file", "-l", "--long", "--name-only", "--tree", "-i", "--include", "--exclude", "--password-stdin", "--recipient-key", "--trusted-ca-cert", "--trusted-system-roots"];
 
-const TEST_OPTIONS: &[&str] = &[
-    "-T",
-    "--test",
-    "-f",
-    "--file",
-    "-i",
-    "--include",
-    "--exclude",
-    "--password-stdin",
-    "--recipient-key",
-    "--public-no-key",
-    "--trusted-ca-cert",
-    "--trusted-system-roots",
-];
+const TEST_OPTIONS: &[&str] =
+    &["-T", "--test", "-f", "--file", "-i", "--include", "--exclude", "--password-stdin", "--recipient-key", "--public-no-key", "--trusted-ca-cert", "--trusted-system-roots"];
 
-const PLAN_OPTIONS: &[&str] = &[
-    "--format",
-    "-C",
-    "--directory",
-    "-@",
-    "--files-from",
-    "--null",
-    "--clean",
-    "--no-ignore",
-    "-i",
-    "--include",
-    "--exclude",
-    "--exclude-from",
-];
+const PLAN_OPTIONS: &[&str] = &["--format", "-C", "--directory", "-@", "--files-from", "--null", "--clean", "--no-ignore", "-i", "--include", "--exclude", "--exclude-from"];
 
 const GLOBAL_COMMAND_OPTIONS: &[&str] = &["--json"];
 const COMPLETIONS_OPTIONS: &[&str] = &["--help", "-h"];

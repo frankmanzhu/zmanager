@@ -3,22 +3,15 @@ use crate::cli::extract::{extract_command, extract_command_from_expanded};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::APPLE_ARCHIVE_EXTENSIONS;
 use crate::cli::format::{
-    CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FORMAT_LIBARCHIVE, FormatDescriptor, RAR_EXTENSIONS,
-    SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS, TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX, ZIP_FAMILY_EXTENSIONS,
-    strip_suffix_ignore_ascii_case,
+    CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FORMAT_LIBARCHIVE, FormatDescriptor, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS, TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX,
+    ZIP_FAMILY_EXTENSIONS, strip_suffix_ignore_ascii_case,
 };
-use crate::cli::open::{
-    list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded,
-};
+use crate::cli::open::{list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded};
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_output_mode};
-use crate::cli::tzap::{
-    auth_command, cert_command, contact_command, device_command, me_command, share_command, sign_command,
-    verify_command,
-};
+use crate::cli::tzap::{auth_command, cert_command, contact_command, device_command, me_command, share_command, sign_command, verify_command};
 use crate::cli::usage::{
-    COMPLETION_BASH_SCRIPT, COMPLETION_FISH_SCRIPT, COMPLETION_POWERSHELL_SCRIPT, COMPLETION_ZSH_SCRIPT,
-    COMPLETIONS_HELP, DOCTOR_HELP, FORMATS_HELP, USAGE, command_usage_error, help_command, json_escape,
-    print_help_stderr, print_help_stdout, usage_error, wants_help,
+    COMPLETION_BASH_SCRIPT, COMPLETION_FISH_SCRIPT, COMPLETION_POWERSHELL_SCRIPT, COMPLETION_ZSH_SCRIPT, COMPLETIONS_HELP, DOCTOR_HELP, FORMATS_HELP, USAGE, command_usage_error, help_command,
+    json_escape, print_help_stderr, print_help_stdout, usage_error, wants_help,
 };
 use crate::output::{self, OutputMode, StyleRole};
 use std::env;
@@ -109,10 +102,7 @@ pub(crate) struct ProgressReporter {
 impl ProgressReporter {
     pub(crate) fn from_global(global: Option<&GlobalOptions>) -> Self {
         let stderr_is_terminal = io::stderr().is_terminal();
-        let enabled = global.is_some_and(|global| {
-            matches!(global.progress, OutputMode::Always)
-                || matches!(global.progress, OutputMode::Auto) && !global.quiet && stderr_is_terminal
-        });
+        let enabled = global.is_some_and(|global| matches!(global.progress, OutputMode::Always) || matches!(global.progress, OutputMode::Auto) && !global.quiet && stderr_is_terminal);
         let color = global.map_or(OutputMode::Never, |global| global.color);
 
         Self { enabled, color, total_bytes: None, last_percent: None, last_reported_bytes: 0 }
@@ -153,26 +143,18 @@ impl ProgressReporter {
             JobEvent::Cancelled { message } => {
                 self.emit_line(format_args!("cancelled: {message}"));
             }
-            JobEvent::EntryStarted { .. }
-            | JobEvent::EntryFinished { .. }
-            | JobEvent::PhaseStarted { .. }
-            | JobEvent::PhaseBytesProcessed { .. }
-            | JobEvent::Warning { .. } => {}
+            JobEvent::EntryStarted { .. } | JobEvent::EntryFinished { .. } | JobEvent::PhaseStarted { .. } | JobEvent::PhaseBytesProcessed { .. } | JobEvent::Warning { .. } => {}
         }
     }
 
     fn emit_line(&self, message: std::fmt::Arguments<'_>) {
-        output::stderr_line(
-            self.color,
-            format_args!("{}: {message}", output::styled(StyleRole::Progress, format_args!("{PROGRESS_PREFIX}"))),
-        );
+        output::stderr_line(self.color, format_args!("{}: {message}", output::styled(StyleRole::Progress, format_args!("{PROGRESS_PREFIX}"))));
     }
 
     fn emit_percent(&mut self, total_bytes_processed: u64, total_bytes: u64) {
         let percent = total_bytes_processed.saturating_mul(100).checked_div(total_bytes).unwrap_or(100).clamp(1, 100);
 
-        let should_emit =
-            self.last_percent.is_none_or(|last| percent == 100 || percent >= last + PROGRESS_PERCENT_STEP);
+        let should_emit = self.last_percent.is_none_or(|last| percent == 100 || percent >= last + PROGRESS_PERCENT_STEP);
         if should_emit {
             self.last_percent = Some(percent);
             self.emit_line(format_args!("{percent}% ({total_bytes_processed}/{total_bytes} bytes)"));
@@ -180,8 +162,7 @@ impl ProgressReporter {
     }
 
     fn emit_byte_count(&mut self, total_bytes_processed: u64) {
-        let should_emit = self.last_reported_bytes == 0
-            || total_bytes_processed.saturating_sub(self.last_reported_bytes) >= PROGRESS_BYTE_STEP;
+        let should_emit = self.last_reported_bytes == 0 || total_bytes_processed.saturating_sub(self.last_reported_bytes) >= PROGRESS_BYTE_STEP;
         if should_emit {
             self.last_reported_bytes = total_bytes_processed;
             self.emit_line(format_args!("{total_bytes_processed} bytes"));
@@ -233,15 +214,7 @@ where
         let mut answer = String::new();
         loop {
             answer.clear();
-            if write!(
-                self.output,
-                "overwrite {} from {}?{OVERWRITE_PROMPT_SUFFIX}",
-                conflict.destination_path.display(),
-                conflict.archive_path
-            )
-            .and_then(|()| self.output.flush())
-            .is_err()
-            {
+            if write!(self.output, "overwrite {} from {}?{OVERWRITE_PROMPT_SUFFIX}", conflict.destination_path.display(), conflict.archive_path).and_then(|()| self.output.flush()).is_err() {
                 return OverwriteDecision::Quit;
             }
             match self.input.read_line(&mut answer) {
@@ -524,9 +497,7 @@ fn peel_leading_global_options(args: &mut Vec<String>, global: &mut GlobalOption
 }
 
 fn has_classic_action(args: &[String]) -> bool {
-    expand_short_options(args)
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "-c" | "--create" | "-x" | "--extract" | "-t" | "--list" | "-T" | "--test"))
+    expand_short_options(args).iter().any(|arg| matches!(arg.as_str(), "-c" | "--create" | "-x" | "--extract" | "-t" | "--list" | "-T" | "--test"))
 }
 
 fn run_classic_command(args: &[String], global: GlobalOptions) -> ExitCode {
@@ -629,39 +600,16 @@ fn print_formats_table(global: &GlobalOptions) {
     output::stdout_line(global.color, format_args!("{}", output::styled(StyleRole::Heading, format_args!("Create:"))));
     for format in CREATE_FORMATS {
         let padding = " ".repeat(9usize.saturating_sub(format.name.len()));
-        output::stdout_line(
-            global.color,
-            format_args!(
-                "  {}{} {}",
-                output::styled(StyleRole::Command, format_args!("{}", format.name)),
-                padding,
-                format.extensions.join(", ")
-            ),
-        );
+        output::stdout_line(global.color, format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")));
     }
     output::stdout_line(global.color, format_args!(""));
     output::stdout_line(global.color, format_args!("{}", output::styled(StyleRole::Heading, format_args!("Extract:"))));
     for format in EXTRACT_FORMATS {
         let padding = " ".repeat(9usize.saturating_sub(format.name.len()));
         if format.name == FORMAT_LIBARCHIVE {
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "  {}{} fallback for supported archive formats",
-                    output::styled(StyleRole::Command, format_args!("{}", format.name)),
-                    padding
-                ),
-            );
+            output::stdout_line(global.color, format_args!("  {}{} fallback for supported archive formats", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding));
         } else {
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "  {}{} {}",
-                    output::styled(StyleRole::Command, format_args!("{}", format.name)),
-                    padding,
-                    format.extensions.join(", ")
-                ),
-            );
+            output::stdout_line(global.color, format_args!("  {}{} {}", output::styled(StyleRole::Command, format_args!("{}", format.name)), padding, format.extensions.join(", ")));
         }
     }
 }
@@ -688,18 +636,10 @@ fn doctor_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     }
     let report = zmanager_core::healthcheck();
     if global.json {
-        println!(
-            "{{\"engine\":\"{}\",\"version\":\"{}\",\"ready\":{}}}",
-            json_escape(report.engine),
-            json_escape(report.version),
-            report.ready
-        );
+        println!("{{\"engine\":\"{}\",\"version\":\"{}\",\"ready\":{}}}", json_escape(report.engine), json_escape(report.version), report.ready);
     } else {
         let role = if report.ready { StyleRole::Success } else { StyleRole::Warning };
-        output::stdout_line(
-            global.color,
-            format_args!("{}", output::styled(role, format_args!("{}", report.summary()))),
-        );
+        output::stdout_line(global.color, format_args!("{}", output::styled(role, format_args!("{}", report.summary()))));
     }
     ExitCode::SUCCESS
 }
@@ -748,11 +688,7 @@ fn completions_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
         "fish" => COMPLETION_FISH_SCRIPT,
         "powershell" => COMPLETION_POWERSHELL_SCRIPT,
         _ => {
-            return command_usage_error(
-                "completions",
-                &format!("unsupported shell: {shell}; use bash, zsh, fish, or powershell"),
-                &global,
-            );
+            return command_usage_error("completions", &format!("unsupported shell: {shell}; use bash, zsh, fish, or powershell"), &global);
         }
     };
     print!("{script}");
@@ -761,8 +697,7 @@ fn completions_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
 pub(crate) fn temp_archive_path(destination: &Path) -> PathBuf {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
     let file_name = destination.file_name().and_then(|name| name.to_str()).unwrap_or("archive");
-    destination
-        .with_file_name(format!("{TEMP_ARCHIVE_PREFIX}{file_name}{TEMP_ARCHIVE_MARKER}-{}-{now}", std::process::id()))
+    destination.with_file_name(format!("{TEMP_ARCHIVE_PREFIX}{file_name}{TEMP_ARCHIVE_MARKER}-{}-{now}", std::process::id()))
 }
 
 pub(crate) fn create_test_archive_path(destination: &Path, format: ArchiveFormat, split_output: bool) -> PathBuf {
@@ -793,10 +728,7 @@ fn remove_file_destination_for_publish(path: &Path) -> io::Result<()> {
     };
 
     if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::IsADirectory,
-            format!("cannot replace directory {}", path.display()),
-        ));
+        return Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())));
     }
 
     fs::remove_file(path)
@@ -810,8 +742,7 @@ pub(crate) fn default_extract_destination(archive: &str) -> PathBuf {
 }
 
 fn strip_known_archive_suffix(name: &str) -> Option<&str> {
-    let mut extensions: Vec<&str> =
-        TAR_ZST_EXTENSIONS.iter().chain(ZIP_FAMILY_EXTENSIONS).chain(SEVEN_Z_EXTENSIONS).copied().collect();
+    let mut extensions: Vec<&str> = TAR_ZST_EXTENSIONS.iter().chain(ZIP_FAMILY_EXTENSIONS).chain(SEVEN_Z_EXTENSIONS).copied().collect();
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     extensions.extend_from_slice(APPLE_ARCHIVE_EXTENSIONS);
     extensions.extend_from_slice(RAR_EXTENSIONS);

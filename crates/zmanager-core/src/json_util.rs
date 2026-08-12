@@ -47,24 +47,15 @@ impl JsonFieldError for TzapContactCardError {
     }
 }
 
-pub(crate) fn json_object<'a, E: JsonFieldError>(
-    value: &'a Value,
-    field: &'static str,
-) -> Result<&'a Map<String, Value>, E> {
+pub(crate) fn json_object<'a, E: JsonFieldError>(value: &'a Value, field: &'static str) -> Result<&'a Map<String, Value>, E> {
     value.as_object().ok_or_else(|| E::invalid_field(field))
 }
 
-pub(crate) fn required_field<'a, E: JsonFieldError>(
-    object: &'a Map<String, Value>,
-    field: &'static str,
-) -> Result<&'a Value, E> {
+pub(crate) fn required_field<'a, E: JsonFieldError>(object: &'a Map<String, Value>, field: &'static str) -> Result<&'a Value, E> {
     object.get(field).ok_or_else(|| E::invalid_field(field))
 }
 
-pub(crate) fn required_string<E: JsonFieldError>(
-    object: &Map<String, Value>,
-    field: &'static str,
-) -> Result<String, E> {
+pub(crate) fn required_string<E: JsonFieldError>(object: &Map<String, Value>, field: &'static str) -> Result<String, E> {
     required_string_value(required_field(object, field)?, field)
 }
 
@@ -72,10 +63,7 @@ pub(crate) fn required_string_value<E: JsonFieldError>(value: &Value, field: &'s
     value.as_str().filter(|value| !value.is_empty()).map(ToOwned::to_owned).ok_or_else(|| E::invalid_field(field))
 }
 
-pub(crate) fn required_array<'a, E: JsonFieldError>(
-    object: &'a Map<String, Value>,
-    field: &'static str,
-) -> Result<&'a Vec<Value>, E> {
+pub(crate) fn required_array<'a, E: JsonFieldError>(object: &'a Map<String, Value>, field: &'static str) -> Result<&'a Vec<Value>, E> {
     required_field(object, field)?.as_array().ok_or_else(|| E::invalid_field(field))
 }
 
@@ -83,17 +71,10 @@ pub(crate) fn required_bool<E: JsonFieldError>(object: &Map<String, Value>, fiel
     required_field(object, field)?.as_bool().ok_or_else(|| E::invalid_field(field))
 }
 
-pub(crate) fn optional_string<E: JsonFieldError>(
-    object: &Map<String, Value>,
-    field: &'static str,
-) -> Result<Option<String>, E> {
+pub(crate) fn optional_string<E: JsonFieldError>(object: &Map<String, Value>, field: &'static str) -> Result<Option<String>, E> {
     match object.get(field) {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => value
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .map(|value| Some(value.to_owned()))
-            .ok_or_else(|| E::invalid_field(field)),
+        Some(value) => value.as_str().filter(|value| !value.is_empty()).map(|value| Some(value.to_owned())).ok_or_else(|| E::invalid_field(field)),
     }
 }
 
@@ -101,10 +82,7 @@ pub(crate) fn required_u64<E: JsonFieldError>(object: &Map<String, Value>, field
     required_field(object, field)?.as_u64().ok_or_else(|| E::invalid_field(field))
 }
 
-pub(crate) fn optional_u64<E: JsonFieldError>(
-    object: &Map<String, Value>,
-    field: &'static str,
-) -> Result<Option<u64>, E> {
+pub(crate) fn optional_u64<E: JsonFieldError>(object: &Map<String, Value>, field: &'static str) -> Result<Option<u64>, E> {
     match object.get(field) {
         None | Some(Value::Null) => Ok(None),
         Some(value) => value.as_u64().map(Some).ok_or_else(|| E::invalid_field(field)),

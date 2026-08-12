@@ -22,24 +22,12 @@ pub struct BridgeError {
 #[derive(Debug, Error)]
 pub enum ZmanagerGuiError {
     #[error("{user_message}")]
-    Bridge {
-        code: String,
-        user_message: String,
-        recovery_hint: Option<String>,
-        severity: BridgeSeverity,
-        retryable: bool,
-    },
+    Bridge { code: String, user_message: String, recovery_hint: Option<String>, severity: BridgeSeverity, retryable: bool },
 }
 
 impl From<BridgeError> for ZmanagerGuiError {
     fn from(error: BridgeError) -> Self {
-        Self::Bridge {
-            code: error.code,
-            user_message: error.message,
-            recovery_hint: error.recovery_hint,
-            severity: error.severity,
-            retryable: error.retryable,
-        }
+        Self::Bridge { code: error.code, user_message: error.message, recovery_hint: error.recovery_hint, severity: error.severity, retryable: error.retryable }
     }
 }
 

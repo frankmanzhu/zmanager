@@ -138,10 +138,7 @@ pub fn list_tzap_with_password(archive: impl AsRef<Path>, password: &str) -> Res
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or listed.
-pub fn list_tzap_with_optional_password(
-    archive: impl AsRef<Path>,
-    password: Option<&str>,
-) -> Result<TzapListing, TzapError> {
+pub fn list_tzap_with_optional_password(archive: impl AsRef<Path>, password: Option<&str>) -> Result<TzapListing, TzapError> {
     let archive_path = archive.as_ref();
     let opened = open_tzap_archive(archive_path, password)?;
     let encrypted = password.is_some() || opened.crypto_header.kdf_algo != KdfAlgo::None;
@@ -158,10 +155,7 @@ pub fn list_tzap_with_optional_password(
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or indexed.
-pub fn list_tzap_index_with_optional_password(
-    archive: impl AsRef<Path>,
-    password: Option<&str>,
-) -> Result<TzapIndexListing, TzapError> {
+pub fn list_tzap_index_with_optional_password(archive: impl AsRef<Path>, password: Option<&str>) -> Result<TzapIndexListing, TzapError> {
     let archive_path = archive.as_ref();
     let opened = open_tzap_archive(archive_path, password)?;
     let encrypted = password.is_some() || opened.crypto_header.kdf_algo != KdfAlgo::None;
@@ -170,11 +164,7 @@ pub fn list_tzap_index_with_optional_password(
 }
 
 /// Lists only the immediate children of the requested directory.
-pub fn list_tzap_directory_with_optional_password(
-    archive: impl AsRef<Path>,
-    dir_path: &str,
-    password: Option<&str>,
-) -> Result<TzapIndexListing, TzapError> {
+pub fn list_tzap_directory_with_optional_password(archive: impl AsRef<Path>, dir_path: &str, password: Option<&str>) -> Result<TzapIndexListing, TzapError> {
     let archive_path = archive.as_ref();
     let opened = open_tzap_archive(archive_path, password)?;
     let encrypted = password.is_some() || opened.crypto_header.kdf_algo != KdfAlgo::None;
@@ -187,18 +177,12 @@ pub fn list_tzap_directory_with_optional_password(
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or listed.
-pub fn list_tzap_with_recipient_key(
-    archive: impl AsRef<Path>,
-    recipient_private_key: impl AsRef<Path>,
-) -> Result<TzapListing, TzapError> {
+pub fn list_tzap_with_recipient_key(archive: impl AsRef<Path>, recipient_private_key: impl AsRef<Path>) -> Result<TzapListing, TzapError> {
     let opened = open_tzap_archive_with_recipient_key(archive, recipient_private_key)?;
     list_opened_tzap_archive(&opened, true)
 }
 
-pub fn list_tzap_index_with_recipient_key(
-    archive: impl AsRef<Path>,
-    recipient_private_key: impl AsRef<Path>,
-) -> Result<TzapIndexListing, TzapError> {
+pub fn list_tzap_index_with_recipient_key(archive: impl AsRef<Path>, recipient_private_key: impl AsRef<Path>) -> Result<TzapIndexListing, TzapError> {
     let opened = open_tzap_archive_with_recipient_key(archive, recipient_private_key)?;
     let indexed = opened.list_index_entries()?;
     Ok(map_index_entries(indexed, opened.observed_archive_bytes(), true, opened.crypto_header.kdf_algo))
@@ -209,12 +193,7 @@ pub fn list_tzap_index_with_recipient_key(
 /// Per-entry `compressed_size` is estimated from the whole-archive compression
 /// ratio rather than measured per member group, matching the index listing's
 /// promise of avoiding payload decoding.
-fn map_index_entries(
-    indexed: Vec<ArchiveIndexEntry>,
-    observed_archive_bytes: u64,
-    encrypted: bool,
-    kdf_algo: KdfAlgo,
-) -> TzapIndexListing {
+fn map_index_entries(indexed: Vec<ArchiveIndexEntry>, observed_archive_bytes: u64, encrypted: bool, kdf_algo: KdfAlgo) -> TzapIndexListing {
     let total_uncompressed_size: u64 = indexed.iter().map(|entry| entry.file_data_size).sum();
 
     let mut entries = Vec::with_capacity(indexed.len());
@@ -237,11 +216,7 @@ fn map_index_entries(
                 // (an entry larger than `total_uncompressed_size` would
                 // overflow u64). `entry.file_data_size > 0` implies the total
                 // is non-zero, so this division never divides by zero.
-                u64::try_from(
-                    u128::from(entry.file_data_size) * u128::from(observed_archive_bytes)
-                        / u128::from(total_uncompressed_size),
-                )
-                .unwrap_or(u64::MAX)
+                u64::try_from(u128::from(entry.file_data_size) * u128::from(observed_archive_bytes) / u128::from(total_uncompressed_size)).unwrap_or(u64::MAX)
             } else {
                 0
             },

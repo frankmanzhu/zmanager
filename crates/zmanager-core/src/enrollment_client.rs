@@ -1,18 +1,10 @@
 //! Client-side TZAP certificate enrollment flow.
 
-use crate::auth_client::{
-    SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpTransport, TzapBearerToken,
-    TzapSessionRecord,
-};
+use crate::auth_client::{SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord};
 use crate::http_client::{http_error_body, require_success, send_json_request};
 use crate::jcs;
-use crate::json_util::{
-    JsonFieldError, json_object, optional_string, optional_u64, required_field, required_string, required_u64,
-};
-use crate::local_identity_store::{
-    TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore,
-    TzapLocalIdentityStoreError, TzapSignDeviceRouting,
-};
+use crate::json_util::{JsonFieldError, json_object, optional_string, optional_u64, required_field, required_string, required_u64};
+use crate::local_identity_store::{TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore, TzapLocalIdentityStoreError, TzapSignDeviceRouting};
 use crate::p256_signature;
 use crate::secrets::SecretBytes;
 use crate::trust::{self, TzapCertificateProfileOptions, TzapCertificatePublicMetadata};
@@ -178,15 +170,9 @@ impl From<serde_json::Error> for TzapEnrollmentError {
 }
 
 pub trait TzapEnrollmentCertificateValidator {
-    fn validate_certificate_chain(
-        &self,
-        chain_der: &[Vec<u8>],
-    ) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError>;
+    fn validate_certificate_chain(&self, chain_der: &[Vec<u8>]) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError>;
 
-    fn validate_and_complete_certificate_chain(
-        &self,
-        chain_der: &[Vec<u8>],
-    ) -> Result<(Vec<Vec<u8>>, TzapCertificatePublicMetadata), TzapEnrollmentError> {
+    fn validate_and_complete_certificate_chain(&self, chain_der: &[Vec<u8>]) -> Result<(Vec<Vec<u8>>, TzapCertificatePublicMetadata), TzapEnrollmentError> {
         self.validate_certificate_chain(chain_der).map(|metadata| (chain_der.to_vec(), metadata))
     }
 }
@@ -197,10 +183,7 @@ pub struct TzapCustomEnrollmentCertificateValidator {
 }
 
 impl TzapEnrollmentCertificateValidator for TzapCustomEnrollmentCertificateValidator {
-    fn validate_certificate_chain(
-        &self,
-        chain_der: &[Vec<u8>],
-    ) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError> {
+    fn validate_certificate_chain(&self, chain_der: &[Vec<u8>]) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError> {
         trust::validate_custom_tzap_certificate_chain_der(chain_der, &self.options)
             .map(|validation| validation.public_metadata)
             .map_err(|error| TzapEnrollmentError::CertificateChain(error.to_string()))
@@ -225,11 +208,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
     }
 
     #[must_use]
-    pub(crate) fn with_wire_profile(
-        sign_base_url: impl Into<String>,
-        transport: &'a T,
-        wire_profile: crate::wire_profile::TzapWireProfile,
-    ) -> Self {
+    pub(crate) fn with_wire_profile(sign_base_url: impl Into<String>, transport: &'a T, wire_profile: crate::wire_profile::TzapWireProfile) -> Self {
         Self { sign_base_url: sign_base_url.into(), transport, wire_profile }
     }
 
@@ -261,12 +240,7 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
                 "renewal_of_certificate_sha256": Value::Null,
             }),
         };
-        let response = self.send_json(
-            TzapAuthHttpMethod::Post,
-            ENROLLMENT_CHALLENGES_PATH,
-            Some(session.access_token.clone()),
-            Some(body),
-        )?;
+        let response = self.send_json(TzapAuthHttpMethod::Post, ENROLLMENT_CHALLENGES_PATH, Some(session.access_token.clone()), Some(body))?;
         let challenge = parse_challenge_response::<TzapEnrollmentError>(&response.body)?;
         validate_challenge_payload(self.wire_profile, session, request, signing_key, csr_der, &challenge)?;
         Ok(challenge)
@@ -281,11 +255,8 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
     ) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
         session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
         let challenge_bytes = match self.wire_profile {
-            crate::wire_profile::TzapWireProfile::Spec => jcs::canonicalize_json_bytes(&challenge.payload)
-                .map_err(|error| TzapEnrollmentError::Canonicalization(format!("{error:?}")))?,
-            crate::wire_profile::TzapWireProfile::LocalStagingServer => {
-                canonicalize_local_staging_server_json_bytes(&challenge.payload)?
-            }
+            crate::wire_profile::TzapWireProfile::Spec => jcs::canonicalize_json_bytes(&challenge.payload).map_err(|error| TzapEnrollmentError::Canonicalization(format!("{error:?}")))?,
+            crate::wire_profile::TzapWireProfile::LocalStagingServer => canonicalize_local_staging_server_json_bytes(&challenge.payload)?,
         };
         let signature = sign_challenge(signing_key, &challenge_bytes)?;
         let body = match self.wire_profile {
@@ -309,30 +280,17 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
                 "requested_validity_days": required_u64::<TzapEnrollmentError>(json_object::<TzapEnrollmentError>(&challenge.payload, "challenge_payload")?, "requested_validity_days")?,
             }),
         };
-        let response = self.send_json(
-            TzapAuthHttpMethod::Post,
-            ENROLL_CERTIFICATES_PATH,
-            Some(session.access_token.clone()),
-            Some(body),
-        )?;
+        let response = self.send_json(TzapAuthHttpMethod::Post, ENROLL_CERTIFICATES_PATH, Some(session.access_token.clone()), Some(body))?;
         parse_enrollment_response(&response.body)
     }
 
-    pub fn list_certificates(
-        &self,
-        session: &TzapSessionRecord,
-    ) -> Result<Vec<TzapEnrollmentCertificatePayload>, TzapEnrollmentError> {
+    pub fn list_certificates(&self, session: &TzapSessionRecord) -> Result<Vec<TzapEnrollmentCertificatePayload>, TzapEnrollmentError> {
         session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
-        let response =
-            self.send_json(TzapAuthHttpMethod::Get, CERTIFICATES_PATH, Some(session.access_token.clone()), None)?;
+        let response = self.send_json(TzapAuthHttpMethod::Get, CERTIFICATES_PATH, Some(session.access_token.clone()), None)?;
         parse_certificate_list_response(&response.body)
     }
 
-    pub fn get_certificate(
-        &self,
-        session: &TzapSessionRecord,
-        certificate_id: &str,
-    ) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
+    pub fn get_certificate(&self, session: &TzapSessionRecord, certificate_id: &str) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
         session.require_audience(SESSION_AUDIENCE_SIGN_TZAP)?;
         if certificate_id.is_empty() || certificate_id.contains('/') {
             return Err(TzapEnrollmentError::InvalidField { field: "certificate_id" });
@@ -342,18 +300,9 @@ impl<'a, T: TzapAuthHttpTransport> TzapEnrollmentClient<'a, T> {
         parse_enrollment_response(&response.body)
     }
 
-    fn send_json(
-        &self,
-        method: TzapAuthHttpMethod,
-        path: &str,
-        bearer_token: Option<TzapBearerToken>,
-        body: Option<Value>,
-    ) -> Result<crate::auth_client::TzapAuthHttpResponse, TzapEnrollmentError> {
+    fn send_json(&self, method: TzapAuthHttpMethod, path: &str, bearer_token: Option<TzapBearerToken>, body: Option<Value>) -> Result<crate::auth_client::TzapAuthHttpResponse, TzapEnrollmentError> {
         let response = send_json_request(self.transport, method, &self.sign_base_url, path, bearer_token, body)?;
-        require_success(response, |status_code, response| TzapEnrollmentError::HttpStatus {
-            status_code,
-            body: http_error_body(&response.body),
-        })
+        require_success(response, |status_code, response| TzapEnrollmentError::HttpStatus { status_code, body: http_error_body(&response.body) })
     }
 }
 
@@ -391,9 +340,7 @@ impl TzapEnrollmentCertificatePayload {
             return Err(TzapEnrollmentError::InvalidField { field: "certificate_chain_der" });
         };
         if leaf != &self.leaf_certificate_der {
-            return Err(TzapEnrollmentError::CertificateChain(
-                "validated certificate chain leaf does not match enrollment response".to_owned(),
-            ));
+            return Err(TzapEnrollmentError::CertificateChain("validated certificate chain leaf does not match enrollment response".to_owned()));
         }
         self.intermediate_chain_der = intermediates.to_vec();
         Ok(())
@@ -408,9 +355,7 @@ impl TzapEnrollmentCertificatePayload {
         let sign_device_routing = match &request.org_id {
             Some(org_id) => TzapSignDeviceRouting::Organization {
                 org_id: org_id.clone(),
-                login_organization_device_id: self
-                    .login_organization_device_id
-                    .ok_or(TzapEnrollmentError::InvalidField { field: "login_organization_device_id" })?,
+                login_organization_device_id: self.login_organization_device_id.ok_or(TzapEnrollmentError::InvalidField { field: "login_organization_device_id" })?,
             },
             None => TzapSignDeviceRouting::Personal,
         };
@@ -433,10 +378,7 @@ impl TzapEnrollmentCertificatePayload {
     }
 }
 
-fn validate_enrollment_org_context(
-    session: &TzapSessionRecord,
-    request: &TzapEnrollmentRequest,
-) -> Result<(), TzapEnrollmentError> {
+fn validate_enrollment_org_context(session: &TzapSessionRecord, request: &TzapEnrollmentRequest) -> Result<(), TzapEnrollmentError> {
     if let (Some(selected_org_id), Some(request_org_id)) = (&session.selected_org_id, &request.org_id)
         && selected_org_id != request_org_id
     {
@@ -469,11 +411,7 @@ fn validate_challenge_payload(
                 return Err(TzapEnrollmentError::ChallengeMismatch { field: "canonicalization" });
             }
             expect_string(object, "audience", LOCAL_STAGING_ENROLLMENT_AUDIENCE)?;
-            expect_u64(
-                object,
-                "requested_validity_days",
-                requested_validity_days(request.requested_validity_seconds)?,
-            )?;
+            expect_u64(object, "requested_validity_days", requested_validity_days(request.requested_validity_seconds)?)?;
             let _ = required_string::<TzapEnrollmentError>(object, "expires_at")?;
         }
     }
@@ -487,10 +425,7 @@ fn validate_challenge_payload(
     Ok(())
 }
 
-fn sign_challenge(
-    signing_key: &TzapDeviceSigningKeyRecord,
-    challenge_bytes: &[u8],
-) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], TzapEnrollmentError> {
+fn sign_challenge(signing_key: &TzapDeviceSigningKeyRecord, challenge_bytes: &[u8]) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], TzapEnrollmentError> {
     sign_p256_challenge(&signing_key.private_key_der, challenge_bytes)
 }
 
@@ -516,14 +451,9 @@ impl ChallengeCryptoError for crate::certificate_lifecycle::TzapCertificateLifec
 ///
 /// The secret DER comes from [`crate::local_identity_store`] records in both
 /// clients, so a single implementation keeps the signing paths identical.
-pub(crate) fn sign_p256_challenge<E: ChallengeCryptoError>(
-    secret_der: &SecretBytes,
-    canonical_bytes: &[u8],
-) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], E> {
-    let private_key = PKey::<Private>::private_key_from_der(secret_der.expose_secret())
-        .map_err(|error| E::crypto(error.to_string()))?;
-    p256_signature::sign_p256_sha256_p1363(&private_key, canonical_bytes)
-        .map_err(|error| E::crypto(format!("{error:?}")))
+pub(crate) fn sign_p256_challenge<E: ChallengeCryptoError>(secret_der: &SecretBytes, canonical_bytes: &[u8]) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], E> {
+    let private_key = PKey::<Private>::private_key_from_der(secret_der.expose_secret()).map_err(|error| E::crypto(error.to_string()))?;
+    p256_signature::sign_p256_sha256_p1363(&private_key, canonical_bytes).map_err(|error| E::crypto(format!("{error:?}")))
 }
 
 /// Parses a challenge response body into [`TzapEnrollmentChallenge`], shared
@@ -559,9 +489,7 @@ pub(crate) fn parse_enrollment_response(bytes: &[u8]) -> Result<TzapEnrollmentCe
 fn parse_certificate_list_response(bytes: &[u8]) -> Result<Vec<TzapEnrollmentCertificatePayload>, TzapEnrollmentError> {
     let value: Value = serde_json::from_slice(bytes)?;
     let object = json_object::<TzapEnrollmentError>(&value, "$")?;
-    let certificates = required_field::<TzapEnrollmentError>(object, "certificates")?
-        .as_array()
-        .ok_or(TzapEnrollmentError::InvalidField { field: "certificates" })?;
+    let certificates = required_field::<TzapEnrollmentError>(object, "certificates")?.as_array().ok_or(TzapEnrollmentError::InvalidField { field: "certificates" })?;
     certificates.iter().map(parse_certificate_payload).collect::<Result<Vec<_>, _>>()
 }
 
@@ -572,17 +500,13 @@ fn parse_certificate_payload(value: &Value) -> Result<TzapEnrollmentCertificateP
     }
     Ok(TzapEnrollmentCertificatePayload {
         certificate_id: required_string::<TzapEnrollmentError>(object, "certificate_id")?,
-        leaf_certificate_der: decode_base64url(&required_string::<TzapEnrollmentError>(
-            object,
-            "leaf_certificate_der",
-        )?)?,
+        leaf_certificate_der: decode_base64url(&required_string::<TzapEnrollmentError>(object, "leaf_certificate_der")?)?,
         intermediate_chain_der: required_field::<TzapEnrollmentError>(object, "intermediate_chain_der")?
             .as_array()
             .ok_or(TzapEnrollmentError::InvalidField { field: "intermediate_chain_der" })?
             .iter()
             .map(|value| {
-                let encoded =
-                    value.as_str().ok_or(TzapEnrollmentError::InvalidField { field: "intermediate_chain_der" })?;
+                let encoded = value.as_str().ok_or(TzapEnrollmentError::InvalidField { field: "intermediate_chain_der" })?;
                 decode_base64url(encoded)
             })
             .collect::<Result<Vec<_>, _>>()?,
@@ -597,11 +521,8 @@ fn parse_certificate_payload(value: &Value) -> Result<TzapEnrollmentCertificateP
     })
 }
 
-fn parse_pem_certificate_payload(
-    object: &Map<String, Value>,
-) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
-    let leaf_certificate_der =
-        certificate_pem_to_der(&required_string::<TzapEnrollmentError>(object, "certificate_pem")?, "certificate_pem")?;
+fn parse_pem_certificate_payload(object: &Map<String, Value>) -> Result<TzapEnrollmentCertificatePayload, TzapEnrollmentError> {
+    let leaf_certificate_der = certificate_pem_to_der(&required_string::<TzapEnrollmentError>(object, "certificate_pem")?, "certificate_pem")?;
     let intermediate_chain_der = required_field::<TzapEnrollmentError>(object, "chain_pem")?
         .as_array()
         .ok_or(TzapEnrollmentError::InvalidField { field: "chain_pem" })?
@@ -630,8 +551,7 @@ fn parse_pem_certificate_payload(
 fn parse_denial(value: &Value) -> Result<TzapEnrollmentDenial, TzapEnrollmentError> {
     let object = json_object::<TzapEnrollmentError>(value, "denial")?;
     let reason = required_string::<TzapEnrollmentError>(object, "reason")?;
-    let kind = TzapEnrollmentDenialKind::from_wire_value(&reason)
-        .ok_or(TzapEnrollmentError::InvalidField { field: "denial.reason" })?;
+    let kind = TzapEnrollmentDenialKind::from_wire_value(&reason).ok_or(TzapEnrollmentError::InvalidField { field: "denial.reason" })?;
     Ok(TzapEnrollmentDenial {
         kind,
         retry_after_unix_seconds: optional_u64::<TzapEnrollmentError>(object, "retry_after")?,
@@ -640,8 +560,7 @@ fn parse_denial(value: &Value) -> Result<TzapEnrollmentDenial, TzapEnrollmentErr
 }
 
 pub(crate) fn decode_base64url(value: &str) -> Result<Vec<u8>, TzapEnrollmentError> {
-    crate::trust::decode_base64url_no_padding(value)
-        .map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })
+    crate::trust::decode_base64url_no_padding(value).map_err(|_| TzapEnrollmentError::InvalidField { field: "base64url" })
 }
 
 pub(crate) fn requested_validity_days(requested_validity_seconds: u64) -> Result<u64, TzapEnrollmentError> {
@@ -671,16 +590,13 @@ fn certificate_pem_to_der(pem: &str, field: &'static str) -> Result<Vec<u8>, Tza
 }
 
 fn certificate_validity_unix_seconds(der: &[u8]) -> Result<(u64, u64), TzapEnrollmentError> {
-    let (remaining, certificate) =
-        X509Certificate::from_der(der).map_err(|_| TzapEnrollmentError::InvalidField { field: "certificate_pem" })?;
+    let (remaining, certificate) = X509Certificate::from_der(der).map_err(|_| TzapEnrollmentError::InvalidField { field: "certificate_pem" })?;
     if !remaining.is_empty() {
         return Err(TzapEnrollmentError::InvalidField { field: "certificate_pem" });
     }
     let validity = certificate.validity();
-    let not_before = u64::try_from(validity.not_before.timestamp())
-        .map_err(|_| TzapEnrollmentError::InvalidField { field: "not_before" })?;
-    let not_after = u64::try_from(validity.not_after.timestamp())
-        .map_err(|_| TzapEnrollmentError::InvalidField { field: "not_after" })?;
+    let not_before = u64::try_from(validity.not_before.timestamp()).map_err(|_| TzapEnrollmentError::InvalidField { field: "not_before" })?;
+    let not_after = u64::try_from(validity.not_after.timestamp()).map_err(|_| TzapEnrollmentError::InvalidField { field: "not_after" })?;
     Ok((not_before, not_after))
 }
 
@@ -696,10 +612,7 @@ fn write_local_staging_canonical_json(value: &Value, output: &mut String) -> Res
         Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
         Value::Number(value) => output.push_str(&local_staging_canonical_number(value)),
         Value::String(value) => {
-            output.push_str(
-                &serde_json::to_string(value)
-                    .map_err(|error| TzapEnrollmentError::Canonicalization(error.to_string()))?,
-            );
+            output.push_str(&serde_json::to_string(value).map_err(|error| TzapEnrollmentError::Canonicalization(error.to_string()))?);
         }
         Value::Array(values) => {
             output.push('[');
@@ -719,15 +632,9 @@ fn write_local_staging_canonical_json(value: &Value, output: &mut String) -> Res
                 if index > 0 {
                     output.push(',');
                 }
-                output.push_str(
-                    &serde_json::to_string(key)
-                        .map_err(|error| TzapEnrollmentError::Canonicalization(error.to_string()))?,
-                );
+                output.push_str(&serde_json::to_string(key).map_err(|error| TzapEnrollmentError::Canonicalization(error.to_string()))?);
                 output.push(':');
-                write_local_staging_canonical_json(
-                    object.get(key).ok_or(TzapEnrollmentError::InvalidField { field: "challenge_payload" })?,
-                    output,
-                )?;
+                write_local_staging_canonical_json(object.get(key).ok_or(TzapEnrollmentError::InvalidField { field: "challenge_payload" })?, output)?;
             }
             output.push('}');
         }
@@ -740,11 +647,7 @@ fn local_staging_canonical_number(value: &Number) -> String {
         return local_staging_canonical_integer(&number.to_string());
     }
     if let Some(number) = value.as_i64() {
-        return if number < 0 {
-            format!("-{}", local_staging_canonical_integer(&number.unsigned_abs().to_string()))
-        } else {
-            local_staging_canonical_integer(&number.to_string())
-        };
+        return if number < 0 { format!("-{}", local_staging_canonical_integer(&number.unsigned_abs().to_string())) } else { local_staging_canonical_integer(&number.to_string()) };
     }
     value.to_string().replace('E', "e")
 }
@@ -763,11 +666,7 @@ fn expect_string(object: &Map<String, Value>, field: &'static str, expected: &st
     if actual == expected { Ok(()) } else { Err(TzapEnrollmentError::ChallengeMismatch { field }) }
 }
 
-fn expect_optional_string(
-    object: &Map<String, Value>,
-    field: &'static str,
-    expected: Option<&str>,
-) -> Result<(), TzapEnrollmentError> {
+fn expect_optional_string(object: &Map<String, Value>, field: &'static str, expected: Option<&str>) -> Result<(), TzapEnrollmentError> {
     let actual = optional_string::<TzapEnrollmentError>(object, field)?;
     if actual.as_deref() == expected { Ok(()) } else { Err(TzapEnrollmentError::ChallengeMismatch { field }) }
 }
@@ -787,18 +686,13 @@ fn expect_null(object: &Map<String, Value>, field: &'static str) -> Result<(), T
 #[cfg(test)]
 mod tests {
     use super::{
-        CERTIFICATES_PATH, DEFAULT_ENROLLMENT_DEVICE_NAME, ENROLL_OPERATION, ENROLLMENT_CHALLENGE_CANONICALIZATION,
-        LOCAL_STAGING_ENROLLMENT_AUDIENCE, TzapEnrollmentCertificateValidator, TzapEnrollmentClient,
-        TzapEnrollmentDenialKind, TzapEnrollmentError, TzapEnrollmentRequest, enroll_device_certificate,
+        CERTIFICATES_PATH, DEFAULT_ENROLLMENT_DEVICE_NAME, ENROLL_OPERATION, ENROLLMENT_CHALLENGE_CANONICALIZATION, LOCAL_STAGING_ENROLLMENT_AUDIENCE, TzapEnrollmentCertificateValidator,
+        TzapEnrollmentClient, TzapEnrollmentDenialKind, TzapEnrollmentError, TzapEnrollmentRequest, enroll_device_certificate,
     };
-    use crate::auth_client::{
-        SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse,
-        TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord,
-    };
+    use crate::auth_client::{SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapSessionRecord};
     use crate::device_identity::{TzapDeviceCsrOptions, generate_device_signing_key_and_csr};
     use crate::local_identity_store::{
-        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord,
-        TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore,
+        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore,
     };
     use crate::secrets::SecretBytes;
     use crate::trust::{self, TzapCertificatePublicMetadata};
@@ -816,24 +710,12 @@ mod tests {
     #[test]
     fn fake_sign_service_completes_enrollment_end_to_end() {
         let fixture = EnrollmentFixture::new(None, None);
-        let transport = FakeEnrollmentTransport::new(vec![
-            challenge_response(&fixture, ChallengeOverride::default()),
-            certificate_response(None),
-        ]);
+        let transport = FakeEnrollmentTransport::new(vec![challenge_response(&fixture, ChallengeOverride::default()), certificate_response(None)]);
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
         let validator = AcceptingCertificateValidator;
         let mut store = store_with_signing_key(&fixture.signing_key);
 
-        let record = enroll_device_certificate(
-            &client,
-            &validator,
-            &mut store,
-            &fixture.session,
-            &fixture.request,
-            &fixture.signing_key,
-            &fixture.csr_der,
-        )
-        .unwrap();
+        let record = enroll_device_certificate(&client, &validator, &mut store, &fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap();
 
         assert_eq!(record.certificate_id, "cert_123");
         assert_eq!(record.sign_device_id, "sign-device-123");
@@ -854,24 +736,12 @@ mod tests {
     #[test]
     fn local_staging_server_profile_uses_pem_wire_contract() {
         let fixture = EnrollmentFixture::new(None, None);
-        let transport = FakeEnrollmentTransport::new(vec![
-            local_staging_challenge_response(&fixture),
-            local_staging_certificate_response(),
-        ]);
+        let transport = FakeEnrollmentTransport::new(vec![local_staging_challenge_response(&fixture), local_staging_certificate_response()]);
         let client = TzapEnrollmentClient::local_staging_server("http://localhost:8080", &transport);
         let validator = AcceptingCertificateValidator;
         let mut store = store_with_signing_key(&fixture.signing_key);
 
-        let record = enroll_device_certificate(
-            &client,
-            &validator,
-            &mut store,
-            &fixture.session,
-            &fixture.request,
-            &fixture.signing_key,
-            &fixture.csr_der,
-        )
-        .unwrap();
+        let record = enroll_device_certificate(&client, &validator, &mut store, &fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap();
 
         assert_eq!(record.certificate_id, "cert_local_123");
         let requests = transport.requests();
@@ -899,27 +769,16 @@ mod tests {
 
         let canonical = super::canonicalize_local_staging_server_json_bytes(&payload).unwrap();
 
-        assert_eq!(
-            String::from_utf8(canonical).unwrap(),
-            r#"{"nested":{"ten":1e+1,"zero":0},"requested_validity_days":9e+1,"version":1}"#
-        );
+        assert_eq!(String::from_utf8(canonical).unwrap(), r#"{"nested":{"ten":1e+1,"zero":0},"requested_validity_days":9e+1,"version":1}"#);
     }
 
     #[test]
     fn mismatched_csr_challenge_is_rejected_before_signing() {
         let fixture = EnrollmentFixture::new(None, None);
-        let transport = FakeEnrollmentTransport::new(vec![challenge_response(
-            &fixture,
-            ChallengeOverride {
-                csr_sha256: Some(trust::format_csr_sha256(&[0x42; 32])),
-                ..ChallengeOverride::default()
-            },
-        )]);
+        let transport = FakeEnrollmentTransport::new(vec![challenge_response(&fixture, ChallengeOverride { csr_sha256: Some(trust::format_csr_sha256(&[0x42; 32])), ..ChallengeOverride::default() })]);
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
 
-        let error = client
-            .request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der)
-            .unwrap_err();
+        let error = client.request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap_err();
 
         assert!(matches!(
             error,
@@ -931,15 +790,10 @@ mod tests {
     #[test]
     fn different_session_challenge_is_rejected_before_signing() {
         let fixture = EnrollmentFixture::new(None, None);
-        let transport = FakeEnrollmentTransport::new(vec![challenge_response(
-            &fixture,
-            ChallengeOverride { session_id: Some(Some("other-session".to_owned())), ..ChallengeOverride::default() },
-        )]);
+        let transport = FakeEnrollmentTransport::new(vec![challenge_response(&fixture, ChallengeOverride { session_id: Some(Some("other-session".to_owned())), ..ChallengeOverride::default() })]);
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
 
-        let error = client
-            .request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der)
-            .unwrap_err();
+        let error = client.request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap_err();
 
         assert!(matches!(
             error,
@@ -954,18 +808,14 @@ mod tests {
         let transport = FakeEnrollmentTransport::new(Vec::new());
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
 
-        let error = client
-            .request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der)
-            .unwrap_err();
+        let error = client.request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap_err();
         assert!(matches!(error, TzapEnrollmentError::SessionOrgMismatch));
         assert!(transport.requests().is_empty());
 
         let fixture = EnrollmentFixture::new(Some("org_a".to_owned()), None);
         let transport = FakeEnrollmentTransport::new(vec![challenge_response(&fixture, ChallengeOverride::default())]);
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
-        client
-            .request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der)
-            .unwrap();
+        client.request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap();
 
         let body = transport.requests()[0].body.clone().unwrap();
         assert!(body.get("org_id").unwrap().is_null());
@@ -974,24 +824,12 @@ mod tests {
     #[test]
     fn malformed_certificate_chain_is_not_stored_as_active() {
         let fixture = EnrollmentFixture::new(None, None);
-        let transport = FakeEnrollmentTransport::new(vec![
-            challenge_response(&fixture, ChallengeOverride::default()),
-            certificate_response(Some(Vec::new())),
-        ]);
+        let transport = FakeEnrollmentTransport::new(vec![challenge_response(&fixture, ChallengeOverride::default()), certificate_response(Some(Vec::new()))]);
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
         let validator = AcceptingCertificateValidator;
         let mut store = store_with_signing_key(&fixture.signing_key);
 
-        let error = enroll_device_certificate(
-            &client,
-            &validator,
-            &mut store,
-            &fixture.session,
-            &fixture.request,
-            &fixture.signing_key,
-            &fixture.csr_der,
-        )
-        .unwrap_err();
+        let error = enroll_device_certificate(&client, &validator, &mut store, &fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap_err();
 
         assert!(matches!(error, TzapEnrollmentError::CertificateChain(_)));
         let inventory = store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
@@ -1006,23 +844,11 @@ mod tests {
             ("algorithm_not_allowed", TzapEnrollmentDenialKind::AlgorithmNotAllowed),
         ] {
             let fixture = EnrollmentFixture::new(None, None);
-            let transport = FakeEnrollmentTransport::new(vec![
-                challenge_response(&fixture, ChallengeOverride::default()),
-                denial_response(reason),
-            ]);
+            let transport = FakeEnrollmentTransport::new(vec![challenge_response(&fixture, ChallengeOverride::default()), denial_response(reason)]);
             let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
-            let challenge = client
-                .request_enrollment_challenge(
-                    &fixture.session,
-                    &fixture.request,
-                    &fixture.signing_key,
-                    &fixture.csr_der,
-                )
-                .unwrap();
+            let challenge = client.request_enrollment_challenge(&fixture.session, &fixture.request, &fixture.signing_key, &fixture.csr_der).unwrap();
 
-            let error = client
-                .submit_enrollment(&fixture.session, &challenge, &fixture.signing_key, &fixture.csr_der)
-                .unwrap_err();
+            let error = client.submit_enrollment(&fixture.session, &challenge, &fixture.signing_key, &fixture.csr_der).unwrap_err();
 
             assert!(matches!(
                 error,
@@ -1034,13 +860,8 @@ mod tests {
     #[test]
     fn certificate_listing_and_lookup_use_typed_paths() {
         let fixture = EnrollmentFixture::new(None, None);
-        let transport = FakeEnrollmentTransport::new(vec![
-            TzapAuthHttpResponse {
-                status_code: 200,
-                body: json!({"certificates": [certificate_json(None)]}).to_string().into_bytes(),
-            },
-            certificate_response(None),
-        ]);
+        let transport =
+            FakeEnrollmentTransport::new(vec![TzapAuthHttpResponse { status_code: 200, body: json!({"certificates": [certificate_json(None)]}).to_string().into_bytes() }, certificate_response(None)]);
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
 
         let listed = client.list_certificates(&fixture.session).unwrap();
@@ -1099,8 +920,7 @@ mod tests {
     }
 
     fn challenge_response(fixture: &EnrollmentFixture, override_values: ChallengeOverride) -> TzapAuthHttpResponse {
-        let csr_sha256 =
-            override_values.csr_sha256.unwrap_or_else(|| crate::device_identity::csr_fingerprint(&fixture.csr_der));
+        let csr_sha256 = override_values.csr_sha256.unwrap_or_else(|| crate::device_identity::csr_fingerprint(&fixture.csr_der));
         let session_id = override_values.session_id.unwrap_or_else(|| fixture.session.login_session_id.clone());
         let payload = json!({
             "canonicalization": ENROLLMENT_CHALLENGE_CANONICALIZATION,
@@ -1155,10 +975,7 @@ mod tests {
     }
 
     fn certificate_response(intermediate_chain_der: Option<Vec<Vec<u8>>>) -> TzapAuthHttpResponse {
-        TzapAuthHttpResponse {
-            status_code: 200,
-            body: json!({"certificate": certificate_json(intermediate_chain_der)}).to_string().into_bytes(),
-        }
+        TzapAuthHttpResponse { status_code: 200, body: json!({"certificate": certificate_json(intermediate_chain_der)}).to_string().into_bytes() }
     }
 
     fn local_staging_certificate_response() -> TzapAuthHttpResponse {
@@ -1257,10 +1074,7 @@ mod tests {
     struct AcceptingCertificateValidator;
 
     impl TzapEnrollmentCertificateValidator for AcceptingCertificateValidator {
-        fn validate_certificate_chain(
-            &self,
-            chain_der: &[Vec<u8>],
-        ) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError> {
+        fn validate_certificate_chain(&self, chain_der: &[Vec<u8>]) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError> {
             if chain_der.len() < 2 {
                 return Err(TzapEnrollmentError::CertificateChain("malformed chain".to_owned()));
             }

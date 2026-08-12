@@ -11,10 +11,7 @@ use zmanager_core::jobs::{self, CancellationToken, JobEvent as CoreJobEvent, Job
 use zmanager_core::libarchive_backend::{self, LibarchiveTestReport};
 use zmanager_core::manifest::{ManifestFileType, PlanOptions};
 use zmanager_core::raw_stream_backend;
-use zmanager_core::safety::{
-    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
-    ExtractionSafetyPlanner, OverwritePolicy,
-};
+use zmanager_core::safety::{ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwritePolicy};
 use zmanager_core::secrets::SecretString;
 use zmanager_core::sevenz_backend::SevenZCreateOptions;
 use zmanager_core::tar_zst_backend::TarZstdCreateOptions;
@@ -24,17 +21,15 @@ use zmanager_core::zip_backend::{self, ZipCreateOptions, ZipTestReport};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
-    ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error,
-    hint, map_7z_error, map_archive_browser_error, map_libarchive_error, map_rar_error, map_raw_stream_error,
-    map_tar_zst_error, map_tzap_error, map_zip_error,
+    ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error, hint, map_7z_error, map_archive_browser_error, map_libarchive_error,
+    map_rar_error, map_raw_stream_error, map_tar_zst_error, map_tzap_error, map_zip_error,
 };
 use crate::ffi::event::{cancelled_event, completed_event_from_summary, failed_event, mobile_event_from_core_event};
 use crate::ffi::ops::archive::{selected_path_matches, testArchive};
 use crate::ffi::types::{
-    ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult,
-    ClearSensitiveStateResult, CreateArchiveFormat, ExtractionCollisionPolicy, ExtractionPlanEntry,
-    ExtractionPlanEntryStatus, JobTerminalSummary, MobileJobEvent, MobileJobEventKind, MobileJobKind, MobileJobStatus,
-    PollJobEventsRequest, PollJobEventsResult, StartJobResult, TestArchiveRequest, ZmanagerGuiError, usize_to_u64,
+    ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreateArchiveFormat, ExtractionCollisionPolicy, ExtractionPlanEntry,
+    ExtractionPlanEntryStatus, JobTerminalSummary, MobileJobEvent, MobileJobEventKind, MobileJobKind, MobileJobStatus, PollJobEventsRequest, PollJobEventsResult, StartJobResult, TestArchiveRequest,
+    ZmanagerGuiError, usize_to_u64,
 };
 use crate::ffi::util::map_browser_entry_kind;
 
@@ -83,45 +78,25 @@ impl MobileJobRegistry {
         self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub(crate) fn create_job(
-        &self,
-        kind: MobileJobKind,
-        token: CancellationToken,
-        contains_sensitive_input: bool,
-    ) -> StartJobResult {
+    pub(crate) fn create_job(&self, kind: MobileJobKind, token: CancellationToken, contains_sensitive_input: bool) -> StartJobResult {
         let mut inner = self.lock_inner();
         inner.next_job_index = inner.next_job_index.saturating_add(1);
         let job_id = format!("job-{}-{}", std::process::id(), inner.next_job_index);
-        inner.jobs.insert(
-            job_id.clone(),
-            MobileJobRecord {
-                kind,
-                status: MobileJobStatus::Queued,
-                events: VecDeque::new(),
-                next_sequence: 1,
-                token,
-                terminal_summary: None,
-                contains_sensitive_input,
-            },
-        );
+        inner
+            .jobs
+            .insert(job_id.clone(), MobileJobRecord { kind, status: MobileJobStatus::Queued, events: VecDeque::new(), next_sequence: 1, token, terminal_summary: None, contains_sensitive_input });
 
         StartJobResult { job_id, kind, status: MobileJobStatus::Queued }
     }
 
     pub(crate) fn poll_events(&self, request: PollJobEventsRequest) -> Result<PollJobEventsResult, ZmanagerGuiError> {
         let inner = self.lock_inner();
-        let record = inner.jobs.get(&request.job_id).ok_or_else(|| {
-            bridge_error(
-                ERROR_NOT_FOUND,
-                "Job not found.",
-                hint("The job may have been created in a previous app process."),
-                BridgeSeverity::Warning,
-                false,
-            )
-        })?;
+        let record = inner
+            .jobs
+            .get(&request.job_id)
+            .ok_or_else(|| bridge_error(ERROR_NOT_FOUND, "Job not found.", hint("The job may have been created in a previous app process."), BridgeSeverity::Warning, false))?;
 
-        let events: Vec<MobileJobEvent> =
-            record.events.iter().filter(|event| event.sequence > request.cursor).cloned().collect();
+        let events: Vec<MobileJobEvent> = record.events.iter().filter(|event| event.sequence > request.cursor).cloned().collect();
         let next_cursor = events.last().map(|event| event.sequence).unwrap_or(request.cursor);
         let min_retained_sequence = record.events.front().map(|event| event.sequence).unwrap_or(record.next_sequence);
 
@@ -139,15 +114,10 @@ impl MobileJobRegistry {
 
     pub(crate) fn cancel_job(&self, request: CancelJobRequest) -> Result<CancelJobResult, ZmanagerGuiError> {
         let inner = self.lock_inner();
-        let record = inner.jobs.get(&request.job_id).ok_or_else(|| {
-            bridge_error(
-                ERROR_NOT_FOUND,
-                "Job not found.",
-                hint("The job may have been created in a previous app process."),
-                BridgeSeverity::Warning,
-                false,
-            )
-        })?;
+        let record = inner
+            .jobs
+            .get(&request.job_id)
+            .ok_or_else(|| bridge_error(ERROR_NOT_FOUND, "Job not found.", hint("The job may have been created in a previous app process."), BridgeSeverity::Warning, false))?;
 
         let cancel_requested = !record.status.is_terminal();
         if cancel_requested {
@@ -233,12 +203,7 @@ impl MobileJobRegistry {
     }
 
     fn append_event(record: &mut MobileJobRecord, mut event: MobileJobEvent) {
-        if record.status.is_terminal()
-            && matches!(
-                event.event_type,
-                MobileJobEventKind::Completed | MobileJobEventKind::Failed | MobileJobEventKind::Cancelled
-            )
-        {
+        if record.status.is_terminal() && matches!(event.event_type, MobileJobEventKind::Completed | MobileJobEventKind::Failed | MobileJobEventKind::Cancelled) {
             return;
         }
 
@@ -268,10 +233,7 @@ impl MobileJobRegistry {
             }
             MobileJobEventKind::Failed => record.status = MobileJobStatus::Failed,
             MobileJobEventKind::Cancelled => record.status = MobileJobStatus::Cancelled,
-            MobileJobEventKind::EntryStarted
-            | MobileJobEventKind::BytesProcessed
-            | MobileJobEventKind::EntryFinished
-            | MobileJobEventKind::Warning => {}
+            MobileJobEventKind::EntryStarted | MobileJobEventKind::BytesProcessed | MobileJobEventKind::EntryFinished | MobileJobEventKind::Warning => {}
         }
 
         event.sequence = record.next_sequence;
@@ -319,11 +281,7 @@ pub(crate) fn job_registry() -> Arc<MobileJobRegistry> {
     JOB_REGISTRY.get_or_init(|| Arc::new(MobileJobRegistry::default())).clone()
 }
 
-pub(crate) fn run_create_job(
-    input: CreateJobInput,
-    token: &CancellationToken,
-    sink: &mut dyn jobs::JobEventSink,
-) -> Result<JobTerminalSummary, ZmanagerGuiError> {
+pub(crate) fn run_create_job(input: CreateJobInput, token: &CancellationToken, sink: &mut dyn jobs::JobEventSink) -> Result<JobTerminalSummary, ZmanagerGuiError> {
     let destination = Path::new(&input.destination_archive_path);
     let plan_options = create_plan_options(input.clean_source, &input.excluded_paths);
     let verify_after_create = input.verify_after_create;
@@ -344,15 +302,7 @@ pub(crate) fn run_create_job(
                 volume_size,
                 ..ZipCreateOptions::default()
             };
-            let report = jobs::run_zip_create_job_from_sources_with_plan_options(
-                &input.source_paths,
-                destination,
-                &options,
-                &plan_options,
-                token,
-                sink,
-            )
-            .map_err(map_zip_error)?;
+            let report = jobs::run_zip_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink).map_err(map_zip_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
         CreateArchiveFormat::SevenZ => {
@@ -365,15 +315,7 @@ pub(crate) fn run_create_job(
                 volume_size,
                 ..SevenZCreateOptions::default()
             };
-            let report = jobs::run_7z_create_job_from_sources_with_plan_options(
-                &input.source_paths,
-                destination,
-                &options,
-                &plan_options,
-                token,
-                sink,
-            )
-            .map_err(map_7z_error)?;
+            let report = jobs::run_7z_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink).map_err(map_7z_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
         CreateArchiveFormat::TarZst => {
@@ -383,23 +325,12 @@ pub(crate) fn run_create_job(
                 level: i32::try_from(level).unwrap_or(0),
                 ..TarZstdCreateOptions::default()
             };
-            let report = jobs::run_tar_zst_create_job_from_sources_with_plan_options(
-                &input.source_paths,
-                destination,
-                &options,
-                &plan_options,
-                token,
-                sink,
-            )
-            .map_err(map_tar_zst_error)?;
+            let report = jobs::run_tar_zst_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink).map_err(map_tar_zst_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
         CreateArchiveFormat::Tzap => {
             let options = TzapCreateOptions {
-                key_source: input
-                    .password
-                    .map(|password| TzapKeySource::Passphrase(SecretString::from(password)))
-                    .unwrap_or(TzapKeySource::NoPassword),
+                key_source: input.password.map(|password| TzapKeySource::Passphrase(SecretString::from(password))).unwrap_or(TzapKeySource::NoPassword),
                 level: i32::try_from(level).unwrap_or(0),
                 preserve_metadata: input.preserve_metadata,
                 replace_existing: input.replace_existing,
@@ -408,15 +339,7 @@ pub(crate) fn run_create_job(
                 volume_loss_tolerance,
                 x509_signing,
             };
-            let report = jobs::run_tzap_create_job_from_sources_with_plan_options(
-                &input.source_paths,
-                destination,
-                &options,
-                &plan_options,
-                token,
-                sink,
-            )
-            .map_err(map_tzap_error)?;
+            let report = jobs::run_tzap_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink).map_err(map_tzap_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
     };
@@ -428,16 +351,8 @@ pub(crate) fn run_create_job(
     Ok(summary)
 }
 
-pub(crate) fn run_extract_job(
-    input: ExtractJobInput,
-    token: &CancellationToken,
-    sink: &mut dyn jobs::JobEventSink,
-) -> Result<JobTerminalSummary, ZmanagerGuiError> {
-    if input.selected_paths.is_empty() {
-        run_full_extract_job(input, token, sink)
-    } else {
-        run_selected_extract_job(input, token, sink)
-    }
+pub(crate) fn run_extract_job(input: ExtractJobInput, token: &CancellationToken, sink: &mut dyn jobs::JobEventSink) -> Result<JobTerminalSummary, ZmanagerGuiError> {
+    if input.selected_paths.is_empty() { run_full_extract_job(input, token, sink) } else { run_selected_extract_job(input, token, sink) }
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -472,65 +387,32 @@ fn maybe_run_apple_extract_job(
     None
 }
 
-fn run_full_extract_job(
-    input: ExtractJobInput,
-    token: &CancellationToken,
-    sink: &mut dyn jobs::JobEventSink,
-) -> Result<JobTerminalSummary, ZmanagerGuiError> {
+fn run_full_extract_job(input: ExtractJobInput, token: &CancellationToken, sink: &mut dyn jobs::JobEventSink) -> Result<JobTerminalSummary, ZmanagerGuiError> {
     let archive_path = Path::new(&input.archive_path);
     let destination_root = Path::new(&input.destination_root);
     let password = input.password.as_deref();
     let policy = extraction_policy_for_request(input.collision_policy, input.strip_components);
 
     if matches!(input.format, ArchiveFormat::Zip) {
-        jobs::run_zip_extract_job_with_password_and_policy(
-            archive_path,
-            destination_root,
-            password,
-            policy,
-            token,
-            sink,
-        )
-        .map(ArchiveJobReport::from)
-        .map_err(map_zip_error)
-        .map(JobTerminalSummary::from)
+        jobs::run_zip_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
+            .map(ArchiveJobReport::from)
+            .map_err(map_zip_error)
+            .map(JobTerminalSummary::from)
     } else if matches!(input.format, ArchiveFormat::TarZst) {
-        jobs::run_tar_zst_extract_job_with_policy(archive_path, destination_root, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_tar_zst_error)
-            .map(JobTerminalSummary::from)
+        jobs::run_tar_zst_extract_job_with_policy(archive_path, destination_root, policy, token, sink).map(ArchiveJobReport::from).map_err(map_tar_zst_error).map(JobTerminalSummary::from)
     } else if matches!(input.format, ArchiveFormat::SevenZ) {
-        jobs::run_7z_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_7z_error)
-            .map(JobTerminalSummary::from)
+        jobs::run_7z_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink).map(ArchiveJobReport::from).map_err(map_7z_error).map(JobTerminalSummary::from)
     } else if matches!(input.format, ArchiveFormat::Rar | ArchiveFormat::MultipartRar) {
-        jobs::run_rar_extract_job_with_password_and_policy(
-            archive_path,
-            destination_root,
-            password,
-            policy,
-            token,
-            sink,
-        )
-        .map(ArchiveJobReport::from)
-        .map_err(map_rar_error)
-        .map(JobTerminalSummary::from)
+        jobs::run_rar_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
+            .map(ArchiveJobReport::from)
+            .map_err(map_rar_error)
+            .map(JobTerminalSummary::from)
     } else if matches!(input.format, ArchiveFormat::Tzap) {
-        jobs::run_tzap_extract_job_with_password_and_policy(
-            archive_path,
-            destination_root,
-            password,
-            policy,
-            token,
-            sink,
-        )
-        .map(ArchiveJobReport::from)
-        .map_err(map_tzap_error)
-        .map(JobTerminalSummary::from)
-    } else if let Some(result) =
-        maybe_run_apple_extract_job(input.format, archive_path, destination_root, &policy, token, sink)
-    {
+        jobs::run_tzap_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
+            .map(ArchiveJobReport::from)
+            .map_err(map_tzap_error)
+            .map(JobTerminalSummary::from)
+    } else if let Some(result) = maybe_run_apple_extract_job(input.format, archive_path, destination_root, &policy, token, sink) {
         result
     } else if let Some(raw_format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
         jobs::run_raw_stream_extract_job_with_policy(archive_path, raw_format, destination_root, policy, token, sink)
@@ -538,60 +420,33 @@ fn run_full_extract_job(
             .map_err(map_raw_stream_error)
             .map(JobTerminalSummary::from)
     } else {
-        jobs::run_libarchive_extract_job_with_password_and_policy(
-            archive_path,
-            destination_root,
-            password,
-            policy,
-            token,
-            sink,
-        )
-        .map(ArchiveJobReport::from)
-        .map_err(map_libarchive_error)
-        .map(JobTerminalSummary::from)
+        jobs::run_libarchive_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
+            .map(ArchiveJobReport::from)
+            .map_err(map_libarchive_error)
+            .map(JobTerminalSummary::from)
     }
 }
 
-fn run_selected_extract_job(
-    input: ExtractJobInput,
-    token: &CancellationToken,
-    sink: &mut dyn jobs::JobEventSink,
-) -> Result<JobTerminalSummary, ZmanagerGuiError> {
+fn run_selected_extract_job(input: ExtractJobInput, token: &CancellationToken, sink: &mut dyn jobs::JobEventSink) -> Result<JobTerminalSummary, ZmanagerGuiError> {
     let archive_path = Path::new(&input.archive_path);
     let destination_root = Path::new(&input.destination_root);
     let password = input.password.as_deref();
-    let listing = archive_browser::list_entries_with_options(archive_path, BrowserListOptions { password })
-        .map_err(map_archive_browser_error)?;
-    let entries: Vec<_> =
-        listing.entries.into_iter().filter(|entry| selected_path_matches(&input.selected_paths, &entry.path)).collect();
+    let listing = archive_browser::list_entries_with_options(archive_path, BrowserListOptions { password }).map_err(map_archive_browser_error)?;
+    let entries: Vec<_> = listing.entries.into_iter().filter(|entry| selected_path_matches(&input.selected_paths, &entry.path)).collect();
 
     if entries.is_empty() {
-        return Err(bridge_error(
-            ERROR_NOT_FOUND,
-            "No selected archive entries were found.",
-            hint("Refresh the archive listing and select entries that still exist."),
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_NOT_FOUND, "No selected archive entries were found.", hint("Refresh the archive listing and select entries that still exist."), BridgeSeverity::Warning, false));
     }
 
     let total_bytes = entries.iter().fold((false, 0_u64), |(has_size, total), entry| match entry.size {
         Some(size) => (true, total.saturating_add(size)),
         None => (has_size, total),
     });
-    sink.emit(CoreJobEvent::Started {
-        kind: core_extract_job_kind(archive_path, input.format),
-        total_bytes: total_bytes.0.then_some(total_bytes.1),
-    });
+    sink.emit(CoreJobEvent::Started { kind: core_extract_job_kind(archive_path, input.format), total_bytes: total_bytes.0.then_some(total_bytes.1) });
 
     let mut written_entries = 0usize;
     let mut written_bytes = 0u64;
-    let options = BrowserExtractOptions {
-        password,
-        overwrite: map_collision_policy(input.collision_policy),
-        strip_components: input.strip_components,
-        ..Default::default()
-    };
+    let options = BrowserExtractOptions { password, overwrite: map_collision_policy(input.collision_policy), strip_components: input.strip_components, ..Default::default() };
 
     for entry in entries {
         if token.is_cancelled() {
@@ -601,8 +456,7 @@ fn run_selected_extract_job(
 
         let entry_path = entry.path;
         sink.emit(CoreJobEvent::EntryStarted { path: entry_path.clone(), bytes: entry.size });
-        let report = archive_browser::extract_entry_with_options(archive_path, &entry_path, destination_root, options)
-            .map_err(map_archive_browser_error)?;
+        let report = archive_browser::extract_entry_with_options(archive_path, &entry_path, destination_root, options).map_err(map_archive_browser_error)?;
         written_entries = written_entries.saturating_add(1);
         written_bytes = written_bytes.saturating_add(report.written_bytes);
         sink.emit(CoreJobEvent::EntryFinished { path: entry_path, bytes: report.written_bytes });
@@ -667,68 +521,19 @@ macro_rules! archive_job_report_from {
 }
 
 archive_job_report_from!(zip_backend::ZipExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(
-    zmanager_core::tar_zst_backend::TarZstdExtractReport,
-    report,
-    report.skipped_entries,
-    None,
-    None,
-    None
-);
-archive_job_report_from!(
-    zmanager_core::sevenz_backend::SevenZExtractReport,
-    report,
-    report.skipped_entries,
-    None,
-    None,
-    None
-);
-archive_job_report_from!(
-    zmanager_core::rar_backend::RarExtractReport,
-    report,
-    report.skipped_entries,
-    None,
-    None,
-    None
-);
+archive_job_report_from!(zmanager_core::tar_zst_backend::TarZstdExtractReport, report, report.skipped_entries, None, None, None);
+archive_job_report_from!(zmanager_core::sevenz_backend::SevenZExtractReport, report, report.skipped_entries, None, None, None);
+archive_job_report_from!(zmanager_core::rar_backend::RarExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(tzap_backend::TzapExtractReport, report, report.skipped_entries, None, None, None);
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-archive_job_report_from!(
-    apple_archive_backend::AppleArchiveExtractReport,
-    report,
-    report.skipped_entries,
-    None,
-    None,
-    None
-);
+archive_job_report_from!(apple_archive_backend::AppleArchiveExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(raw_stream_backend::RawStreamExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(libarchive_backend::LibarchiveExtractReport, report, report.skipped_entries, None, None, None);
 
-archive_job_report_from!(
-    zip_backend::ZipCreateReport,
-    report,
-    0,
-    Some(report.encrypted),
-    report.volume_size,
-    Some(report.volume_count)
-);
-archive_job_report_from!(
-    zmanager_core::sevenz_backend::SevenZCreateReport,
-    report,
-    0,
-    Some(report.encrypted),
-    report.volume_size,
-    Some(report.volume_count)
-);
+archive_job_report_from!(zip_backend::ZipCreateReport, report, 0, Some(report.encrypted), report.volume_size, Some(report.volume_count));
+archive_job_report_from!(zmanager_core::sevenz_backend::SevenZCreateReport, report, 0, Some(report.encrypted), report.volume_size, Some(report.volume_count));
 archive_job_report_from!(zmanager_core::tar_zst_backend::TarZstdCreateReport, report, 0, Some(false), None, Some(1));
-archive_job_report_from!(
-    tzap_backend::TzapCreateReport,
-    report,
-    0,
-    None,
-    report.volume_size,
-    Some(report.volume_count)
-);
+archive_job_report_from!(tzap_backend::TzapCreateReport, report, 0, None, report.volume_size, Some(report.volume_count));
 
 impl From<ArchiveJobReport> for JobTerminalSummary {
     fn from(report: ArchiveJobReport) -> Self {
@@ -757,30 +562,15 @@ pub(crate) struct TestArchiveReport {
 
 impl TestArchiveReport {
     pub(crate) fn from_zip(report: ZipTestReport) -> Self {
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
-        }
+        Self { tested_entries: usize_to_u64(report.tested_entries), skipped_entries: usize_to_u64(report.skipped_entries), tested_bytes: report.tested_bytes, warnings: Vec::new() }
     }
 
     pub(crate) fn from_7z(report: zmanager_core::sevenz_backend::SevenZTestReport) -> Self {
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
-        }
+        Self { tested_entries: usize_to_u64(report.tested_entries), skipped_entries: usize_to_u64(report.skipped_entries), tested_bytes: report.tested_bytes, warnings: Vec::new() }
     }
 
     pub(crate) fn from_libarchive(report: LibarchiveTestReport) -> Self {
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
-        }
+        Self { tested_entries: usize_to_u64(report.tested_entries), skipped_entries: usize_to_u64(report.skipped_entries), tested_bytes: report.tested_bytes, warnings: Vec::new() }
     }
 
     pub(crate) fn from_tzap(report: TzapTestReport) -> Self {
@@ -794,22 +584,12 @@ impl TestArchiveReport {
             })
             .unwrap_or_default();
 
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings,
-        }
+        Self { tested_entries: usize_to_u64(report.tested_entries), skipped_entries: usize_to_u64(report.skipped_entries), tested_bytes: report.tested_bytes, warnings }
     }
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub(crate) fn from_apple_archive(report: apple_archive_backend::AppleArchiveTestReport) -> Self {
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
-        }
+        Self { tested_entries: usize_to_u64(report.tested_entries), skipped_entries: usize_to_u64(report.skipped_entries), tested_bytes: report.tested_bytes, warnings: Vec::new() }
     }
 
     pub(crate) fn total_entries(&self) -> u64 {
@@ -833,55 +613,39 @@ pub(crate) fn plan_browser_entry(planner: &mut ExtractionSafetyPlanner<'_>, entr
             let archive_path = entry.path.clone();
             return PlanEntryOutcome::EntryWithWarning {
                 plan_entry: blocked_plan_entry(entry, kind, reason),
-                warning: bridge_warning(format!(
-                    "Blocked {} until zmanager-core exposes link target metadata for mobile planning.",
-                    archive_path
-                )),
+                warning: bridge_warning(format!("Blocked {} until zmanager-core exposes link target metadata for mobile planning.", archive_path)),
             };
         }
         BrowserEntryKind::Special => {
-            return PlanEntryOutcome::Entry(blocked_plan_entry(
-                entry,
-                kind,
-                "Special files are blocked by the mobile extraction policy.",
-            ));
+            return PlanEntryOutcome::Entry(blocked_plan_entry(entry, kind, "Special files are blocked by the mobile extraction policy."));
         }
     };
 
-    let safety_entry = ExtractionEntry {
-        archive_path: entry.path.clone(),
-        kind: extraction_kind,
-        uncompressed_size: entry.size,
-        compressed_size: entry.compressed_size,
-    };
+    let safety_entry = ExtractionEntry { archive_path: entry.path.clone(), kind: extraction_kind, uncompressed_size: entry.size, compressed_size: entry.compressed_size };
 
     match planner.validate_entry(&safety_entry) {
-        Ok(ExtractionDecision::Write { normalized_archive_path, destination_path, replace_existing, .. }) => {
-            PlanEntryOutcome::Entry(ExtractionPlanEntry {
-                archive_path: entry.path,
-                normalized_path: Some(normalized_archive_path),
-                destination_path: Some(destination_path.to_string_lossy().to_string()),
-                kind,
-                status: ExtractionPlanEntryStatus::Write,
-                reason: None,
-                size: entry.size,
-                compressed_size: entry.compressed_size,
-                replace_existing,
-            })
-        }
-        Ok(ExtractionDecision::Skip { normalized_archive_path, reason }) => {
-            PlanEntryOutcome::Entry(ExtractionPlanEntry {
-                archive_path: entry.path,
-                normalized_path: Some(normalized_archive_path),
-                destination_path: None,
-                kind,
-                status: ExtractionPlanEntryStatus::Skip,
-                reason: Some(reason),
-                size: entry.size,
-                compressed_size: entry.compressed_size,
-                replace_existing: false,
-            })
-        }
+        Ok(ExtractionDecision::Write { normalized_archive_path, destination_path, replace_existing, .. }) => PlanEntryOutcome::Entry(ExtractionPlanEntry {
+            archive_path: entry.path,
+            normalized_path: Some(normalized_archive_path),
+            destination_path: Some(destination_path.to_string_lossy().to_string()),
+            kind,
+            status: ExtractionPlanEntryStatus::Write,
+            reason: None,
+            size: entry.size,
+            compressed_size: entry.compressed_size,
+            replace_existing,
+        }),
+        Ok(ExtractionDecision::Skip { normalized_archive_path, reason }) => PlanEntryOutcome::Entry(ExtractionPlanEntry {
+            archive_path: entry.path,
+            normalized_path: Some(normalized_archive_path),
+            destination_path: None,
+            kind,
+            status: ExtractionPlanEntryStatus::Skip,
+            reason: Some(reason),
+            size: entry.size,
+            compressed_size: entry.compressed_size,
+            replace_existing: false,
+        }),
         Err(error) => PlanEntryOutcome::Entry(blocked_plan_entry_from_safety_error(entry, kind, error)),
     }
 }
@@ -900,11 +664,7 @@ fn blocked_plan_entry(entry: BrowserEntry, kind: ArchiveEntryKind, reason: impl 
     }
 }
 
-fn blocked_plan_entry_from_safety_error(
-    entry: BrowserEntry,
-    kind: ArchiveEntryKind,
-    error: ExtractionSafetyError,
-) -> ExtractionPlanEntry {
+fn blocked_plan_entry_from_safety_error(entry: BrowserEntry, kind: ArchiveEntryKind, error: ExtractionSafetyError) -> ExtractionPlanEntry {
     let destination_path = safety_error_destination_path(&error);
     ExtractionPlanEntry {
         archive_path: entry.path,
@@ -950,15 +710,8 @@ pub(crate) fn map_collision_policy(policy: ExtractionCollisionPolicy) -> Overwri
     }
 }
 
-fn extraction_policy_for_request(
-    collision_policy: ExtractionCollisionPolicy,
-    strip_components: usize,
-) -> ExtractionPolicy {
-    ExtractionPolicy {
-        overwrite: map_collision_policy(collision_policy),
-        strip_components,
-        ..ExtractionPolicy::default()
-    }
+fn extraction_policy_for_request(collision_policy: ExtractionCollisionPolicy, strip_components: usize) -> ExtractionPolicy {
+    ExtractionPolicy { overwrite: map_collision_policy(collision_policy), strip_components, ..ExtractionPolicy::default() }
 }
 
 pub(crate) fn create_plan_options(clean_source: bool, excluded_paths: &[String]) -> PlanOptions {
@@ -972,16 +725,10 @@ pub(crate) fn create_plan_options(clean_source: bool, excluded_paths: &[String])
 
 fn tzap_signing_options(input: &CreateJobInput) -> Option<TzapX509SigningOptions> {
     if let Some(identity) = input.tzap_identity.as_deref().filter(|path| !path.is_empty()) {
-        return Some(TzapX509SigningOptions::Pkcs12 {
-            identity: PathBuf::from(identity),
-            password: SecretString::from(input.tzap_identity_password.clone().unwrap_or_default()),
-        });
+        return Some(TzapX509SigningOptions::Pkcs12 { identity: PathBuf::from(identity), password: SecretString::from(input.tzap_identity_password.clone().unwrap_or_default()) });
     }
 
-    match (
-        input.tzap_signing_certificate.as_deref().filter(|path| !path.is_empty()),
-        input.tzap_signing_private_key.as_deref().filter(|path| !path.is_empty()),
-    ) {
+    match (input.tzap_signing_certificate.as_deref().filter(|path| !path.is_empty()), input.tzap_signing_private_key.as_deref().filter(|path| !path.is_empty())) {
         (Some(certificate), Some(private_key)) => Some(TzapX509SigningOptions::CertificateAndKey {
             signing_certificate: PathBuf::from(certificate),
             signing_private_key: PathBuf::from(private_key),
@@ -995,26 +742,11 @@ fn tzap_signing_options(input: &CreateJobInput) -> Option<TzapX509SigningOptions
 /// path. All current formats do; a format without a test path must return
 /// false here instead of silently offering verification.
 pub(crate) fn create_verify_supported(format: CreateArchiveFormat) -> bool {
-    matches!(
-        format,
-        CreateArchiveFormat::Zip
-            | CreateArchiveFormat::SevenZ
-            | CreateArchiveFormat::TarZst
-            | CreateArchiveFormat::Tzap
-    )
+    matches!(format, CreateArchiveFormat::Zip | CreateArchiveFormat::SevenZ | CreateArchiveFormat::TarZst | CreateArchiveFormat::Tzap)
 }
 
-fn apply_create_verification(
-    summary: &mut JobTerminalSummary,
-    destination: &Path,
-    password: Option<String>,
-    sink: &mut dyn jobs::JobEventSink,
-) {
-    match testArchive(TestArchiveRequest {
-        archive_path: destination.to_string_lossy().to_string(),
-        password,
-        selected_paths: Vec::new(),
-    }) {
+fn apply_create_verification(summary: &mut JobTerminalSummary, destination: &Path, password: Option<String>, sink: &mut dyn jobs::JobEventSink) {
+    match testArchive(TestArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password, selected_paths: Vec::new() }) {
         Ok(report) => {
             summary.verified = Some(true);
             summary.verified_entries = Some(report.tested_entries);
@@ -1025,9 +757,7 @@ fn apply_create_verification(
             let error = bridge_error_from_mobile(error);
             summary.verified = Some(false);
             summary.warnings.push(error.clone());
-            sink.emit(CoreJobEvent::Warning {
-                message: format!("Created archive verification failed: {}", error.message),
-            });
+            sink.emit(CoreJobEvent::Warning { message: format!("Created archive verification failed: {}", error.message) });
         }
     }
 }

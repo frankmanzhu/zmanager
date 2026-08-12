@@ -9,9 +9,7 @@ use openssl::ec::{EcGroup, EcKey};
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::{PKey, PKeyRef, Private};
-use openssl::x509::extension::{
-    AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectKeyIdentifier,
-};
+use openssl::x509::extension::{AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectKeyIdentifier};
 use openssl::x509::{X509, X509Extension, X509Ref};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -22,50 +20,31 @@ use std::path::Path;
 use x509_parser::extensions::ParsedExtension;
 use x509_parser::prelude::{FromDer as _, X509Certificate};
 use zmanager_core::auth_client::{
-    AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP,
-    TzapAuthError, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapAuthRelayCompletion,
-    TzapBearerToken, TzapHostedAuthCallback, TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig,
-    TzapOAuthStateTracker, TzapPendingAuthState, TzapPkcePair, TzapSessionRecord, TzapSessionStore,
-    complete_hosted_auth_handoff,
+    AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport,
+    TzapAuthRelayCompletion, TzapBearerToken, TzapHostedAuthCallback, TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig, TzapOAuthStateTracker, TzapPendingAuthState, TzapPkcePair,
+    TzapSessionRecord, TzapSessionStore, complete_hosted_auth_handoff,
 };
-use zmanager_core::certificate_lifecycle::{
-    TzapCertificateLifecycleClient, TzapCertificateLifecycleError, TzapRenewalPolicy, TzapRenewalRequest,
-    TzapRetirementCompletion,
-};
-use zmanager_core::contact_card::{
-    TzapContactCardError, TzapContactCardExportRequest, TzapContactCardImportOptions, accepted_contact_recipients,
-    export_tzap_contact_card, import_tzap_contact_card,
-};
-use zmanager_core::device_identity::{
-    TzapDeviceCsrOptions, generate_device_signing_key_and_csr, generate_recipient_encryption_key,
-};
+use zmanager_core::certificate_lifecycle::{TzapCertificateLifecycleClient, TzapCertificateLifecycleError, TzapRenewalPolicy, TzapRenewalRequest, TzapRetirementCompletion};
+use zmanager_core::contact_card::{TzapContactCardError, TzapContactCardExportRequest, TzapContactCardImportOptions, accepted_contact_recipients, export_tzap_contact_card, import_tzap_contact_card};
+use zmanager_core::device_identity::{TzapDeviceCsrOptions, generate_device_signing_key_and_csr, generate_recipient_encryption_key};
 use zmanager_core::document_envelope::validate_tzap_document_envelope_value;
 use zmanager_core::document_signing::{TzapDocumentSigningRequest, sign_tzap_document_payload};
 use zmanager_core::document_verification::{TzapOfflineVerificationOptions, verify_tzap_document_envelope_offline};
 use zmanager_core::enrollment_client::{
-    ENROLL_OPERATION, ENROLLMENT_CHALLENGE_CANONICALIZATION, TzapCustomEnrollmentCertificateValidator,
-    TzapEnrollmentClient, TzapEnrollmentDenialKind, TzapEnrollmentError, TzapEnrollmentRequest,
+    ENROLL_OPERATION, ENROLLMENT_CHALLENGE_CANONICALIZATION, TzapCustomEnrollmentCertificateValidator, TzapEnrollmentClient, TzapEnrollmentDenialKind, TzapEnrollmentError, TzapEnrollmentRequest,
     enroll_device_certificate,
 };
 use zmanager_core::jobs::{CancellationToken, JobContext};
 use zmanager_core::local_identity_store::{
-    DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord,
-    TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory,
-    TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
+    DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState,
+    TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
 };
 use zmanager_core::manifest::{ManifestEntry, ManifestFileType, PermissionSnapshot};
 use zmanager_core::safety::ExtractionPolicy;
-use zmanager_core::status_client::{
-    TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse,
-    online_verification_result_from_status,
-};
-use zmanager_core::trust::{
-    self, TzapCertificateProfileOptions, TzapCertificatePublicMetadata, TzapCertificateStatus, TzapRootPinSet,
-    TzapTrustAnchorType, TzapVerificationState,
-};
+use zmanager_core::status_client::{TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, online_verification_result_from_status};
+use zmanager_core::trust::{self, TzapCertificateProfileOptions, TzapCertificatePublicMetadata, TzapCertificateStatus, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState};
 use zmanager_core::tzap_backend::{
-    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapRestoreOptions,
-    create_tzap_from_manifest_with_context, extract_tzap, list_tzap_with_recipient_key,
+    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapRestoreOptions, create_tzap_from_manifest_with_context, extract_tzap, list_tzap_with_recipient_key,
 };
 
 const ACCOUNT_KEY: &str = DEFAULT_IDENTITY_INVENTORY_ACCOUNT;
@@ -84,13 +63,7 @@ const FIXED_PROVIDER_ID: &str = "hosted";
 fn hosted_auth_handoff_obligations_are_enforced() {
     let pkce = TzapPkcePair::from_verifier(FIXED_PKCE_VERIFIER).unwrap();
     let pending = pending_state(pkce.clone(), FIXED_NOW);
-    let launch = TzapHostedAuthLaunchConfig::for_environment(
-        TzapHostedAuthEnvironment::Local,
-        "zmanager-cli",
-        CALLBACK_REDIRECT_URI,
-    )
-    .launch_url(&pending)
-    .unwrap();
+    let launch = TzapHostedAuthLaunchConfig::for_environment(TzapHostedAuthEnvironment::Local, "zmanager-cli", CALLBACK_REDIRECT_URI).launch_url(&pending).unwrap();
 
     assert!(launch.starts_with("http://localhost:8787/auth/launch?"));
     assert!(launch.contains("client_id=zmanager-cli"));
@@ -100,8 +73,7 @@ fn hosted_auth_handoff_obligations_are_enforced() {
     assert!(!launch.contains("session_token"));
 
     let mut store = InMemoryTzapSessionStore::new();
-    let session = complete_callback(pending.clone(), &mut store, ok_relay_body(), FIXED_NOW)
-        .expect("valid handoff should create a local session");
+    let session = complete_callback(pending.clone(), &mut store, ok_relay_body(), FIXED_NOW).expect("valid handoff should create a local session");
     assert_eq!(session.audience, SESSION_AUDIENCE_SIGN_TZAP);
     assert!(!session.is_expired_at(FIXED_NOW));
     assert!(session.is_expired_at(FIXED_NOW + 3_600));
@@ -113,17 +85,11 @@ fn hosted_auth_handoff_obligations_are_enforced() {
     let wrong_pkce = callback_with(pending.clone(), ok_relay_body(), Some("wrong-verifier"));
     let mut tracker = tracker_with_pending(pending.clone());
     let mut store = InMemoryTzapSessionStore::new();
-    assert!(matches!(
-        complete_hosted_auth_handoff(&mut tracker, &mut store, ACCOUNT_KEY, &wrong_pkce, FIXED_NOW),
-        Err(TzapAuthError::PkceVerifierMismatch)
-    ));
+    assert!(matches!(complete_hosted_auth_handoff(&mut tracker, &mut store, ACCOUNT_KEY, &wrong_pkce, FIXED_NOW), Err(TzapAuthError::PkceVerifierMismatch)));
 
     let expired_pending = pending_state(pkce, FIXED_NOW - AUTH_HANDOFF_LIFETIME_SECONDS - 1);
     let mut store = InMemoryTzapSessionStore::new();
-    assert!(matches!(
-        complete_callback(expired_pending, &mut store, ok_relay_body(), FIXED_NOW),
-        Err(TzapAuthError::ExpiredHandoff)
-    ));
+    assert!(matches!(complete_callback(expired_pending, &mut store, ok_relay_body(), FIXED_NOW), Err(TzapAuthError::ExpiredHandoff)));
 
     for (status, expected) in [("denied", "denied"), ("cancelled", "cancelled"), ("expired", "expired")] {
         let result = TzapAuthRelayCompletion::from_json_value(&json!({"status": status}));
@@ -141,16 +107,7 @@ fn personal_happy_path_signs_verifies_imports_contact_and_unwraps_share() {
     let client = TzapEnrollmentClient::new(SIGN_BASE_URL, &transport);
     let validator = TzapCustomEnrollmentCertificateValidator { options: TzapCertificateProfileOptions::default() };
 
-    let enrolled = enroll_device_certificate(
-        &client,
-        &validator,
-        &mut harness.store,
-        &harness.sign_session,
-        &harness.enrollment_request,
-        &harness.signing_key,
-        &harness.csr_der,
-    )
-    .unwrap();
+    let enrolled = enroll_device_certificate(&client, &validator, &mut harness.store, &harness.sign_session, &harness.enrollment_request, &harness.signing_key, &harness.csr_der).unwrap();
 
     assert_eq!(enrolled.certificate_id, "cert_personal_1");
     assert_eq!(enrolled.sign_device_id, "sdev_personal_1");
@@ -158,12 +115,9 @@ fn personal_happy_path_signs_verifies_imports_contact_and_unwraps_share() {
     assert_eq!(transport.requests()[0].url, "https://sign.tzap.test/v1/certificates/enrollment-challenges");
     assert_eq!(transport.requests()[1].url, "https://sign.tzap.test/v1/certificates/enroll");
 
-    let envelope = sign_tzap_document_payload(
-        &harness.store,
-        &TzapDocumentSigningRequest::new(ACCOUNT_KEY, "cert_personal_1", FIXED_NOW),
-        json!({"tzap_payload_version": 1, "title": "Harness document"}),
-    )
-    .unwrap();
+    let envelope =
+        sign_tzap_document_payload(&harness.store, &TzapDocumentSigningRequest::new(ACCOUNT_KEY, "cert_personal_1", FIXED_NOW), json!({"tzap_payload_version": 1, "title": "Harness document"}))
+            .unwrap();
     let parsed = validate_tzap_document_envelope_value(&envelope).unwrap();
     assert_eq!(parsed.intermediate_chain_der, vec![harness.chain.platform_der.clone()]);
     let empty_official = TzapRootPinSet { current: &[], planned_successors: &[] };
@@ -181,53 +135,23 @@ fn personal_happy_path_signs_verifies_imports_contact_and_unwraps_share() {
     assert_eq!(offline.state, TzapVerificationState::CryptographicallyIntactOffline);
     assert_eq!(offline.trust_anchor_type, TzapTrustAnchorType::OfficialTzap);
 
-    let fresh_status = TzapStatusResponse::from_json_value(&valid_status(
-        &harness.chain.leaf_sha256,
-        &harness.chain.platform_sha256,
-        &harness.chain.issuer_key_identifier,
-        &harness.chain.serial_number,
-    ))
-    .unwrap();
+    let fresh_status =
+        TzapStatusResponse::from_json_value(&valid_status(&harness.chain.leaf_sha256, &harness.chain.platform_sha256, &harness.chain.issuer_key_identifier, &harness.chain.serial_number)).unwrap();
     let expected_status_target = TzapDocumentStatusTarget::from_envelope(&parsed);
-    let valid_now = online_verification_result_from_status(
-        offline,
-        &expected_status_target,
-        &fresh_status,
-        FIXED_NOW.cast_signed(),
-    );
+    let valid_now = online_verification_result_from_status(offline, &expected_status_target, &fresh_status, FIXED_NOW.cast_signed());
     assert_eq!(valid_now.state, TzapVerificationState::ValidNow);
 
     let card = export_tzap_contact_card(&harness.store, &harness.contact_export()).unwrap();
     assert!(matches!(
-        import_tzap_contact_card(
-            &mut InMemoryTzapLocalIdentityStore::new(),
-            ACCOUNT_KEY,
-            &card,
-            &harness.contact_import_options(),
-            None,
-        ),
+        import_tzap_contact_card(&mut InMemoryTzapLocalIdentityStore::new(), ACCOUNT_KEY, &card, &harness.contact_import_options(), None,),
         Err(TzapContactCardError::AcceptanceRequired)
     ));
     let mut recipient_store = InMemoryTzapLocalIdentityStore::new();
-    let contact = import_tzap_contact_card(
-        &mut recipient_store,
-        ACCOUNT_KEY,
-        &card,
-        &harness.contact_import_options(),
-        Some(FIXED_NOW),
-    )
-    .unwrap();
-    let selected_recipients = accepted_contact_recipients(
-        &recipient_store,
-        ACCOUNT_KEY,
-        std::slice::from_ref(&contact.contact_id),
-        FIXED_NOW + 1,
-    )
-    .unwrap();
+    let contact = import_tzap_contact_card(&mut recipient_store, ACCOUNT_KEY, &card, &harness.contact_import_options(), Some(FIXED_NOW)).unwrap();
+    let selected_recipients = accepted_contact_recipients(&recipient_store, ACCOUNT_KEY, std::slice::from_ref(&contact.contact_id), FIXED_NOW + 1).unwrap();
     assert_eq!(selected_recipients.len(), 1);
     assert!(selected_recipients[0].missing_status_caveat);
-    let recipients =
-        selected_recipients.into_iter().map(|recipient| recipient.recipient_public_key_der).collect::<Vec<_>>();
+    let recipients = selected_recipients.into_iter().map(|recipient| recipient.recipient_public_key_der).collect::<Vec<_>>();
     assert_eq!(recipients.len(), 1);
 
     let temp = TestDir::new("tzap-obligation-harness-share");
@@ -312,17 +236,8 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
     assert_eq!(statuses[2].response.status, TzapCertificateStatus::MalformedLookup);
 
     for status in ["suspended", "revoked", "issuer_revoked", "unknown_issuer", "unsupported_lookup_form"] {
-        let value = non_valid_status(
-            status,
-            &harness.chain.leaf_sha256,
-            &harness.chain.platform_sha256,
-            &harness.chain.issuer_key_identifier,
-            &harness.chain.serial_number,
-        );
-        assert!(
-            !TzapStatusResponse::from_json_value(&value).unwrap().is_fresh_valid_for_valid_now(FIXED_NOW.cast_signed()),
-            "status should not produce valid_now: {status}"
-        );
+        let value = non_valid_status(status, &harness.chain.leaf_sha256, &harness.chain.platform_sha256, &harness.chain.issuer_key_identifier, &harness.chain.serial_number);
+        assert!(!TzapStatusResponse::from_json_value(&value).unwrap().is_fresh_valid_for_valid_now(FIXED_NOW.cast_signed()), "status should not produce valid_now: {status}");
     }
 
     let crl_manifest_transport = FakeTransport::new(vec![json_response(json!({
@@ -340,16 +255,8 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
     assert_eq!(crl_entries[0].crl_scope, trust::TZAP_CRL_SCOPE_ALL_CERTIFICATES_ISSUED_BY_CA);
 
     let planned_successor_pin = Box::leak(harness.chain.root_sha256.clone().into_boxed_str());
-    let planned_successor_pins = TzapRootPinSet {
-        current: &[],
-        planned_successors: Box::leak(vec![planned_successor_pin as &'static str].into_boxed_slice()),
-    };
-    let planned_successor_validation = trust::validate_official_tzap_certificate_chain_der(
-        &harness.chain_der(),
-        &planned_successor_pins,
-        &TzapCertificateProfileOptions::default(),
-    )
-    .unwrap();
+    let planned_successor_pins = TzapRootPinSet { current: &[], planned_successors: Box::leak(vec![planned_successor_pin as &'static str].into_boxed_slice()) };
+    let planned_successor_validation = trust::validate_official_tzap_certificate_chain_der(&harness.chain_der(), &planned_successor_pins, &TzapCertificateProfileOptions::default()).unwrap();
     assert_eq!(planned_successor_validation.official_root_pin_kind.unwrap().as_str(), "planned_successor");
 
     let enrollment_transport = FakeTransport::new(vec![
@@ -364,37 +271,18 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
         enrollment_challenge_response_with_id(&harness, "chal_personal_2"),
     ]);
     let enrollment_client = TzapEnrollmentClient::new(SIGN_BASE_URL, &enrollment_transport);
-    let first_challenge = enrollment_client
-        .request_enrollment_challenge(
-            &harness.sign_session,
-            &harness.enrollment_request,
-            &harness.signing_key,
-            &harness.csr_der,
-        )
-        .unwrap();
-    let denial = enrollment_client
-        .submit_enrollment(&harness.sign_session, &first_challenge, &harness.signing_key, &harness.csr_der)
-        .unwrap_err();
+    let first_challenge = enrollment_client.request_enrollment_challenge(&harness.sign_session, &harness.enrollment_request, &harness.signing_key, &harness.csr_der).unwrap();
+    let denial = enrollment_client.submit_enrollment(&harness.sign_session, &first_challenge, &harness.signing_key, &harness.csr_der).unwrap_err();
     assert!(matches!(
         denial,
         TzapEnrollmentError::Denied(denial)
             if denial.kind == TzapEnrollmentDenialKind::DeviceApprovalRequired
     ));
-    let fresh_challenge = enrollment_client
-        .request_enrollment_challenge(
-            &harness.sign_session,
-            &harness.enrollment_request,
-            &harness.signing_key,
-            &harness.csr_der,
-        )
-        .unwrap();
+    let fresh_challenge = enrollment_client.request_enrollment_challenge(&harness.sign_session, &harness.enrollment_request, &harness.signing_key, &harness.csr_der).unwrap();
     assert_eq!(fresh_challenge.challenge_id, "chal_personal_2");
 
     let mut store = harness.store_with_certificate_routing(TzapSignDeviceRouting::Personal);
-    let same_key_renewal_transport = FakeTransport::new(vec![
-        renewal_challenge_response(&harness, None),
-        renewal_certificate_response("cert_renewed_same_key", &harness.chain, 0x55),
-    ]);
+    let same_key_renewal_transport = FakeTransport::new(vec![renewal_challenge_response(&harness, None), renewal_certificate_response("cert_renewed_same_key", &harness.chain, 0x55)]);
     let lifecycle = TzapCertificateLifecycleClient::new(SIGN_BASE_URL, LOGIN_BASE_URL, &same_key_renewal_transport);
     let renewed = lifecycle
         .renew_certificate(
@@ -408,14 +296,7 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
         )
         .unwrap();
     assert_eq!(renewed.certificate_id, "cert_renewed_same_key");
-    assert!(
-        same_key_renewal_transport.requests()[1]
-            .body
-            .as_ref()
-            .and_then(|body| body.get("old_certificate_signature"))
-            .and_then(Value::as_str)
-            .is_some()
-    );
+    assert!(same_key_renewal_transport.requests()[1].body.as_ref().and_then(|body| body.get("old_certificate_signature")).and_then(Value::as_str).is_some());
 
     let rotated_material = generate_device_signing_key_and_csr(&TzapDeviceCsrOptions::default()).unwrap();
     let rotated_signing_key = TzapDeviceSigningKeyRecord {
@@ -429,10 +310,7 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
     let mut rotated_inventory = rotated_store.load_inventory(ACCOUNT_KEY).unwrap();
     rotated_inventory.device_signing_keys.push(rotated_signing_key.clone());
     rotated_store.save_inventory(ACCOUNT_KEY, rotated_inventory).unwrap();
-    let rotated_transport = FakeTransport::new(vec![
-        renewal_challenge_response(&harness, None),
-        renewal_certificate_response("cert_renewed_rotated_key", &harness.chain, 0x56),
-    ]);
+    let rotated_transport = FakeTransport::new(vec![renewal_challenge_response(&harness, None), renewal_certificate_response("cert_renewed_rotated_key", &harness.chain, 0x56)]);
     let lifecycle = TzapCertificateLifecycleClient::new(SIGN_BASE_URL, LOGIN_BASE_URL, &rotated_transport);
     lifecycle
         .renew_certificate(
@@ -445,26 +323,11 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
             &rotated_material.csr_der,
         )
         .unwrap();
-    assert!(
-        rotated_transport.requests()[1]
-            .body
-            .as_ref()
-            .and_then(|body| body.get("old_certificate_signature"))
-            .is_some_and(Value::is_null)
-    );
+    assert!(rotated_transport.requests()[1].body.as_ref().and_then(|body| body.get("old_certificate_signature")).is_some_and(Value::is_null));
 
-    let personal_revocation = TzapCertificateLifecycleClient::new(
-        SIGN_BASE_URL,
-        LOGIN_BASE_URL,
-        &FakeTransport::new(vec![json_response(json!({"result": "revoked"}))]),
-    )
-    .revoke_personal_certificate(
-        &mut harness.store_with_certificate_routing(TzapSignDeviceRouting::Personal),
-        &harness.sign_session,
-        ACCOUNT_KEY,
-        "cert_personal_1",
-    )
-    .unwrap();
+    let personal_revocation = TzapCertificateLifecycleClient::new(SIGN_BASE_URL, LOGIN_BASE_URL, &FakeTransport::new(vec![json_response(json!({"result": "revoked"}))]))
+        .revoke_personal_certificate(&mut harness.store_with_certificate_routing(TzapSignDeviceRouting::Personal), &harness.sign_session, ACCOUNT_KEY, "cert_personal_1")
+        .unwrap();
     assert_eq!(personal_revocation, TzapRetirementCompletion::Complete);
 
     let mut store = harness.store_with_certificate_routing(TzapSignDeviceRouting::Personal);
@@ -484,30 +347,15 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
         .unwrap_err();
     assert!(matches!(renewal_error, TzapCertificateLifecycleError::RenewalTargetMismatch));
 
-    let pending_retirement = TzapCertificateLifecycleClient::new(
-        SIGN_BASE_URL,
-        LOGIN_BASE_URL,
-        &FakeTransport::new(vec![json_response_with_code(202, &json!({"result": "revocation_pending_sync"}))]),
-    )
-    .retire_personal_devices(
-        &harness.store_with_certificate_routing(TzapSignDeviceRouting::Personal),
-        &harness.sign_session,
-        ACCOUNT_KEY,
-    )
-    .unwrap();
+    let pending_retirement = TzapCertificateLifecycleClient::new(SIGN_BASE_URL, LOGIN_BASE_URL, &FakeTransport::new(vec![json_response_with_code(202, &json!({"result": "revocation_pending_sync"}))]))
+        .retire_personal_devices(&harness.store_with_certificate_routing(TzapSignDeviceRouting::Personal), &harness.sign_session, ACCOUNT_KEY)
+        .unwrap();
     assert_eq!(pending_retirement.completion, TzapRetirementCompletion::Incomplete);
 
-    let org_store = harness.store_with_certificate_routing(TzapSignDeviceRouting::Organization {
-        org_id: "org_123".to_owned(),
-        login_organization_device_id: "odev_123".to_owned(),
-    });
-    let org_pending = TzapCertificateLifecycleClient::new(
-        SIGN_BASE_URL,
-        LOGIN_BASE_URL,
-        &FakeTransport::new(vec![json_response_with_code(409, &json!({"error": "device_linkage_pending"}))]),
-    )
-    .retire_organization_devices(&org_store, &harness.login_session, ACCOUNT_KEY)
-    .unwrap();
+    let org_store = harness.store_with_certificate_routing(TzapSignDeviceRouting::Organization { org_id: "org_123".to_owned(), login_organization_device_id: "odev_123".to_owned() });
+    let org_pending = TzapCertificateLifecycleClient::new(SIGN_BASE_URL, LOGIN_BASE_URL, &FakeTransport::new(vec![json_response_with_code(409, &json!({"error": "device_linkage_pending"}))]))
+        .retire_organization_devices(&org_store, &harness.login_session, ACCOUNT_KEY)
+        .unwrap();
     assert_eq!(org_pending.completion, TzapRetirementCompletion::Incomplete);
     assert!(org_pending.incomplete_reasons[0].contains("device_linkage_pending"));
 
@@ -519,12 +367,8 @@ fn negative_status_renewal_revocation_and_blocklist_obligations_are_exercised() 
         updated_at_unix_seconds: Some(FIXED_NOW),
     };
     blocked_store.save_inventory(ACCOUNT_KEY, inventory).unwrap();
-    let signing_error = sign_tzap_document_payload(
-        &blocked_store,
-        &TzapDocumentSigningRequest::new(ACCOUNT_KEY, "cert_personal_1", FIXED_NOW),
-        json!({"tzap_payload_version": 1, "title": "Blocked"}),
-    )
-    .unwrap_err();
+    let signing_error =
+        sign_tzap_document_payload(&blocked_store, &TzapDocumentSigningRequest::new(ACCOUNT_KEY, "cert_personal_1", FIXED_NOW), json!({"tzap_payload_version": 1, "title": "Blocked"})).unwrap_err();
     assert!(signing_error.to_string().contains("issuer is blocked"));
 }
 
@@ -563,22 +407,8 @@ impl PersonalHarness {
         };
         let sign_session = session(SESSION_AUDIENCE_SIGN_TZAP, "sign-session-1");
         let login_session = session(SESSION_AUDIENCE_LOGIN_TZAP, "login-session-1");
-        let enrollment_request = TzapEnrollmentRequest {
-            account_key: ACCOUNT_KEY.to_owned(),
-            org_id: None,
-            requested_validity_seconds: REQUESTED_VALIDITY_SECONDS,
-            now_unix_seconds: FIXED_NOW,
-        };
-        let mut harness = Self {
-            sign_session,
-            login_session,
-            enrollment_request,
-            signing_key,
-            recipient_key,
-            csr_der: signing_material.csr_der,
-            chain,
-            store: InMemoryTzapLocalIdentityStore::new(),
-        };
+        let enrollment_request = TzapEnrollmentRequest { account_key: ACCOUNT_KEY.to_owned(), org_id: None, requested_validity_seconds: REQUESTED_VALIDITY_SECONDS, now_unix_seconds: FIXED_NOW };
+        let mut harness = Self { sign_session, login_session, enrollment_request, signing_key, recipient_key, csr_der: signing_material.csr_der, chain, store: InMemoryTzapLocalIdentityStore::new() };
         harness.store = harness.store_with_keys();
         harness
     }
@@ -667,31 +497,16 @@ impl PersonalHarness {
 }
 
 fn pending_state(pkce: TzapPkcePair, created_at_unix_seconds: u64) -> TzapPendingAuthState {
-    TzapPendingAuthState {
-        state: FIXED_STATE.to_owned(),
-        provider_id: FIXED_PROVIDER_ID.to_owned(),
-        redirect_uri: CALLBACK_REDIRECT_URI.to_owned(),
-        pkce,
-        created_at_unix_seconds,
-    }
+    TzapPendingAuthState { state: FIXED_STATE.to_owned(), provider_id: FIXED_PROVIDER_ID.to_owned(), redirect_uri: CALLBACK_REDIRECT_URI.to_owned(), pkce, created_at_unix_seconds }
 }
 
-fn complete_callback(
-    pending: TzapPendingAuthState,
-    store: &mut impl TzapSessionStore,
-    relay_body: Vec<u8>,
-    now: u64,
-) -> Result<TzapSessionRecord, TzapAuthError> {
+fn complete_callback(pending: TzapPendingAuthState, store: &mut impl TzapSessionStore, relay_body: Vec<u8>, now: u64) -> Result<TzapSessionRecord, TzapAuthError> {
     let callback = callback_with(pending.clone(), relay_body, None);
     let mut tracker = tracker_with_pending(pending);
     complete_hosted_auth_handoff(&mut tracker, store, ACCOUNT_KEY, &callback, now)
 }
 
-fn callback_with(
-    pending: TzapPendingAuthState,
-    relay_body: Vec<u8>,
-    pkce_verifier: Option<&str>,
-) -> TzapHostedAuthCallback {
+fn callback_with(pending: TzapPendingAuthState, relay_body: Vec<u8>, pkce_verifier: Option<&str>) -> TzapHostedAuthCallback {
     TzapHostedAuthCallback {
         state: pending.state,
         redirect_uri: pending.redirect_uri,
@@ -762,20 +577,13 @@ fn enrollment_certificate_response(chain: &IssuedChain) -> TzapAuthHttpResponse 
     json_response(json!({"certificate": certificate_json("cert_personal_1", chain)}))
 }
 
-fn renewal_certificate_response(
-    certificate_id: &str,
-    chain: &IssuedChain,
-    fingerprint_byte: u8,
-) -> TzapAuthHttpResponse {
+fn renewal_certificate_response(certificate_id: &str, chain: &IssuedChain, fingerprint_byte: u8) -> TzapAuthHttpResponse {
     let mut certificate = certificate_json(certificate_id, chain);
     certificate["certificate_sha256"] = json!(trust::format_certificate_sha256(&[fingerprint_byte; 32]));
     json_response(json!({"certificate": certificate}))
 }
 
-fn renewal_challenge_response(
-    harness: &PersonalHarness,
-    renewal_target_override: Option<&str>,
-) -> TzapAuthHttpResponse {
+fn renewal_challenge_response(harness: &PersonalHarness, renewal_target_override: Option<&str>) -> TzapAuthHttpResponse {
     json_response(json!({
         "challenge_id": "chal_renewal_1",
         "challenge_payload": {
@@ -809,12 +617,7 @@ fn certificate_json(certificate_id: &str, chain: &IssuedChain) -> Value {
     })
 }
 
-fn valid_status(
-    certificate_sha256: &str,
-    issuer_sha256: &str,
-    issuer_key_identifier: &str,
-    serial_number: &str,
-) -> Value {
+fn valid_status(certificate_sha256: &str, issuer_sha256: &str, issuer_key_identifier: &str, serial_number: &str) -> Value {
     json!({
         "status": "valid",
         "certificate_sha256": certificate_sha256,
@@ -829,13 +632,7 @@ fn valid_status(
     })
 }
 
-fn non_valid_status(
-    status: &str,
-    certificate_sha256: &str,
-    issuer_sha256: &str,
-    issuer_key_identifier: &str,
-    serial_number: &str,
-) -> Value {
+fn non_valid_status(status: &str, certificate_sha256: &str, issuer_sha256: &str, issuer_key_identifier: &str, serial_number: &str) -> Value {
     match status {
         "unknown_issuer" | "unsupported_lookup_form" => {
             json!({
@@ -928,12 +725,7 @@ fn root_certificate(key: &PKeyRef<Private>) -> X509 {
     builder.build()
 }
 
-fn intermediate_certificate(
-    key: &PKeyRef<Private>,
-    issuer_cert: &X509Ref,
-    issuer_key: &PKeyRef<Private>,
-    aki_source: &X509Ref,
-) -> X509 {
+fn intermediate_certificate(key: &PKeyRef<Private>, issuer_cert: &X509Ref, issuer_key: &PKeyRef<Private>, aki_source: &X509Ref) -> X509 {
     let mut builder = base_certificate_builder("TZAP Harness Platform Intermediate", key, Some(issuer_cert));
     builder.append_extension(BasicConstraints::new().critical().ca().pathlen(0).build().unwrap()).unwrap();
     builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build().unwrap()).unwrap();
@@ -945,12 +737,7 @@ fn intermediate_certificate(
     builder.build()
 }
 
-fn leaf_certificate(
-    key: &PKeyRef<Private>,
-    issuer_cert: &X509Ref,
-    issuer_key: &PKeyRef<Private>,
-    aki_source: &X509Ref,
-) -> X509 {
+fn leaf_certificate(key: &PKeyRef<Private>, issuer_cert: &X509Ref, issuer_key: &PKeyRef<Private>, aki_source: &X509Ref) -> X509 {
     let mut builder = base_certificate_builder("TZAP Harness Signer", key, Some(issuer_cert));
     builder.append_extension(BasicConstraints::new().critical().build().unwrap()).unwrap();
     builder.append_extension(KeyUsage::new().critical().digital_signature().build().unwrap()).unwrap();
@@ -964,11 +751,7 @@ fn leaf_certificate(
     builder.build()
 }
 
-fn base_certificate_builder(
-    common_name: &str,
-    key: &PKeyRef<Private>,
-    issuer: Option<&X509Ref>,
-) -> openssl::x509::X509Builder {
+fn base_certificate_builder(common_name: &str, key: &PKeyRef<Private>, issuer: Option<&X509Ref>) -> openssl::x509::X509Builder {
     let mut name = openssl::x509::X509NameBuilder::new().unwrap();
     name.append_entry_by_text("CN", common_name).unwrap();
     let name = name.build();
@@ -1075,13 +858,7 @@ fn public_metadata() -> TzapCertificatePublicMetadata {
 }
 
 fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
-    certificate.iter_extensions().find_map(|extension| {
-        if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() {
-            Some(identifier.0.to_vec())
-        } else {
-            None
-        }
-    })
+    certificate.iter_extensions().find_map(|extension| if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() { Some(identifier.0.to_vec()) } else { None })
 }
 
 fn sha256_identifier(bytes: &[u8]) -> String {
@@ -1092,10 +869,7 @@ fn sha256_identifier(bytes: &[u8]) -> String {
 fn pin_set(root_sha256: &str) -> TzapRootPinSet {
     let pin: &'static str = Box::leak(root_sha256.to_owned().into_boxed_str());
     let current: &'static [&'static str] = Box::leak(vec![pin].into_boxed_slice());
-    TzapRootPinSet {
-        current,
-        planned_successors: &["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
-    }
+    TzapRootPinSet { current, planned_successors: &["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] }
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -1111,10 +885,7 @@ fn json_response_with_code(status_code: u16, value: &Value) -> TzapAuthHttpRespo
 struct AcceptingLifecycleValidator;
 
 impl zmanager_core::enrollment_client::TzapEnrollmentCertificateValidator for AcceptingLifecycleValidator {
-    fn validate_certificate_chain(
-        &self,
-        _chain_der: &[Vec<u8>],
-    ) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError> {
+    fn validate_certificate_chain(&self, _chain_der: &[Vec<u8>]) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError> {
         Ok(public_metadata())
     }
 }

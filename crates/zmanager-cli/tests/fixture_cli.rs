@@ -26,9 +26,7 @@ fn unix_process_is_elevated() -> bool {
 fn create_windows_relative_symlink(path: &Path, target: &str) {
     use std::os::windows::fs::OpenOptionsExt as _;
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-    };
+    use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE};
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
 
@@ -53,24 +51,10 @@ fn create_windows_relative_symlink(path: &Path, target: &str) {
         reparse.extend_from_slice(&unit.to_le_bytes());
     }
 
-    let file = fs::OpenOptions::new()
-        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-        .unwrap();
+    let file = fs::OpenOptions::new().access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(path).unwrap();
     let mut returned = 0u32;
-    let result = unsafe {
-        DeviceIoControl(
-            file.as_raw_handle().cast(),
-            FSCTL_SET_REPARSE_POINT,
-            reparse.as_ptr().cast(),
-            reparse.len() as u32,
-            std::ptr::null_mut(),
-            0,
-            &mut returned,
-            std::ptr::null_mut(),
-        )
-    };
+    let result =
+        unsafe { DeviceIoControl(file.as_raw_handle().cast(), FSCTL_SET_REPARSE_POINT, reparse.as_ptr().cast(), reparse.len() as u32, std::ptr::null_mut(), 0, &mut returned, std::ptr::null_mut()) };
     assert_ne!(result, 0, "failed to create relative symlink fixture: {}", std::io::Error::last_os_error());
 }
 
@@ -88,15 +72,7 @@ fn windows_process_is_elevated() -> bool {
     }
     let mut elevation = TOKEN_ELEVATION::default();
     let mut returned = 0u32;
-    let result = unsafe {
-        GetTokenInformation(
-            token,
-            TokenElevation,
-            (&mut elevation as *mut TOKEN_ELEVATION).cast(),
-            size_of::<TOKEN_ELEVATION>() as u32,
-            &mut returned,
-        )
-    };
+    let result = unsafe { GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut returned) };
     unsafe {
         CloseHandle(token);
     }
@@ -123,8 +99,7 @@ fn cli_lists_all_fixture_archives() {
 fn cli_extracts_extractable_fixture_archives() {
     for fixture in fixture_manifest().into_iter().filter(|fixture| fixture.extract) {
         let temp = TestDir::new("fixture_cli_extracts");
-        let output =
-            Command::new(cli_path()).arg("extract").arg(fixture.path()).arg(temp.path("out")).output().unwrap();
+        let output = Command::new(cli_path()).arg("extract").arg(fixture.path()).arg(temp.path("out")).output().unwrap();
 
         assert!(
             output.status.success(),
@@ -141,9 +116,7 @@ fn cli_extracts_extractable_fixture_archives() {
 fn cli_lists_tests_and_extracts_checked_in_multipart_rar_fixtures() {
     let password = "zmanager-rar-fixture-password";
 
-    for (filename, fixture_password) in
-        [("rar5-multipart.part1.rar", None), ("rar5-passworded-multipart.part1.rar", Some(password))]
-    {
+    for (filename, fixture_password) in [("rar5-multipart.part1.rar", None), ("rar5-passworded-multipart.part1.rar", Some(password))] {
         let archive = archives_dir().join(filename);
         let temp = TestDir::new("fixture-cli-multipart-rar");
         let mut list = Command::new(cli_path());
@@ -183,13 +156,7 @@ fn optional_unzip_validates_zip_fixture_when_available() {
 
     let output = Command::new(unzip).arg("-t").arg(&fixture).output().unwrap();
 
-    assert!(
-        output.status.success(),
-        "unzip failed for {}\nstdout:\n{}\nstderr:\n{}",
-        fixture.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(output.status.success(), "unzip failed for {}\nstdout:\n{}\nstderr:\n{}", fixture.display(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
@@ -205,13 +172,7 @@ fn optional_bsdtar_lists_common_libarchive_fixtures_when_available() {
         }
         let output = Command::new(&bsdtar).arg("-tf").arg(&fixture).output().unwrap();
 
-        assert!(
-            output.status.success(),
-            "bsdtar failed for {}\nstdout:\n{}\nstderr:\n{}",
-            fixture.display(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        assert!(output.status.success(), "bsdtar failed for {}\nstdout:\n{}\nstderr:\n{}", fixture.display(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     }
 }
 
@@ -227,13 +188,7 @@ fn optional_xar_lists_xar_fixture_when_available() {
 
     let output = Command::new(xar).arg("-tf").arg(&fixture).output().unwrap();
 
-    assert!(
-        output.status.success(),
-        "xar failed for {}\nstdout:\n{}\nstderr:\n{}",
-        fixture.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(output.status.success(), "xar failed for {}\nstdout:\n{}\nstderr:\n{}", fixture.display(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
@@ -296,19 +251,11 @@ fn zm_creates_lists_tests_and_extracts_apple_archive_folder() {
     let test = Command::new(zm_path()).arg("test").arg(&archive).output().unwrap();
     assert_success("zm test aar", &test);
 
-    let stdout = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("--include")
-        .arg("project/README.md")
-        .arg("--to-stdout")
-        .output()
-        .unwrap();
+    let stdout = Command::new(zm_path()).arg("extract").arg(&archive).arg("--include").arg("project/README.md").arg("--to-stdout").output().unwrap();
     assert_success("zm extract aar to stdout", &stdout);
     assert_eq!(stdout.stdout, b"hello aar");
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract aar", &extract);
 
     assert_eq!(fs::read_to_string(temp.path("out/project/README.md")).unwrap(), "hello aar");
@@ -323,13 +270,7 @@ fn zm_create_accepts_multiple_explicit_sources() {
     fs::write(temp.path("LICENSE"), "license").unwrap();
     let archive = temp.path("release.zip");
 
-    let output = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("README.md"))
-        .arg(temp.path("LICENSE"))
-        .output()
-        .unwrap();
+    let output = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("README.md")).arg(temp.path("LICENSE")).output().unwrap();
     assert_success("zm create multiple sources", &output);
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
@@ -349,13 +290,7 @@ fn zm_create_no_hidden_excludes_nested_hidden_entries() {
     fs::write(temp.path("project/README.md"), "readme").unwrap();
     let archive = temp.path("nohidden.zip");
 
-    let output = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg("--no-hidden")
-        .arg(temp.path("project"))
-        .output()
-        .unwrap();
+    let output = Command::new(zm_path()).arg("create").arg(&archive).arg("--no-hidden").arg(temp.path("project")).output().unwrap();
     assert_success("zm create --no-hidden", &output);
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
@@ -374,13 +309,7 @@ fn zm_create_accepts_long_create_file_form() {
     fs::write(temp.path("file.txt"), "content").unwrap();
     let archive = temp.path("long.zip");
 
-    let output = Command::new(zm_path())
-        .arg("--create")
-        .arg("--file")
-        .arg(&archive)
-        .arg(temp.path("file.txt"))
-        .output()
-        .unwrap();
+    let output = Command::new(zm_path()).arg("--create").arg("--file").arg(&archive).arg(temp.path("file.txt")).output().unwrap();
     assert_success("zm --create --file", &output);
 
     let list = Command::new(zm_path()).arg("--list").arg("--file").arg(&archive).arg("--name-only").output().unwrap();
@@ -397,15 +326,7 @@ fn zm_create_directory_base_uses_relative_archive_paths() {
     fs::write(temp.path("project/README.md"), "readme").unwrap();
     let archive = temp.path("base.zip");
 
-    let output = Command::new(zm_path())
-        .arg("-cf")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("project"))
-        .arg("src")
-        .arg("README.md")
-        .output()
-        .unwrap();
+    let output = Command::new(zm_path()).arg("-cf").arg(&archive).arg("-C").arg(temp.path("project")).arg("src").arg("README.md").output().unwrap();
     assert_success("zm -cf -C", &output);
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
@@ -423,15 +344,8 @@ fn zm_create_reads_newline_paths_from_stdin_with_at() {
     fs::write(temp.path("b.txt"), "b").unwrap();
     let archive = temp.path("stdin.zip");
 
-    let mut child = Command::new(zm_path())
-        .arg("-cf")
-        .arg(&archive)
-        .arg("-@")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child =
+        Command::new(zm_path()).arg("-cf").arg(&archive).arg("-@").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
     {
         use std::io::Write as _;
         let stdin = child.stdin.as_mut().unwrap();
@@ -491,15 +405,9 @@ fn zm_create_refuses_existing_destination_without_force() {
     assert_success("first zm -cf", &first);
 
     let second = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("file.txt")).output().unwrap();
-    assert!(
-        !second.status.success(),
-        "second create unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&second.stdout),
-        String::from_utf8_lossy(&second.stderr)
-    );
+    assert!(!second.status.success(), "second create unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&second.stdout), String::from_utf8_lossy(&second.stderr));
 
-    let forced =
-        Command::new(zm_path()).arg("-cf").arg(&archive).arg("--force").arg(temp.path("file.txt")).output().unwrap();
+    let forced = Command::new(zm_path()).arg("-cf").arg(&archive).arg("--force").arg(temp.path("file.txt")).output().unwrap();
     assert_success("forced zm -cf", &forced);
 }
 
@@ -512,13 +420,7 @@ fn zm_create_junk_paths_flattens_names_and_unzip_accepts_archive() {
     fs::write(temp.path("docs/guide.md"), "# Guide\n").unwrap();
     let archive = temp.path("junk.zip");
 
-    let create = Command::new(zm_path())
-        .arg("-jcf")
-        .arg(&archive)
-        .arg(temp.path("src/main.rs"))
-        .arg(temp.path("docs/guide.md"))
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("-jcf").arg(&archive).arg(temp.path("src/main.rs")).arg(temp.path("docs/guide.md")).output().unwrap();
     assert_success("zm -jcf", &create);
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
@@ -545,25 +447,10 @@ fn zm_create_junk_paths_rejects_duplicate_flattened_names() {
     fs::write(temp.path("test/config.json"), "{}").unwrap();
     let archive = temp.path("dup.zip");
 
-    let output = Command::new(zm_path())
-        .arg("-jcf")
-        .arg(&archive)
-        .arg(temp.path("src/config.json"))
-        .arg(temp.path("test/config.json"))
-        .output()
-        .unwrap();
+    let output = Command::new(zm_path()).arg("-jcf").arg(&archive).arg(temp.path("src/config.json")).arg(temp.path("test/config.json")).output().unwrap();
 
-    assert!(
-        !output.status.success(),
-        "duplicate junk paths unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("duplicate junk path"),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(!output.status.success(), "duplicate junk paths unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate junk path"), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("src/config.json"), "stderr:\n{stderr}");
     assert!(stderr.contains("test/config.json"), "stderr:\n{stderr}");
@@ -582,14 +469,7 @@ fn zm_lists_zip_created_with_competitor_junk_paths() {
     fs::write(temp.path("docs/guide.md"), "# Guide\n").unwrap();
     let archive = temp.path("competitor-junk.zip");
 
-    let zip_output = Command::new(zip)
-        .current_dir(temp.root())
-        .arg("-jq")
-        .arg(&archive)
-        .arg("src/main.rs")
-        .arg("docs/guide.md")
-        .output()
-        .unwrap();
+    let zip_output = Command::new(zip).current_dir(temp.root()).arg("-jq").arg(&archive).arg("src/main.rs").arg("docs/guide.md").output().unwrap();
     assert_success("zip -j", &zip_output);
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
@@ -631,8 +511,7 @@ fn zm_create_and_extract_zip_preserves_unicode_paths() {
     let stdout = String::from_utf8_lossy(&list.stdout);
     assert!(stdout.contains("project/数据/emoji-😀.txt"), "{stdout}");
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract unicode zip", &extract);
     assert_eq!(fs::read_to_string(temp.path("out/project/数据/emoji-😀.txt")).unwrap(), "unicode\n");
 }
@@ -643,8 +522,7 @@ fn zm_extract_zip_rejects_unicode_case_collision() {
     let archive = temp.path("unicode-collision.zip");
     write_zip_entries(&archive, CompressionMethod::Stored, &[("Über.txt", b"upper\n"), ("über.txt", b"lower\n")]);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
 
     assert_failure("zm extract unicode collision zip", &extract);
     let stderr = String::from_utf8_lossy(&extract.stderr);
@@ -658,8 +536,7 @@ fn zm_extract_zip_rejects_high_expansion_ratio_before_writing() {
     let repeated = vec![0_u8; 8 * 1024 * 1024];
     write_zip_entries(&archive, CompressionMethod::Deflated, &[("bomb.bin", repeated.as_slice())]);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
 
     assert_failure("zm extract high-ratio zip", &extract);
     let stderr = String::from_utf8_lossy(&extract.stderr);
@@ -677,29 +554,14 @@ fn zm_extract_nested_rejects_non_deb_and_default_zip_extraction_is_not_recursive
     let archive = temp.path("outer.zip");
     write_zip_entries(&archive, CompressionMethod::Stored, &[("project/inner.zip", inner_bytes.as_slice())]);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract zip containing nested zip", &extract);
     assert!(temp.path("out/project/inner.zip").is_file());
-    assert!(
-        !temp.path("out/project/inner.txt").exists(),
-        "plain extraction should not recursively expand nested archives"
-    );
+    assert!(!temp.path("out/project/inner.txt").exists(), "plain extraction should not recursively expand nested archives");
 
-    let nested = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("nested-out"))
-        .arg("--extract-nested")
-        .output()
-        .unwrap();
+    let nested = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("nested-out")).arg("--extract-nested").output().unwrap();
     assert_failure("zm extract --extract-nested non-deb", &nested);
-    assert!(
-        String::from_utf8_lossy(&nested.stderr).contains("only for .deb packages"),
-        "{}",
-        String::from_utf8_lossy(&nested.stderr)
-    );
+    assert!(String::from_utf8_lossy(&nested.stderr).contains("only for .deb packages"), "{}", String::from_utf8_lossy(&nested.stderr));
 }
 
 #[test]
@@ -716,14 +578,7 @@ fn zm_extract_nested_deb_handles_gzip_and_zstd_payload_members() {
         write_deb_ar_archive(&archive, "control.tar.gz", &control_gz, data_member_name, &data_member);
 
         let out = temp.path(format!("out-{label}"));
-        let extract = Command::new(zm_path())
-            .arg("extract")
-            .arg(&archive)
-            .arg("-C")
-            .arg(&out)
-            .arg("--extract-nested")
-            .output()
-            .unwrap();
+        let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(&out).arg("--extract-nested").output().unwrap();
         assert_success(&format!("zm extract --extract-nested deb {label}"), &extract);
         assert_eq!(fs::read_to_string(out.join("control/control")).unwrap(), "Package: zmanager-compat\n");
         assert_eq!(fs::read_to_string(out.join("data/usr/share/zmanager-compat/file.txt")).unwrap(), "deb payload\n");
@@ -747,18 +602,10 @@ fn zm_create_tar_zst_level_round_trips_and_bsdtar_extracts_when_available() {
     fs::write(temp.path("project/file.txt"), "zstd level\n").unwrap();
     let archive = temp.path("project.tar.zst");
 
-    let create = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .arg("--level")
-        .arg("1")
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--level").arg("1").output().unwrap();
     assert_success("zm create tar.zst --level 1", &create);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-zm")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-zm")).output().unwrap();
     assert_success("zm extract tar.zst level archive", &extract);
     assert_eq!(fs::read_to_string(temp.path("out-zm/project/file.txt")).unwrap(), "zstd level\n");
 
@@ -766,8 +613,7 @@ fn zm_create_tar_zst_level_round_trips_and_bsdtar_extracts_when_available() {
         return;
     };
     fs::create_dir_all(temp.path("out-bsdtar")).unwrap();
-    let bsdtar_extract =
-        Command::new(bsdtar).arg("-xf").arg(&archive).arg("-C").arg(temp.path("out-bsdtar")).output().unwrap();
+    let bsdtar_extract = Command::new(bsdtar).arg("-xf").arg(&archive).arg("-C").arg(temp.path("out-bsdtar")).output().unwrap();
     assert_success("bsdtar -xf zm tar.zst level archive", &bsdtar_extract);
     assert_eq!(fs::read_to_string(temp.path("out-bsdtar/project/file.txt")).unwrap(), "zstd level\n");
 }
@@ -779,18 +625,10 @@ fn zm_create_tgz_level_round_trips_and_bsdtar_extracts_when_available() {
     fs::write(temp.path("project/file.txt"), "gzip level\n").unwrap();
     let archive = temp.path("project.tar.gz");
 
-    let create = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .arg("--level")
-        .arg("1")
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--level").arg("1").output().unwrap();
     assert_success("zm create tgz --level 1", &create);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-zm")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-zm")).output().unwrap();
     assert_success("zm extract tgz level archive", &extract);
     assert_eq!(fs::read_to_string(temp.path("out-zm/project/file.txt")).unwrap(), "gzip level\n");
 
@@ -798,8 +636,7 @@ fn zm_create_tgz_level_round_trips_and_bsdtar_extracts_when_available() {
         return;
     };
     fs::create_dir_all(temp.path("out-bsdtar")).unwrap();
-    let bsdtar_extract =
-        Command::new(bsdtar).arg("-xf").arg(&archive).arg("-C").arg(temp.path("out-bsdtar")).output().unwrap();
+    let bsdtar_extract = Command::new(bsdtar).arg("-xf").arg(&archive).arg("-C").arg(temp.path("out-bsdtar")).output().unwrap();
     assert_success("bsdtar -xf zm tgz level archive", &bsdtar_extract);
     assert_eq!(fs::read_to_string(temp.path("out-bsdtar/project/file.txt")).unwrap(), "gzip level\n");
 }
@@ -814,8 +651,7 @@ fn zm_create_tgz_alias_round_trips_with_inferred_format() {
     let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create tgz", &create);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract tgz alias archive", &extract);
     assert_eq!(fs::read_to_string(temp.path("out/project/file.txt")).unwrap(), "tgz alias\n");
 }
@@ -830,8 +666,7 @@ fn zm_create_tzst_alias_round_trips_with_inferred_format() {
     let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create .tzst alias", &create);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract .tzst alias", &extract);
     assert_eq!(fs::read_to_string(temp.path("out/project/file.txt")).unwrap(), "tzst alias\n");
 }
@@ -875,26 +710,13 @@ fn zm_create_tzap_round_trips_with_password_stdin() {
     assert!(test_stdout.contains("\"format\":\"tzap\""), "{test_stdout}");
 
     let mut extract = Command::new(zm_path());
-    extract
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--password-stdin")
-        .arg("--strip-components")
-        .arg("1");
+    extract.arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--password-stdin").arg("--strip-components").arg("1");
     let extract = run_with_stdin(extract, "correct horse\n");
     assert_success("zm extract tzap --password-stdin", &extract);
     assert_eq!(fs::read_to_string(temp.path("out/nested/file.txt")).unwrap(), "tzap payload\n");
 
     let mut stdout = Command::new(zm_path());
-    stdout
-        .arg("extract")
-        .arg(&archive)
-        .arg("--password-stdin")
-        .arg("--to-stdout")
-        .arg("--include")
-        .arg("project/nested/file.txt");
+    stdout.arg("extract").arg(&archive).arg("--password-stdin").arg("--to-stdout").arg("--include").arg("project/nested/file.txt");
     let stdout = run_with_stdin(stdout, "correct horse\n");
     assert_success("zm extract tzap --to-stdout", &stdout);
     assert_eq!(stdout.stdout, b"tzap payload\n");
@@ -917,15 +739,7 @@ fn zm_create_tzap_without_password_uses_unencrypted_mode() {
     let test = Command::new(zm_path()).arg("test").arg(&archive).arg("--json").output().unwrap();
     assert_success("zm test unencrypted tzap", &test);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--strip-components")
-        .arg("1")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--strip-components").arg("1").output().unwrap();
     assert_success("zm extract unencrypted tzap", &extract);
     assert_eq!(fs::read_to_string(temp.path("out/file.txt")).unwrap(), "public\n");
 }
@@ -953,18 +767,9 @@ fn zm_extract_tzap_honors_metadata_restore_policy() {
         xattr::set(&source_directory, "com.tzap.zm", b"directory metadata").unwrap();
         xattr::set(&source_link, "com.tzap.zm", b"link metadata").unwrap();
         for source in [&source_file, &source_directory] {
-            assert!(
-                Command::new("/bin/chmod").args(["+a", "everyone deny delete"]).arg(source).status().unwrap().success()
-            );
+            assert!(Command::new("/bin/chmod").args(["+a", "everyone deny delete"]).arg(source).status().unwrap().success());
         }
-        assert!(
-            Command::new("/bin/chmod")
-                .args(["-h", "+a", "everyone deny delete"])
-                .arg(&source_link)
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(Command::new("/bin/chmod").args(["-h", "+a", "everyone deny delete"]).arg(&source_link).status().unwrap().success());
         for source in [&source_file, &source_directory] {
             assert!(Command::new("/usr/bin/chflags").arg("hidden").arg(source).status().unwrap().success());
         }
@@ -990,10 +795,7 @@ fn zm_extract_tzap_honors_metadata_restore_policy() {
         xattr::set(&source_directory, "user.zmanager.cli", b"directory metadata").unwrap();
         xattr::set(&source_file, "system.posix_acl_access", &file_acl).unwrap();
         xattr::set(&source_directory, "system.posix_acl_access", &directory_acl).unwrap();
-        (
-            xattr::get(&source_file, "system.posix_acl_access").unwrap().unwrap(),
-            xattr::get(&source_directory, "system.posix_acl_access").unwrap().unwrap(),
-        )
+        (xattr::get(&source_file, "system.posix_acl_access").unwrap().unwrap(), xattr::get(&source_directory, "system.posix_acl_access").unwrap().unwrap())
     };
 
     let source_file_metadata = fs::symlink_metadata(&source_file).unwrap();
@@ -1025,8 +827,7 @@ fn zm_extract_tzap_honors_metadata_restore_policy() {
     let listed_link = entries.iter().find(|entry| entry["name"] == "project/current").unwrap();
     assert_eq!(listed_link["link_target"], "scripts/executable.sh");
 
-    let policies: &[&str] =
-        if unix_process_is_elevated() { &["portable", "same-os", "system"] } else { &["portable", "same-os"] };
+    let policies: &[&str] = if unix_process_is_elevated() { &["portable", "same-os", "system"] } else { &["portable", "same-os"] };
     for &policy in policies {
         let destination = temp.path(format!("restore-{policy}"));
         let mut restore_command = Command::new(zm_path());
@@ -1047,19 +848,10 @@ fn zm_extract_tzap_honors_metadata_restore_policy() {
         let restored_link = destination.join("project/current");
         let restored_file_metadata = fs::symlink_metadata(&restored_file).unwrap();
         let restored_directory_metadata = fs::symlink_metadata(&restored_directory).unwrap();
-        assert_eq!(
-            restored_file_metadata.permissions().mode() & 0o7777,
-            source_file_metadata.permissions().mode() & 0o7777
-        );
-        assert_eq!(
-            restored_directory_metadata.permissions().mode() & 0o7777,
-            source_directory_metadata.permissions().mode() & 0o7777
-        );
+        assert_eq!(restored_file_metadata.permissions().mode() & 0o7777, source_file_metadata.permissions().mode() & 0o7777);
+        assert_eq!(restored_directory_metadata.permissions().mode() & 0o7777, source_directory_metadata.permissions().mode() & 0o7777);
         assert_eq!(fs::read_link(&restored_link).unwrap(), Path::new("scripts/executable.sh"));
-        assert_eq!(
-            (restored_file_metadata.mtime(), restored_file_metadata.mtime_nsec()),
-            (source_file_metadata.mtime(), source_file_metadata.mtime_nsec())
-        );
+        assert_eq!((restored_file_metadata.mtime(), restored_file_metadata.mtime_nsec()), (source_file_metadata.mtime(), source_file_metadata.mtime_nsec()));
 
         #[cfg(target_os = "macos")]
         {
@@ -1070,26 +862,11 @@ fn zm_extract_tzap_honors_metadata_restore_policy() {
                 continue;
             }
             assert_eq!(fs::symlink_metadata(&restored_file).unwrap().st_flags(), source_file_metadata.st_flags());
-            assert_eq!(
-                fs::symlink_metadata(&restored_directory).unwrap().st_flags(),
-                source_directory_metadata.st_flags()
-            );
-            assert_eq!(
-                fs::symlink_metadata(&restored_link).unwrap().st_flags(),
-                fs::symlink_metadata(&source_link).unwrap().st_flags()
-            );
-            assert_eq!(
-                xattr::get(&restored_file, "com.tzap.zm").unwrap().as_deref(),
-                Some(b"file metadata".as_slice())
-            );
-            assert_eq!(
-                xattr::get(&restored_directory, "com.tzap.zm").unwrap().as_deref(),
-                Some(b"directory metadata".as_slice())
-            );
-            assert_eq!(
-                xattr::get(&restored_link, "com.tzap.zm").unwrap().as_deref(),
-                Some(b"link metadata".as_slice())
-            );
+            assert_eq!(fs::symlink_metadata(&restored_directory).unwrap().st_flags(), source_directory_metadata.st_flags());
+            assert_eq!(fs::symlink_metadata(&restored_link).unwrap().st_flags(), fs::symlink_metadata(&source_link).unwrap().st_flags());
+            assert_eq!(xattr::get(&restored_file, "com.tzap.zm").unwrap().as_deref(), Some(b"file metadata".as_slice()));
+            assert_eq!(xattr::get(&restored_directory, "com.tzap.zm").unwrap().as_deref(), Some(b"directory metadata".as_slice()));
+            assert_eq!(xattr::get(&restored_link, "com.tzap.zm").unwrap().as_deref(), Some(b"link metadata".as_slice()));
             for restored_path in [&restored_file, &restored_directory, &restored_link] {
                 let acl = Command::new("/bin/ls").args(["-lde"]).arg(restored_path).output().unwrap();
                 assert!(acl.status.success());
@@ -1104,40 +881,16 @@ fn zm_extract_tzap_honors_metadata_restore_policy() {
                 assert_eq!(xattr::get(&restored_directory, "user.zmanager.cli").unwrap(), None);
                 continue;
             }
-            assert_eq!(
-                xattr::get(&restored_file, "user.zmanager.cli").unwrap().as_deref(),
-                Some(b"file metadata".as_slice())
-            );
-            assert_eq!(
-                xattr::get(&restored_directory, "user.zmanager.cli").unwrap().as_deref(),
-                Some(b"directory metadata".as_slice())
-            );
-            assert_eq!(
-                xattr::get(&restored_file, "system.posix_acl_access").unwrap().as_deref(),
-                Some(expected_file_acl.as_slice())
-            );
-            assert_eq!(
-                xattr::get(&restored_directory, "system.posix_acl_access").unwrap().as_deref(),
-                Some(expected_directory_acl.as_slice())
-            );
+            assert_eq!(xattr::get(&restored_file, "user.zmanager.cli").unwrap().as_deref(), Some(b"file metadata".as_slice()));
+            assert_eq!(xattr::get(&restored_directory, "user.zmanager.cli").unwrap().as_deref(), Some(b"directory metadata".as_slice()));
+            assert_eq!(xattr::get(&restored_file, "system.posix_acl_access").unwrap().as_deref(), Some(expected_file_acl.as_slice()));
+            assert_eq!(xattr::get(&restored_directory, "system.posix_acl_access").unwrap().as_deref(), Some(expected_directory_acl.as_slice()));
         }
     }
 
-    let content = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("content"))
-        .arg("--restore")
-        .arg("content")
-        .arg("--allow-degraded")
-        .output()
-        .unwrap();
+    let content = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("content")).arg("--restore").arg("content").arg("--allow-degraded").output().unwrap();
     assert_success("zm extract tzap content only", &content);
-    assert_ne!(
-        fs::metadata(temp.path("content/project/scripts/executable.sh")).unwrap().permissions().mode() & 0o777,
-        0o751
-    );
+    assert_ne!(fs::metadata(temp.path("content/project/scripts/executable.sh")).unwrap().permissions().mode() & 0o777, 0o751);
 }
 
 #[cfg(windows)]
@@ -1154,8 +907,7 @@ fn zm_extract_tzap_preserves_windows_entry_metadata() {
     fs::write(&source_file, b"windows metadata").unwrap();
     create_windows_relative_symlink(&source_link, r"scripts\payload.txt");
     fs::write(PathBuf::from(format!("{}:zmanager-cli", source_file.display())), b"file alternate data").unwrap();
-    fs::write(PathBuf::from(format!("{}:zmanager-cli", source_directory.display())), b"directory alternate data")
-        .unwrap();
+    fs::write(PathBuf::from(format!("{}:zmanager-cli", source_directory.display())), b"directory alternate data").unwrap();
     assert!(Command::new("attrib").args(["+H", source_file.to_str().unwrap()]).status().unwrap().success());
     let mut permissions = fs::metadata(&source_file).unwrap().permissions();
     permissions.set_readonly(true);
@@ -1178,8 +930,7 @@ fn zm_extract_tzap_preserves_windows_entry_metadata() {
     let link_entry = entries.iter().find(|entry| entry["name"] == "project/current.txt").unwrap();
     assert_eq!(link_entry["link_target"], "scripts/payload.txt");
 
-    let policies: &[&str] =
-        if windows_process_is_elevated() { &["portable", "same-os", "system"] } else { &["portable", "same-os"] };
+    let policies: &[&str] = if windows_process_is_elevated() { &["portable", "same-os", "system"] } else { &["portable", "same-os"] };
     for &policy in policies {
         let destination = temp.path(&format!("restore-{policy}"));
         let mut restore_command = Command::new(zm_path());
@@ -1207,10 +958,7 @@ fn zm_extract_tzap_preserves_windows_entry_metadata() {
             assert_eq!(fs::read(&restored_directory_ads).unwrap(), b"directory alternate data");
         }
         let attribute_mask = if policy == "portable" { 0x1 } else { 0x23 };
-        assert_eq!(
-            restored_file_metadata.file_attributes() & attribute_mask,
-            source_file_metadata.file_attributes() & attribute_mask
-        );
+        assert_eq!(restored_file_metadata.file_attributes() & attribute_mask, source_file_metadata.file_attributes() & attribute_mask);
         assert_eq!(restored_file_metadata.last_write_time(), source_file_metadata.last_write_time());
         if policy != "portable" {
             assert_eq!(restored_file_metadata.creation_time(), source_file_metadata.creation_time());
@@ -1230,23 +978,11 @@ fn zm_create_tzap_accepts_bare_relative_archive_path() {
     fs::create_dir_all(temp.path("project")).unwrap();
     fs::write(temp.path("project/file.txt"), "relative output\n").unwrap();
 
-    let create = Command::new(zm_path())
-        .current_dir(temp.root())
-        .arg("create")
-        .arg("project.tzap")
-        .arg("project")
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).current_dir(temp.root()).arg("create").arg("project.tzap").arg("project").output().unwrap();
     assert_success("zm create with bare relative tzap output", &create);
     assert!(temp.path("project.tzap").is_file());
 
-    let list = Command::new(zm_path())
-        .current_dir(temp.root())
-        .arg("list")
-        .arg("project.tzap")
-        .arg("--name-only")
-        .output()
-        .unwrap();
+    let list = Command::new(zm_path()).current_dir(temp.root()).arg("list").arg("project.tzap").arg("--name-only").output().unwrap();
     assert_success("zm list bare relative tzap output", &list);
     assert!(String::from_utf8_lossy(&list.stdout).contains("project/file.txt"));
 }
@@ -1258,26 +994,14 @@ fn zm_create_7z_level_round_trips_with_backend() {
     fs::write(temp.path("project/file.txt"), "7z level\n").unwrap();
     let archive = temp.path("project.7z");
 
-    let create = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .arg("--level")
-        .arg("1")
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--level").arg("1").output().unwrap();
     assert_success("zm create 7z --level 1", &create);
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
     assert_success("zm list 7z level archive", &list);
-    assert!(
-        String::from_utf8_lossy(&list.stdout).contains("project/file.txt"),
-        "{}",
-        String::from_utf8_lossy(&list.stdout)
-    );
+    assert!(String::from_utf8_lossy(&list.stdout).contains("project/file.txt"), "{}", String::from_utf8_lossy(&list.stdout));
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract 7z level archive", &extract);
     assert_eq!(fs::read_to_string(temp.path("out/project/file.txt")).unwrap(), "7z level\n");
 }
@@ -1309,19 +1033,10 @@ fn optional_zm_extracts_7zip_created_archive_when_available() {
     fs::write(temp.path("project/file.txt"), "created by 7zip\n").unwrap();
     let archive = temp.path("competitor.7z");
 
-    let create = Command::new(sevenzip)
-        .current_dir(temp.root())
-        .arg("a")
-        .arg("-t7z")
-        .arg("-bd")
-        .arg(&archive)
-        .arg("project")
-        .output()
-        .unwrap();
+    let create = Command::new(sevenzip).current_dir(temp.root()).arg("a").arg("-t7z").arg("-bd").arg(&archive).arg("project").output().unwrap();
     assert_success("7zz a competitor 7z archive", &create);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract 7zz-created archive", &extract);
     assert_eq!(fs::read_to_string(temp.path("out/project/file.txt")).unwrap(), "created by 7zip\n");
 }
@@ -1333,18 +1048,8 @@ fn zm_create_split_zip_lists_extracts_and_7zip_tests_when_available() {
     fs::write(temp.path("project/blob.bin"), deterministic_bytes(200_000)).unwrap();
     let archive = temp.path("project.zip");
 
-    let create = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .arg("--format")
-        .arg("zip")
-        .arg("--store")
-        .arg("--volume-size")
-        .arg("64k")
-        .arg("--json")
-        .output()
-        .unwrap();
+    let create =
+        Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--format").arg("zip").arg("--store").arg("--volume-size").arg("64k").arg("--json").output().unwrap();
     assert_success("zm create split zip", &create);
     let stdout = String::from_utf8_lossy(&create.stdout);
     assert!(stdout.contains("\"volume_size\":65536"), "{stdout}");
@@ -1354,34 +1059,14 @@ fn zm_create_split_zip_lists_extracts_and_7zip_tests_when_available() {
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
     assert_success("zm list split zip", &list);
-    assert!(
-        String::from_utf8_lossy(&list.stdout).contains("project/blob.bin"),
-        "{}",
-        String::from_utf8_lossy(&list.stdout)
-    );
+    assert!(String::from_utf8_lossy(&list.stdout).contains("project/blob.bin"), "{}", String::from_utf8_lossy(&list.stdout));
 
     let zm_test = Command::new(zm_path()).arg("test").arg(&archive).arg("--json").output().unwrap();
     assert_success("zm test split zip", &zm_test);
-    assert!(
-        String::from_utf8_lossy(&zm_test.stdout).contains("\"format\":\"zip\""),
-        "{}",
-        String::from_utf8_lossy(&zm_test.stdout)
-    );
-    assert!(
-        String::from_utf8_lossy(&zm_test.stdout).contains("\"bytes\":200000"),
-        "{}",
-        String::from_utf8_lossy(&zm_test.stdout)
-    );
+    assert!(String::from_utf8_lossy(&zm_test.stdout).contains("\"format\":\"zip\""), "{}", String::from_utf8_lossy(&zm_test.stdout));
+    assert!(String::from_utf8_lossy(&zm_test.stdout).contains("\"bytes\":200000"), "{}", String::from_utf8_lossy(&zm_test.stdout));
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--overwrite")
-        .arg("always")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--overwrite").arg("always").output().unwrap();
     assert_success("zm extract split zip", &extract);
     assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), fs::read(temp.path("project/blob.bin")).unwrap());
 
@@ -1399,16 +1084,7 @@ fn zm_create_split_7z_lists_extracts_and_7zip_tests_when_available() {
     let archive = temp.path("project.7z");
     let first_volume = temp.path("project.7z.001");
 
-    let create = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .arg("--format")
-        .arg("7z")
-        .arg("--volume-size")
-        .arg("1m")
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--format").arg("7z").arg("--volume-size").arg("1m").output().unwrap();
     assert_success("zm create split 7z", &create);
     assert!(!archive.exists());
     assert_eq!(fs::metadata(&first_volume).unwrap().len(), 1_048_576);
@@ -1416,29 +1092,13 @@ fn zm_create_split_7z_lists_extracts_and_7zip_tests_when_available() {
 
     let list = Command::new(zm_path()).arg("list").arg(&first_volume).arg("--name-only").output().unwrap();
     assert_success("zm list split 7z", &list);
-    assert!(
-        String::from_utf8_lossy(&list.stdout).contains("project/blob.bin"),
-        "{}",
-        String::from_utf8_lossy(&list.stdout)
-    );
+    assert!(String::from_utf8_lossy(&list.stdout).contains("project/blob.bin"), "{}", String::from_utf8_lossy(&list.stdout));
 
     let zm_test = Command::new(zm_path()).arg("test").arg(&first_volume).arg("--json").output().unwrap();
     assert_success("zm test split 7z", &zm_test);
-    assert!(
-        String::from_utf8_lossy(&zm_test.stdout).contains("\"format\":\"7z\""),
-        "{}",
-        String::from_utf8_lossy(&zm_test.stdout)
-    );
+    assert!(String::from_utf8_lossy(&zm_test.stdout).contains("\"format\":\"7z\""), "{}", String::from_utf8_lossy(&zm_test.stdout));
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&first_volume)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--overwrite")
-        .arg("always")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&first_volume).arg("-C").arg(temp.path("out")).arg("--overwrite").arg("always").output().unwrap();
     assert_success("zm extract split 7z", &extract);
     assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), fs::read(temp.path("project/blob.bin")).unwrap());
 
@@ -1455,27 +1115,14 @@ fn zm_create_single_volume_split_7z_lists_base_archive_path() {
     fs::write(temp.path("project/file.txt"), "small payload\n").unwrap();
     let archive = temp.path("project.7z");
 
-    let create = Command::new(zm_path())
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .arg("--format")
-        .arg("7z")
-        .arg("--volume-size")
-        .arg("1m")
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--format").arg("7z").arg("--volume-size").arg("1m").output().unwrap();
     assert_success("zm create single-volume split 7z", &create);
     assert!(!archive.exists());
     assert!(temp.path("project.7z.001").is_file());
 
     let list = Command::new(zm_path()).arg("list").arg(&archive).arg("--name-only").output().unwrap();
     assert_success("zm list base path for single-volume split 7z", &list);
-    assert!(
-        String::from_utf8_lossy(&list.stdout).contains("project/file.txt"),
-        "{}",
-        String::from_utf8_lossy(&list.stdout)
-    );
+    assert!(String::from_utf8_lossy(&list.stdout).contains("project/file.txt"), "{}", String::from_utf8_lossy(&list.stdout));
 }
 
 #[test]
@@ -1486,79 +1133,36 @@ fn zm_create_passworded_split_archives_extract_with_password_stdin() {
 
     let zip_archive = temp.path("secret.zip");
     let mut create_zip = Command::new(zm_path());
-    create_zip
-        .arg("create")
-        .arg(&zip_archive)
-        .arg(temp.path("project"))
-        .arg("--format")
-        .arg("zip")
-        .arg("--store")
-        .arg("--volume-size")
-        .arg("64k")
-        .arg("--encrypt")
-        .arg("--password-stdin");
+    create_zip.arg("create").arg(&zip_archive).arg(temp.path("project")).arg("--format").arg("zip").arg("--store").arg("--volume-size").arg("64k").arg("--encrypt").arg("--password-stdin");
     let zip_create = run_with_stdin(create_zip, "correct horse\n");
     assert_success("zm create passworded split zip", &zip_create);
     assert!(temp.path("secret.z01").is_file());
 
     let mut extract_zip = Command::new(zm_path());
-    extract_zip
-        .arg("extract")
-        .arg(&zip_archive)
-        .arg("-C")
-        .arg(temp.path("out-zip"))
-        .arg("--overwrite")
-        .arg("always")
-        .arg("--password-stdin");
+    extract_zip.arg("extract").arg(&zip_archive).arg("-C").arg(temp.path("out-zip")).arg("--overwrite").arg("always").arg("--password-stdin");
     let zip_extract = run_with_stdin(extract_zip, "correct horse\n");
     assert_success("zm extract passworded split zip", &zip_extract);
-    assert_eq!(
-        fs::read(temp.path("out-zip/project/blob.bin")).unwrap(),
-        fs::read(temp.path("project/blob.bin")).unwrap()
-    );
+    assert_eq!(fs::read(temp.path("out-zip/project/blob.bin")).unwrap(), fs::read(temp.path("project/blob.bin")).unwrap());
 
     let mut test_zip = Command::new(zm_path());
     test_zip.arg("test").arg(&zip_archive).arg("--json").arg("--password-stdin");
     let zip_test = run_with_stdin(test_zip, "correct horse\n");
     assert_success("zm test passworded split zip", &zip_test);
-    assert!(
-        String::from_utf8_lossy(&zip_test.stdout).contains("\"format\":\"zip\""),
-        "{}",
-        String::from_utf8_lossy(&zip_test.stdout)
-    );
+    assert!(String::from_utf8_lossy(&zip_test.stdout).contains("\"format\":\"zip\""), "{}", String::from_utf8_lossy(&zip_test.stdout));
 
     let sevenz_archive = temp.path("secret.7z");
     let first_7z_volume = temp.path("secret.7z.001");
     let mut create_7z = Command::new(zm_path());
-    create_7z
-        .arg("create")
-        .arg(&sevenz_archive)
-        .arg(temp.path("project"))
-        .arg("--format")
-        .arg("7z")
-        .arg("--volume-size")
-        .arg("1m")
-        .arg("--encrypt")
-        .arg("--password-stdin");
+    create_7z.arg("create").arg(&sevenz_archive).arg(temp.path("project")).arg("--format").arg("7z").arg("--volume-size").arg("1m").arg("--encrypt").arg("--password-stdin");
     let sevenz_create = run_with_stdin(create_7z, "correct horse\n");
     assert_success("zm create passworded split 7z", &sevenz_create);
     assert!(first_7z_volume.is_file());
 
     let mut extract_7z = Command::new(zm_path());
-    extract_7z
-        .arg("extract")
-        .arg(&first_7z_volume)
-        .arg("-C")
-        .arg(temp.path("out-7z"))
-        .arg("--overwrite")
-        .arg("always")
-        .arg("--password-stdin");
+    extract_7z.arg("extract").arg(&first_7z_volume).arg("-C").arg(temp.path("out-7z")).arg("--overwrite").arg("always").arg("--password-stdin");
     let sevenz_extract = run_with_stdin(extract_7z, "correct horse\n");
     assert_success("zm extract passworded split 7z", &sevenz_extract);
-    assert_eq!(
-        fs::read(temp.path("out-7z/project/blob.bin")).unwrap(),
-        fs::read(temp.path("project/blob.bin")).unwrap()
-    );
+    assert_eq!(fs::read(temp.path("out-7z/project/blob.bin")).unwrap(), fs::read(temp.path("project/blob.bin")).unwrap());
 
     let mut test_7z = Command::new(zm_path());
     test_7z.arg("test").arg(&first_7z_volume).arg("--json").arg("--password-stdin");
@@ -1574,37 +1178,13 @@ fn zm_volume_size_rejects_tar_zst_and_stdout_output() {
     let temp = TestDir::new("zm_volume_size_rejections");
     fs::write(temp.path("file.txt"), "payload").unwrap();
 
-    let tar = Command::new(zm_path())
-        .arg("create")
-        .arg(temp.path("archive.tar.zst"))
-        .arg(temp.path("file.txt"))
-        .arg("--volume-size")
-        .arg("64k")
-        .output()
-        .unwrap();
+    let tar = Command::new(zm_path()).arg("create").arg(temp.path("archive.tar.zst")).arg(temp.path("file.txt")).arg("--volume-size").arg("64k").output().unwrap();
     assert_failure("zm create tar.zst --volume-size", &tar);
-    assert!(
-        String::from_utf8_lossy(&tar.stderr).contains("supported only for ZIP, TZAP, and 7z"),
-        "{}",
-        String::from_utf8_lossy(&tar.stderr)
-    );
+    assert!(String::from_utf8_lossy(&tar.stderr).contains("supported only for ZIP, TZAP, and 7z"), "{}", String::from_utf8_lossy(&tar.stderr));
 
-    let stdout_archive = Command::new(zm_path())
-        .arg("create")
-        .arg("-")
-        .arg(temp.path("file.txt"))
-        .arg("--format")
-        .arg("zip")
-        .arg("--volume-size")
-        .arg("64k")
-        .output()
-        .unwrap();
+    let stdout_archive = Command::new(zm_path()).arg("create").arg("-").arg(temp.path("file.txt")).arg("--format").arg("zip").arg("--volume-size").arg("64k").output().unwrap();
     assert_failure("zm create stdout --volume-size", &stdout_archive);
-    assert!(
-        String::from_utf8_lossy(&stdout_archive.stderr).contains("stdout archive output"),
-        "{}",
-        String::from_utf8_lossy(&stdout_archive.stderr)
-    );
+    assert!(String::from_utf8_lossy(&stdout_archive.stderr).contains("stdout archive output"), "{}", String::from_utf8_lossy(&stdout_archive.stderr));
 }
 
 #[test]
@@ -1615,61 +1195,21 @@ fn optional_zm_reads_infozip_and_7zip_split_zip_sets_when_available() {
 
     if let Some(zip) = find_on_path("zip") {
         let archive = temp.path("infozip.zip");
-        let create = Command::new(zip)
-            .arg("-0")
-            .arg("-q")
-            .arg("-s")
-            .arg("64k")
-            .arg(&archive)
-            .arg("project/blob.bin")
-            .current_dir(temp.root())
-            .output()
-            .unwrap();
+        let create = Command::new(zip).arg("-0").arg("-q").arg("-s").arg("64k").arg(&archive).arg("project/blob.bin").current_dir(temp.root()).output().unwrap();
         assert_success("zip create split zip", &create);
 
-        let extract = Command::new(zm_path())
-            .arg("extract")
-            .arg(&archive)
-            .arg("-C")
-            .arg(temp.path("out-infozip"))
-            .arg("--overwrite")
-            .arg("always")
-            .output()
-            .unwrap();
+        let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-infozip")).arg("--overwrite").arg("always").output().unwrap();
         assert_success("zm extract Info-ZIP split zip", &extract);
-        assert_eq!(
-            fs::read(temp.path("out-infozip/project/blob.bin")).unwrap(),
-            fs::read(temp.path("project/blob.bin")).unwrap()
-        );
+        assert_eq!(fs::read(temp.path("out-infozip/project/blob.bin")).unwrap(), fs::read(temp.path("project/blob.bin")).unwrap());
     }
 
     if let Some(sevenzip) = find_7zip() {
-        let create = Command::new(sevenzip)
-            .arg("a")
-            .arg("-tzip")
-            .arg("-mx=0")
-            .arg("-v64k")
-            .arg("sevenzip.zip")
-            .arg("project/blob.bin")
-            .current_dir(temp.root())
-            .output()
-            .unwrap();
+        let create = Command::new(sevenzip).arg("a").arg("-tzip").arg("-mx=0").arg("-v64k").arg("sevenzip.zip").arg("project/blob.bin").current_dir(temp.root()).output().unwrap();
         assert_success("7zz create split zip stream", &create);
 
-        let extract = Command::new(zm_path())
-            .arg("extract")
-            .arg(temp.path("sevenzip.zip.001"))
-            .arg("-C")
-            .arg(temp.path("out-sevenzip"))
-            .arg("--overwrite")
-            .arg("always")
-            .output()
-            .unwrap();
+        let extract = Command::new(zm_path()).arg("extract").arg(temp.path("sevenzip.zip.001")).arg("-C").arg(temp.path("out-sevenzip")).arg("--overwrite").arg("always").output().unwrap();
         assert_success("zm extract 7zz split zip stream", &extract);
-        assert_eq!(
-            fs::read(temp.path("out-sevenzip/project/blob.bin")).unwrap(),
-            fs::read(temp.path("project/blob.bin")).unwrap()
-        );
+        assert_eq!(fs::read(temp.path("out-sevenzip/project/blob.bin")).unwrap(), fs::read(temp.path("project/blob.bin")).unwrap());
     }
 }
 
@@ -1682,26 +1222,10 @@ fn optional_zm_reads_7zip_created_split_7z_when_available() {
     fs::create_dir_all(temp.path("project")).unwrap();
     fs::write(temp.path("project/blob.bin"), deterministic_bytes(3_200_000)).unwrap();
 
-    let create = Command::new(sevenzip)
-        .arg("a")
-        .arg("-t7z")
-        .arg("-v1m")
-        .arg("external.7z")
-        .arg("project/blob.bin")
-        .current_dir(temp.root())
-        .output()
-        .unwrap();
+    let create = Command::new(sevenzip).arg("a").arg("-t7z").arg("-v1m").arg("external.7z").arg("project/blob.bin").current_dir(temp.root()).output().unwrap();
     assert_success("7zz create split 7z", &create);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(temp.path("external.7z.001"))
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--overwrite")
-        .arg("always")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(temp.path("external.7z.001")).arg("-C").arg(temp.path("out")).arg("--overwrite").arg("always").output().unwrap();
     assert_success("zm extract 7zz split 7z", &extract);
     assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), fs::read(temp.path("project/blob.bin")).unwrap());
 }
@@ -1716,30 +1240,14 @@ fn optional_zm_extracts_7zip_created_tar_family_archives_when_available() {
     fs::write(temp.path("project/file.txt"), "created by 7zip tar\n").unwrap();
 
     let tar_archive = temp.path("project.tar");
-    let create_tar = Command::new(&sevenzip)
-        .current_dir(temp.root())
-        .arg("a")
-        .arg("-ttar")
-        .arg("-bd")
-        .arg(&tar_archive)
-        .arg("project")
-        .output()
-        .unwrap();
+    let create_tar = Command::new(&sevenzip).current_dir(temp.root()).arg("a").arg("-ttar").arg("-bd").arg(&tar_archive).arg("project").output().unwrap();
     assert_success("7zz a -ttar archive", &create_tar);
 
     assert_zm_extracts_7zip_tar_family_archive("7zz-created tar", &tar_archive, &temp);
 
     for (format, archive_name) in [("gzip", "project.tar.gz"), ("xz", "project.tar.xz")] {
         let compressed_archive = temp.path(archive_name);
-        let create_compressed = Command::new(&sevenzip)
-            .current_dir(temp.root())
-            .arg("a")
-            .arg(format!("-t{format}"))
-            .arg("-bd")
-            .arg(&compressed_archive)
-            .arg(&tar_archive)
-            .output()
-            .unwrap();
+        let create_compressed = Command::new(&sevenzip).current_dir(temp.root()).arg("a").arg(format!("-t{format}")).arg("-bd").arg(&compressed_archive).arg(&tar_archive).output().unwrap();
         assert_success(&format!("7zz a -t{format} archive"), &create_compressed);
 
         assert_zm_extracts_7zip_tar_family_archive(&format!("7zz-created {archive_name}"), &compressed_archive, &temp);
@@ -1760,8 +1268,7 @@ fn zm_create_zip_follows_symlink_by_default() {
     let create = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -cf follows symlink", &create);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract followed symlink archive", &extract);
 
     let metadata = fs::symlink_metadata(temp.path("out/project/link.txt")).unwrap();
@@ -1787,8 +1294,7 @@ fn zm_create_zip_preserves_symlink_with_y() {
     assert_success("zm list preserved symlink", &list);
     assert!(String::from_utf8_lossy(&list.stdout).contains("symlink"), "{}", String::from_utf8_lossy(&list.stdout));
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract preserved symlink archive", &extract);
 
     let metadata = fs::symlink_metadata(temp.path("out/project/link.txt")).unwrap();
@@ -1810,17 +1316,12 @@ fn zm_extracts_zip_symlink_created_by_competitor() {
     symlink("target.txt", temp.path("project/link.txt")).unwrap();
     let archive = temp.path("competitor-preserve.zip");
 
-    let zip_output =
-        Command::new(zip).current_dir(temp.root()).arg("-qry").arg(&archive).arg("project").output().unwrap();
+    let zip_output = Command::new(zip).current_dir(temp.root()).arg("-qry").arg(&archive).arg("project").output().unwrap();
     assert_success("zip -qry", &zip_output);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract competitor symlink zip", &extract);
-    assert!(
-        fs::symlink_metadata(temp.path("out/project/link.txt")).unwrap().file_type().is_symlink(),
-        "expected competitor symlink to extract as symlink"
-    );
+    assert!(fs::symlink_metadata(temp.path("out/project/link.txt")).unwrap().file_type().is_symlink(), "expected competitor symlink to extract as symlink");
 }
 
 #[cfg(unix)]
@@ -1837,13 +1338,9 @@ fn zm_create_tar_zst_preserves_symlink_with_y() {
     let create = Command::new(zm_path()).arg("-ycf").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -ycf tar.zst preserves symlink", &create);
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract tar.zst preserved symlink archive", &extract);
-    assert!(
-        fs::symlink_metadata(temp.path("out/project/link.txt")).unwrap().file_type().is_symlink(),
-        "expected tar.zst symlink to extract as symlink"
-    );
+    assert!(fs::symlink_metadata(temp.path("out/project/link.txt")).unwrap().file_type().is_symlink(), "expected tar.zst symlink to extract as symlink");
 }
 
 #[cfg(unix)]
@@ -1855,8 +1352,7 @@ fn zm_extract_tar_zst_materializes_safe_hardlink_entries() {
     let archive = temp.path("hardlink.tar.zst");
     write_tar_zst_with_hardlink(&archive, "project/target.txt", "project/hard.txt", b"hardlink payload\n");
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract tar.zst hardlink", &extract);
 
     let target = temp.path("out/project/target.txt");
@@ -1874,8 +1370,7 @@ fn zm_extract_libarchive_tar_materializes_safe_hardlink_entries() {
     let archive = temp.path("hardlink.tar");
     write_tar_with_hardlink(&archive, "project/target.txt", "project/hard.txt", b"hardlink payload\n");
 
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract tar hardlink", &extract);
 
     let target = temp.path("out/project/target.txt");
@@ -1897,17 +1392,8 @@ fn zm_create_7z_rejects_preserve_symlinks() {
 
     let output = Command::new(zm_path()).arg("-ycf").arg(&archive).arg(temp.path("project")).output().unwrap();
 
-    assert!(
-        !output.status.success(),
-        "7z preserve symlink unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("7z symlink preservation is not supported"),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(!output.status.success(), "7z preserve symlink unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("7z symlink preservation is not supported"), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
@@ -1925,38 +1411,23 @@ fn zm_create_no_metadata_archives_remain_readable_across_formats() {
     }
 
     let tar_zst_archive = temp.path("project.tar.zst");
-    let tar_zst_create =
-        Command::new(zm_path()).arg("-Xcf").arg(&tar_zst_archive).arg(temp.path("project")).output().unwrap();
+    let tar_zst_create = Command::new(zm_path()).arg("-Xcf").arg(&tar_zst_archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -Xcf tar.zst", &tar_zst_create);
-    let tar_zst_extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&tar_zst_archive)
-        .arg("-C")
-        .arg(temp.path("out-tar-zst"))
-        .output()
-        .unwrap();
+    let tar_zst_extract = Command::new(zm_path()).arg("extract").arg(&tar_zst_archive).arg("-C").arg(temp.path("out-tar-zst")).output().unwrap();
     assert_success("zm extract -X tar.zst", &tar_zst_extract);
     assert_eq!(fs::read_to_string(temp.path("out-tar-zst/project/file.txt")).unwrap(), "metadata\n");
 
     let sevenz_archive = temp.path("project.7z");
-    let sevenz_create =
-        Command::new(zm_path()).arg("-Xcf").arg(&sevenz_archive).arg(temp.path("project")).output().unwrap();
+    let sevenz_create = Command::new(zm_path()).arg("-Xcf").arg(&sevenz_archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -Xcf 7z", &sevenz_create);
-    let sevenz_extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&sevenz_archive)
-        .arg("-C")
-        .arg(temp.path("out-7z"))
-        .output()
-        .unwrap();
+    let sevenz_extract = Command::new(zm_path()).arg("extract").arg(&sevenz_archive).arg("-C").arg(temp.path("out-7z")).output().unwrap();
     assert_success("zm extract -X 7z", &sevenz_extract);
     assert_eq!(fs::read_to_string(temp.path("out-7z/project/file.txt")).unwrap(), "metadata\n");
 
     let tgz_archive = temp.path("project.tar.gz");
     let tgz_create = Command::new(zm_path()).arg("-Xcf").arg(&tgz_archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -Xcf tgz", &tgz_create);
-    let tgz_extract =
-        Command::new(zm_path()).arg("extract").arg(&tgz_archive).arg("-C").arg(temp.path("out-tgz")).output().unwrap();
+    let tgz_extract = Command::new(zm_path()).arg("extract").arg(&tgz_archive).arg("-C").arg(temp.path("out-tgz")).output().unwrap();
     assert_success("zm extract -X tgz", &tgz_extract);
     assert_eq!(fs::read_to_string(temp.path("out-tgz/project/file.txt")).unwrap(), "metadata\n");
 }
@@ -1973,21 +1444,10 @@ fn zm_extracts_selected_zip_entries_created_by_competitor() {
     fs::write(temp.path("project/nested/deep.txt"), "deep\n").unwrap();
     let archive = temp.path("competitor.zip");
 
-    let zip_output =
-        Command::new(zip).current_dir(temp.root()).arg("-qr").arg(&archive).arg("project").output().unwrap();
+    let zip_output = Command::new(zip).current_dir(temp.root()).arg("-qr").arg(&archive).arg("project").output().unwrap();
     assert_success("zip -qr competitor filter archive", &zip_output);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--include")
-        .arg("project/keep.txt")
-        .arg("--strip-components")
-        .arg("1")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--include").arg("project/keep.txt").arg("--strip-components").arg("1").output().unwrap();
     assert_success("zm extract zip --include --strip-components", &extract);
 
     assert_eq!(fs::read_to_string(temp.path("out/keep.txt")).unwrap(), "keep\n");
@@ -2005,49 +1465,24 @@ fn zm_extract_zip_honors_overwrite_policies() {
 
     fs::create_dir_all(temp.path("out-never")).unwrap();
     fs::write(temp.path("out-never/file.txt"), "old\n").unwrap();
-    let never =
-        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-never")).output().unwrap();
+    let never = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-never")).output().unwrap();
     assert_failure("zm extract default overwrite refusal", &never);
     assert_eq!(fs::read_to_string(temp.path("out-never/file.txt")).unwrap(), "old\n");
 
     fs::create_dir_all(temp.path("out-always")).unwrap();
     fs::write(temp.path("out-always/file.txt"), "old\n").unwrap();
-    let always = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out-always"))
-        .arg("--overwrite")
-        .arg("always")
-        .output()
-        .unwrap();
+    let always = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-always")).arg("--overwrite").arg("always").output().unwrap();
     assert_success("zm extract --overwrite always", &always);
     assert_eq!(fs::read_to_string(temp.path("out-always/file.txt")).unwrap(), "archive\n");
 
     fs::create_dir_all(temp.path("out-rename")).unwrap();
     fs::write(temp.path("out-rename/file.txt"), "old\n").unwrap();
-    let rename = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out-rename"))
-        .arg("--overwrite")
-        .arg("rename")
-        .output()
-        .unwrap();
+    let rename = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-rename")).arg("--overwrite").arg("rename").output().unwrap();
     assert_success("zm extract --overwrite rename", &rename);
     assert_eq!(fs::read_to_string(temp.path("out-rename/file.txt")).unwrap(), "old\n");
     assert_eq!(fs::read_to_string(temp.path("out-rename/file 2.txt")).unwrap(), "archive\n");
 
-    let ask = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out-ask"))
-        .arg("--overwrite")
-        .arg("ask")
-        .output()
-        .unwrap();
+    let ask = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out-ask")).arg("--overwrite").arg("ask").output().unwrap();
     assert_failure("zm extract --overwrite ask without terminal", &ask);
 }
 
@@ -2066,21 +1501,10 @@ fn zm_extract_overwrite_always_replaces_symlink_without_following_it() {
     fs::write(temp.path("outside.txt"), "outside\n").unwrap();
     symlink(temp.path("outside.txt"), temp.path("out/file.txt")).unwrap();
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--overwrite")
-        .arg("always")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--overwrite").arg("always").output().unwrap();
     assert_success("zm extract --overwrite always over symlink", &extract);
 
-    assert!(
-        fs::symlink_metadata(temp.path("out/file.txt")).unwrap().file_type().is_file(),
-        "expected symlink path to become a regular file"
-    );
+    assert!(fs::symlink_metadata(temp.path("out/file.txt")).unwrap().file_type().is_file(), "expected symlink path to become a regular file");
     assert_eq!(fs::read_to_string(temp.path("out/file.txt")).unwrap(), "archive\n");
     assert_eq!(fs::read_to_string(temp.path("outside.txt")).unwrap(), "outside\n");
 }
@@ -2097,17 +1521,8 @@ fn zm_extract_tar_zst_honors_filters_and_strip_components() {
     let create = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -cf tar.zst filter fixture", &create);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--include")
-        .arg("project/nested/deep.txt")
-        .arg("--strip-components")
-        .arg("2")
-        .output()
-        .unwrap();
+    let extract =
+        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--include").arg("project/nested/deep.txt").arg("--strip-components").arg("2").output().unwrap();
     assert_success("zm extract tar.zst --include --strip-components", &extract);
 
     assert_eq!(fs::read_to_string(temp.path("out/deep.txt")).unwrap(), "deep\n");
@@ -2127,17 +1542,8 @@ fn zm_extract_7z_honors_filters_and_strip_components() {
     let create = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -cf 7z filter fixture", &create);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--include")
-        .arg("project/nested/deep.txt")
-        .arg("--strip-components")
-        .arg("2")
-        .output()
-        .unwrap();
+    let extract =
+        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--include").arg("project/nested/deep.txt").arg("--strip-components").arg("2").output().unwrap();
     assert_success("zm extract 7z --include --strip-components", &extract);
 
     assert_eq!(fs::read_to_string(temp.path("out/deep.txt")).unwrap(), "deep\n");
@@ -2149,22 +1555,10 @@ fn zm_extract_7z_honors_filters_and_strip_components() {
 fn zm_extract_libarchive_tar_honors_filters_and_strip_components() {
     let temp = TestDir::new("zm_extract_libarchive_tar_filters");
     let archive = temp.path("project.tar");
-    write_tar_entries(
-        &archive,
-        &[("project/keep.txt", b"keep\n"), ("project/drop.txt", b"drop\n"), ("project/nested/deep.txt", b"deep\n")],
-    );
+    write_tar_entries(&archive, &[("project/keep.txt", b"keep\n"), ("project/drop.txt", b"drop\n"), ("project/nested/deep.txt", b"deep\n")]);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--include")
-        .arg("project/nested/deep.txt")
-        .arg("--strip-components")
-        .arg("2")
-        .output()
-        .unwrap();
+    let extract =
+        Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--include").arg("project/nested/deep.txt").arg("--strip-components").arg("2").output().unwrap();
     assert_success("zm extract libarchive tar --include --strip-components", &extract);
 
     assert_eq!(fs::read_to_string(temp.path("out/deep.txt")).unwrap(), "deep\n");
@@ -2183,14 +1577,7 @@ fn zm_test_zip_honors_filters_and_reports_skipped_entries() {
     let create = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -cf zip test filter fixture", &create);
 
-    let test = Command::new(zm_path())
-        .arg("test")
-        .arg(&archive)
-        .arg("--include")
-        .arg("project/keep.txt")
-        .arg("--json")
-        .output()
-        .unwrap();
+    let test = Command::new(zm_path()).arg("test").arg(&archive).arg("--include").arg("project/keep.txt").arg("--json").output().unwrap();
     assert_success("zm test zip --include --json", &test);
     let stdout = String::from_utf8_lossy(&test.stdout);
     assert!(stdout.contains("\"tested_entries\":1"), "{stdout}");
@@ -2208,14 +1595,7 @@ fn zm_test_tar_zst_and_7z_honor_filters() {
         let create = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("project")).output().unwrap();
         assert_success("zm -cf non-zip test filter fixture", &create);
 
-        let test = Command::new(zm_path())
-            .arg("test")
-            .arg(&archive)
-            .arg("--include")
-            .arg("project/keep.txt")
-            .arg("--json")
-            .output()
-            .unwrap();
+        let test = Command::new(zm_path()).arg("test").arg(&archive).arg("--include").arg("project/keep.txt").arg("--json").output().unwrap();
         assert_success("zm test non-zip --include --json", &test);
         let stdout = String::from_utf8_lossy(&test.stdout);
         assert!(stdout.contains("\"bytes\":5"), "{stdout}");
@@ -2235,21 +1615,10 @@ fn zm_extract_zip_to_stdout_matches_selected_file_bytes() {
     let create = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm -cf zip stdout fixture", &create);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("--to-stdout")
-        .arg("--include")
-        .arg("project/keep.txt")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("--to-stdout").arg("--include").arg("project/keep.txt").output().unwrap();
     assert_success("zm extract zip --to-stdout", &extract);
     assert_eq!(String::from_utf8_lossy(&extract.stdout), "keep\n");
-    assert!(
-        extract.stderr.is_empty(),
-        "stderr should stay quiet unless verbose/error:\n{}",
-        String::from_utf8_lossy(&extract.stderr)
-    );
+    assert!(extract.stderr.is_empty(), "stderr should stay quiet unless verbose/error:\n{}", String::from_utf8_lossy(&extract.stderr));
 
     let Some(unzip) = find_on_path("unzip") else {
         return;
@@ -2270,21 +1639,10 @@ fn zm_extract_tar_zst_and_7z_to_stdout_match_selected_file_bytes() {
         let create = Command::new(zm_path()).arg("-cf").arg(&archive).arg(temp.path("project")).output().unwrap();
         assert_success("zm -cf non-zip stdout fixture", &create);
 
-        let extract = Command::new(zm_path())
-            .arg("extract")
-            .arg(&archive)
-            .arg("--to-stdout")
-            .arg("--include")
-            .arg("project/keep.txt")
-            .output()
-            .unwrap();
+        let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("--to-stdout").arg("--include").arg("project/keep.txt").output().unwrap();
         assert_success("zm extract non-zip --to-stdout", &extract);
         assert_eq!(String::from_utf8_lossy(&extract.stdout), "keep\n");
-        assert!(
-            extract.stderr.is_empty(),
-            "stderr should stay quiet unless verbose/error:\n{}",
-            String::from_utf8_lossy(&extract.stderr)
-        );
+        assert!(extract.stderr.is_empty(), "stderr should stay quiet unless verbose/error:\n{}", String::from_utf8_lossy(&extract.stderr));
     }
 }
 
@@ -2294,41 +1652,15 @@ fn zm_extract_libarchive_tar_to_stdout_requires_one_selected_regular_file() {
     let archive = temp.path("project.tar");
     write_tar_entries(&archive, &[("project/keep.txt", b"keep\n"), ("project/drop.txt", b"drop\n")]);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("--to-stdout")
-        .arg("--include")
-        .arg("project/keep.txt")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("--to-stdout").arg("--include").arg("project/keep.txt").output().unwrap();
     assert_success("zm extract libarchive tar --to-stdout", &extract);
     assert_eq!(String::from_utf8_lossy(&extract.stdout), "keep\n");
-    assert!(
-        extract.stderr.is_empty(),
-        "stderr should stay quiet unless verbose/error:\n{}",
-        String::from_utf8_lossy(&extract.stderr)
-    );
+    assert!(extract.stderr.is_empty(), "stderr should stay quiet unless verbose/error:\n{}", String::from_utf8_lossy(&extract.stderr));
 
-    let multiple = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("--to-stdout")
-        .arg("--include")
-        .arg("project/**")
-        .output()
-        .unwrap();
+    let multiple = Command::new(zm_path()).arg("extract").arg(&archive).arg("--to-stdout").arg("--include").arg("project/**").output().unwrap();
     assert_failure("zm extract libarchive tar --to-stdout multiple", &multiple);
-    assert!(
-        multiple.stdout.is_empty(),
-        "failed stdout extraction must not write partial bytes:\n{}",
-        String::from_utf8_lossy(&multiple.stdout)
-    );
-    assert!(
-        String::from_utf8_lossy(&multiple.stderr).contains("exactly one selected regular file"),
-        "expected single-file selection error:\n{}",
-        String::from_utf8_lossy(&multiple.stderr)
-    );
+    assert!(multiple.stdout.is_empty(), "failed stdout extraction must not write partial bytes:\n{}", String::from_utf8_lossy(&multiple.stdout));
+    assert!(String::from_utf8_lossy(&multiple.stderr).contains("exactly one selected regular file"), "expected single-file selection error:\n{}", String::from_utf8_lossy(&multiple.stderr));
 }
 
 #[test]
@@ -2353,29 +1685,13 @@ fn zm_list_tree_prints_hierarchical_archive_paths() {
 
 #[test]
 fn zm_global_modes_validate_values_and_do_not_break_json() {
-    let valid = Command::new(zm_path())
-        .arg("--color")
-        .arg("never")
-        .arg("--progress")
-        .arg("never")
-        .arg("doctor")
-        .arg("--json")
-        .output()
-        .unwrap();
+    let valid = Command::new(zm_path()).arg("--color").arg("never").arg("--progress").arg("never").arg("doctor").arg("--json").output().unwrap();
     assert_success("zm global color/progress modes", &valid);
-    assert!(
-        String::from_utf8_lossy(&valid.stdout).contains("\"ready\":true"),
-        "{}",
-        String::from_utf8_lossy(&valid.stdout)
-    );
+    assert!(String::from_utf8_lossy(&valid.stdout).contains("\"ready\":true"), "{}", String::from_utf8_lossy(&valid.stdout));
 
     let invalid = Command::new(zm_path()).arg("--color").arg("sometimes").arg("doctor").output().unwrap();
     assert_failure("zm --color invalid value", &invalid);
-    assert!(
-        String::from_utf8_lossy(&invalid.stderr).contains("invalid value for --color"),
-        "{}",
-        String::from_utf8_lossy(&invalid.stderr)
-    );
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("invalid value for --color"), "{}", String::from_utf8_lossy(&invalid.stderr));
 }
 
 #[test]
@@ -2386,14 +1702,7 @@ fn zm_progress_always_writes_create_and_extract_progress_to_stderr() {
     fs::write(temp.path("project/nested/data.bin"), vec![b'x'; 16 * 1024]).unwrap();
     let archive = temp.path("project.zip");
 
-    let create = Command::new(zm_path())
-        .arg("--progress")
-        .arg("always")
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("--progress").arg("always").arg("create").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create --progress always", &create);
     let create_stdout = String::from_utf8_lossy(&create.stdout);
     let create_stderr = String::from_utf8_lossy(&create.stderr);
@@ -2403,15 +1712,7 @@ fn zm_progress_always_writes_create_and_extract_progress_to_stderr() {
     assert!(create_stderr.contains("progress: 100%"), "{create_stderr}");
     assert!(create_stderr.contains("progress: complete"), "{create_stderr}");
 
-    let extract = Command::new(zm_path())
-        .arg("--progress")
-        .arg("always")
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("--progress").arg("always").arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).output().unwrap();
     assert_success("zm extract --progress always", &extract);
     let extract_stdout = String::from_utf8_lossy(&extract.stdout);
     let extract_stderr = String::from_utf8_lossy(&extract.stderr);
@@ -2430,20 +1731,9 @@ fn zm_progress_never_suppresses_progress() {
     fs::write(temp.path("project/file.txt"), "payload\n").unwrap();
     let archive = temp.path("project.zip");
 
-    let create = Command::new(zm_path())
-        .arg("--progress")
-        .arg("never")
-        .arg("create")
-        .arg(&archive)
-        .arg(temp.path("project"))
-        .output()
-        .unwrap();
+    let create = Command::new(zm_path()).arg("--progress").arg("never").arg("create").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create --progress never", &create);
-    assert!(
-        !String::from_utf8_lossy(&create.stderr).contains("progress:"),
-        "{}",
-        String::from_utf8_lossy(&create.stderr)
-    );
+    assert!(!String::from_utf8_lossy(&create.stderr).contains("progress:"), "{}", String::from_utf8_lossy(&create.stderr));
 }
 
 #[test]
@@ -2453,16 +1743,7 @@ fn zm_color_always_styles_human_summary_and_progress() {
     fs::write(temp.path("project/file.txt"), "payload\n").unwrap();
 
     let colored_archive = temp.path("colored.zip");
-    let colored = Command::new(zm_path())
-        .arg("--color")
-        .arg("always")
-        .arg("--progress")
-        .arg("always")
-        .arg("create")
-        .arg(&colored_archive)
-        .arg(temp.path("project"))
-        .output()
-        .unwrap();
+    let colored = Command::new(zm_path()).arg("--color").arg("always").arg("--progress").arg("always").arg("create").arg(&colored_archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create --color always --progress always", &colored);
     let colored_stdout = String::from_utf8_lossy(&colored.stdout);
     let colored_stderr = String::from_utf8_lossy(&colored.stderr);
@@ -2471,16 +1752,7 @@ fn zm_color_always_styles_human_summary_and_progress() {
     assert!(colored_stderr.contains(ANSI_PROGRESS_PREFIX), "{colored_stderr}");
 
     let plain_archive = temp.path("plain.zip");
-    let plain = Command::new(zm_path())
-        .arg("--color")
-        .arg("never")
-        .arg("--progress")
-        .arg("always")
-        .arg("create")
-        .arg(&plain_archive)
-        .arg(temp.path("project"))
-        .output()
-        .unwrap();
+    let plain = Command::new(zm_path()).arg("--color").arg("never").arg("--progress").arg("always").arg("create").arg(&plain_archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create --color never --progress always", &plain);
     let plain_stderr = String::from_utf8_lossy(&plain.stderr);
     assert!(plain_stderr.contains("progress: zip create started"), "{plain_stderr}");
@@ -2498,30 +1770,16 @@ fn zm_color_always_does_not_color_json_or_archive_stdout() {
     let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create color fixture", &create);
 
-    let json =
-        Command::new(zm_path()).arg("--color").arg("always").arg("list").arg(&archive).arg("--json").output().unwrap();
+    let json = Command::new(zm_path()).arg("--color").arg("always").arg("list").arg(&archive).arg("--json").output().unwrap();
     assert_success("zm --color always list --json", &json);
     let json_stdout = String::from_utf8_lossy(&json.stdout);
     assert_json_object(&json_stdout);
     assert!(!json_stdout.contains("\x1b["), "{json_stdout}");
 
-    let extract = Command::new(zm_path())
-        .arg("--color")
-        .arg("always")
-        .arg("extract")
-        .arg(&archive)
-        .arg("--to-stdout")
-        .arg("--include")
-        .arg("project/keep.txt")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("--color").arg("always").arg("extract").arg(&archive).arg("--to-stdout").arg("--include").arg("project/keep.txt").output().unwrap();
     assert_success("zm --color always extract --to-stdout", &extract);
     assert_eq!(String::from_utf8_lossy(&extract.stdout), "keep\n");
-    assert!(
-        extract.stderr.is_empty(),
-        "stderr should stay quiet unless verbose/error:\n{}",
-        String::from_utf8_lossy(&extract.stderr)
-    );
+    assert!(extract.stderr.is_empty(), "stderr should stay quiet unless verbose/error:\n{}", String::from_utf8_lossy(&extract.stderr));
 }
 
 #[test]
@@ -2531,14 +1789,9 @@ fn zm_create_json_summary_is_machine_readable() {
     fs::write(temp.path("project/file.txt"), "payload\n").unwrap();
     let archive = temp.path("project.zip");
 
-    let create =
-        Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--json").output().unwrap();
+    let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--json").output().unwrap();
     assert_success("zm create --json", &create);
-    assert!(
-        create.stderr.is_empty(),
-        "stderr should stay quiet unless verbose/error:\n{}",
-        String::from_utf8_lossy(&create.stderr)
-    );
+    assert!(create.stderr.is_empty(), "stderr should stay quiet unless verbose/error:\n{}", String::from_utf8_lossy(&create.stderr));
     let stdout = String::from_utf8_lossy(&create.stdout);
     assert_json_object(&stdout);
     assert!(stdout.contains("\"operation\":\"create\""), "{stdout}");
@@ -2548,14 +1801,9 @@ fn zm_create_json_summary_is_machine_readable() {
     assert!(stdout.contains("\"written_entries\":"), "{stdout}");
     assert!(stdout.contains("\"written_bytes\":"), "{stdout}");
 
-    let refused =
-        Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--json").output().unwrap();
+    let refused = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).arg("--json").output().unwrap();
     assert_failure("zm create --json refuses existing destination", &refused);
-    assert!(
-        refused.stdout.is_empty(),
-        "failed create must not emit partial success JSON:\n{}",
-        String::from_utf8_lossy(&refused.stdout)
-    );
+    assert!(refused.stdout.is_empty(), "failed create must not emit partial success JSON:\n{}", String::from_utf8_lossy(&refused.stdout));
 }
 
 #[test]
@@ -2568,20 +1816,9 @@ fn zm_extract_json_summary_is_machine_readable() {
     let create = Command::new(zm_path()).arg("create").arg(&archive).arg(temp.path("project")).output().unwrap();
     assert_success("zm create json extract fixture", &create);
 
-    let extract = Command::new(zm_path())
-        .arg("extract")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temp.path("out"))
-        .arg("--json")
-        .output()
-        .unwrap();
+    let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("-C").arg(temp.path("out")).arg("--json").output().unwrap();
     assert_success("zm extract --json", &extract);
-    assert!(
-        extract.stderr.is_empty(),
-        "stderr should stay quiet unless verbose/error:\n{}",
-        String::from_utf8_lossy(&extract.stderr)
-    );
+    assert!(extract.stderr.is_empty(), "stderr should stay quiet unless verbose/error:\n{}", String::from_utf8_lossy(&extract.stderr));
     let stdout = String::from_utf8_lossy(&extract.stdout);
     assert_json_object(&stdout);
     assert!(stdout.contains("\"operation\":\"extract\""), "{stdout}");
@@ -2642,11 +1879,7 @@ fn zm_no_password_prompt_fails_instead_of_prompting() {
 
     let test = Command::new(zm_path()).arg("--no-password-prompt").arg("test").arg(&archive).output().unwrap();
     assert_failure("zm --no-password-prompt test encrypted zip", &test);
-    assert!(
-        String::from_utf8_lossy(&test.stderr).contains("prompts are disabled"),
-        "{}",
-        String::from_utf8_lossy(&test.stderr)
-    );
+    assert!(String::from_utf8_lossy(&test.stderr).contains("prompts are disabled"), "{}", String::from_utf8_lossy(&test.stderr));
 }
 
 #[derive(Debug)]
@@ -2690,11 +1923,7 @@ fn fixture_manifest() -> Vec<Fixture> {
     for fixture in &fixtures {
         assert!(fixture.path().exists(), "missing fixture archive: {}", fixture.path().display());
         assert_eq!(sha256_hex(&fixture.path()), fixture.sha256, "fixture checksum drifted: {}", fixture.filename);
-        assert!(
-            fixture.password.is_none(),
-            "password-protected fixtures are not wired into generic CLI tests yet: {}",
-            fixture.filename
-        );
+        assert!(fixture.password.is_none(), "password-protected fixtures are not wired into generic CLI tests yet: {}", fixture.filename);
     }
 
     fixtures
@@ -2719,10 +1948,7 @@ fn cli_path() -> PathBuf {
 }
 
 fn assert_json_object(stdout: &str) {
-    assert!(
-        stdout.starts_with('{') && stdout.trim_end().ends_with('}'),
-        "stdout is not a single JSON object:\n{stdout}"
-    );
+    assert!(stdout.starts_with('{') && stdout.trim_end().ends_with('}'), "stdout is not a single JSON object:\n{stdout}");
 }
 
 fn write_zip_entries(path: &Path, method: CompressionMethod, entries: &[(&str, &[u8])]) {
@@ -2789,12 +2015,7 @@ fn deterministic_bytes(len: usize) -> Vec<u8> {
 }
 
 fn run_with_stdin(mut command: Command, input: &str) -> std::process::Output {
-    let mut child = command
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
     child.stdin.as_mut().unwrap().write_all(input.as_bytes()).unwrap();
     child.wait_with_output().unwrap()
 }
@@ -2809,13 +2030,7 @@ fn run_with_optional_password(mut command: Command, password: Option<&str>) -> s
     }
 }
 
-fn write_deb_ar_archive(
-    path: &Path,
-    control_member_name: &str,
-    control_member: &[u8],
-    data_member_name: &str,
-    data_member: &[u8],
-) {
+fn write_deb_ar_archive(path: &Path, control_member_name: &str, control_member: &[u8], data_member_name: &str, data_member: &[u8]) {
     let mut file = File::create(path).unwrap();
     file.write_all(b"!<arch>\n").unwrap();
     write_ar_member(&mut file, "debian-binary", b"2.0\n");
@@ -2879,11 +2094,7 @@ fn assert_no_zmanager_temp_files(root: &Path) {
         let entry = entry.unwrap();
         let path = entry.path();
         let name = entry.file_name();
-        assert!(
-            !name.to_string_lossy().starts_with(".zmanager-"),
-            "temporary output file was left behind: {}",
-            path.display()
-        );
+        assert!(!name.to_string_lossy().starts_with(".zmanager-"), "temporary output file was left behind: {}", path.display());
         if path.is_dir() {
             assert_no_zmanager_temp_files(&path);
         }
@@ -2903,17 +2114,11 @@ fn find_7zip() -> Option<PathBuf> {
 }
 
 fn assert_zm_extracts_7zip_tar_family_archive(label: &str, archive: &Path, temp: &TestDir) {
-    let output_dir_name =
-        format!("out-{}", archive.file_name().and_then(|name| name.to_str()).unwrap_or("archive").replace('.', "-"));
-    let extract =
-        Command::new(zm_path()).arg("extract").arg(archive).arg("-C").arg(temp.path(output_dir_name)).output().unwrap();
+    let output_dir_name = format!("out-{}", archive.file_name().and_then(|name| name.to_str()).unwrap_or("archive").replace('.', "-"));
+    let extract = Command::new(zm_path()).arg("extract").arg(archive).arg("-C").arg(temp.path(output_dir_name)).output().unwrap();
     assert_success(&format!("zm extract {label}"), &extract);
     assert_eq!(
-        fs::read_to_string(temp.path(format!(
-            "out-{}/project/file.txt",
-            archive.file_name().and_then(|name| name.to_str()).unwrap_or("archive").replace('.', "-")
-        )))
-        .unwrap(),
+        fs::read_to_string(temp.path(format!("out-{}/project/file.txt", archive.file_name().and_then(|name| name.to_str()).unwrap_or("archive").replace('.', "-")))).unwrap(),
         "created by 7zip tar\n"
     );
 }

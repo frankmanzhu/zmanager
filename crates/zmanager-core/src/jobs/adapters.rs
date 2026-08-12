@@ -82,8 +82,7 @@ pub fn run_zip_extract_job_with_password_and_policy(
 ) -> Result<zip_backend::ZipExtractReport, ZipBackendError> {
     sink.emit(JobEvent::Started { kind: JobKind::ZipExtract, total_bytes: None });
     let mut context = JobContext::new(token, sink);
-    let result =
-        zip_backend::extract_zip_with_context_and_password(archive_path, destination, policy, password, &mut context);
+    let result = zip_backend::extract_zip_with_context_and_password(archive_path, destination, policy, password, &mut context);
     context.flush_progress();
     finish_zip_extract_result(result, sink)
 }
@@ -116,8 +115,7 @@ pub fn run_tar_zst_create_job_from_sources_with_plan_options(
     };
     sink.emit(JobEvent::Started { kind: JobKind::TarZstdCreate, total_bytes: Some(manifest.total_bytes) });
     let mut context = JobContext::new_with_progress_total(token, sink, Some(manifest.total_bytes));
-    let result =
-        tar_zst_backend::create_tar_zst_from_manifest_with_context(&manifest, destination, options, &mut context);
+    let result = tar_zst_backend::create_tar_zst_from_manifest_with_context(&manifest, destination, options, &mut context);
     context.flush_progress();
     finish_tar_zst_create_result(result, sink)
 }
@@ -378,14 +376,7 @@ pub fn run_rar_extract_job_with_password_and_policy(
 
     let entries = listing.entries.into_iter().map(rar_backend::RarListEntry::into_unrar_entry).collect::<Vec<_>>();
     let mut context = JobContext::new_with_progress_total(token, sink, total_bytes);
-    let result = rar_backend::extract_rar_entries_with_password_and_context(
-        archive_path,
-        destination,
-        policy,
-        password,
-        entries,
-        &mut context,
-    );
+    let result = rar_backend::extract_rar_entries_with_password_and_context(archive_path, destination, policy, password, entries, &mut context);
     context.flush_progress();
     finish_rar_extract_result(result, sink)
 }
@@ -415,13 +406,7 @@ pub fn run_libarchive_extract_job_with_password_and_policy(
     sink.emit(JobEvent::Started { kind: JobKind::ArchiveExtract, total_bytes: None });
 
     let mut context = JobContext::new(token, sink);
-    let result = libarchive_backend::extract_archive_with_password_and_context(
-        archive_path,
-        destination,
-        policy,
-        password,
-        &mut context,
-    );
+    let result = libarchive_backend::extract_archive_with_password_and_context(archive_path, destination, policy, password, &mut context);
     context.flush_progress();
     finish_libarchive_extract_result(result, sink)
 }
@@ -447,9 +432,7 @@ pub fn run_raw_stream_extract_job_with_policy(
     let archive_path = archive_path.as_ref();
     let estimated_total_bytes = raw_stream_backend::estimate_raw_stream_uncompressed_size(archive_path, format);
     let source_size = archive_path.metadata().ok().map(|metadata| metadata.len());
-    let track_source_progress = estimated_total_bytes.is_none()
-        && raw_stream_backend::can_track_source_progress(format)
-        && source_size.is_some_and(|size| size > 0);
+    let track_source_progress = estimated_total_bytes.is_none() && raw_stream_backend::can_track_source_progress(format) && source_size.is_some_and(|size| size > 0);
     let total_bytes = if estimated_total_bytes.is_some() {
         estimated_total_bytes
     } else if track_source_progress {
@@ -464,14 +447,8 @@ pub fn run_raw_stream_extract_job_with_policy(
 
     let mut context = JobContext::new_with_progress_total(token, sink, total_bytes);
     let progress_path = archive_path.to_string_lossy().into_owned();
-    let result = raw_stream_backend::extract_raw_stream_with_progress(
-        archive_path,
-        format,
-        destination,
-        policy,
-        Some(&mut |bytes| context.bytes_processed(Some(&progress_path), bytes)),
-        track_source_progress,
-    );
+    let result =
+        raw_stream_backend::extract_raw_stream_with_progress(archive_path, format, destination, policy, Some(&mut |bytes| context.bytes_processed(Some(&progress_path), bytes)), track_source_progress);
     context.flush_progress();
     finish_raw_stream_extract_result(result, sink)
 }
@@ -494,15 +471,7 @@ pub fn run_tzap_extract_job_with_password_and_policy(
     token: &CancellationToken,
     sink: &mut dyn JobEventSink,
 ) -> Result<tzap_backend::TzapExtractReport, TzapError> {
-    run_tzap_extract_job_with_password_and_policy_and_restore_options(
-        archive_path,
-        destination,
-        password,
-        policy,
-        tzap_backend::TzapRestoreOptions::default(),
-        token,
-        sink,
-    )
+    run_tzap_extract_job_with_password_and_policy_and_restore_options(archive_path, destination, password, policy, tzap_backend::TzapRestoreOptions::default(), token, sink)
 }
 
 /// Runs a TZAP extract job with explicit archive safety and metadata restoration policies.
@@ -530,18 +499,8 @@ pub fn run_tzap_extract_job_with_password_and_policy_and_restore_options(
         Some(password) => tzap_backend::TzapExtractKeySource::Password(password),
         None => tzap_backend::TzapExtractKeySource::None,
     };
-    let result = tzap_backend::extract_tzap(
-        tzap_backend::TzapExtractRequest {
-            key,
-            policy,
-            restore_options,
-            overwrite_resolver: None,
-            context: Some(&mut context),
-            fast: true,
-        },
-        archive_path,
-        destination,
-    );
+    let result =
+        tzap_backend::extract_tzap(tzap_backend::TzapExtractRequest { key, policy, restore_options, overwrite_resolver: None, context: Some(&mut context), fast: true }, archive_path, destination);
     context.flush_progress();
     finish_tzap_extract_result(result, sink)
 }

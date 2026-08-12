@@ -21,15 +21,13 @@ use serde_json::{Value, json};
 
 use crate::trust;
 use crate::tzap_service_auth::{
-    AUTH_PENDING_FILE, TzapFfiSessionStore, current_unix_seconds, default_tzap_state_dir, load_pending_auth,
-    parse_auth_environment, save_pending_auth, session_summary_json, session_summary_json_at,
+    AUTH_PENDING_FILE, TzapFfiSessionStore, current_unix_seconds, default_tzap_state_dir, load_pending_auth, parse_auth_environment, save_pending_auth, session_summary_json, session_summary_json_at,
 };
 
 use crate::auth_client::TzapSessionStore;
 use crate::jobs::{CancellationToken, JobEvent};
 use crate::local_identity_store::{
-    FileTzapLocalIdentityStore, TzapContactRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState,
-    TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord,
+    FileTzapLocalIdentityStore, TzapContactRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord,
 };
 use crate::manifest::PlanOptions;
 use crate::secrets::SecretString;
@@ -118,16 +116,9 @@ fn request_i64(request: &Value, field: &'static str) -> Result<Option<i64>, Stri
 fn request_string_array(request: &Value, field: &'static str) -> Result<Vec<String>, String> {
     match request.get(field) {
         None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_owned)
-                    .ok_or_else(|| format!("missing or invalid field: {field}"))
-            })
-            .collect(),
+        Some(Value::Array(values)) => {
+            values.iter().map(|value| value.as_str().filter(|value| !value.is_empty()).map(str::to_owned).ok_or_else(|| format!("missing or invalid field: {field}"))).collect()
+        }
         _ => Err(format!("missing or invalid field: {field}")),
     }
 }
@@ -139,12 +130,7 @@ fn required_request_path_array(request: &Value, field: &'static str) -> Result<V
 
 fn run_local_tzap_service<F>(request_json: &str, action: F) -> String
 where
-    F: FnOnce(
-        &mut FileTzapLocalIdentityStore,
-        &crate::auth_client::TzapSessionRecord,
-        &crate::local_tzap_service::TzapLocalServiceOptions,
-        &Value,
-    ) -> Result<Value, String>,
+    F: FnOnce(&mut FileTzapLocalIdentityStore, &crate::auth_client::TzapSessionRecord, &crate::local_tzap_service::TzapLocalServiceOptions, &Value) -> Result<Value, String>,
 {
     match parse_json_request(request_json).and_then(|request| {
         let context = TzapFfiContext::from_request(&request)?;
@@ -153,10 +139,8 @@ where
             return Err(MISSING_TZAP_SESSION.to_owned());
         };
         let mut identity_store = FileTzapLocalIdentityStore::new(&context.state_dir);
-        let options = crate::local_tzap_service::TzapLocalServiceOptions {
-            account_key: context.account_key,
-            now_unix_seconds: request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds),
-        };
+        let options =
+            crate::local_tzap_service::TzapLocalServiceOptions { account_key: context.account_key, now_unix_seconds: request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds) };
         action(&mut identity_store, &session, &options, &request)
     }) {
         Ok(value) => value.to_string(),
@@ -270,34 +254,15 @@ fn retirement_completion_label(completion: crate::certificate_lifecycle::TzapRet
     }
 }
 
-fn create_self_signed_tzap_identity(
-    identity_path: &Path,
-    public_certificate_path: Option<&Path>,
-    common_name: &str,
-    password: &SecretString,
-) -> Result<Value, String> {
-    let key = PKey::from_rsa(
-        Rsa::generate(SELF_SIGNED_IDENTITY_RSA_BITS)
-            .map_err(|source| format!("could not generate signing key: {source}"))?,
-    )
-    .map_err(|source| format!("could not prepare signing key: {source}"))?;
+fn create_self_signed_tzap_identity(identity_path: &Path, public_certificate_path: Option<&Path>, common_name: &str, password: &SecretString) -> Result<Value, String> {
+    let key = PKey::from_rsa(Rsa::generate(SELF_SIGNED_IDENTITY_RSA_BITS).map_err(|source| format!("could not generate signing key: {source}"))?)
+        .map_err(|source| format!("could not prepare signing key: {source}"))?;
     let certificate = create_self_signed_certificate(common_name, &key)?;
-    let identity = Pkcs12::builder()
-        .name(common_name)
-        .pkey(&key)
-        .cert(&certificate)
-        .build2(password.expose_secret())
-        .map_err(|source| format!("could not create PKCS#12 identity: {source}"))?;
+    let identity = Pkcs12::builder().name(common_name).pkey(&key).cert(&certificate).build2(password.expose_secret()).map_err(|source| format!("could not create PKCS#12 identity: {source}"))?;
 
-    write_output_file(
-        identity_path,
-        &identity.to_der().map_err(|source| format!("could not encode PKCS#12 identity: {source}"))?,
-    )?;
+    write_output_file(identity_path, &identity.to_der().map_err(|source| format!("could not encode PKCS#12 identity: {source}"))?)?;
     if let Some(path) = public_certificate_path {
-        write_output_file(
-            path,
-            &certificate.to_pem().map_err(|source| format!("could not encode public certificate: {source}"))?,
-        )?;
+        write_output_file(path, &certificate.to_pem().map_err(|source| format!("could not encode public certificate: {source}"))?)?;
     }
 
     x509_certificate_summary_json(&certificate)
@@ -305,44 +270,25 @@ fn create_self_signed_tzap_identity(
 
 fn create_self_signed_certificate(common_name: &str, key: &PKey<Private>) -> Result<X509, String> {
     let mut name = X509NameBuilder::new().map_err(|source| format!("could not create certificate name: {source}"))?;
-    name.append_entry_by_text("CN", common_name)
-        .map_err(|source| format!("could not set certificate name: {source}"))?;
+    name.append_entry_by_text("CN", common_name).map_err(|source| format!("could not set certificate name: {source}"))?;
     let name = name.build();
 
     let mut builder = X509::builder().map_err(|source| format!("could not create certificate: {source}"))?;
     builder.set_version(2).map_err(|source| format!("could not set certificate version: {source}"))?;
     let serial = random_certificate_serial()?;
-    builder
-        .set_serial_number(&serial)
-        .map_err(|source| format!("could not set certificate serial number: {source}"))?;
+    builder.set_serial_number(&serial).map_err(|source| format!("could not set certificate serial number: {source}"))?;
     builder.set_subject_name(&name).map_err(|source| format!("could not set certificate subject: {source}"))?;
     builder.set_issuer_name(&name).map_err(|source| format!("could not set certificate issuer: {source}"))?;
     builder.set_pubkey(key).map_err(|source| format!("could not set certificate public key: {source}"))?;
-    let not_before =
-        Asn1Time::days_from_now(0).map_err(|source| format!("could not set certificate start date: {source}"))?;
+    let not_before = Asn1Time::days_from_now(0).map_err(|source| format!("could not set certificate start date: {source}"))?;
     builder.set_not_before(&not_before).map_err(|source| format!("could not set certificate start date: {source}"))?;
-    let not_after = Asn1Time::days_from_now(SELF_SIGNED_IDENTITY_VALID_DAYS)
-        .map_err(|source| format!("could not set certificate expiry: {source}"))?;
+    let not_after = Asn1Time::days_from_now(SELF_SIGNED_IDENTITY_VALID_DAYS).map_err(|source| format!("could not set certificate expiry: {source}"))?;
     builder.set_not_after(&not_after).map_err(|source| format!("could not set certificate expiry: {source}"))?;
     builder
-        .append_extension(
-            BasicConstraints::new()
-                .critical()
-                .ca()
-                .build()
-                .map_err(|source| format!("could not set certificate constraints: {source}"))?,
-        )
+        .append_extension(BasicConstraints::new().critical().ca().build().map_err(|source| format!("could not set certificate constraints: {source}"))?)
         .map_err(|source| format!("could not set certificate constraints: {source}"))?;
     builder
-        .append_extension(
-            KeyUsage::new()
-                .critical()
-                .digital_signature()
-                .key_cert_sign()
-                .crl_sign()
-                .build()
-                .map_err(|source| format!("could not set certificate key usage: {source}"))?,
-        )
+        .append_extension(KeyUsage::new().critical().digital_signature().key_cert_sign().crl_sign().build().map_err(|source| format!("could not set certificate key usage: {source}"))?)
         .map_err(|source| format!("could not set certificate key usage: {source}"))?;
     builder.sign(key, MessageDigest::sha256()).map_err(|source| format!("could not sign certificate: {source}"))?;
 
@@ -351,16 +297,12 @@ fn create_self_signed_certificate(common_name: &str, key: &PKey<Private>) -> Res
 
 fn random_certificate_serial() -> Result<Asn1Integer, String> {
     let mut serial = BigNum::new().map_err(|source| format!("could not create serial number: {source}"))?;
-    serial
-        .rand(SELF_SIGNED_IDENTITY_SERIAL_BITS, MsbOption::MAYBE_ZERO, false)
-        .map_err(|source| format!("could not create serial number: {source}"))?;
+    serial.rand(SELF_SIGNED_IDENTITY_SERIAL_BITS, MsbOption::MAYBE_ZERO, false).map_err(|source| format!("could not create serial number: {source}"))?;
     serial.to_asn1_integer().map_err(|source| format!("could not encode serial number: {source}"))
 }
 
 fn x509_certificate_summary_json(certificate: &X509) -> Result<Value, String> {
-    let fingerprint = certificate
-        .digest(MessageDigest::sha256())
-        .map_err(|source| format!("could not fingerprint certificate: {source}"))?;
+    let fingerprint = certificate.digest(MessageDigest::sha256()).map_err(|source| format!("could not fingerprint certificate: {source}"))?;
     let serial_number = certificate
         .serial_number()
         .to_bn()
@@ -389,21 +331,11 @@ fn write_output_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::write(path, bytes).map_err(|source| format!("could not write {}: {source}", path.display()))
 }
 
-pub fn create_tzap_self_signed_identity(
-    identity_path: &str,
-    public_certificate_path: Option<&str>,
-    common_name: &str,
-    password: &str,
-) -> String {
+pub fn create_tzap_self_signed_identity(identity_path: &str, public_certificate_path: Option<&str>, common_name: &str, password: &str) -> String {
     let identity_path = PathBuf::from(identity_path);
     let public_certificate_path = public_certificate_path.map(PathBuf::from);
 
-    match create_self_signed_tzap_identity(
-        &identity_path,
-        public_certificate_path.as_deref(),
-        common_name,
-        &SecretString::from(password),
-    ) {
+    match create_self_signed_tzap_identity(&identity_path, public_certificate_path.as_deref(), common_name, &SecretString::from(password)) {
         Ok(certificate) => json!({
             "ok": true,
             "identity_kind": DEV_ONLY_SELF_SIGNED_IDENTITY_KIND,
@@ -518,22 +450,12 @@ fn ffi_error_json(message: &str) -> String {
 /// Verifies the X.509 `RootAuth` signer of a `.tzap` archive with an optional
 /// password and explicit trust sources, returning a JSON response envelope.
 #[must_use]
-pub fn verify_tzap_x509(
-    archive_path: &str,
-    password: Option<&str>,
-    trusted_ca_certs: &[String],
-    trusted_system_roots: bool,
-) -> String {
+pub fn verify_tzap_x509(archive_path: &str, password: Option<&str>, trusted_ca_certs: &[String], trusted_system_roots: bool) -> String {
     let trust = tzap_x509_trust_options(trusted_ca_certs, trusted_system_roots);
     if !trust.has_trust_source() {
         return ffi_error_json("X.509 verification requires trusted roots");
     }
-    match crate::tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(
-        PathBuf::from(archive_path),
-        password,
-        |_| true,
-        Some(&trust),
-    ) {
+    match crate::tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(PathBuf::from(archive_path), password, |_| true, Some(&trust)) {
         Ok(report) => match report.x509_root_auth.as_ref() {
             Some(root_auth) => json!({
                 "ok": true,
@@ -553,11 +475,7 @@ pub fn verify_tzap_x509(
 /// Verifies the X.509 `RootAuth` signer of a `.tzap` archive without the
 /// archive key, using explicit trust sources.
 #[must_use]
-pub fn verify_tzap_x509_public_no_key(
-    archive_path: &str,
-    trusted_ca_certs: &[String],
-    trusted_system_roots: bool,
-) -> String {
+pub fn verify_tzap_x509_public_no_key(archive_path: &str, trusted_ca_certs: &[String], trusted_system_roots: bool) -> String {
     let trust = tzap_x509_trust_options(trusted_ca_certs, trusted_system_roots);
     if !trust.has_trust_source() {
         return ffi_error_json("X.509 verification requires trusted roots");
@@ -615,11 +533,7 @@ pub fn tzap_public_metadata_summary(archive_path: &str) -> String {
         Ok(summary) => {
             let signature = match crate::tzap_backend::verify_tzap_x509_public_no_key(
                 &archive_path,
-                &TzapX509TrustOptions {
-                    trusted_ca_certificates: Vec::new(),
-                    trusted_system_roots: true,
-                    include_official_tzap_root: true,
-                },
+                &TzapX509TrustOptions { trusted_ca_certificates: Vec::new(), trusted_system_roots: true, include_official_tzap_root: true },
             ) {
                 Ok(root_auth) => json!({
                     "status": "verified",
@@ -702,11 +616,7 @@ pub fn tzap_public_metadata_display_summary(archive_path: &str) -> String {
 }
 
 fn tzap_x509_trust_options(trusted_ca_certs: &[String], trusted_system_roots: bool) -> TzapX509TrustOptions {
-    TzapX509TrustOptions {
-        trusted_ca_certificates: trusted_ca_certs.iter().map(PathBuf::from).collect(),
-        trusted_system_roots,
-        include_official_tzap_root: false,
-    }
+    TzapX509TrustOptions { trusted_ca_certificates: trusted_ca_certs.iter().map(PathBuf::from).collect(), trusted_system_roots, include_official_tzap_root: false }
 }
 
 /// Builds the custom trust root inputs from the request (CR-113: the service
@@ -714,12 +624,8 @@ fn tzap_x509_trust_options(trusted_ca_certs: &[String], trusted_system_roots: bo
 /// loaded and fingerprinted alongside the explicit SHA-256 pins).
 fn custom_trust_roots_from_request(request: &Value) -> Result<(Vec<String>, Vec<Vec<u8>>), String> {
     let mut custom_trust_root_sha256 = request_string_array(request, "custom_trust_root_sha256")?;
-    let custom_root_cert_paths = request_string_array(request, "custom_trust_root_cert_paths")?
-        .into_iter()
-        .map(PathBuf::from)
-        .collect::<Vec<_>>();
-    let custom_trust_root_certificates_der =
-        trust::load_custom_root_certificate_files(&custom_root_cert_paths, &mut custom_trust_root_sha256)?;
+    let custom_root_cert_paths = request_string_array(request, "custom_trust_root_cert_paths")?.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+    let custom_trust_root_certificates_der = trust::load_custom_root_certificate_files(&custom_root_cert_paths, &mut custom_trust_root_sha256)?;
     Ok((custom_trust_root_sha256, custom_trust_root_certificates_der))
 }
 
@@ -727,23 +633,16 @@ fn custom_trust_roots_from_request(request: &Value) -> Result<(Vec<String>, Vec<
 pub fn tzap_auth_login_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
-        let environment = request
-            .get("environment")
-            .and_then(Value::as_str)
-            .map(parse_auth_environment)
-            .transpose()?
-            .unwrap_or(crate::auth_client::TzapHostedAuthEnvironment::Prod);
+        let environment = request.get("environment").and_then(Value::as_str).map(parse_auth_environment).transpose()?.unwrap_or(crate::auth_client::TzapHostedAuthEnvironment::Prod);
         let client_id = request_string(&request, "client_id")?.unwrap_or_else(|| DEFAULT_TZAP_CLIENT_ID.into());
-        let redirect_uri =
-            request_string(&request, "redirect_uri")?.unwrap_or_else(|| DEFAULT_TZAP_REDIRECT_URI.into());
+        let redirect_uri = request_string(&request, "redirect_uri")?.unwrap_or_else(|| DEFAULT_TZAP_REDIRECT_URI.into());
         let provider_id = request_string(&request, "provider_id")?.unwrap_or_else(|| DEFAULT_TZAP_PROVIDER_ID.into());
         let now_unix_seconds = request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds);
 
         let mut tracker = crate::auth_client::TzapOAuthStateTracker::new();
         let pending = tracker.begin(provider_id, redirect_uri.clone(), now_unix_seconds);
 
-        let mut config =
-            crate::auth_client::TzapHostedAuthLaunchConfig::for_environment(environment, client_id, redirect_uri);
+        let mut config = crate::auth_client::TzapHostedAuthLaunchConfig::for_environment(environment, client_id, redirect_uri);
         if let Some(auth_base_url) = request_string(&request, "auth_base_url")? {
             config.hosted_auth_base_url = auth_base_url;
         }
@@ -774,16 +673,10 @@ pub fn tzap_auth_callback_json(request_json: &str) -> String {
         let context = TzapFfiContext::from_request(&request)?;
         let pending = load_pending_auth(&context.state_dir)?;
         let state = required_request_string(&request, "state")?;
-        let redirect_uri =
-            request_string(&request, "redirect_uri")?.unwrap_or_else(|| DEFAULT_TZAP_REDIRECT_URI.into());
+        let redirect_uri = request_string(&request, "redirect_uri")?.unwrap_or_else(|| DEFAULT_TZAP_REDIRECT_URI.into());
         let relay_body = required_request_string(&request, "relay_body")?.into_bytes();
-        let callback = crate::auth_client::TzapHostedAuthCallback {
-            state,
-            redirect_uri,
-            pkce_verifier: pending.pkce.verifier.clone(),
-            callback_url: request_string(&request, "callback_url")?,
-            relay_body,
-        };
+        let callback =
+            crate::auth_client::TzapHostedAuthCallback { state, redirect_uri, pkce_verifier: pending.pkce.verifier.clone(), callback_url: request_string(&request, "callback_url")?, relay_body };
         let mut tracker = crate::auth_client::TzapOAuthStateTracker::new();
         tracker.insert_pending(pending).map_err(|error| error.to_string())?;
         let mut session_store = TzapFfiSessionStore::new(&context.state_dir);
@@ -841,17 +734,10 @@ pub fn tzap_auth_forget_json(request_json: &str) -> String {
 #[must_use]
 pub fn tzap_auth_account_url_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
-        let environment = request
-            .get("environment")
-            .and_then(Value::as_str)
-            .map(parse_auth_environment)
-            .transpose()?
-            .unwrap_or(crate::auth_client::TzapHostedAuthEnvironment::Prod);
+        let environment = request.get("environment").and_then(Value::as_str).map(parse_auth_environment).transpose()?.unwrap_or(crate::auth_client::TzapHostedAuthEnvironment::Prod);
         let client_id = request_string(&request, "client_id")?.unwrap_or_else(|| DEFAULT_TZAP_CLIENT_ID.into());
-        let redirect_uri =
-            request_string(&request, "redirect_uri")?.unwrap_or_else(|| DEFAULT_TZAP_REDIRECT_URI.into());
-        let mut config =
-            crate::auth_client::TzapHostedAuthLaunchConfig::for_environment(environment, client_id, redirect_uri);
+        let redirect_uri = request_string(&request, "redirect_uri")?.unwrap_or_else(|| DEFAULT_TZAP_REDIRECT_URI.into());
+        let mut config = crate::auth_client::TzapHostedAuthLaunchConfig::for_environment(environment, client_id, redirect_uri);
         if let Some(account_base_url) = request_string(&request, "account_base_url")? {
             config.hosted_account_base_url = account_base_url;
         }
@@ -946,14 +832,10 @@ pub fn tzap_document_sign_json(request_json: &str) -> String {
         let certificate_id = required_request_string(&request, "certificate_id")?;
         let payload = request.get("payload").cloned().ok_or_else(|| "missing or invalid field: payload".to_owned())?;
         let store = FileTzapLocalIdentityStore::new(&context.state_dir);
-        let mut signing_request = crate::document_signing::TzapDocumentSigningRequest::new(
-            context.account_key,
-            certificate_id,
-            request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds),
-        );
+        let mut signing_request =
+            crate::document_signing::TzapDocumentSigningRequest::new(context.account_key, certificate_id, request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds));
         signing_request.claimed_signing_time = request_string(&request, "claimed_signing_time")?;
-        let envelope = crate::document_signing::sign_tzap_document_payload(&store, &signing_request, payload)
-            .map_err(|error| error.to_string())?;
+        let envelope = crate::document_signing::sign_tzap_document_payload(&store, &signing_request, payload).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "envelope": envelope,
@@ -968,8 +850,7 @@ pub fn tzap_document_verify_json(request_json: &str) -> String {
         let bytes = serde_json::to_vec(envelope).map_err(|error| error.to_string())?;
         let (custom_trust_root_sha256, custom_trust_root_certificates_der) = custom_trust_roots_from_request(&request)?;
         let options = crate::document_verification::TzapOfflineVerificationOptions {
-            verifier_time_unix_seconds: request_i64(&request, "verifier_time_unix_seconds")?
-                .unwrap_or_else(|| i64::try_from(current_unix_seconds()).unwrap_or(i64::MAX)),
+            verifier_time_unix_seconds: request_i64(&request, "verifier_time_unix_seconds")?.unwrap_or_else(|| i64::try_from(current_unix_seconds()).unwrap_or(i64::MAX)),
             official_root_pins: &trust::OFFICIAL_TZAP_ROOT_PINS,
             official_root_certificates_der: Vec::new(),
             custom_trust_root_sha256,
@@ -977,20 +858,15 @@ pub fn tzap_document_verify_json(request_json: &str) -> String {
             certificate_profile_options: trust::TzapCertificateProfileOptions::default(),
         };
         let result = crate::document_verification::verify_tzap_document_envelope_offline_json(&bytes, &options);
-        if request_string(&request, "mode")?.as_deref().unwrap_or("offline") == "offline"
-            || result.state == trust::TzapVerificationState::Invalid
-        {
+        if request_string(&request, "mode")?.as_deref().unwrap_or("offline") == "offline" || result.state == trust::TzapVerificationState::Invalid {
             return Ok(document_verification_result_json(&result));
         }
         if request_string(&request, "mode")?.as_deref() != Some("valid_now") {
             return Err("document verify mode must be offline or valid_now".to_owned());
         }
-        let envelope =
-            crate::document_envelope::parse_tzap_document_envelope_json(&bytes).map_err(|error| error.to_string())?;
-        let status_value =
-            request.get("status_response").ok_or_else(|| "missing or invalid field: status_response".to_owned())?;
-        let status = crate::status_client::TzapStatusResponse::from_json_value(status_value)
-            .map_err(|error| error.to_string())?;
+        let envelope = crate::document_envelope::parse_tzap_document_envelope_json(&bytes).map_err(|error| error.to_string())?;
+        let status_value = request.get("status_response").ok_or_else(|| "missing or invalid field: status_response".to_owned())?;
+        let status = crate::status_client::TzapStatusResponse::from_json_value(status_value).map_err(|error| error.to_string())?;
         let result = crate::status_client::verify_tzap_document_envelope_valid_now(&envelope, &options, &status);
         Ok(document_verification_result_json(&result))
     })
@@ -1000,16 +876,14 @@ pub fn tzap_document_verify_json(request_json: &str) -> String {
 pub fn tzap_recipient_key_generate_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
-        let material =
-            crate::device_identity::generate_recipient_encryption_key().map_err(|error| error.to_string())?;
+        let material = crate::device_identity::generate_recipient_encryption_key().map_err(|error| error.to_string())?;
         let record = TzapRecipientEncryptionKeyRecord {
             key_id: material.public_key_fingerprint.clone(),
             algorithm: material.algorithm.to_owned(),
             public_key_fingerprint: material.public_key_fingerprint,
             public_key_der: material.public_key_spki_der,
             private_key_der: material.private_key_der,
-            created_at_unix_seconds: request_u64(&request, "created_at_unix_seconds")?
-                .unwrap_or_else(current_unix_seconds),
+            created_at_unix_seconds: request_u64(&request, "created_at_unix_seconds")?.unwrap_or_else(current_unix_seconds),
             label: request_string(&request, "label")?,
         };
         let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
@@ -1053,12 +927,10 @@ pub fn tzap_contact_export_json(request_json: &str) -> String {
             certificate_id: required_request_string(&request, "certificate_id")?,
             display_name: required_request_string(&request, "display_name")?,
             device_label: request_string(&request, "device_label")?.unwrap_or_else(|| "ZManager".to_owned()),
-            created_at_unix_seconds: request_u64(&request, "created_at_unix_seconds")?
-                .unwrap_or_else(current_unix_seconds),
+            created_at_unix_seconds: request_u64(&request, "created_at_unix_seconds")?.unwrap_or_else(current_unix_seconds),
             expires_at_unix_seconds: request_u64(&request, "expires_at_unix_seconds")?,
         };
-        let card = crate::contact_card::export_tzap_contact_card(&store, &export_request)
-            .map_err(|error| error.to_string())?;
+        let card = crate::contact_card::export_tzap_contact_card(&store, &export_request).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "contact_card": card,
@@ -1070,12 +942,10 @@ pub fn tzap_contact_export_json(request_json: &str) -> String {
 pub fn tzap_contact_import_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
-        let card =
-            request.get("contact_card").cloned().ok_or_else(|| "missing or invalid field: contact_card".to_owned())?;
+        let card = request.get("contact_card").cloned().ok_or_else(|| "missing or invalid field: contact_card".to_owned())?;
         let (custom_trust_root_sha256, custom_trust_root_certificates_der) = custom_trust_roots_from_request(&request)?;
         let options = crate::contact_card::TzapContactCardImportOptions {
-            verifier_time_unix_seconds: request_i64(&request, "verifier_time_unix_seconds")?
-                .unwrap_or_else(|| i64::try_from(current_unix_seconds()).unwrap_or(i64::MAX)),
+            verifier_time_unix_seconds: request_i64(&request, "verifier_time_unix_seconds")?.unwrap_or_else(|| i64::try_from(current_unix_seconds()).unwrap_or(i64::MAX)),
             official_root_pins: &trust::OFFICIAL_TZAP_ROOT_PINS,
             official_root_certificates_der: Vec::new(),
             custom_trust_root_sha256,
@@ -1083,19 +953,8 @@ pub fn tzap_contact_import_json(request_json: &str) -> String {
             certificate_profile_options: trust::TzapCertificateProfileOptions::default(),
         };
         let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
-        let accepted_at = request
-            .get("accept")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-            .then_some(request_u64(&request, "accepted_at_unix_seconds")?.unwrap_or_else(current_unix_seconds));
-        let contact = crate::contact_card::import_tzap_contact_card(
-            &mut store,
-            &context.account_key,
-            &card,
-            &options,
-            accepted_at,
-        )
-        .map_err(|error| error.to_string())?;
+        let accepted_at = request.get("accept").and_then(Value::as_bool).unwrap_or(false).then_some(request_u64(&request, "accepted_at_unix_seconds")?.unwrap_or_else(current_unix_seconds));
+        let contact = crate::contact_card::import_tzap_contact_card(&mut store, &context.account_key, &card, &options, accepted_at).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "contact": contact_summary_json(&contact),
@@ -1153,27 +1012,12 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
         // `certificate_id` is requested) and create through the manifest
         // path with progress, instead of the job path without signing.
         let x509_signing = match certificate_id.as_deref() {
-            Some(certificate_id) => Some(
-                crate::tzap_backend::tzap_x509_signing_options_from_inventory(
-                    &store,
-                    &context.account_key,
-                    certificate_id,
-                    now_unix_seconds,
-                )
-                .map_err(|error| error.clone())?,
-            ),
+            Some(certificate_id) => Some(crate::tzap_backend::tzap_x509_signing_options_from_inventory(&store, &context.account_key, certificate_id, now_unix_seconds).map_err(|error| error.clone())?),
             None => None,
         };
-        let recipients = crate::contact_card::accepted_contact_recipients(
-            &store,
-            &context.account_key,
-            &contact_ids,
-            now_unix_seconds,
-        )
-        .map_err(|error| error.to_string())?;
+        let recipients = crate::contact_card::accepted_contact_recipients(&store, &context.account_key, &contact_ids, now_unix_seconds).map_err(|error| error.to_string())?;
         let recipient_status_caveats = recipients.iter().filter(|recipient| recipient.missing_status_caveat).count();
-        let recipient_public_keys =
-            recipients.into_iter().map(|recipient| recipient.recipient_public_key_der).collect();
+        let recipient_public_keys = recipients.into_iter().map(|recipient| recipient.recipient_public_key_der).collect();
         let options = TzapCreateOptions {
             key_source: TzapKeySource::RecipientPublicKeys(recipient_public_keys),
             level: TZAP_DEFAULT_COMPRESSION_LEVEL,
@@ -1184,19 +1028,11 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
             volume_loss_tolerance: TZAP_SINGLE_VOLUME_LOSS_TOLERANCE,
             x509_signing,
         };
-        let manifest =
-            crate::manifest::plan_archives(&sources, &PlanOptions::default()).map_err(|error| error.to_string())?;
+        let manifest = crate::manifest::plan_archives(&sources, &PlanOptions::default()).map_err(|error| error.to_string())?;
         let token = CancellationToken::new();
         let mut event_sink = |_event: JobEvent| {};
-        let mut job_context =
-            crate::jobs::JobContext::new_with_progress_total(&token, &mut event_sink, Some(manifest.total_bytes));
-        let report = crate::tzap_backend::create_tzap_from_manifest_with_context(
-            &manifest,
-            &destination,
-            &options,
-            &mut job_context,
-        )
-        .map_err(|error| error.to_string())?;
+        let mut job_context = crate::jobs::JobContext::new_with_progress_total(&token, &mut event_sink, Some(manifest.total_bytes));
+        let report = crate::tzap_backend::create_tzap_from_manifest_with_context(&manifest, &destination, &options, &mut job_context).map_err(|error| error.to_string())?;
         job_context.flush_progress();
         let mut response = json!({
             "ok": true,

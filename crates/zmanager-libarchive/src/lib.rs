@@ -282,9 +282,7 @@ impl ReadArchive {
         let mut pointers = wide_paths.iter().map(Vec::as_ptr).collect::<Vec<_>>();
         pointers.push(ptr::null());
 
-        self.check_status(unsafe {
-            sys::archive_read_open_filenames_w(self.as_ptr(), pointers.as_mut_ptr(), BLOCK_SIZE)
-        })?;
+        self.check_status(unsafe { sys::archive_read_open_filenames_w(self.as_ptr(), pointers.as_mut_ptr(), BLOCK_SIZE) })?;
         Ok(())
     }
 
@@ -294,9 +292,7 @@ impl ReadArchive {
         let mut pointers = c_paths.iter().map(|path| path.as_ptr()).collect::<Vec<_>>();
         pointers.push(ptr::null());
 
-        self.check_status(unsafe {
-            sys::archive_read_open_filenames(self.as_ptr(), pointers.as_mut_ptr(), BLOCK_SIZE)
-        })?;
+        self.check_status(unsafe { sys::archive_read_open_filenames(self.as_ptr(), pointers.as_mut_ptr(), BLOCK_SIZE) })?;
         Ok(())
     }
 
@@ -326,8 +322,7 @@ impl ReadArchive {
     ///
     /// Returns [`Error`] if libarchive reports a read failure.
     pub fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize> {
-        let read =
-            unsafe { sys::archive_read_data(self.as_ptr(), buffer.as_mut_ptr().cast::<libc::c_void>(), buffer.len()) };
+        let read = unsafe { sys::archive_read_data(self.as_ptr(), buffer.as_mut_ptr().cast::<libc::c_void>(), buffer.len()) };
         if read < 0 {
             let status = c_int::try_from(read).unwrap_or(sys::ARCHIVE_FATAL);
             Err(self.error_from_archive(status))
@@ -357,8 +352,7 @@ impl ReadArchive {
 
     fn error_from_archive(&self, status: c_int) -> Error {
         let errno = unsafe { sys::archive_errno(self.as_ptr()) };
-        let message = unsafe { nullable_c_string(sys::archive_error_string(self.as_ptr())) }
-            .unwrap_or_else(|| "unknown libarchive error".to_owned());
+        let message = unsafe { nullable_c_string(sys::archive_error_string(self.as_ptr())) }.unwrap_or_else(|| "unknown libarchive error".to_owned());
         Error::Archive { status, errno, message }
     }
 }
@@ -382,10 +376,8 @@ fn read_entry(entry: NonNull<sys::archive_entry>) -> Entry {
         hardlink: entry_string(entry, sys::archive_entry_hardlink_utf8, sys::archive_entry_hardlink),
         data_encrypted: unsafe { sys::archive_entry_is_data_encrypted(entry) != 0 },
         metadata_encrypted: unsafe { sys::archive_entry_is_metadata_encrypted(entry) != 0 },
-        uid: (unsafe { sys::archive_entry_uid_is_set(entry) } != 0)
-            .then(|| unsafe { sys::archive_entry_uid(entry) }.cast_unsigned()),
-        gid: (unsafe { sys::archive_entry_gid_is_set(entry) } != 0)
-            .then(|| unsafe { sys::archive_entry_gid(entry) }.cast_unsigned()),
+        uid: (unsafe { sys::archive_entry_uid_is_set(entry) } != 0).then(|| unsafe { sys::archive_entry_uid(entry) }.cast_unsigned()),
+        gid: (unsafe { sys::archive_entry_gid_is_set(entry) } != 0).then(|| unsafe { sys::archive_entry_gid(entry) }.cast_unsigned()),
         uname: entry_string(entry, sys::archive_entry_uname_utf8, sys::archive_entry_uname),
         gname: entry_string(entry, sys::archive_entry_gname_utf8, sys::archive_entry_gname),
     }
@@ -500,14 +492,8 @@ mod tests {
 
     #[test]
     fn converts_positive_and_negative_fractional_unix_timestamps() {
-        assert_eq!(
-            system_time_from_unix_timestamp(1, 250_000_000),
-            UNIX_EPOCH.checked_add(Duration::from_millis(1_250))
-        );
-        assert_eq!(
-            system_time_from_unix_timestamp(-1, 250_000_000),
-            UNIX_EPOCH.checked_sub(Duration::from_millis(750))
-        );
+        assert_eq!(system_time_from_unix_timestamp(1, 250_000_000), UNIX_EPOCH.checked_add(Duration::from_millis(1_250)));
+        assert_eq!(system_time_from_unix_timestamp(-1, 250_000_000), UNIX_EPOCH.checked_sub(Duration::from_millis(750)));
     }
 
     #[test]

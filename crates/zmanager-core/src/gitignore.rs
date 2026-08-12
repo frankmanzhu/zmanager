@@ -33,8 +33,7 @@ impl GitignoreRule {
         if self.is_anchored_or_path_pattern() {
             path_pattern_matches_or_contains_descendant(relative_path, &self.pattern)
         } else {
-            relative_path.split('/').any(|segment| segment_pattern_matches(segment, &self.pattern))
-                || file_type == ManifestFileType::Directory && segment_pattern_matches(relative_path, &self.pattern)
+            relative_path.split('/').any(|segment| segment_pattern_matches(segment, &self.pattern)) || file_type == ManifestFileType::Directory && segment_pattern_matches(relative_path, &self.pattern)
         }
     }
 
@@ -85,20 +84,13 @@ pub(crate) enum GitignoreAnchor {
     Anchored,
 }
 
-pub(crate) fn read_gitignore_rules(
-    directory: &Path,
-    base_archive_path: &str,
-    warnings: &mut Vec<ManifestWarning>,
-) -> Vec<GitignoreRule> {
+pub(crate) fn read_gitignore_rules(directory: &Path, base_archive_path: &str, warnings: &mut Vec<ManifestWarning>) -> Vec<GitignoreRule> {
     let gitignore_path = directory.join(".gitignore");
     let contents = match fs::read_to_string(&gitignore_path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Vec::new(),
         Err(error) => {
-            warnings.push(ManifestWarning {
-                source_path: gitignore_path,
-                message: format!("failed to read .gitignore: {error}"),
-            });
+            warnings.push(ManifestWarning { source_path: gitignore_path, message: format!("failed to read .gitignore: {error}") });
             return Vec::new();
         }
     };
@@ -131,33 +123,14 @@ pub(crate) fn parse_gitignore_rule(line: &str, base_archive_path: &str) -> Optio
         return None;
     }
 
-    Some(GitignoreRule {
-        base_archive_path: base_archive_path.to_owned(),
-        pattern: pattern.to_owned(),
-        polarity,
-        scope,
-        anchor,
-    })
+    Some(GitignoreRule { base_archive_path: base_archive_path.to_owned(), pattern: pattern.to_owned(), polarity, scope, anchor })
 }
 
-pub(crate) fn gitignore_decision(
-    archive_path: &str,
-    file_type: ManifestFileType,
-    rules: &[GitignoreRule],
-) -> Option<(bool, usize)> {
-    rules
-        .iter()
-        .enumerate()
-        .filter(|(_, rule)| rule.matches(archive_path, file_type))
-        .map(|(index, rule)| (rule.polarity == GitignorePolarity::Ignore, index))
-        .next_back()
+pub(crate) fn gitignore_decision(archive_path: &str, file_type: ManifestFileType, rules: &[GitignoreRule]) -> Option<(bool, usize)> {
+    rules.iter().enumerate().filter(|(_, rule)| rule.matches(archive_path, file_type)).map(|(index, rule)| (rule.polarity == GitignorePolarity::Ignore, index)).next_back()
 }
 
-pub(crate) fn gitignore_has_later_negated_descendant(
-    archive_path: &str,
-    rules: &[GitignoreRule],
-    rule_index: usize,
-) -> bool {
+pub(crate) fn gitignore_has_later_negated_descendant(archive_path: &str, rules: &[GitignoreRule], rule_index: usize) -> bool {
     rules.iter().skip(rule_index.saturating_add(1)).any(|rule| rule.could_include_below(archive_path))
 }
 
@@ -211,13 +184,8 @@ fn segment_pattern_matches_bytes(value: &[u8], pattern: &[u8]) -> bool {
     };
 
     match pattern_head {
-        b'*' => {
-            segment_pattern_matches_bytes(value, pattern_tail)
-                || !value.is_empty() && segment_pattern_matches_bytes(&value[1..], pattern)
-        }
+        b'*' => segment_pattern_matches_bytes(value, pattern_tail) || !value.is_empty() && segment_pattern_matches_bytes(&value[1..], pattern),
         b'?' => !value.is_empty() && segment_pattern_matches_bytes(&value[1..], pattern_tail),
-        expected => value.split_first().is_some_and(|(&actual, value_tail)| {
-            actual == expected && segment_pattern_matches_bytes(value_tail, pattern_tail)
-        }),
+        expected => value.split_first().is_some_and(|(&actual, value_tail)| actual == expected && segment_pattern_matches_bytes(value_tail, pattern_tail)),
     }
 }

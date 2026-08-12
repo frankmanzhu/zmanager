@@ -8,11 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub(super) fn parse_tzap_context_args(
-    args: &[String],
-    global: &mut GlobalOptions,
-    command: &str,
-) -> Result<TzapCliContext, ExitCode> {
+pub(super) fn parse_tzap_context_args(args: &[String], global: &mut GlobalOptions, command: &str) -> Result<TzapCliContext, ExitCode> {
     let mut context = TzapCliContext::default();
     let mut index = 0usize;
     while index < args.len() {
@@ -31,11 +27,7 @@ pub(super) fn parse_tzap_context_args(
     Ok(context)
 }
 
-pub(super) fn parse_cert_id_operation_args(
-    args: &[String],
-    global: &mut GlobalOptions,
-    command: &str,
-) -> Result<(TzapCliContext, String), ExitCode> {
+pub(super) fn parse_cert_id_operation_args(args: &[String], global: &mut GlobalOptions, command: &str) -> Result<(TzapCliContext, String), ExitCode> {
     let mut context = TzapCliContext::default();
     let mut certificate_id = None;
     let mut index = 0usize;
@@ -52,10 +44,7 @@ pub(super) fn parse_cert_id_operation_args(
         }
         match args[index].as_str() {
             "--certificate-id" => {
-                certificate_id = Some(
-                    take_value(args, &mut index, "--certificate-id")
-                        .map_err(|error| command_usage_error(command, &error, global))?,
-                );
+                certificate_id = Some(take_value(args, &mut index, "--certificate-id").map_err(|error| command_usage_error(command, &error, global))?);
             }
             other => {
                 return Err(command_usage_error(command, &format!("unknown {command} option: {other}"), global));
@@ -68,36 +57,21 @@ pub(super) fn parse_cert_id_operation_args(
     Ok((context, certificate_id))
 }
 
-pub(super) fn parse_tzap_context_option(
-    args: &[String],
-    index: &mut usize,
-    context: &mut TzapCliContext,
-    command: &str,
-    global: &GlobalOptions,
-) -> Result<bool, ExitCode> {
+pub(super) fn parse_tzap_context_option(args: &[String], index: &mut usize, context: &mut TzapCliContext, command: &str, global: &GlobalOptions) -> Result<bool, ExitCode> {
     match args[*index].as_str() {
         "--state-dir" => {
-            context.state_dir = PathBuf::from(
-                take_value(args, index, "--state-dir").map_err(|error| command_usage_error(command, &error, global))?,
-            );
+            context.state_dir = PathBuf::from(take_value(args, index, "--state-dir").map_err(|error| command_usage_error(command, &error, global))?);
         }
         "--account-key" => {
-            context.account_key = take_value(args, index, "--account-key")
-                .map_err(|error| command_usage_error(command, &error, global))?;
+            context.account_key = take_value(args, index, "--account-key").map_err(|error| command_usage_error(command, &error, global))?;
         }
         _ => return Ok(false),
     }
     Ok(true)
 }
 
-pub(super) fn parse_environment_option(
-    args: &[String],
-    index: &mut usize,
-    environment: &mut zmanager_core::auth_client::TzapHostedAuthEnvironment,
-    global: &GlobalOptions,
-) -> Result<(), ExitCode> {
-    let value =
-        take_value(args, index, "--environment").map_err(|error| command_usage_error("auth", &error, global))?;
+pub(super) fn parse_environment_option(args: &[String], index: &mut usize, environment: &mut zmanager_core::auth_client::TzapHostedAuthEnvironment, global: &GlobalOptions) -> Result<(), ExitCode> {
+    let value = take_value(args, index, "--environment").map_err(|error| command_usage_error("auth", &error, global))?;
     *environment = match value.as_str() {
         "local" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Local,
         "staging" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging,
@@ -109,18 +83,12 @@ pub(super) fn parse_environment_option(
 
 pub(super) fn print_stable_tzap_error(operation: &str, message: &str, global: &GlobalOptions) {
     if global.json {
-        println!(
-            "{{\"ok\":false,\"operation\":\"{}\",\"error\":\"{}\"}}",
-            json_escape(operation),
-            json_escape(message)
-        );
+        println!("{{\"ok\":false,\"operation\":\"{}\",\"error\":\"{}\"}}", json_escape(operation), json_escape(message));
     } else {
         print_error_line(global, format_args!("{operation} failed: {message}"));
     }
 }
-pub(super) fn certificate_summary_value(
-    cert: &zmanager_core::local_identity_store::TzapEnrolledCertificateRecord,
-) -> serde_json::Value {
+pub(super) fn certificate_summary_value(cert: &zmanager_core::local_identity_store::TzapEnrolledCertificateRecord) -> serde_json::Value {
     json!({
         "certificate_id": cert.certificate_id,
         "certificate_sha256": cert.certificate_sha256,
@@ -135,9 +103,7 @@ pub(super) fn certificate_summary_value(
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub(super) fn retirement_completion_label(
-    completion: zmanager_core::certificate_lifecycle::TzapRetirementCompletion,
-) -> &'static str {
+pub(super) fn retirement_completion_label(completion: zmanager_core::certificate_lifecycle::TzapRetirementCompletion) -> &'static str {
     match completion {
         zmanager_core::certificate_lifecycle::TzapRetirementCompletion::Complete => "complete",
         zmanager_core::certificate_lifecycle::TzapRetirementCompletion::Incomplete => "incomplete",
@@ -191,14 +157,7 @@ pub(super) fn callback_url_parameter(callback_url: &str, key: &str) -> Option<St
     None
 }
 
-pub(super) fn exchange_handoff_code(
-    auth_base_url: &str,
-    client_id: &str,
-    redirect_uri: &str,
-    state: &str,
-    pkce_verifier: &str,
-    handoff_code: &str,
-) -> Result<Vec<u8>, String> {
+pub(super) fn exchange_handoff_code(auth_base_url: &str, client_id: &str, redirect_uri: &str, state: &str, pkce_verifier: &str, handoff_code: &str) -> Result<Vec<u8>, String> {
     let url = format!("{}{}", auth_base_url.trim_end_matches('/'), AUTH_SESSION_EXCHANGE_PATH);
     let exchange = http_post_json(
         &url,
@@ -213,12 +172,11 @@ pub(super) fn exchange_handoff_code(
     )?;
     let session_token = json_string_field(&exchange, "session_token")?;
     let session_id = json_string_field(&exchange, "session_id")?;
-    let audience = json_string_field(&exchange, "audience")
-        .unwrap_or_else(|_| zmanager_core::auth_client::SESSION_AUDIENCE_SIGN_TZAP.to_owned());
-    let expires_at_unix_seconds = exchange.get("expires_at_unix_seconds").and_then(Value::as_u64).map_or_else(
-        || json_string_field(&exchange, "expires_at").and_then(|expires_at| rfc3339_utc_to_unix_seconds(&expires_at)),
-        Ok,
-    )?;
+    let audience = json_string_field(&exchange, "audience").unwrap_or_else(|_| zmanager_core::auth_client::SESSION_AUDIENCE_SIGN_TZAP.to_owned());
+    let expires_at_unix_seconds = exchange
+        .get("expires_at_unix_seconds")
+        .and_then(Value::as_u64)
+        .map_or_else(|| json_string_field(&exchange, "expires_at").and_then(|expires_at| rfc3339_utc_to_unix_seconds(&expires_at)), Ok)?;
     let identity_assurance = json_string_field(&exchange, "identity_assurance")
         .or_else(|_| json_string_field(&exchange, "identity_assurance_level"))
         .unwrap_or_else(|_| zmanager_core::trust::TzapIdentityAssurance::OauthVerifiedEmail.as_str().to_owned());
@@ -248,30 +206,17 @@ pub(super) fn http_post_json(url: &str, body: &Value) -> Result<Value, String> {
 pub(super) struct CliHttpJsonTransport;
 
 impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
-    fn send(
-        &self,
-        request: &zmanager_core::auth_client::TzapAuthHttpRequest,
-    ) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, zmanager_core::auth_client::TzapAuthError> {
+    fn send(&self, request: &zmanager_core::auth_client::TzapAuthHttpRequest) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, zmanager_core::auth_client::TzapAuthError> {
         let method = match request.method {
             zmanager_core::auth_client::TzapAuthHttpMethod::Get => "GET",
             zmanager_core::auth_client::TzapAuthHttpMethod::Post => "POST",
         };
-        http_json_request(
-            method,
-            &request.url,
-            request.bearer_token.as_ref().map(zmanager_core::auth_client::TzapBearerToken::expose),
-            request.body.as_ref(),
-        )
-        .map_err(|message| zmanager_core::auth_client::TzapAuthError::Transport { message })
+        http_json_request(method, &request.url, request.bearer_token.as_ref().map(zmanager_core::auth_client::TzapBearerToken::expose), request.body.as_ref())
+            .map_err(|message| zmanager_core::auth_client::TzapAuthError::Transport { message })
     }
 }
 
-pub(super) fn http_json_request(
-    method: &str,
-    url: &str,
-    bearer_token: Option<&str>,
-    body: Option<&Value>,
-) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, String> {
+pub(super) fn http_json_request(method: &str, url: &str, bearer_token: Option<&str>, body: Option<&Value>) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, String> {
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
@@ -281,20 +226,12 @@ pub(super) fn http_json_request(
     let request = build_hosted_http_request(&client, method, url, bearer_token, body)?;
     let response = client.execute(request).map_err(|error| format!("hosted HTTPS request failed: {error}"))?;
     let status_code = response.status().as_u16();
-    let response_body =
-        response.bytes().map_err(|error| format!("could not read hosted HTTPS response: {error}"))?.to_vec();
+    let response_body = response.bytes().map_err(|error| format!("could not read hosted HTTPS response: {error}"))?.to_vec();
     Ok(zmanager_core::auth_client::TzapAuthHttpResponse { status_code, body: response_body })
 }
 
-pub(crate) fn build_hosted_http_request(
-    client: &reqwest::blocking::Client,
-    method: &str,
-    url: &str,
-    bearer_token: Option<&str>,
-    body: Option<&Value>,
-) -> Result<reqwest::blocking::Request, String> {
-    let method = reqwest::Method::from_bytes(method.as_bytes())
-        .map_err(|error| format!("invalid hosted HTTP method: {error}"))?;
+pub(crate) fn build_hosted_http_request(client: &reqwest::blocking::Client, method: &str, url: &str, bearer_token: Option<&str>, body: Option<&Value>) -> Result<reqwest::blocking::Request, String> {
+    let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|error| format!("invalid hosted HTTP method: {error}"))?;
     let mut request = client.request(method, url).header(reqwest::header::ACCEPT, "application/json");
     if let Some(token) = bearer_token {
         request = request.bearer_auth(token);
@@ -364,10 +301,7 @@ pub(super) fn rfc3339_utc_to_unix_seconds(value: &str) -> Result<u64, String> {
         return Err(format!("expires_at second {second} is out of range"));
     }
     let days = days_from_civil(year, month, day);
-    let seconds = days
-        .checked_mul(86_400)
-        .and_then(|value| value.checked_add(hour * 3_600 + minute * 60 + second))
-        .ok_or_else(|| "expires_at is out of range".to_owned())?;
+    let seconds = days.checked_mul(86_400).and_then(|value| value.checked_add(hour * 3_600 + minute * 60 + second)).ok_or_else(|| "expires_at is out of range".to_owned())?;
     u64::try_from(seconds).map_err(|_| "expires_at is before the Unix epoch".to_owned())
 }
 
@@ -396,11 +330,7 @@ pub(super) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 pub(super) fn json_string_field(value: &Value, field: &'static str) -> Result<String, String> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| format!("missing or invalid field: {field}"))
+    value.get(field).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("missing or invalid field: {field}"))
 }
 
 /// Builds a `tzap_service` JSON request carrying the CLI context (CR-113:
@@ -426,10 +356,7 @@ pub(super) fn service_envelope(response: &str) -> Result<Value, String> {
     if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         Ok(value)
     } else {
-        Err(value
-            .get("message")
-            .and_then(Value::as_str)
-            .map_or_else(|| "service request failed".to_owned(), str::to_owned))
+        Err(value.get("message").and_then(Value::as_str).map_or_else(|| "service request failed".to_owned(), str::to_owned))
     }
 }
 

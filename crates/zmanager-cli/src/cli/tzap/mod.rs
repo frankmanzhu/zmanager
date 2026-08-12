@@ -24,10 +24,7 @@ pub(crate) use device::device_command;
 pub(crate) use share::share_command;
 pub(crate) use sign::{sign_command, verify_command};
 #[cfg(test)]
-pub(crate) use {
-    contacts::contact_keygen_command, hosted::create_and_store_staging_enrollment_key,
-    support::build_hosted_http_request,
-};
+pub(crate) use {contacts::contact_keygen_command, hosted::create_and_store_staging_enrollment_key, support::build_hosted_http_request};
 
 use std::path::PathBuf;
 
@@ -48,10 +45,7 @@ pub(super) struct TzapCliContext {
 
 impl Default for TzapCliContext {
     fn default() -> Self {
-        Self {
-            state_dir: support::default_tzap_state_dir(),
-            account_key: zmanager_core::local_identity_store::DEFAULT_IDENTITY_INVENTORY_ACCOUNT.to_owned(),
-        }
+        Self { state_dir: support::default_tzap_state_dir(), account_key: zmanager_core::local_identity_store::DEFAULT_IDENTITY_INVENTORY_ACCOUNT.to_owned() }
     }
 }
 

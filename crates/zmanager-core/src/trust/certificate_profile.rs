@@ -7,9 +7,8 @@
 //! constants; the public items are re-exported from [`crate::trust`].
 
 use crate::trust::{
-    TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION,
-    TzapIdentityAssurance, TzapRootPinSet, TzapTrustAnchorType, format_certificate_sha256, is_valid_public_device_id,
-    is_valid_public_org_id, is_valid_public_signer_id,
+    TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TzapIdentityAssurance, TzapRootPinSet, TzapTrustAnchorType, format_certificate_sha256,
+    is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id,
 };
 use openssl::asn1::Asn1Object;
 use openssl::nid::Nid;
@@ -61,11 +60,7 @@ pub struct TzapCertificateProfileOptions {
 
 impl Default for TzapCertificateProfileOptions {
     fn default() -> Self {
-        Self {
-            approved_org_intermediate_policy_oids: Vec::new(),
-            approved_leaf_policy_oids: vec![TZAP_OID_LEAF_POLICY.to_owned()],
-            validation_time_unix_seconds: None,
-        }
+        Self { approved_org_intermediate_policy_oids: Vec::new(), approved_leaf_policy_oids: vec![TZAP_OID_LEAF_POLICY.to_owned()], validation_time_unix_seconds: None }
     }
 }
 
@@ -172,10 +167,7 @@ pub fn validate_official_tzap_certificate_chain_der(
 
 /// Validates a custom trust chain against TZAP document-signing profiles without
 /// upgrading it to official TZAP trust.
-pub fn validate_custom_tzap_certificate_chain_der(
-    chain_der: &[Vec<u8>],
-    options: &TzapCertificateProfileOptions,
-) -> Result<TzapCertificateProfileValidation, TzapCertificateProfileError> {
+pub fn validate_custom_tzap_certificate_chain_der(chain_der: &[Vec<u8>], options: &TzapCertificateProfileOptions) -> Result<TzapCertificateProfileValidation, TzapCertificateProfileError> {
     validate_tzap_certificate_chain_der(chain_der, None, TzapTrustAnchorType::Custom, options)
 }
 
@@ -194,8 +186,7 @@ pub fn public_intermediate_chain_der(chain_der: &[Vec<u8>]) -> Vec<Vec<u8>> {
 }
 
 fn is_self_issued_certificate_der(der: &[u8]) -> bool {
-    X509Certificate::from_der(der)
-        .is_ok_and(|(remaining, certificate)| remaining.is_empty() && certificate.issuer() == certificate.subject())
+    X509Certificate::from_der(der).is_ok_and(|(remaining, certificate)| remaining.is_empty() && certificate.issuer() == certificate.subject())
 }
 
 fn validate_tzap_certificate_chain_der(
@@ -227,12 +218,7 @@ fn validate_tzap_certificate_chain_der(
     require_leaf_aki_matches_issuer(&parsed)?;
     let public_metadata = validate_leaf_certificate(&parsed[0], 0, options)?;
 
-    Ok(TzapCertificateProfileValidation {
-        trust_anchor_type,
-        official_root_pin_kind,
-        root_certificate_sha256: root_fingerprint,
-        public_metadata,
-    })
+    Ok(TzapCertificateProfileValidation { trust_anchor_type, official_root_pin_kind, root_certificate_sha256: root_fingerprint, public_metadata })
 }
 
 fn parse_x509_chain(chain_der: &[Vec<u8>]) -> Result<Vec<X509Certificate<'_>>, TzapCertificateProfileError> {
@@ -240,37 +226,18 @@ fn parse_x509_chain(chain_der: &[Vec<u8>]) -> Result<Vec<X509Certificate<'_>>, T
         .iter()
         .enumerate()
         .map(|(index, der)| {
-            X509Certificate::from_der(der)
-                .map_err(|error| TzapCertificateProfileError::CertificateParse { index, detail: error.to_string() })
-                .and_then(|(remaining, certificate)| {
-                    if remaining.is_empty() {
-                        Ok(certificate)
-                    } else {
-                        Err(TzapCertificateProfileError::CertificateParse {
-                            index,
-                            detail: "trailing DER bytes".to_owned(),
-                        })
-                    }
-                })
+            X509Certificate::from_der(der).map_err(|error| TzapCertificateProfileError::CertificateParse { index, detail: error.to_string() }).and_then(|(remaining, certificate)| {
+                if remaining.is_empty() { Ok(certificate) } else { Err(TzapCertificateProfileError::CertificateParse { index, detail: "trailing DER bytes".to_owned() }) }
+            })
         })
         .collect()
 }
 
 fn parse_openssl_chain(chain_der: &[Vec<u8>]) -> Result<Vec<X509>, TzapCertificateProfileError> {
-    chain_der
-        .iter()
-        .enumerate()
-        .map(|(index, der)| {
-            X509::from_der(der)
-                .map_err(|source| TzapCertificateProfileError::CertificateParse { index, detail: source.to_string() })
-        })
-        .collect()
+    chain_der.iter().enumerate().map(|(index, der)| X509::from_der(der).map_err(|source| TzapCertificateProfileError::CertificateParse { index, detail: source.to_string() })).collect()
 }
 
-fn validate_chain_order_and_signatures(
-    parsed: &[X509Certificate<'_>],
-    openssl: &[X509],
-) -> Result<(), TzapCertificateProfileError> {
+fn validate_chain_order_and_signatures(parsed: &[X509Certificate<'_>], openssl: &[X509]) -> Result<(), TzapCertificateProfileError> {
     for (index, pair) in parsed.windows(2).enumerate() {
         if pair[0].issuer() != pair[1].subject() {
             return Err(TzapCertificateProfileError::ChainOrder { child_index: index });
@@ -283,76 +250,42 @@ fn validate_chain_order_and_signatures(
     }
 
     for (index, pair) in openssl.windows(2).enumerate() {
-        let issuer_key = pair[1].public_key().map_err(|source| TzapCertificateProfileError::SignatureValidation {
-            subject_index: index,
-            detail: source.to_string(),
-        })?;
-        let verified = pair[0].verify(&issuer_key).map_err(|source| {
-            TzapCertificateProfileError::SignatureValidation { subject_index: index, detail: source.to_string() }
-        })?;
+        let issuer_key = pair[1].public_key().map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: index, detail: source.to_string() })?;
+        let verified = pair[0].verify(&issuer_key).map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: index, detail: source.to_string() })?;
         if !verified {
-            return Err(TzapCertificateProfileError::SignatureValidation {
-                subject_index: index,
-                detail: "issuer public key did not verify certificate signature".to_owned(),
-            });
+            return Err(TzapCertificateProfileError::SignatureValidation { subject_index: index, detail: "issuer public key did not verify certificate signature".to_owned() });
         }
     }
 
     let root_index = openssl.len() - 1;
-    let root_key = openssl[root_index].public_key().map_err(|source| {
-        TzapCertificateProfileError::SignatureValidation { subject_index: root_index, detail: source.to_string() }
-    })?;
-    if !openssl[root_index].verify(&root_key).map_err(|source| TzapCertificateProfileError::SignatureValidation {
-        subject_index: root_index,
-        detail: source.to_string(),
-    })? {
+    let root_key = openssl[root_index].public_key().map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: root_index, detail: source.to_string() })?;
+    if !openssl[root_index].verify(&root_key).map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: root_index, detail: source.to_string() })? {
         return Err(TzapCertificateProfileError::RootNotSelfSigned);
     }
 
     Ok(())
 }
 
-fn validate_chain_algorithms(
-    parsed: &[X509Certificate<'_>],
-    openssl: &[X509],
-) -> Result<(), TzapCertificateProfileError> {
+fn validate_chain_algorithms(parsed: &[X509Certificate<'_>], openssl: &[X509]) -> Result<(), TzapCertificateProfileError> {
     for (index, certificate) in parsed.iter().enumerate() {
-        if certificate.signature_algorithm.oid().to_id_string() != OID_ECDSA_WITH_SHA256
-            || certificate.tbs_certificate.signature.oid().to_id_string() != OID_ECDSA_WITH_SHA256
-        {
-            return Err(TzapCertificateProfileError::UnsupportedAlgorithm {
-                index,
-                reason: "certificate signature must be ECDSA P-256 with SHA-256",
-            });
+        if certificate.signature_algorithm.oid().to_id_string() != OID_ECDSA_WITH_SHA256 || certificate.tbs_certificate.signature.oid().to_id_string() != OID_ECDSA_WITH_SHA256 {
+            return Err(TzapCertificateProfileError::UnsupportedAlgorithm { index, reason: "certificate signature must be ECDSA P-256 with SHA-256" });
         }
 
         let key = openssl[index].public_key().map_err(|source| TzapCertificateProfileError::UnsupportedAlgorithm {
             index,
-            reason: if source.errors().is_empty() {
-                "certificate public key is unreadable"
-            } else {
-                "certificate public key is unsupported"
-            },
+            reason: if source.errors().is_empty() { "certificate public key is unreadable" } else { "certificate public key is unsupported" },
         })?;
-        let ec_key = key.ec_key().map_err(|_| TzapCertificateProfileError::UnsupportedAlgorithm {
-            index,
-            reason: "certificate public key must be ECDSA P-256",
-        })?;
+        let ec_key = key.ec_key().map_err(|_| TzapCertificateProfileError::UnsupportedAlgorithm { index, reason: "certificate public key must be ECDSA P-256" })?;
         if ec_key.group().curve_name() != Some(Nid::X9_62_PRIME256V1) {
-            return Err(TzapCertificateProfileError::UnsupportedAlgorithm {
-                index,
-                reason: "certificate public key must use prime256v1",
-            });
+            return Err(TzapCertificateProfileError::UnsupportedAlgorithm { index, reason: "certificate public key must use prime256v1" });
         }
     }
 
     Ok(())
 }
 
-pub(crate) fn official_root_pin_kind(
-    pins: &TzapRootPinSet,
-    fingerprint: &str,
-) -> Result<Option<TzapOfficialRootPinKind>, TzapCertificateProfileError> {
+pub(crate) fn official_root_pin_kind(pins: &TzapRootPinSet, fingerprint: &str) -> Result<Option<TzapOfficialRootPinKind>, TzapCertificateProfileError> {
     if pins.is_current_root(fingerprint) {
         Ok(Some(TzapOfficialRootPinKind::Current))
     } else if pins.is_planned_successor(fingerprint) {
@@ -362,11 +295,7 @@ pub(crate) fn official_root_pin_kind(
     }
 }
 
-fn validate_root_certificate(
-    certificate: &X509Certificate<'_>,
-    index: usize,
-    options: &TzapCertificateProfileOptions,
-) -> Result<(), TzapCertificateProfileError> {
+fn validate_root_certificate(certificate: &X509Certificate<'_>, index: usize, options: &TzapCertificateProfileOptions) -> Result<(), TzapCertificateProfileError> {
     if let Some(time) = options.validation_time_unix_seconds
         && !is_valid_at(certificate, time)
     {
@@ -374,17 +303,10 @@ fn validate_root_certificate(
     }
     let basic_constraints = certificate
         .basic_constraints()
-        .map_err(|_| TzapCertificateProfileError::RootProfile {
-            reason: "basic constraints are invalid or duplicated",
-        })?
+        .map_err(|_| TzapCertificateProfileError::RootProfile { reason: "basic constraints are invalid or duplicated" })?
         .ok_or(TzapCertificateProfileError::RootProfile { reason: "missing critical basic constraints" })?;
-    if !basic_constraints.critical
-        || !basic_constraints.value.ca
-        || basic_constraints.value.path_len_constraint != Some(REQUIRED_ROOT_PATH_LEN)
-    {
-        return Err(TzapCertificateProfileError::RootProfile {
-            reason: "root must be a critical CA with pathLenConstraint 2",
-        });
+    if !basic_constraints.critical || !basic_constraints.value.ca || basic_constraints.value.path_len_constraint != Some(REQUIRED_ROOT_PATH_LEN) {
+        return Err(TzapCertificateProfileError::RootProfile { reason: "root must be a critical CA with pathLenConstraint 2" });
     }
 
     require_ca_key_usage(certificate, CertificateRole::Root, None)?;
@@ -396,10 +318,7 @@ fn validate_root_certificate(
     Ok(())
 }
 
-fn validate_intermediates(
-    chain: &[X509Certificate<'_>],
-    options: &TzapCertificateProfileOptions,
-) -> Result<(), TzapCertificateProfileError> {
+fn validate_intermediates(chain: &[X509Certificate<'_>], options: &TzapCertificateProfileOptions) -> Result<(), TzapCertificateProfileError> {
     let root_index = chain.len() - 1;
     for (index, certificate) in chain.iter().enumerate().take(root_index).skip(1) {
         if let Some(time) = options.validation_time_unix_seconds
@@ -408,11 +327,7 @@ fn validate_intermediates(
             return Err(TzapCertificateProfileError::Expired { index });
         }
         let has_org_intermediate = chain.len() == MAX_TZAP_CHAIN_LEN;
-        let role = if has_org_intermediate && index == 1 {
-            CertificateRole::OrganizationIntermediate
-        } else {
-            CertificateRole::PlatformIntermediate
-        };
+        let role = if has_org_intermediate && index == 1 { CertificateRole::OrganizationIntermediate } else { CertificateRole::PlatformIntermediate };
         let expected_path_len = match role {
             CertificateRole::PlatformIntermediate if has_org_intermediate => PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE,
             CertificateRole::PlatformIntermediate => PLATFORM_LEAF_ONLY_PATH_LEN,
@@ -422,57 +337,30 @@ fn validate_intermediates(
 
         let basic_constraints = certificate
             .basic_constraints()
-            .map_err(|_| TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "basic constraints are invalid or duplicated",
-            })?
-            .ok_or(TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "missing critical basic constraints",
-            })?;
-        if !basic_constraints.critical
-            || !basic_constraints.value.ca
-            || basic_constraints.value.path_len_constraint != Some(expected_path_len)
-        {
-            return Err(TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "intermediate must be a critical CA with the expected path length",
-            });
+            .map_err(|_| TzapCertificateProfileError::IntermediateProfile { index, reason: "basic constraints are invalid or duplicated" })?
+            .ok_or(TzapCertificateProfileError::IntermediateProfile { index, reason: "missing critical basic constraints" })?;
+        if !basic_constraints.critical || !basic_constraints.value.ca || basic_constraints.value.path_len_constraint != Some(expected_path_len) {
+            return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "intermediate must be a critical CA with the expected path length" });
         }
 
         require_ca_key_usage(certificate, role, Some(index))?;
         reject_forbidden_extended_key_usage(certificate, role, Some(index))?;
         require_aki_ski_pair(chain, index)?;
         if !certificate_has_policy(certificate, TZAP_OID_CA_POLICY) {
-            return Err(TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "missing TZAP CA policy OID",
-            });
+            return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "missing TZAP CA policy OID" });
         }
-        if matches!(role, CertificateRole::OrganizationIntermediate)
-            && !has_any_policy(certificate, &options.approved_org_intermediate_policy_oids)
-        {
-            return Err(TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "organization intermediate lacks an approved organization policy OID",
-            });
+        if matches!(role, CertificateRole::OrganizationIntermediate) && !has_any_policy(certificate, &options.approved_org_intermediate_policy_oids) {
+            return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "organization intermediate lacks an approved organization policy OID" });
         }
         if certificate.iter_extensions().all(|extension| extension.oid.to_id_string() != "2.5.29.31") {
-            return Err(TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "missing CRL distribution point or TZAP status distribution extension",
-            });
+            return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "missing CRL distribution point or TZAP status distribution extension" });
         }
     }
 
     Ok(())
 }
 
-fn validate_leaf_certificate(
-    certificate: &X509Certificate<'_>,
-    index: usize,
-    options: &TzapCertificateProfileOptions,
-) -> Result<TzapCertificatePublicMetadata, TzapCertificateProfileError> {
+fn validate_leaf_certificate(certificate: &X509Certificate<'_>, index: usize, options: &TzapCertificateProfileOptions) -> Result<TzapCertificatePublicMetadata, TzapCertificateProfileError> {
     if let Some(time) = options.validation_time_unix_seconds
         && !is_valid_at(certificate, time)
     {
@@ -480,14 +368,10 @@ fn validate_leaf_certificate(
     }
     let basic_constraints = certificate
         .basic_constraints()
-        .map_err(|_| TzapCertificateProfileError::LeafProfile {
-            reason: "basic constraints are invalid or duplicated",
-        })?
+        .map_err(|_| TzapCertificateProfileError::LeafProfile { reason: "basic constraints are invalid or duplicated" })?
         .ok_or(TzapCertificateProfileError::LeafProfile { reason: "missing critical basic constraints" })?;
     if !basic_constraints.critical || basic_constraints.value.ca {
-        return Err(TzapCertificateProfileError::LeafProfile {
-            reason: "leaf must have critical CA:FALSE basic constraints",
-        });
+        return Err(TzapCertificateProfileError::LeafProfile { reason: "leaf must have critical CA:FALSE basic constraints" });
     }
     let validity = certificate.validity();
     let Some(validity_duration) = validity.not_after - validity.not_before else {
@@ -502,32 +386,19 @@ fn validate_leaf_certificate(
         .map_err(|_| TzapCertificateProfileError::LeafProfile { reason: "key usage is invalid or duplicated" })?
         .ok_or(TzapCertificateProfileError::LeafProfile { reason: "missing critical key usage" })?;
     if !key_usage.critical || key_usage.value.flags != 1 {
-        return Err(TzapCertificateProfileError::LeafProfile {
-            reason: "leaf key usage must be exactly digitalSignature",
-        });
+        return Err(TzapCertificateProfileError::LeafProfile { reason: "leaf key usage must be exactly digitalSignature" });
     }
 
-    let eku_oids = extended_key_usage_oids(certificate)
-        .ok_or(TzapCertificateProfileError::LeafProfile { reason: "missing document-signing extended key usage" })?;
-    let document_signing_oid = oid_value_bytes(TZAP_OID_DOCUMENT_SIGNING_EKU)
-        .ok_or(TzapCertificateProfileError::LeafProfile { reason: "document-signing OID is not numeric" })?;
+    let eku_oids = extended_key_usage_oids(certificate).ok_or(TzapCertificateProfileError::LeafProfile { reason: "missing document-signing extended key usage" })?;
+    let document_signing_oid = oid_value_bytes(TZAP_OID_DOCUMENT_SIGNING_EKU).ok_or(TzapCertificateProfileError::LeafProfile { reason: "document-signing OID is not numeric" })?;
     if eku_oids.as_slice() != [document_signing_oid.as_slice()] {
-        return Err(TzapCertificateProfileError::LeafProfile {
-            reason: "extended key usage must be exactly TZAP document signing",
-        });
+        return Err(TzapCertificateProfileError::LeafProfile { reason: "extended key usage must be exactly TZAP document signing" });
     }
 
-    if let Some(san) = certificate.subject_alternative_name().map_err(|_| TzapCertificateProfileError::LeafProfile {
-        reason: "subject alternative name is invalid or duplicated",
-    })? && san
-        .value
-        .general_names
-        .iter()
-        .any(|name| matches!(name, GeneralName::DNSName(_) | GeneralName::IPAddress(_)))
+    if let Some(san) = certificate.subject_alternative_name().map_err(|_| TzapCertificateProfileError::LeafProfile { reason: "subject alternative name is invalid or duplicated" })?
+        && san.value.general_names.iter().any(|name| matches!(name, GeneralName::DNSName(_) | GeneralName::IPAddress(_)))
     {
-        return Err(TzapCertificateProfileError::LeafProfile {
-            reason: "MVP leaves must not contain DNS or IP subject alternative names",
-        });
+        return Err(TzapCertificateProfileError::LeafProfile { reason: "MVP leaves must not contain DNS or IP subject alternative names" });
     }
 
     if !has_any_policy(certificate, &options.approved_leaf_policy_oids) {
@@ -546,34 +417,16 @@ fn validate_leaf_certificate(
     Ok(metadata)
 }
 
-fn require_ca_key_usage(
-    certificate: &X509Certificate<'_>,
-    role: CertificateRole,
-    index: Option<usize>,
-) -> Result<(), TzapCertificateProfileError> {
-    let key_usage = certificate
-        .key_usage()
-        .map_err(|_| role.profile_error("key usage is invalid or duplicated", index))?
-        .ok_or_else(|| role.profile_error("missing critical key usage", index))?;
-    if !key_usage.critical
-        || !key_usage.value.key_cert_sign()
-        || !key_usage.value.crl_sign()
-        || key_usage.value.flags != ((1 << 5) | (1 << 6))
-    {
+fn require_ca_key_usage(certificate: &X509Certificate<'_>, role: CertificateRole, index: Option<usize>) -> Result<(), TzapCertificateProfileError> {
+    let key_usage = certificate.key_usage().map_err(|_| role.profile_error("key usage is invalid or duplicated", index))?.ok_or_else(|| role.profile_error("missing critical key usage", index))?;
+    if !key_usage.critical || !key_usage.value.key_cert_sign() || !key_usage.value.crl_sign() || key_usage.value.flags != ((1 << 5) | (1 << 6)) {
         return Err(role.profile_error("CA key usage must be exactly keyCertSign and cRLSign", index));
     }
     Ok(())
 }
 
-fn reject_forbidden_extended_key_usage(
-    certificate: &X509Certificate<'_>,
-    role: CertificateRole,
-    index: Option<usize>,
-) -> Result<(), TzapCertificateProfileError> {
-    if let Some(eku) = certificate
-        .extended_key_usage()
-        .map_err(|_| role.profile_error("extended key usage is invalid or duplicated", index))?
-    {
+fn reject_forbidden_extended_key_usage(certificate: &X509Certificate<'_>, role: CertificateRole, index: Option<usize>) -> Result<(), TzapCertificateProfileError> {
+    if let Some(eku) = certificate.extended_key_usage().map_err(|_| role.profile_error("extended key usage is invalid or duplicated", index))? {
         if eku.value.any || eku.value.server_auth || eku.value.client_auth || eku.value.code_signing {
             return Err(role.profile_error("certificate authorizes forbidden extended key usage", index));
         }
@@ -583,10 +436,7 @@ fn reject_forbidden_extended_key_usage(
         }
     }
     if let Some(oids) = extended_key_usage_oids(certificate) {
-        let forbidden = [OID_ANY_EXTENDED_KEY_USAGE, OID_SERVER_AUTH_EKU, OID_CLIENT_AUTH_EKU, OID_CODE_SIGNING_EKU]
-            .into_iter()
-            .filter_map(oid_value_bytes)
-            .collect::<Vec<_>>();
+        let forbidden = [OID_ANY_EXTENDED_KEY_USAGE, OID_SERVER_AUTH_EKU, OID_CLIENT_AUTH_EKU, OID_CODE_SIGNING_EKU].into_iter().filter_map(oid_value_bytes).collect::<Vec<_>>();
         if oids.iter().any(|oid| forbidden.iter().any(|forbidden| forbidden == oid)) {
             return Err(role.profile_error("certificate authorizes forbidden extended key usage", index));
         }
@@ -595,58 +445,33 @@ fn reject_forbidden_extended_key_usage(
 }
 
 fn require_aki_ski_pair(parsed: &[X509Certificate<'_>], index: usize) -> Result<(), TzapCertificateProfileError> {
-    let child_aki =
-        authority_key_identifier(&parsed[index]).ok_or(TzapCertificateProfileError::IntermediateProfile {
-            index,
-            reason: "missing authority key identifier",
-        })?;
-    let issuer_ski =
-        subject_key_identifier(&parsed[index + 1]).ok_or(TzapCertificateProfileError::IntermediateProfile {
-            index,
-            reason: "issuer is missing subject key identifier",
-        })?;
-    let own_ski = subject_key_identifier(&parsed[index])
-        .ok_or(TzapCertificateProfileError::IntermediateProfile { index, reason: "missing subject key identifier" })?;
+    let child_aki = authority_key_identifier(&parsed[index]).ok_or(TzapCertificateProfileError::IntermediateProfile { index, reason: "missing authority key identifier" })?;
+    let issuer_ski = subject_key_identifier(&parsed[index + 1]).ok_or(TzapCertificateProfileError::IntermediateProfile { index, reason: "issuer is missing subject key identifier" })?;
+    let own_ski = subject_key_identifier(&parsed[index]).ok_or(TzapCertificateProfileError::IntermediateProfile { index, reason: "missing subject key identifier" })?;
     if child_aki != issuer_ski {
-        return Err(TzapCertificateProfileError::IntermediateProfile {
-            index,
-            reason: "authority key identifier does not match issuer subject key identifier",
-        });
+        return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "authority key identifier does not match issuer subject key identifier" });
     }
     if index > 1 {
         let issued_child_aki =
-            authority_key_identifier(&parsed[index - 1]).ok_or(TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "issued child is missing authority key identifier",
-            })?;
+            authority_key_identifier(&parsed[index - 1]).ok_or(TzapCertificateProfileError::IntermediateProfile { index, reason: "issued child is missing authority key identifier" })?;
         if own_ski != issued_child_aki {
-            return Err(TzapCertificateProfileError::IntermediateProfile {
-                index,
-                reason: "subject key identifier does not match child authority key identifier",
-            });
+            return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "subject key identifier does not match child authority key identifier" });
         }
     }
     Ok(())
 }
 
 fn require_leaf_aki_matches_issuer(parsed: &[X509Certificate<'_>]) -> Result<(), TzapCertificateProfileError> {
-    let leaf_aki = authority_key_identifier(&parsed[0])
-        .ok_or(TzapCertificateProfileError::LeafProfile { reason: "missing authority key identifier" })?;
-    let issuer_ski = subject_key_identifier(&parsed[1])
-        .ok_or(TzapCertificateProfileError::LeafProfile { reason: "issuer is missing subject key identifier" })?;
+    let leaf_aki = authority_key_identifier(&parsed[0]).ok_or(TzapCertificateProfileError::LeafProfile { reason: "missing authority key identifier" })?;
+    let issuer_ski = subject_key_identifier(&parsed[1]).ok_or(TzapCertificateProfileError::LeafProfile { reason: "issuer is missing subject key identifier" })?;
     if leaf_aki != issuer_ski {
-        return Err(TzapCertificateProfileError::LeafProfile {
-            reason: "authority key identifier does not match issuer subject key identifier",
-        });
+        return Err(TzapCertificateProfileError::LeafProfile { reason: "authority key identifier does not match issuer subject key identifier" });
     }
     Ok(())
 }
 
-fn parse_public_metadata_extension(
-    certificate: &X509Certificate<'_>,
-) -> Result<TzapCertificatePublicMetadata, TzapCertificateProfileError> {
-    let mut matches =
-        certificate.iter_extensions().filter(|extension| extension_oid_matches(extension, TZAP_OID_METADATA_EXTENSION));
+fn parse_public_metadata_extension(certificate: &X509Certificate<'_>) -> Result<TzapCertificatePublicMetadata, TzapCertificateProfileError> {
+    let mut matches = certificate.iter_extensions().filter(|extension| extension_oid_matches(extension, TZAP_OID_METADATA_EXTENSION));
     let extension = matches.next().ok_or(TzapCertificateProfileError::MissingMetadata)?;
     if matches.next().is_some() {
         return Err(TzapCertificateProfileError::DuplicateMetadata);
@@ -658,13 +483,9 @@ fn parse_public_metadata_extension(
         return Err(TzapCertificateProfileError::NestedAsn1Metadata);
     }
 
-    let raw = std::str::from_utf8(extension.value)
-        .map_err(|_| TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not UTF-8" })?;
-    let value: Value = serde_json::from_str(raw)
-        .map_err(|_| TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not JSON" })?;
-    let canonical = serde_json_canonicalizer::to_string(&value).map_err(|_| {
-        TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not JCS canonicalizable" }
-    })?;
+    let raw = std::str::from_utf8(extension.value).map_err(|_| TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not UTF-8" })?;
+    let value: Value = serde_json::from_str(raw).map_err(|_| TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not JSON" })?;
+    let canonical = serde_json_canonicalizer::to_string(&value).map_err(|_| TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not JCS canonicalizable" })?;
     if canonical.as_bytes() != extension.value {
         return Err(TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not JCS canonical JSON" });
     }
@@ -673,9 +494,7 @@ fn parse_public_metadata_extension(
 }
 
 fn parse_public_metadata_value(value: &Value) -> Result<TzapCertificatePublicMetadata, TzapCertificateProfileError> {
-    let object = value
-        .as_object()
-        .ok_or(TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not a JSON object" })?;
+    let object = value.as_object().ok_or(TzapCertificateProfileError::MalformedMetadata { reason: "metadata is not a JSON object" })?;
     validate_metadata_fields(object)?;
 
     let version = required_u64(object, "version")?;
@@ -697,8 +516,7 @@ fn parse_public_metadata_value(value: &Value) -> Result<TzapCertificatePublicMet
         return Err(TzapCertificateProfileError::MalformedMetadata { reason: "invalid public_device_id" });
     }
     let assurance_level = required_string(object, "assurance_level")?;
-    let assurance_level = TzapIdentityAssurance::parse(assurance_level)
-        .ok_or(TzapCertificateProfileError::MalformedMetadata { reason: "invalid assurance_level" })?;
+    let assurance_level = TzapIdentityAssurance::parse(assurance_level).ok_or(TzapCertificateProfileError::MalformedMetadata { reason: "invalid assurance_level" })?;
     let policy_oid = required_string(object, "policy_oid")?;
     if !is_numeric_dotted_oid(policy_oid) {
         return Err(TzapCertificateProfileError::MalformedMetadata { reason: "invalid policy_oid" });
@@ -715,8 +533,7 @@ fn parse_public_metadata_value(value: &Value) -> Result<TzapCertificatePublicMet
 }
 
 fn validate_metadata_fields(object: &Map<String, Value>) -> Result<(), TzapCertificateProfileError> {
-    const ALLOWED_FIELDS: &[&str] =
-        &["assurance_level", "policy_oid", "public_device_id", "public_org_id", "public_signer_id", "version"];
+    const ALLOWED_FIELDS: &[&str] = &["assurance_level", "policy_oid", "public_device_id", "public_org_id", "public_signer_id", "version"];
     for field in object.keys() {
         if !ALLOWED_FIELDS.contains(&field.as_str()) {
             return Err(TzapCertificateProfileError::UnknownMetadataField { field: field.clone() });
@@ -729,17 +546,11 @@ fn required_u64(object: &Map<String, Value>, field: &'static str) -> Result<u64,
     object.get(field).and_then(Value::as_u64).ok_or(TzapCertificateProfileError::MalformedMetadata { reason: field })
 }
 
-fn required_string<'a>(
-    object: &'a Map<String, Value>,
-    field: &'static str,
-) -> Result<&'a str, TzapCertificateProfileError> {
+fn required_string<'a>(object: &'a Map<String, Value>, field: &'static str) -> Result<&'a str, TzapCertificateProfileError> {
     object.get(field).and_then(Value::as_str).ok_or(TzapCertificateProfileError::MalformedMetadata { reason: field })
 }
 
-fn optional_string<'a>(
-    object: &'a Map<String, Value>,
-    field: &'static str,
-) -> Result<Option<&'a str>, TzapCertificateProfileError> {
+fn optional_string<'a>(object: &'a Map<String, Value>, field: &'static str) -> Result<Option<&'a str>, TzapCertificateProfileError> {
     match object.get(field) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => Ok(Some(value)),
@@ -838,9 +649,7 @@ fn has_any_policy(certificate: &X509Certificate<'_>, oids: &[String]) -> bool {
 }
 
 fn extended_key_usage_oids(certificate: &X509Certificate<'_>) -> Option<Vec<Vec<u8>>> {
-    let mut matching = certificate
-        .iter_extensions()
-        .filter(|extension| extension.oid.to_id_string() == OID_EXTENDED_KEY_USAGE_EXTENSION);
+    let mut matching = certificate.iter_extensions().filter(|extension| extension.oid.to_id_string() == OID_EXTENDED_KEY_USAGE_EXTENSION);
     let extension = matching.next()?;
     if matching.next().is_some() {
         return None;
@@ -866,28 +675,17 @@ fn oid_value_bytes(oid: &str) -> Option<Vec<u8>> {
 }
 
 fn extension_oid_matches(extension: &x509_parser::extensions::X509Extension<'_>, oid: &str) -> bool {
-    oid_value_bytes(oid).is_some_and(|target| extension.oid.as_bytes() == target.as_slice())
-        || extension.oid.to_id_string() == oid
+    oid_value_bytes(oid).is_some_and(|target| extension.oid.as_bytes() == target.as_slice()) || extension.oid.to_id_string() == oid
 }
 
 fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
-    certificate.iter_extensions().find_map(|extension| {
-        if let ParsedExtension::AuthorityKeyIdentifier(aki) = extension.parsed_extension() {
-            aki.key_identifier.as_ref().map(|identifier| identifier.0.to_vec())
-        } else {
-            None
-        }
-    })
+    certificate
+        .iter_extensions()
+        .find_map(|extension| if let ParsedExtension::AuthorityKeyIdentifier(aki) = extension.parsed_extension() { aki.key_identifier.as_ref().map(|identifier| identifier.0.to_vec()) } else { None })
 }
 
 fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
-    certificate.iter_extensions().find_map(|extension| {
-        if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() {
-            Some(identifier.0.to_vec())
-        } else {
-            None
-        }
-    })
+    certificate.iter_extensions().find_map(|extension| if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() { Some(identifier.0.to_vec()) } else { None })
 }
 
 #[derive(Copy, Clone)]
@@ -901,9 +699,7 @@ impl CertificateRole {
     fn profile_error(self, reason: &'static str, index: Option<usize>) -> TzapCertificateProfileError {
         match self {
             Self::Root => TzapCertificateProfileError::RootProfile { reason },
-            Self::PlatformIntermediate | Self::OrganizationIntermediate => {
-                TzapCertificateProfileError::IntermediateProfile { index: index.unwrap_or(0), reason }
-            }
+            Self::PlatformIntermediate | Self::OrganizationIntermediate => TzapCertificateProfileError::IntermediateProfile { index: index.unwrap_or(0), reason },
         }
     }
 }

@@ -59,36 +59,14 @@ const FSREDIR_JUNCTION: u32 = 3;
 const FSREDIR_HARDLINK: u32 = 4;
 const FSREDIR_FILECOPY: u32 = 5;
 
-type ListCallback =
-    extern "C" fn(*mut c_void, *const c_char, u64, u64, c_uint, c_uint, *const c_char, u32, u64) -> c_int;
+type ListCallback = extern "C" fn(*mut c_void, *const c_char, u64, u64, c_uint, c_uint, *const c_char, u32, u64) -> c_int;
 
-type ExtractCallback = extern "C" fn(
-    *mut c_void,
-    *const c_char,
-    u64,
-    c_uint,
-    c_uint,
-    *const c_char,
-    u32,
-    u64,
-    *mut c_char,
-    usize,
-) -> c_int;
+type ExtractCallback = extern "C" fn(*mut c_void, *const c_char, u64, c_uint, c_uint, *const c_char, u32, u64, *mut c_char, usize) -> c_int;
 
 unsafe extern "C" {
-    fn zmu_unrar_list(
-        archive: *const c_char,
-        password: *const c_char,
-        user: *mut c_void,
-        callback: ListCallback,
-    ) -> c_int;
+    fn zmu_unrar_list(archive: *const c_char, password: *const c_char, user: *mut c_void, callback: ListCallback) -> c_int;
 
-    fn zmu_unrar_extract(
-        archive: *const c_char,
-        password: *const c_char,
-        user: *mut c_void,
-        callback: ExtractCallback,
-    ) -> c_int;
+    fn zmu_unrar_extract(archive: *const c_char, password: *const c_char, user: *mut c_void, callback: ExtractCallback) -> c_int;
 
     fn zmu_unrar_large_dictionary_allowed(dict_size_kb: u64) -> c_int;
 }
@@ -186,14 +164,7 @@ pub fn list_archive(archive: impl AsRef<Path>, password: Option<&str>) -> Result
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ListContext { entries: Vec::new(), error: None };
 
-    let code = unsafe {
-        zmu_unrar_list(
-            archive.as_ptr(),
-            optional_c_buffer_ptr(password.as_ref()),
-            ptr::from_mut(&mut context).cast::<c_void>(),
-            list_callback,
-        )
-    };
+    let code = unsafe { zmu_unrar_list(archive.as_ptr(), optional_c_buffer_ptr(password.as_ref()), ptr::from_mut(&mut context).cast::<c_void>(), list_callback) };
 
     if let Some(error) = context.error {
         return Err(error);
@@ -211,11 +182,7 @@ pub fn list_archive(archive: impl AsRef<Path>, password: Option<&str>) -> Result
 ///
 /// Returns [`UnrarError`] when `UnRAR` cannot extract the archive or a selected
 /// destination cannot be passed to the C ABI.
-pub fn extract_selected(
-    archive: impl AsRef<Path>,
-    password: Option<&str>,
-    selections: &BTreeMap<String, PathBuf>,
-) -> Result<(), UnrarError> {
+pub fn extract_selected(archive: impl AsRef<Path>, password: Option<&str>, selections: &BTreeMap<String, PathBuf>) -> Result<(), UnrarError> {
     extract_selected_with_progress(archive, password, selections, None)
 }
 
@@ -240,14 +207,7 @@ pub fn extract_selected_with_progress(
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ExtractContext { selections, error: None, progress };
 
-    let code = unsafe {
-        zmu_unrar_extract(
-            archive.as_ptr(),
-            optional_c_buffer_ptr(password.as_ref()),
-            ptr::from_mut(&mut context).cast::<c_void>(),
-            extract_callback,
-        )
-    };
+    let code = unsafe { zmu_unrar_extract(archive.as_ptr(), optional_c_buffer_ptr(password.as_ref()), ptr::from_mut(&mut context).cast::<c_void>(), extract_callback) };
 
     if let Some(error) = context.error {
         return Err(error);
@@ -382,19 +342,14 @@ fn path_to_cstring(path: &Path) -> Result<CString, UnrarError> {
     let Some(text) = path.to_str() else {
         return Err(UnrarError::InvalidPath { path: path.to_path_buf(), reason: "path is not valid UTF-8".to_owned() });
     };
-    CString::new(text)
-        .map_err(|source| UnrarError::InvalidPath { path: path.to_path_buf(), reason: source.to_string() })
+    CString::new(text).map_err(|source| UnrarError::InvalidPath { path: path.to_path_buf(), reason: source.to_string() })
 }
 
 fn destination_to_cstring(path: &Path) -> Result<CString, UnrarError> {
     let Some(text) = path.to_str() else {
-        return Err(UnrarError::InvalidDestination {
-            path: path.to_path_buf(),
-            reason: "path is not valid UTF-8".to_owned(),
-        });
+        return Err(UnrarError::InvalidDestination { path: path.to_path_buf(), reason: "path is not valid UTF-8".to_owned() });
     };
-    CString::new(text)
-        .map_err(|source| UnrarError::InvalidDestination { path: path.to_path_buf(), reason: source.to_string() })
+    CString::new(text).map_err(|source| UnrarError::InvalidDestination { path: path.to_path_buf(), reason: source.to_string() })
 }
 
 fn optional_password_to_c_buffer(password: Option<&str>) -> Result<Option<Zeroizing<Vec<u8>>>, UnrarError> {
@@ -402,10 +357,7 @@ fn optional_password_to_c_buffer(password: Option<&str>) -> Result<Option<Zeroiz
         .filter(|password| !password.is_empty())
         .map(|password| {
             if password.as_bytes().contains(&0) {
-                return Err(UnrarError::InvalidPath {
-                    path: PathBuf::from("<password>"),
-                    reason: "password contains a NUL byte".to_owned(),
-                });
+                return Err(UnrarError::InvalidPath { path: PathBuf::from("<password>"), reason: "password contains a NUL byte".to_owned() });
             }
             let mut bytes = Vec::with_capacity(password.len() + 1);
             bytes.extend_from_slice(password.as_bytes());

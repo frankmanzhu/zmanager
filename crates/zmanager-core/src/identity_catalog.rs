@@ -4,9 +4,7 @@
 //! and compatibility. New readers should use this module so public metadata
 //! never requires hydrating private key bytes.
 
-pub(crate) use crate::identity_migration::{
-    FileTzapSecretMaterialStore, load_inventory_from_catalog, store_inventory_as_catalog,
-};
+pub(crate) use crate::identity_migration::{FileTzapSecretMaterialStore, load_inventory_from_catalog, store_inventory_as_catalog};
 pub use crate::identity_migration::{PendingMutation, TzapLegacyMigrationReport, migrate_legacy_inventory};
 use crate::local_identity_store::{TzapLocalIdentityStoreError, TzapSignDeviceRouting};
 use crate::secrets::SecretBytes;
@@ -44,11 +42,7 @@ impl TzapSecretRef {
 
     pub fn parse(value: impl Into<String>) -> Result<Self, TzapSecretStoreError> {
         let value = value.into();
-        if value.starts_with("secret_") && value.len() > "secret_".len() {
-            Ok(Self(value))
-        } else {
-            Err(TzapSecretStoreError::InvalidReference)
-        }
+        if value.starts_with("secret_") && value.len() > "secret_".len() { Ok(Self(value)) } else { Err(TzapSecretStoreError::InvalidReference) }
     }
 }
 
@@ -105,25 +99,15 @@ impl std::error::Error for TzapSecretStoreError {}
 /// Purpose-specific secure material interface. Implementations must not fall
 /// back to a plaintext file when the native store is unavailable or locked.
 pub trait TzapSecretMaterialStore {
-    fn put(&mut self, purpose: TzapSecretPurpose, material: SecretBytes)
-    -> Result<TzapSecretRef, TzapSecretStoreError>;
+    fn put(&mut self, purpose: TzapSecretPurpose, material: SecretBytes) -> Result<TzapSecretRef, TzapSecretStoreError>;
 
     /// Stores material under a caller-generated reference. This is used by
     /// crash-recoverable catalog transactions: the public catalog can record
     /// the opaque reference before the secret is written, then retry the same
     /// write after an interrupted startup.
-    fn put_at(
-        &mut self,
-        purpose: TzapSecretPurpose,
-        reference: &TzapSecretRef,
-        material: SecretBytes,
-    ) -> Result<(), TzapSecretStoreError>;
+    fn put_at(&mut self, purpose: TzapSecretPurpose, reference: &TzapSecretRef, material: SecretBytes) -> Result<(), TzapSecretStoreError>;
 
-    fn resolve(
-        &self,
-        purpose: TzapSecretPurpose,
-        reference: &TzapSecretRef,
-    ) -> Result<SecretBytes, TzapSecretStoreError>;
+    fn resolve(&self, purpose: TzapSecretPurpose, reference: &TzapSecretRef) -> Result<SecretBytes, TzapSecretStoreError>;
 
     fn delete(&mut self, purpose: TzapSecretPurpose, reference: &TzapSecretRef) -> Result<(), TzapSecretStoreError>;
 }
@@ -141,11 +125,7 @@ impl InMemoryTzapSecretMaterialStore {
 }
 
 impl TzapSecretMaterialStore for InMemoryTzapSecretMaterialStore {
-    fn put(
-        &mut self,
-        purpose: TzapSecretPurpose,
-        material: SecretBytes,
-    ) -> Result<TzapSecretRef, TzapSecretStoreError> {
+    fn put(&mut self, purpose: TzapSecretPurpose, material: SecretBytes) -> Result<TzapSecretRef, TzapSecretStoreError> {
         if material.is_empty() {
             return Err(TzapSecretStoreError::Corrupt);
         }
@@ -154,12 +134,7 @@ impl TzapSecretMaterialStore for InMemoryTzapSecretMaterialStore {
         Ok(reference)
     }
 
-    fn put_at(
-        &mut self,
-        purpose: TzapSecretPurpose,
-        reference: &TzapSecretRef,
-        material: SecretBytes,
-    ) -> Result<(), TzapSecretStoreError> {
+    fn put_at(&mut self, purpose: TzapSecretPurpose, reference: &TzapSecretRef, material: SecretBytes) -> Result<(), TzapSecretStoreError> {
         if material.is_empty() {
             return Err(TzapSecretStoreError::Corrupt);
         }
@@ -167,22 +142,12 @@ impl TzapSecretMaterialStore for InMemoryTzapSecretMaterialStore {
         Ok(())
     }
 
-    fn resolve(
-        &self,
-        purpose: TzapSecretPurpose,
-        reference: &TzapSecretRef,
-    ) -> Result<SecretBytes, TzapSecretStoreError> {
-        self.values
-            .get(&(purpose, reference.clone()))
-            .cloned()
-            .ok_or_else(|| TzapSecretStoreError::Missing { reference: reference.clone() })
+    fn resolve(&self, purpose: TzapSecretPurpose, reference: &TzapSecretRef) -> Result<SecretBytes, TzapSecretStoreError> {
+        self.values.get(&(purpose, reference.clone())).cloned().ok_or_else(|| TzapSecretStoreError::Missing { reference: reference.clone() })
     }
 
     fn delete(&mut self, purpose: TzapSecretPurpose, reference: &TzapSecretRef) -> Result<(), TzapSecretStoreError> {
-        self.values
-            .remove(&(purpose, reference.clone()))
-            .map(|_| ())
-            .ok_or_else(|| TzapSecretStoreError::Missing { reference: reference.clone() })
+        self.values.remove(&(purpose, reference.clone())).map(|_| ()).ok_or_else(|| TzapSecretStoreError::Missing { reference: reference.clone() })
     }
 }
 
@@ -342,12 +307,7 @@ impl TzapIdentityCatalog {
 
 pub trait TzapIdentityCatalogStore {
     fn load_catalog(&self, account_key: &str) -> Result<Option<TzapIdentityCatalog>, TzapIdentityCatalogError>;
-    fn save_catalog(
-        &mut self,
-        account_key: &str,
-        expected_revision: Option<u64>,
-        catalog: TzapIdentityCatalog,
-    ) -> Result<(), TzapIdentityCatalogError>;
+    fn save_catalog(&mut self, account_key: &str, expected_revision: Option<u64>, catalog: TzapIdentityCatalog) -> Result<(), TzapIdentityCatalogError>;
     fn clear_catalog(&mut self, account_key: &str) -> Result<(), TzapIdentityCatalogError>;
 }
 
@@ -368,12 +328,7 @@ impl TzapIdentityCatalogStore for InMemoryTzapIdentityCatalogStore {
         Ok(self.catalogs.get(account_key).cloned())
     }
 
-    fn save_catalog(
-        &mut self,
-        account_key: &str,
-        expected_revision: Option<u64>,
-        catalog: TzapIdentityCatalog,
-    ) -> Result<(), TzapIdentityCatalogError> {
+    fn save_catalog(&mut self, account_key: &str, expected_revision: Option<u64>, catalog: TzapIdentityCatalog) -> Result<(), TzapIdentityCatalogError> {
         catalog.validate()?;
         let actual = self.catalogs.get(account_key).map(|value| value.revision);
         if expected_revision != actual {
@@ -439,11 +394,7 @@ fn acquire_catalog_lock(lock_path: &Path) -> Result<fs::File, TzapIdentityCatalo
 }
 
 fn lock_is_stale(lock_path: &Path) -> bool {
-    fs::metadata(lock_path).is_ok_and(|metadata| {
-        metadata.modified().is_ok_and(|modified| {
-            SystemTime::now().duration_since(modified).is_ok_and(|age| age.as_secs() >= LOCK_STALE_AFTER_SECONDS)
-        })
-    })
+    fs::metadata(lock_path).is_ok_and(|metadata| metadata.modified().is_ok_and(|modified| SystemTime::now().duration_since(modified).is_ok_and(|age| age.as_secs() >= LOCK_STALE_AFTER_SECONDS)))
 }
 
 impl TzapIdentityCatalogStore for FileTzapIdentityCatalogStore {
@@ -458,12 +409,7 @@ impl TzapIdentityCatalogStore for FileTzapIdentityCatalogStore {
         Ok(Some(catalog))
     }
 
-    fn save_catalog(
-        &mut self,
-        account_key: &str,
-        expected_revision: Option<u64>,
-        catalog: TzapIdentityCatalog,
-    ) -> Result<(), TzapIdentityCatalogError> {
+    fn save_catalog(&mut self, account_key: &str, expected_revision: Option<u64>, catalog: TzapIdentityCatalog) -> Result<(), TzapIdentityCatalogError> {
         let path = self.catalog_path(account_key)?;
         catalog.validate()?;
         fs::create_dir_all(&self.root)?;
@@ -556,8 +502,7 @@ fn write_catalog_atomically(path: &Path, catalog: &TzapIdentityCatalog) -> Resul
     // atomic writer allocates a unique `create_new` sibling and renames over
     // the destination without ever removing it first, so a crash leaves the
     // old or the new catalog — never neither.
-    let mut output = crate::atomic_file::AtomicOutputFile::create(path)
-        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
+    let mut output = crate::atomic_file::AtomicOutputFile::create(path).map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -567,16 +512,8 @@ fn write_catalog_atomically(path: &Path, catalog: &TzapIdentityCatalog) -> Resul
             .set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     }
-    output
-        .file_mut()
-        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?
-        .write_all(&bytes)
-        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
-    output
-        .file_mut()
-        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?
-        .sync_all()
-        .map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
+    output.file_mut().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?.write_all(&bytes).map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
+    output.file_mut().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?.sync_all().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     output.commit_with_atomic_replace().map_err(|source| TzapIdentityCatalogError::Io(source.kind()))?;
     #[cfg(unix)]
     if let Ok(directory) = fs::File::open(path.parent().unwrap_or_else(|| Path::new("."))) {
@@ -607,10 +544,7 @@ fn validate_non_empty(field: &'static str, value: &str) -> Result<(), TzapIdenti
     if value.is_empty() { Err(TzapIdentityCatalogError::InvalidCatalog { field }) } else { Ok(()) }
 }
 
-fn validate_unique<'a>(
-    field: &'static str,
-    values: impl Iterator<Item = &'a str>,
-) -> Result<(), TzapIdentityCatalogError> {
+fn validate_unique<'a>(field: &'static str, values: impl Iterator<Item = &'a str>) -> Result<(), TzapIdentityCatalogError> {
     let mut seen = HashSet::new();
     for value in values {
         if !seen.insert(value) {
@@ -623,13 +557,8 @@ fn validate_unique<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device_identity::{
-        TzapDeviceCsrOptions, generate_device_signing_key_and_csr, generate_recipient_encryption_key,
-    };
-    use crate::local_identity_store::{
-        InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapLocalIdentityInventory, TzapLocalIdentityStore,
-        TzapRecipientEncryptionKeyRecord,
-    };
+    use crate::device_identity::{TzapDeviceCsrOptions, generate_device_signing_key_and_csr, generate_recipient_encryption_key};
+    use crate::local_identity_store::{InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -648,15 +577,10 @@ mod tests {
         let mut catalog = TzapIdentityCatalog::empty();
         catalog.revision = 1;
         store.save_catalog("default", None, catalog.clone()).unwrap();
-        assert!(matches!(
-            store.save_catalog("default", None, catalog.clone()),
-            Err(TzapIdentityCatalogError::RevisionConflict { .. })
-        ));
+        assert!(matches!(store.save_catalog("default", None, catalog.clone()), Err(TzapIdentityCatalogError::RevisionConflict { .. })));
         let mut next = catalog.clone();
         next.revision = 2;
-        store
-            .save_catalog("default", Some(1), next.clone())
-            .expect("an existing catalog can be replaced under its locked revision");
+        store.save_catalog("default", Some(1), next.clone()).expect("an existing catalog can be replaced under its locked revision");
         assert_eq!(store.load_catalog("default").unwrap(), Some(next));
         #[cfg(unix)]
         {
@@ -679,10 +603,7 @@ mod tests {
 
         // A fresh lock belongs to a live writer: the save must be refused.
         fs::write(&lock_path, b"").unwrap();
-        assert!(matches!(
-            store.save_catalog("default", None, catalog.clone()),
-            Err(TzapIdentityCatalogError::ConcurrentWrite)
-        ));
+        assert!(matches!(store.save_catalog("default", None, catalog.clone()), Err(TzapIdentityCatalogError::ConcurrentWrite)));
 
         // A lock abandoned by a crashed writer must not block saves forever:
         // once it is old enough it is stolen and the save succeeds.
@@ -690,9 +611,7 @@ mod tests {
         let age = std::time::Duration::from_secs(LOCK_STALE_AFTER_SECONDS + 60);
         lock.set_modified(SystemTime::now() - age).unwrap();
         drop(lock);
-        store
-            .save_catalog("default", None, catalog.clone())
-            .expect("a stale lock should be stolen instead of blocking the save");
+        store.save_catalog("default", None, catalog.clone()).expect("a stale lock should be stolen instead of blocking the save");
         assert!(!lock_path.exists(), "the stolen lock should have been removed");
 
         let _ = std::fs::remove_dir_all(root);

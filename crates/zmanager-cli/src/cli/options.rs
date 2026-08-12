@@ -3,9 +3,8 @@ use crate::cli::create::prompt_password_from_stdin;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::{APPLE_ARCHIVE_FORMAT_ALIASES, is_apple_archive};
 use crate::cli::format::{
-    FORMAT_SEVEN_Z, FORMAT_ZIP, SEVEN_Z_EXTENSIONS, SIZE_UNIT_GIB, SIZE_UNIT_KIB, SIZE_UNIT_MIB, SIZE_UNIT_TIB,
-    TAR_ZST_FORMAT_ALIASES, TGZ_FORMAT_ALIASES, TZAP_FORMAT_ALIASES, is_tar_zst_archive, is_tgz_archive,
-    is_tzap_archive, is_zip_family_archive, path_has_known_extension,
+    FORMAT_SEVEN_Z, FORMAT_ZIP, SEVEN_Z_EXTENSIONS, SIZE_UNIT_GIB, SIZE_UNIT_KIB, SIZE_UNIT_MIB, SIZE_UNIT_TIB, TAR_ZST_FORMAT_ALIASES, TGZ_FORMAT_ALIASES, TZAP_FORMAT_ALIASES, is_tar_zst_archive,
+    is_tgz_archive, is_tzap_archive, is_zip_family_archive, path_has_known_extension,
 };
 use crate::cli::usage::usage_failure;
 use crate::output::OutputMode;
@@ -21,11 +20,7 @@ pub(crate) struct GlobalOptions {
     pub(crate) progress: OutputMode,
     pub(crate) no_password_prompt: bool,
 }
-pub(crate) fn parse_global_option(
-    args: &[String],
-    index: &mut usize,
-    global: &mut GlobalOptions,
-) -> Result<bool, String> {
+pub(crate) fn parse_global_option(args: &[String], index: &mut usize, global: &mut GlobalOptions) -> Result<bool, String> {
     match args[*index].as_str() {
         "--json" => global.json = true,
         "-q" | "--quiet" => global.quiet = true,
@@ -157,32 +152,17 @@ pub(crate) fn resolve_input_path(value: &str, current_dir: Option<&Path>) -> Pat
         path
     }
 }
-pub(crate) fn read_optional_password_stdin(
-    enabled: bool,
-    global: &GlobalOptions,
-) -> Result<Option<SecretString>, ExitCode> {
+pub(crate) fn read_optional_password_stdin(enabled: bool, global: &GlobalOptions) -> Result<Option<SecretString>, ExitCode> {
     if enabled { prompt_password_from_stdin(Some(global)).map(Some) } else { Ok(None) }
 }
 
-pub(crate) fn validate_recipient_key_open_option(
-    command: &str,
-    archive: &str,
-    password_stdin: bool,
-    recipient_key: Option<&PathBuf>,
-    global: &GlobalOptions,
-) -> Option<ExitCode> {
+pub(crate) fn validate_recipient_key_open_option(command: &str, archive: &str, password_stdin: bool, recipient_key: Option<&PathBuf>, global: &GlobalOptions) -> Option<ExitCode> {
     recipient_key?;
     if !is_tzap_archive(archive) {
-        return Some(usage_failure(
-            global,
-            format_args!("{command} failed: --recipient-key is supported only for TZAP archives"),
-        ));
+        return Some(usage_failure(global, format_args!("{command} failed: --recipient-key is supported only for TZAP archives")));
     }
     if password_stdin {
-        return Some(usage_failure(
-            global,
-            format_args!("{command} failed: --recipient-key cannot be combined with --password-stdin"),
-        ));
+        return Some(usage_failure(global, format_args!("{command} failed: --recipient-key cannot be combined with --password-stdin")));
     }
     None
 }

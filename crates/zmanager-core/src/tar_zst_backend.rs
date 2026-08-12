@@ -1,10 +1,7 @@
 use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
-use crate::safety::{
-    ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
-    OverwriteResolver,
-};
+use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -26,12 +23,7 @@ pub struct TarZstdCreateOptions {
 
 impl Default for TarZstdCreateOptions {
     fn default() -> Self {
-        Self {
-            level: 3,
-            threads: crate::tar_metadata::available_parallelism_at_least_two(),
-            preserve_metadata: true,
-            replace_existing: false,
-        }
+        Self { level: 3, threads: crate::tar_metadata::available_parallelism_at_least_two(), preserve_metadata: true, replace_existing: false }
     }
 }
 
@@ -109,11 +101,7 @@ impl std::error::Error for TarZstdError {
 ///
 /// Returns [`TarZstdError`] when planning, filesystem reads, tar writing, or
 /// zstd compression fail.
-pub fn create_tar_zst_from_path(
-    source: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    options: &TarZstdCreateOptions,
-) -> Result<TarZstdCreateReport, TarZstdError> {
+pub fn create_tar_zst_from_path(source: impl AsRef<Path>, destination: impl AsRef<Path>, options: &TarZstdCreateOptions) -> Result<TarZstdCreateReport, TarZstdError> {
     let manifest = plan_archive(source, &PlanOptions::default())?;
 
     create_tar_zst_from_manifest(&manifest, destination, options)
@@ -125,11 +113,7 @@ pub fn create_tar_zst_from_path(
 ///
 /// Returns [`TarZstdError`] when source files cannot be read, tar writing fails,
 /// or zstd compression fails.
-pub fn create_tar_zst_from_manifest(
-    manifest: &ArchiveManifest,
-    destination: impl AsRef<Path>,
-    options: &TarZstdCreateOptions,
-) -> Result<TarZstdCreateReport, TarZstdError> {
+pub fn create_tar_zst_from_manifest(manifest: &ArchiveManifest, destination: impl AsRef<Path>, options: &TarZstdCreateOptions) -> Result<TarZstdCreateReport, TarZstdError> {
     create_tar_zst_from_manifest_inner(manifest, destination, options, None)
 }
 
@@ -155,11 +139,9 @@ fn create_tar_zst_from_manifest_inner(
     mut context: Option<&mut JobContext<'_>>,
 ) -> Result<TarZstdCreateReport, TarZstdError> {
     let destination = destination.as_ref();
-    let mut output = crate::atomic_file::AtomicOutputFile::create(destination)
-        .map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
+    let mut output = crate::atomic_file::AtomicOutputFile::create(destination).map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
     let file = output.file_mut().map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
-    let mut encoder = zstd::stream::write::Encoder::new(file, options.level)
-        .map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
+    let mut encoder = zstd::stream::write::Encoder::new(file, options.level).map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
 
     if let Some(threads) = options.threads
         && threads > 0
@@ -169,24 +151,15 @@ fn create_tar_zst_from_manifest_inner(
 
     let mut builder = Builder::new(encoder);
     builder.follow_symlinks(false);
-    let mut report = TarZstdCreateReport {
-        written_entries: 0,
-        written_bytes: 0,
-        level: options.level,
-        threads: options.threads,
-        warnings: Vec::new(),
-    };
+    let mut report = TarZstdCreateReport { written_entries: 0, written_bytes: 0, level: options.level, threads: options.threads, warnings: Vec::new() };
 
     for entry in &manifest.entries {
         append_manifest_entry(&mut builder, entry, options.preserve_metadata, &mut report, context.as_deref_mut())?;
     }
 
-    let encoder =
-        builder.into_inner().map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
+    let encoder = builder.into_inner().map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
     encoder.finish().map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
-    output
-        .commit_with_file_replace(options.replace_existing)
-        .map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
+    output.commit_with_file_replace(options.replace_existing).map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
 
     Ok(report)
 }
@@ -197,11 +170,7 @@ fn create_tar_zst_from_manifest_inner(
 ///
 /// Returns [`TarZstdError`] when the archive cannot be read, an entry is unsafe,
 /// or filesystem writes fail.
-pub fn extract_tar_zst(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-) -> Result<TarZstdExtractReport, TarZstdError> {
+pub fn extract_tar_zst(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<TarZstdExtractReport, TarZstdError> {
     extract_tar_zst_inner(archive_path, destination, policy, None, None)
 }
 
@@ -213,10 +182,8 @@ pub fn extract_tar_zst(
 /// Returns [`TarZstdError`] when the archive cannot be opened or read.
 pub fn estimate_tar_zst_uncompressed_size(archive_path: impl AsRef<Path>) -> Result<u64, TarZstdError> {
     let archive_path = archive_path.as_ref();
-    let file =
-        File::open(archive_path).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
-    let decoder = zstd::stream::read::Decoder::new(file)
-        .map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let file = File::open(archive_path).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = Archive::new(decoder);
     let mut total = 0_u64;
 
@@ -234,19 +201,12 @@ pub fn estimate_tar_zst_uncompressed_size(archive_path: impl AsRef<Path>) -> Res
 ///
 /// Returns [`TarZstdError`] when the archive cannot be read or output writing
 /// fails.
-pub fn copy_tar_zst_files_to_writer<W: io::Write>(
-    archive_path: impl AsRef<Path>,
-    mut selected: impl FnMut(&str) -> bool,
-    output: &mut W,
-) -> Result<TarZstdExtractReport, TarZstdError> {
+pub fn copy_tar_zst_files_to_writer<W: io::Write>(archive_path: impl AsRef<Path>, mut selected: impl FnMut(&str) -> bool, output: &mut W) -> Result<TarZstdExtractReport, TarZstdError> {
     let archive_path = archive_path.as_ref();
-    let file =
-        File::open(archive_path).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
-    let decoder = zstd::stream::read::Decoder::new(file)
-        .map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let file = File::open(archive_path).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = Archive::new(decoder);
-    let mut report =
-        TarZstdExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let mut report = TarZstdExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
 
     for entry in archive.entries().map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })? {
         let mut entry = entry.map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
@@ -261,8 +221,7 @@ pub fn copy_tar_zst_files_to_writer<W: io::Write>(
             continue;
         }
 
-        let copied = io::copy(&mut entry, output)
-            .map_err(|source| TarZstdError::Io { path: PathBuf::from(&archive_entry_path), source })?;
+        let copied = io::copy(&mut entry, output).map_err(|source| TarZstdError::Io { path: PathBuf::from(&archive_entry_path), source })?;
         report.written_entries += 1;
         report.written_bytes += copied;
     }
@@ -311,17 +270,13 @@ fn extract_tar_zst_inner(
 ) -> Result<TarZstdExtractReport, TarZstdError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
-    let destination_root = crate::safety::prepare_destination_root(destination)
-        .map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| TarZstdError::Io { path: destination.to_path_buf(), source })?;
 
-    let file =
-        File::open(archive_path).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
-    let decoder = zstd::stream::read::Decoder::new(file)
-        .map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let file = File::open(archive_path).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = Archive::new(decoder);
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
-    let mut report =
-        TarZstdExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let mut report = TarZstdExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut deferred_directories = Vec::new();
     let mut deferred_hardlinks = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
@@ -331,36 +286,20 @@ fn extract_tar_zst_inner(
         let archive_entry_path = entry_path_string(&entry)?;
         let entry_size = entry.header().size().unwrap_or(0);
         let kind = extraction_kind(&mut entry, &archive_entry_path)?;
-        let safety_entry = ExtractionEntry {
-            archive_path: archive_entry_path,
-            kind,
-            uncompressed_size: Some(entry_size),
-            compressed_size: None,
-        };
+        let safety_entry = ExtractionEntry { archive_path: archive_entry_path, kind, uncompressed_size: Some(entry_size), compressed_size: None };
 
-        crate::extract_loop::process_extraction_entry(
-            &mut report,
-            context.as_deref_mut(),
-            &mut planner,
-            &safety_entry,
-            &mut |action, report, context| match action {
-                crate::extract_loop::EntryAction::Skip => Ok(0),
-                crate::extract_loop::EntryAction::Write(decision) => materialize_tar_write_decision(
-                    &mut entry,
-                    TarWriteDecision {
-                        safety_entry: &safety_entry,
-                        destination_path: decision.destination_path,
-                        replace_existing: decision.replace_existing,
-                        link_target_path: decision.link_target_path,
-                    },
-                    context,
-                    &mut deferred_directories,
-                    &mut deferred_hardlinks,
-                    report,
-                    &mut io_buffer,
-                ),
-            },
-        )?;
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, context| match action {
+            crate::extract_loop::EntryAction::Skip => Ok(0),
+            crate::extract_loop::EntryAction::Write(decision) => materialize_tar_write_decision(
+                &mut entry,
+                TarWriteDecision { safety_entry: &safety_entry, destination_path: decision.destination_path, replace_existing: decision.replace_existing, link_target_path: decision.link_target_path },
+                context,
+                &mut deferred_directories,
+                &mut deferred_hardlinks,
+                report,
+                &mut io_buffer,
+            ),
+        })?;
     }
 
     materialize_deferred_hardlinks(&deferred_hardlinks, &mut report)?;
@@ -395,25 +334,11 @@ fn materialize_tar_write_decision<R: Read>(
     let TarWriteDecision { safety_entry, destination_path, replace_existing, link_target_path } = decision;
 
     if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
-        crate::extract_loop::skip_entry(
-            report,
-            context,
-            crate::safety::unsupported_symlink_warning(&safety_entry.archive_path),
-        );
+        crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
         return Ok(0);
     }
 
-    let written_bytes = materialize_tar_entry(
-        entry,
-        safety_entry,
-        destination_path,
-        replace_existing,
-        link_target_path,
-        context,
-        deferred_directories,
-        deferred_hardlinks,
-        io_buffer,
-    )?;
+    let written_bytes = materialize_tar_entry(entry, safety_entry, destination_path, replace_existing, link_target_path, context, deferred_directories, deferred_hardlinks, io_buffer)?;
     if !matches!(safety_entry.kind, ExtractionEntryKind::Hardlink { .. }) {
         report.written_entries += 1;
     }
@@ -436,60 +361,35 @@ fn materialize_tar_entry<R: Read>(
     let metadata = tar_entry_metadata(entry, &safety_entry.archive_path)?;
 
     if replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
-        crate::safety::remove_destination_for_replace(destination_path)
-            .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
+        crate::safety::remove_destination_for_replace(destination_path).map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
     }
 
     match &safety_entry.kind {
         ExtractionEntryKind::Directory => {
-            fs::create_dir_all(destination_path)
-                .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
+            fs::create_dir_all(destination_path).map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })?;
             deferred_directories.push((destination_path.to_path_buf(), metadata));
             Ok(0)
         }
-        ExtractionEntryKind::File => copy_tar_file_entry(
-            entry,
-            &safety_entry.archive_path,
-            destination_path,
-            replace_existing,
-            metadata,
-            context,
-            io_buffer,
-        ),
+        ExtractionEntryKind::File => copy_tar_file_entry(entry, &safety_entry.archive_path, destination_path, replace_existing, metadata, context, io_buffer),
         ExtractionEntryKind::Symlink { target } => {
             write_symlink(target, destination_path)?;
             apply_symlink_mtime(destination_path, metadata.mtime)?;
             Ok(0)
         }
         ExtractionEntryKind::Hardlink { .. } => {
-            let source_path = link_target_path.ok_or_else(|| TarZstdError::Io {
-                path: destination_path.to_path_buf(),
-                source: crate::extract_loop::unresolved_hardlink_target(),
-            })?;
-            deferred_hardlinks.push(DeferredHardlink {
-                source_path: source_path.to_path_buf(),
-                destination_path: destination_path.to_path_buf(),
-            });
+            let source_path = link_target_path.ok_or_else(|| TarZstdError::Io { path: destination_path.to_path_buf(), source: crate::extract_loop::unresolved_hardlink_target() })?;
+            deferred_hardlinks.push(DeferredHardlink { source_path: source_path.to_path_buf(), destination_path: destination_path.to_path_buf() });
             Ok(0)
         }
-        ExtractionEntryKind::Device | ExtractionEntryKind::Special => Err(TarZstdError::Io {
-            path: destination_path.to_path_buf(),
-            source: io::Error::new(
-                io::ErrorKind::Unsupported,
-                "special tar entry reached materialization after safety planning",
-            ),
-        }),
+        ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
+            Err(TarZstdError::Io { path: destination_path.to_path_buf(), source: io::Error::new(io::ErrorKind::Unsupported, "special tar entry reached materialization after safety planning") })
+        }
     }
 }
 
-fn materialize_deferred_hardlinks(
-    hardlinks: &[DeferredHardlink],
-    report: &mut TarZstdExtractReport,
-) -> Result<(), TarZstdError> {
-    crate::extract_materialize::materialize_deferred_hardlinks(hardlinks).map_err(|source| TarZstdError::Io {
-        path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()),
-        source,
-    })?;
+fn materialize_deferred_hardlinks(hardlinks: &[DeferredHardlink], report: &mut TarZstdExtractReport) -> Result<(), TarZstdError> {
+    crate::extract_materialize::materialize_deferred_hardlinks(hardlinks)
+        .map_err(|source| TarZstdError::Io { path: hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()), source })?;
     report.written_entries += hardlinks.len();
     Ok(())
 }
@@ -517,33 +417,19 @@ fn copy_tar_file_entry<R: Read>(
     Ok(written_bytes)
 }
 
-fn tar_entry_metadata<R: Read>(
-    entry: &mut tar::Entry<'_, R>,
-    archive_path: &str,
-) -> Result<TarEntryMetadata, TarZstdError> {
+fn tar_entry_metadata<R: Read>(entry: &mut tar::Entry<'_, R>, archive_path: &str) -> Result<TarEntryMetadata, TarZstdError> {
     let mut metadata = TarEntryMetadata {
         mode: entry.header().mode().ok(),
-        mtime: entry
-            .header()
-            .mtime()
-            .ok()
-            .and_then(|seconds| i64::try_from(seconds).ok())
-            .map(|seconds| crate::tar_metadata::TarTimestamp { seconds, nanoseconds: 0 }),
+        mtime: entry.header().mtime().ok().and_then(|seconds| i64::try_from(seconds).ok()).map(|seconds| crate::tar_metadata::TarTimestamp { seconds, nanoseconds: 0 }),
     };
-    if let Some(extensions) =
-        entry.pax_extensions().map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })?
-    {
+    if let Some(extensions) = entry.pax_extensions().map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })? {
         for extension in extensions {
-            let extension =
-                extension.map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })?;
+            let extension = extension.map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })?;
             if extension.key_bytes() == b"mtime" {
-                metadata.mtime =
-                    Some(crate::tar_metadata::parse_pax_mtime(extension.value_bytes()).ok_or_else(|| {
-                        TarZstdError::Io {
-                            path: PathBuf::from(archive_path),
-                            source: io::Error::new(io::ErrorKind::InvalidData, "invalid PAX modification time"),
-                        }
-                    })?);
+                metadata.mtime = Some(
+                    crate::tar_metadata::parse_pax_mtime(extension.value_bytes())
+                        .ok_or_else(|| TarZstdError::Io { path: PathBuf::from(archive_path), source: io::Error::new(io::ErrorKind::InvalidData, "invalid PAX modification time") })?,
+                );
             }
         }
     }
@@ -551,42 +437,29 @@ fn tar_entry_metadata<R: Read>(
 }
 
 fn apply_deferred_directory_metadata(directories: &[(PathBuf, TarEntryMetadata)]) -> Result<(), TarZstdError> {
-    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, metadata)| {
-        apply_metadata(path, *metadata)
-    })
+    crate::extract_loop::apply_deferred_directory_metadata(directories, |(path, metadata)| apply_metadata(path, *metadata))
 }
 
 fn apply_metadata(path: &Path, metadata: TarEntryMetadata) -> Result<(), TarZstdError> {
-    crate::extract_materialize::apply_metadata(
-        path,
-        metadata.mode,
-        metadata.mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)),
-    )
-    .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })
+    crate::extract_materialize::apply_metadata(path, metadata.mode, metadata.mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)))
+        .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })
 }
 
 /// Uses `set_symlink_file_times` to avoid following the link. Errors are
 /// reported so extraction cannot claim metadata was restored when it was not.
 fn apply_symlink_mtime(path: &Path, mtime: Option<crate::tar_metadata::TarTimestamp>) -> Result<(), TarZstdError> {
-    crate::extract_materialize::apply_symlink_mtime(
-        path,
-        mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)),
-    )
-    .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })
+    crate::extract_materialize::apply_symlink_mtime(path, mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)))
+        .map_err(|source| TarZstdError::Io { path: path.to_path_buf(), source })
 }
 
 #[cfg(unix)]
 fn write_symlink(target: &Path, destination_path: &Path) -> Result<(), TarZstdError> {
-    crate::extract_materialize::write_symlink(target, destination_path)
-        .map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })
+    crate::extract_materialize::write_symlink(target, destination_path).map_err(|source| TarZstdError::Io { path: destination_path.to_path_buf(), source })
 }
 
 #[cfg(not(unix))]
 fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(), TarZstdError> {
-    Err(TarZstdError::Io {
-        path: destination_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform"),
-    })
+    Err(TarZstdError::Io { path: destination_path.to_path_buf(), source: io::Error::new(io::ErrorKind::Unsupported, "symlink extraction is not supported on this platform") })
 }
 
 fn append_manifest_entry<W: io::Write>(
@@ -607,9 +480,7 @@ fn append_manifest_entry<W: io::Write>(
     let processed = match entry.file_type {
         ManifestFileType::Directory => {
             if preserve_metadata {
-                builder
-                    .append_dir(&entry.archive_path, &entry.source_path)
-                    .map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
+                builder.append_dir(&entry.archive_path, &entry.source_path).map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
             } else {
                 let mut header = Header::new_gnu();
                 header.set_entry_type(EntryType::Directory);
@@ -617,30 +488,23 @@ fn append_manifest_entry<W: io::Write>(
                 header.set_mode(0o755);
                 header.set_mtime(0);
                 header.set_cksum();
-                builder
-                    .append_data(&mut header, &entry.archive_path, io::empty())
-                    .map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
+                builder.append_data(&mut header, &entry.archive_path, io::empty()).map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
             }
             report.written_entries += 1;
             0
         }
         ManifestFileType::File => {
             if preserve_metadata {
-                builder
-                    .append_path_with_name(&entry.source_path, &entry.archive_path)
-                    .map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
+                builder.append_path_with_name(&entry.source_path, &entry.archive_path).map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
             } else {
-                let mut source = File::open(&entry.source_path)
-                    .map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
+                let mut source = File::open(&entry.source_path).map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
                 let mut header = Header::new_gnu();
                 header.set_entry_type(EntryType::Regular);
                 header.set_size(entry.size);
                 header.set_mode(0o644);
                 header.set_mtime(0);
                 header.set_cksum();
-                builder
-                    .append_data(&mut header, &entry.archive_path, &mut source)
-                    .map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
+                builder.append_data(&mut header, &entry.archive_path, &mut source).map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })?;
             }
             report.written_entries += 1;
             report.written_bytes += entry.size;
@@ -664,10 +528,7 @@ fn append_manifest_entry<W: io::Write>(
             0
         }
         ManifestFileType::Other => {
-            let warning = format!(
-                "skipped special file {}: TAR.ZST backend only writes files, directories, and symlinks",
-                entry.archive_path
-            );
+            let warning = format!("skipped special file {}: TAR.ZST backend only writes files, directories, and symlinks", entry.archive_path);
             report.warnings.push(warning.clone());
             if let Some(context) = context.as_deref_mut() {
                 context.warning(warning);
@@ -683,42 +544,28 @@ fn append_manifest_entry<W: io::Write>(
     Ok(())
 }
 
-fn append_manifest_mtime<W: io::Write>(
-    builder: &mut Builder<W>,
-    entry: &ManifestEntry,
-    preserve_metadata: bool,
-) -> Result<(), TarZstdError> {
+fn append_manifest_mtime<W: io::Write>(builder: &mut Builder<W>, entry: &ManifestEntry, preserve_metadata: bool) -> Result<(), TarZstdError> {
     if !preserve_metadata || entry.file_type == ManifestFileType::Other {
         return Ok(());
     }
-    crate::tar_metadata::append_pax_mtime(builder, entry.modified)
-        .map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })
+    crate::tar_metadata::append_pax_mtime(builder, entry.modified).map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })
 }
 
-fn append_symlink<W: io::Write>(
-    builder: &mut Builder<W>,
-    entry: &ManifestEntry,
-    target: &Path,
-    preserve_metadata: bool,
-) -> Result<(), TarZstdError> {
+fn append_symlink<W: io::Write>(builder: &mut Builder<W>, entry: &ManifestEntry, target: &Path, preserve_metadata: bool) -> Result<(), TarZstdError> {
     let mut header = Header::new_gnu();
     header.set_entry_type(EntryType::Symlink);
     header.set_size(0);
     if preserve_metadata && let Some(mode) = entry.permissions.unix_mode {
         header.set_mode(mode & crate::extract_materialize::MODE_MASK);
     }
-    if preserve_metadata
-        && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds)
-    {
+    if preserve_metadata && let Some(modified) = entry.modified.and_then(crate::tar_metadata::system_time_to_unix_seconds) {
         header.set_mtime(modified);
     }
     if !preserve_metadata {
         header.set_mode(0o777);
         header.set_mtime(0);
     }
-    builder
-        .append_link(&mut header, &entry.archive_path, target)
-        .map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })
+    builder.append_link(&mut header, &entry.archive_path, target).map_err(|source| TarZstdError::Io { path: entry.source_path.clone(), source })
 }
 
 fn entry_path_string<R: Read>(entry: &tar::Entry<'_, R>) -> Result<String, TarZstdError> {
@@ -727,10 +574,7 @@ fn entry_path_string<R: Read>(entry: &tar::Entry<'_, R>) -> Result<String, TarZs
     Ok(path.to_string_lossy().into_owned())
 }
 
-fn extraction_kind<R: Read>(
-    entry: &mut tar::Entry<'_, R>,
-    archive_path: &str,
-) -> Result<ExtractionEntryKind, TarZstdError> {
+fn extraction_kind<R: Read>(entry: &mut tar::Entry<'_, R>, archive_path: &str) -> Result<ExtractionEntryKind, TarZstdError> {
     let entry_type = entry.header().entry_type();
 
     if entry_type.is_file() || entry_type.is_contiguous() {
@@ -742,18 +586,14 @@ fn extraction_kind<R: Read>(
     }
 
     if entry_type.is_symlink() {
-        let Some(target) =
-            entry.link_name().map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })?
-        else {
+        let Some(target) = entry.link_name().map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })? else {
             return Err(TarZstdError::MissingLinkTarget { archive_path: archive_path.to_owned() });
         };
         return Ok(ExtractionEntryKind::Symlink { target: target.into_owned() });
     }
 
     if entry_type.is_hard_link() {
-        let Some(target) =
-            entry.link_name().map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })?
-        else {
+        let Some(target) = entry.link_name().map_err(|source| TarZstdError::Io { path: PathBuf::from(archive_path), source })? else {
             return Err(TarZstdError::MissingLinkTarget { archive_path: archive_path.to_owned() });
         };
         return Ok(ExtractionEntryKind::Hardlink { target: target.into_owned() });
@@ -769,9 +609,7 @@ fn extraction_kind<R: Read>(
 // See `crate::tar_metadata::available_parallelism_at_least_two`.
 #[cfg(test)]
 mod tests {
-    use super::{
-        TarZstdCreateOptions, TarZstdError, create_tar_zst_from_path, extract_tar_zst, extract_tar_zst_with_context,
-    };
+    use super::{TarZstdCreateOptions, TarZstdError, create_tar_zst_from_path, extract_tar_zst, extract_tar_zst_with_context};
     use crate::jobs::{CancellationToken, JobContext, JobEvent};
     use crate::safety::{ExtractionPolicy, ExtractionSafetyError};
     use crate::test_support::TestDir;
@@ -788,8 +626,7 @@ mod tests {
         temp.write_file("project/hello cafe.txt", b"unicode");
         let archive = temp.path("archive.tar.zst");
 
-        let create_report =
-            create_tar_zst_from_path(temp.path("project"), &archive, &TarZstdCreateOptions::default()).unwrap();
+        let create_report = create_tar_zst_from_path(temp.path("project"), &archive, &TarZstdCreateOptions::default()).unwrap();
         let extract_report = extract_tar_zst(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
         assert_eq!(create_report.level, 3);
@@ -823,12 +660,7 @@ mod tests {
 
         let archive = temp.path("archive.tar.zst");
 
-        create_tar_zst_from_path(
-            temp.path("project"),
-            &archive,
-            &TarZstdCreateOptions { preserve_metadata: true, ..TarZstdCreateOptions::default() },
-        )
-        .unwrap();
+        create_tar_zst_from_path(temp.path("project"), &archive, &TarZstdCreateOptions { preserve_metadata: true, ..TarZstdCreateOptions::default() }).unwrap();
 
         extract_tar_zst(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
@@ -873,8 +705,7 @@ mod tests {
         let temp = TestDir::new("accepts_custom_compression_level_and_thread_count");
         temp.write_file("project/file.txt", b"content");
         let archive = temp.path("archive.tar.zst");
-        let options =
-            TarZstdCreateOptions { level: 1, threads: Some(1), preserve_metadata: true, replace_existing: false };
+        let options = TarZstdCreateOptions { level: 1, threads: Some(1), preserve_metadata: true, replace_existing: false };
 
         let report = create_tar_zst_from_path(temp.path("project"), archive, &options).unwrap();
 
@@ -913,8 +744,7 @@ mod tests {
         };
         let mut context = JobContext::new(&token, &mut sink);
 
-        let error = extract_tar_zst_with_context(&archive, temp.path("out"), ExtractionPolicy::default(), &mut context)
-            .unwrap_err();
+        let error = extract_tar_zst_with_context(&archive, temp.path("out"), ExtractionPolicy::default(), &mut context).unwrap_err();
 
         assert!(matches!(error, TarZstdError::Cancelled));
         assert!(events.iter().any(|event| matches!(event, JobEvent::BytesProcessed { .. })));

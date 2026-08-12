@@ -25,12 +25,9 @@ const THIRD_PARTY_NOTICE_GENERATOR: &str = include_str!("../../../scripts/genera
 const RUNTIME_DEPS_SH: &str = include_str!("../../../scripts/inspect-runtime-deps.sh");
 const CI_WINDOWS_PS1: &str = include_str!("../../../scripts/ci-windows.ps1");
 const HOMEBREW_TEMPLATE: &str = include_str!("../../../packaging/homebrew/zmanager.rb.template");
-const WINGET_INSTALLER_TEMPLATE: &str =
-    include_str!("../../../packaging/winget/TzapOrg.ZManagerCLI.installer.yaml.template");
-const WINGET_LOCALE_TEMPLATE: &str =
-    include_str!("../../../packaging/winget/TzapOrg.ZManagerCLI.locale.en-US.yaml.template");
-const PUBLIC_COMMANDS: &[&str] =
-    &["create", "extract", "list", "test", "plan", "formats", "doctor", "completions", "help"];
+const WINGET_INSTALLER_TEMPLATE: &str = include_str!("../../../packaging/winget/TzapOrg.ZManagerCLI.installer.yaml.template");
+const WINGET_LOCALE_TEMPLATE: &str = include_str!("../../../packaging/winget/TzapOrg.ZManagerCLI.locale.en-US.yaml.template");
+const PUBLIC_COMMANDS: &[&str] = &["create", "extract", "list", "test", "plan", "formats", "doctor", "completions", "help"];
 const LEGACY_COMMANDS: &[&str] = &[
     "job-zip-create",
     "job-source-fast",
@@ -120,25 +117,9 @@ const EXTRACT_FLAGS: &[&str] = &[
     "--allow-degraded",
 ];
 
-const LIST_FLAGS: &[&str] = &[
-    "-l, --long",
-    "--name-only",
-    "--tree",
-    "-i, --include <glob>",
-    "--exclude <glob>",
-    "--password-stdin",
-    "--recipient-key <file>",
-];
+const LIST_FLAGS: &[&str] = &["-l, --long", "--name-only", "--tree", "-i, --include <glob>", "--exclude <glob>", "--password-stdin", "--recipient-key <file>"];
 
-const TEST_FLAGS: &[&str] = &[
-    "-i, --include <glob>",
-    "--exclude <glob>",
-    "--password-stdin",
-    "--recipient-key <file>",
-    "--public-no-key",
-    "--trusted-ca-cert <file>",
-    "--trusted-system-roots",
-];
+const TEST_FLAGS: &[&str] = &["-i, --include <glob>", "--exclude <glob>", "--password-stdin", "--recipient-key <file>", "--public-no-key", "--trusted-ca-cert <file>", "--trusted-system-roots"];
 
 const PLAN_FLAGS: &[&str] = &[
     "--format <zip|tar.zst|tzap|aar|7z|tgz>",
@@ -165,56 +146,17 @@ const CREATE_HELP_NEEDLES: &[&str] = &[
     "printf '%s\\n'",
 ];
 
-const EXTRACT_HELP_NEEDLES: &[&str] = &[
-    "Extract supported archives",
-    "zm extract <archive> [-C dir]",
-    "--overwrite <never|always|ask|rename>",
-    "--extract-nested",
-    FILTER_GLOB_NOTE,
-    "printf '%s\\n'",
-];
+const EXTRACT_HELP_NEEDLES: &[&str] = &["Extract supported archives", "zm extract <archive> [-C dir]", "--overwrite <never|always|ask|rename>", "--extract-nested", FILTER_GLOB_NOTE, "printf '%s\\n'"];
 
-const LIST_HELP_NEEDLES: &[&str] =
-    &["List archive contents", "zm list <archive>", "--name-only", "--tree", FILTER_GLOB_NOTE, "printf '%s\\n'"];
+const LIST_HELP_NEEDLES: &[&str] = &["List archive contents", "zm list <archive>", "--name-only", "--tree", FILTER_GLOB_NOTE, "printf '%s\\n'"];
 
-const TEST_HELP_NEEDLES: &[&str] = &[
-    "Verify archive readability",
-    "zm test <archive>",
-    "--include <glob>",
-    "--public-no-key",
-    "--json",
-    FILTER_GLOB_NOTE,
-    "printf '%s\\n'",
-];
+const TEST_HELP_NEEDLES: &[&str] = &["Verify archive readability", "zm test <archive>", "--include <glob>", "--public-no-key", "--json", FILTER_GLOB_NOTE, "printf '%s\\n'"];
 
-const PLAN_HELP_NEEDLES: &[&str] = &[
-    "Show what create would archive",
-    "zm plan <paths...>",
-    "--files-from <file|->",
-    "--exclude-from <file>",
-    FILTER_GLOB_NOTE,
-    "zm plan project/",
-];
+const PLAN_HELP_NEEDLES: &[&str] = &["Show what create would archive", "zm plan <paths...>", "--files-from <file|->", "--exclude-from <file>", FILTER_GLOB_NOTE, "zm plan project/"];
 
-const FORMATS_HELP_NEEDLES: &[&str] = &[
-    "Show supported archive formats",
-    "Create:",
-    "Extract/List/Test:",
-    "raw single-file streams",
-    "zm formats --json",
-    ".tar.zst, .tzst",
-    ".tzap",
-    ".tgz, .tar.gz",
-];
+const FORMATS_HELP_NEEDLES: &[&str] = &["Show supported archive formats", "Create:", "Extract/List/Test:", "raw single-file streams", "zm formats --json", ".tar.zst, .tzst", ".tzap", ".tgz, .tar.gz"];
 
-const DOCTOR_HELP_NEEDLES: &[&str] = &[
-    "Verify the installed CLI and archive engine",
-    "zm doctor",
-    "--json",
-    "bug reports",
-    "zm doctor --json",
-    "Use --json",
-];
+const DOCTOR_HELP_NEEDLES: &[&str] = &["Verify the installed CLI and archive engine", "zm doctor", "--json", "bug reports", "zm doctor --json", "Use --json"];
 
 const COMPLETIONS_HELP_NEEDLES: &[&str] = &[
     "Print shell completion scripts",
@@ -260,12 +202,7 @@ fn top_level_help_is_user_facing_and_hides_legacy_commands() {
     assert_contains(&stdout, "--color <auto|always|never>");
     assert_contains(&stdout, "--progress <auto|always|never>");
     assert_contains(&stdout, "--no-password-prompt");
-    assert!(
-        !stdout.contains("zip-create")
-            && !stdout.contains("Legacy development commands")
-            && !stdout.contains("help legacy"),
-        "top-level help should not expose development commands\n{stdout}"
-    );
+    assert!(!stdout.contains("zip-create") && !stdout.contains("Legacy development commands") && !stdout.contains("help legacy"), "top-level help should not expose development commands\n{stdout}");
 }
 
 #[test]
@@ -313,13 +250,11 @@ fn color_modes_and_no_color_env_control_help_styling() {
     assert_success("zm --color never --help", &never);
     assert_not_contains(&String::from_utf8_lossy(&never.stdout), "\x1b[");
 
-    let no_color_auto =
-        Command::new(zm_path()).env("NO_COLOR", "1").arg("--color").arg("auto").arg("--help").output().unwrap();
+    let no_color_auto = Command::new(zm_path()).env("NO_COLOR", "1").arg("--color").arg("auto").arg("--help").output().unwrap();
     assert_success("NO_COLOR=1 zm --color auto --help", &no_color_auto);
     assert_not_contains(&String::from_utf8_lossy(&no_color_auto.stdout), "\x1b[");
 
-    let no_color_always =
-        Command::new(zm_path()).env("NO_COLOR", "1").arg("--color").arg("always").arg("--help").output().unwrap();
+    let no_color_always = Command::new(zm_path()).env("NO_COLOR", "1").arg("--color").arg("always").arg("--help").output().unwrap();
     assert_success("NO_COLOR=1 zm --color always --help", &no_color_always);
     assert_contains(&String::from_utf8_lossy(&no_color_always.stdout), "\x1b[");
 }
@@ -438,14 +373,8 @@ fn static_completion_files_capture_navigation_contract() {
         assert_contains(completion, "powershell");
     }
 
-    assert_contains(
-        COMPLETION_BASH,
-        "local help_topics=\"create extract list test plan formats auth me cert device sign verify contact share doctor completions\"",
-    );
-    assert_contains(
-        COMPLETION_FISH,
-        "set -l zm_help_topics create extract list test plan formats auth me cert device sign verify contact share doctor completions",
-    );
+    assert_contains(COMPLETION_BASH, "local help_topics=\"create extract list test plan formats auth me cert device sign verify contact share doctor completions\"");
+    assert_contains(COMPLETION_FISH, "set -l zm_help_topics create extract list test plan formats auth me cert device sign verify contact share doctor completions");
     assert_contains(COMPLETION_ZSH, "help_topics=(");
     assert_contains(
         COMPLETION_POWERSHELL,
@@ -507,10 +436,7 @@ run_case list_files zm list ""
     assert_success("bash completion contract", &output);
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert_contains(&stdout, "top: help\n");
-    assert_contains(
-        &stdout,
-        "help_topics: create extract list test plan formats auth me cert device sign verify contact share doctor completions\n",
-    );
+    assert_contains(&stdout, "help_topics: create extract list test plan formats auth me cert device sign verify contact share doctor completions\n");
     assert_contains(&stdout, "list_options: --help");
     assert_contains(&stdout, "--tree");
     assert_contains(&stdout, "create_options: --help");
@@ -521,20 +447,12 @@ run_case list_files zm list ""
     assert_contains(&stdout, "auth_options: --help");
     assert_contains(&stdout, "completion_shells: bash zsh fish powershell\n");
     assert_contains(&stdout, "list_files: archive.zip\n");
-    assert_not_contains(
-        &stdout,
-        "help_topics: create extract list test plan formats auth me cert device sign verify contact share doctor completions help",
-    );
+    assert_not_contains(&stdout, "help_topics: create extract list test plan formats auth me cert device sign verify contact share doctor completions help");
 }
 
 #[test]
 fn completions_command_prints_packaged_completion_scripts() {
-    for (shell, expected) in [
-        ("bash", COMPLETION_BASH),
-        ("zsh", COMPLETION_ZSH),
-        ("fish", COMPLETION_FISH),
-        ("powershell", COMPLETION_POWERSHELL),
-    ] {
+    for (shell, expected) in [("bash", COMPLETION_BASH), ("zsh", COMPLETION_ZSH), ("fish", COMPLETION_FISH), ("powershell", COMPLETION_POWERSHELL)] {
         let output = Command::new(zm_path()).arg("completions").arg(shell).output().unwrap();
         assert_success(&format!("zm completions {shell}"), &output);
         assert!(output.stderr.is_empty(), "completion output should not use stderr");
@@ -557,15 +475,9 @@ fn release_packaging_generates_third_party_notices() {
         assert_contains(CI_WINDOWS_PS1, required);
     }
 
-    for required in [
-        "cargo metadata",
-        "vendor/libarchive/libarchive-3.8.9/COPYING",
-        "vendor/unrar/license.txt",
-        "VCPKG_PORTS",
-        "Rust Crate License Inventory",
-        "License: Apache-2.0",
-        "Notice file: NOTICE",
-    ] {
+    for required in
+        ["cargo metadata", "vendor/libarchive/libarchive-3.8.9/COPYING", "vendor/unrar/license.txt", "VCPKG_PORTS", "Rust Crate License Inventory", "License: Apache-2.0", "Notice file: NOTICE"]
+    {
         assert_contains(THIRD_PARTY_NOTICE_GENERATOR, required);
     }
 
@@ -623,13 +535,7 @@ fn package_channel_metadata_uses_release_checksums() {
         assert_contains(PACKAGE_METADATA_SH, target_constant);
     }
 
-    for required in [
-        "SHA256SUMS",
-        "package-metadata/homebrew/Formula/zmanager.rb",
-        "package-metadata\\winget\\TzapOrg.ZManagerCLI",
-        "brew install tzap-org/zmanager/zmanager",
-        "winget validate",
-    ] {
+    for required in ["SHA256SUMS", "package-metadata/homebrew/Formula/zmanager.rb", "package-metadata\\winget\\TzapOrg.ZManagerCLI", "brew install tzap-org/zmanager/zmanager", "winget validate"] {
         assert_contains(INSTALL_DOC, required);
     }
 
@@ -645,9 +551,7 @@ fn package_channel_metadata_uses_release_checksums() {
 fn release_validation_artifacts_are_declared() {
     assert_eq!(env!("CARGO_PKG_VERSION"), "2.0.1");
 
-    for required in
-        ["*.deps.txt", "package-metadata.tar.gz", "SHA256SUMS", "sha256sum package-metadata.tar.gz >> SHA256SUMS"]
-    {
+    for required in ["*.deps.txt", "package-metadata.tar.gz", "SHA256SUMS", "sha256sum package-metadata.tar.gz >> SHA256SUMS"] {
         assert_contains(RELEASE_WORKFLOW, required);
     }
 
@@ -679,14 +583,7 @@ fn package_preview_uploads_artifacts_without_publishing_release() {
         assert_contains(PACKAGE_PREVIEW_WORKFLOW, required);
     }
 
-    for forbidden in [
-        "contents: write",
-        "gh release create",
-        "actions/download-artifact",
-        "scripts/package-deb.sh",
-        "dist/zmanager-cli_*.deb",
-        "matrix.deb_arch",
-    ] {
+    for forbidden in ["contents: write", "gh release create", "actions/download-artifact", "scripts/package-deb.sh", "dist/zmanager-cli_*.deb", "matrix.deb_arch"] {
         assert_not_contains(PACKAGE_PREVIEW_WORKFLOW, forbidden);
     }
 }
@@ -696,59 +593,32 @@ fn tool_dependent_release_compatibility_validation_is_declared() {
     assert_contains(RELEASE_DOC, "scripts/release-compatibility-check.sh");
     assert_contains(RELEASE_DOC, "fully provisioned validation");
 
-    for required in [
-        "cargo test -p zmanager-cli --test compat_formats_cli -- --nocapture",
-        "require_any_tool \"7zz or 7z\" 7zz 7z",
-        "rar",
-        "zip",
-        "zstd",
-        "bsdtar",
-        "dpkg-deb",
-        "rpmbuild",
-    ] {
+    for required in ["cargo test -p zmanager-cli --test compat_formats_cli -- --nocapture", "require_any_tool \"7zz or 7z\" 7zz 7z", "rar", "zip", "zstd", "bsdtar", "dpkg-deb", "rpmbuild"] {
         assert_contains(RELEASE_COMPATIBILITY_SH, required);
     }
 }
 
 #[test]
 fn linux_release_artifacts_are_static_tarballs() {
-    for required in [
-        "*-unknown-linux-musl",
-        "zig is required",
-        "zig cc -target $musl_abi",
-        "CARGO_TARGET_${target_env_upper}_LINKER",
-    ] {
+    for required in ["*-unknown-linux-musl", "zig is required", "zig cc -target $musl_abi", "CARGO_TARGET_${target_env_upper}_LINKER"] {
         assert_contains(PACKAGE_RELEASE_SH, required);
     }
 
-    for required in [
-        "readelf is required to verify static Linux release artifacts",
-        "static Linux runtime dependency inspection failed",
-    ] {
+    for required in ["readelf is required to verify static Linux release artifacts", "static Linux runtime dependency inspection failed"] {
         assert_contains(RUNTIME_DEPS_SH, required);
     }
 
-    for required in [
-        "zm-x86_64-unknown-linux-musl.tar.gz",
-        "zm-aarch64-unknown-linux-musl.tar.gz",
-        "Linux release archives are statically linked musl builds",
-        "without installing extra runtime packages",
-    ] {
+    for required in
+        ["zm-x86_64-unknown-linux-musl.tar.gz", "zm-aarch64-unknown-linux-musl.tar.gz", "Linux release archives are statically linked musl builds", "without installing extra runtime packages"]
+    {
         assert_contains(INSTALL_DOC, required);
     }
 
-    for required in [
-        "target: x86_64-unknown-linux-musl",
-        "target: aarch64-unknown-linux-musl",
-        "musl-tools",
-        "sha256sum *.tar.gz *.zip *.deps.txt > SHA256SUMS",
-    ] {
+    for required in ["target: x86_64-unknown-linux-musl", "target: aarch64-unknown-linux-musl", "musl-tools", "sha256sum *.tar.gz *.zip *.deps.txt > SHA256SUMS"] {
         assert_contains(RELEASE_WORKFLOW, required);
     }
 
-    for forbidden in
-        ["scripts/package-deb.sh", "deb_arch:", "release-artifacts/*.deb", "zmanager-cli-${{ matrix.deb_arch }}-deb"]
-    {
+    for forbidden in ["scripts/package-deb.sh", "deb_arch:", "release-artifacts/*.deb", "zmanager-cli-${{ matrix.deb_arch }}-deb"] {
         assert_not_contains(RELEASE_WORKFLOW, forbidden);
         assert_not_contains(PACKAGE_PREVIEW_WORKFLOW, forbidden);
     }
@@ -758,10 +628,7 @@ fn linux_release_artifacts_are_static_tarballs() {
 fn libarchive_cmake_vcpkg_toolchain_is_windows_msvc_only() {
     let build_rs = normalize_newlines(LIBARCHIVE_SYS_BUILD_RS);
 
-    for required in [
-        "if !target_uses_vcpkg(target) {\n        return;\n    }",
-        "fn target_uses_vcpkg(target: &str) -> bool {\n    target.contains(\"windows\") && target.contains(\"msvc\")\n}",
-    ] {
+    for required in ["if !target_uses_vcpkg(target) {\n        return;\n    }", "fn target_uses_vcpkg(target: &str) -> bool {\n    target.contains(\"windows\") && target.contains(\"msvc\")\n}"] {
         assert_contains(&build_rs, required);
     }
 }
@@ -773,16 +640,11 @@ fn linux_ci_and_release_builds_use_ubuntu_22_04_baseline() {
     let release_package_job = section_between(&release_workflow, "  package:\n", "\n  publish:\n");
     let ci_test_job = section_between(&ci_workflow, "  test:\n", "\n  windows-test:\n");
 
-    for required in [
-        "- os: ubuntu-22.04\n            target: x86_64-unknown-linux-musl",
-        "- os: ubuntu-22.04-arm\n            target: aarch64-unknown-linux-musl",
-    ] {
+    for required in ["- os: ubuntu-22.04\n            target: x86_64-unknown-linux-musl", "- os: ubuntu-22.04-arm\n            target: aarch64-unknown-linux-musl"] {
         assert_contains(&release_package_job, required);
     }
 
-    for required in
-        ["name: Linux x86_64\n            os: ubuntu-22.04", "name: Linux ARM64\n            os: ubuntu-22.04-arm"]
-    {
+    for required in ["name: Linux x86_64\n            os: ubuntu-22.04", "name: Linux ARM64\n            os: ubuntu-22.04-arm"] {
         assert_contains(&ci_test_job, required);
     }
 
@@ -805,14 +667,7 @@ fn windows_ci_and_release_builds_use_static_crt() {
         assert_not_contains(workflow, "triplet: arm64-windows-static-md");
     }
 
-    for required in [
-        "-C target-feature=+crt-static",
-        "RUSTFLAGS",
-        "static Windows runtime dependency inspection failed",
-        "MSVCP[0-9]+\\.dll",
-        "VCRUNTIME[0-9_]*\\.dll",
-        "api-ms-win-crt-.*\\.dll",
-    ] {
+    for required in ["-C target-feature=+crt-static", "RUSTFLAGS", "static Windows runtime dependency inspection failed", "MSVCP[0-9]+\\.dll", "VCRUNTIME[0-9_]*\\.dll", "api-ms-win-crt-.*\\.dll"] {
         assert_contains(CI_WINDOWS_PS1, required);
     }
 }
@@ -864,11 +719,7 @@ fn assert_help_contains(args: &[&str], needles: &[&str]) {
 }
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("zmanager-cli crate should be inside the CLI workspace")
-        .to_path_buf()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().and_then(|path| path.parent()).expect("zmanager-cli crate should be inside the CLI workspace").to_path_buf()
 }
 
 fn command_available(command: &str) -> bool {
@@ -876,13 +727,7 @@ fn command_available(command: &str) -> bool {
 }
 
 fn assert_usage_failure(label: &str, output: &std::process::Output) {
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "{label} did not fail with usage status\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(output.status.code(), Some(2), "{label} did not fail with usage status\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
 }
 
 fn assert_contains(haystack: &str, needle: &str) {
@@ -901,7 +746,6 @@ fn section_between(haystack: &str, start: &str, end: &str) -> String {
     let normalized = normalize_newlines(haystack);
     let start_index = normalized.find(start).unwrap_or_else(|| panic!("section start not found: {start:?}"));
     let section_start = start_index + start.len();
-    let relative_end =
-        normalized[section_start..].find(end).unwrap_or_else(|| panic!("section end not found: {end:?}"));
+    let relative_end = normalized[section_start..].find(end).unwrap_or_else(|| panic!("section end not found: {end:?}"));
     normalized[section_start..section_start + relative_end].to_owned()
 }

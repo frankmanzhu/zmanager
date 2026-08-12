@@ -46,10 +46,7 @@ pub(crate) fn is_archive_root_directory(path: &str, kind: &ExtractionEntryKind) 
 /// This is the pure link-creation part of the backends' deferred-hardlink
 /// passes; report bookkeeping is left to the caller.
 pub(crate) fn materialize_deferred_hardlinks(hardlinks: &[DeferredHardlink]) -> io::Result<()> {
-    let paths = hardlinks
-        .iter()
-        .map(|hardlink| (hardlink.source_path.clone(), hardlink.destination_path.clone()))
-        .collect::<Vec<_>>();
+    let paths = hardlinks.iter().map(|hardlink| (hardlink.source_path.clone(), hardlink.destination_path.clone())).collect::<Vec<_>>();
     let order = crate::safety::deferred_link_dependency_order(&paths)?;
     for index in order {
         let hardlink = &hardlinks[index];

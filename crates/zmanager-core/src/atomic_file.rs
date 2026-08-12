@@ -27,32 +27,21 @@ impl AtomicOutputFile {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
 
         for attempt in 0..MAX_TEMP_ATTEMPTS {
-            let temp_path =
-                parent.join(format!("{TEMP_PREFIX}-{file_name}-{}-{now}-{attempt}{TEMP_SUFFIX}", std::process::id()));
+            let temp_path = parent.join(format!("{TEMP_PREFIX}-{file_name}-{}-{now}-{attempt}{TEMP_SUFFIX}", std::process::id()));
             match OpenOptions::new().write(true).create_new(true).open(&temp_path) {
                 Ok(file) => {
-                    return Ok(Self {
-                        final_path: final_path.to_path_buf(),
-                        temp_path,
-                        file: Some(file),
-                        committed: false,
-                    });
+                    return Ok(Self { final_path: final_path.to_path_buf(), temp_path, file: Some(file), committed: false });
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
             }
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("could not allocate temporary output path for {}", final_path.display()),
-        ))
+        Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("could not allocate temporary output path for {}", final_path.display())))
     }
 
     pub(crate) fn file_mut(&mut self) -> io::Result<&mut File> {
-        self.file.as_mut().ok_or_else(|| {
-            io::Error::other(format!("temporary output already finalized for {}", self.final_path.display()))
-        })
+        self.file.as_mut().ok_or_else(|| io::Error::other(format!("temporary output already finalized for {}", self.final_path.display())))
     }
 
     pub(crate) fn temp_path(&self) -> &Path {
@@ -77,10 +66,7 @@ impl AtomicOutputFile {
                 Ok(()) => {
                     let _ = fs::remove_file(&self.temp_path);
                 }
-                Err(error)
-                    if matches!(error.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported)
-                        && !self.final_path.exists() =>
-                {
+                Err(error) if matches!(error.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) && !self.final_path.exists() => {
                     // Some app sandboxes (notably Android app filesystems)
                     // reject hard links even within one directory. The
                     // destination was validated as absent, so a same-volume
@@ -109,14 +95,11 @@ impl AtomicOutputFile {
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
-            use windows_sys::Win32::Storage::FileSystem::{
-                MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-            };
+            use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
 
             let from: Vec<u16> = self.temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
             let to: Vec<u16> = self.final_path.as_os_str().encode_wide().chain(Some(0)).collect();
-            let result =
-                unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+            let result = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
             if result == 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -150,8 +133,7 @@ impl TemporaryFile {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |duration| duration.as_nanos());
 
         for attempt in 0..MAX_TEMP_ATTEMPTS {
-            let path =
-                parent.join(format!("{TEMP_PREFIX}-{label}-{}-{now}-{attempt}{TEMP_SUFFIX}", std::process::id()));
+            let path = parent.join(format!("{TEMP_PREFIX}-{label}-{}-{now}-{attempt}{TEMP_SUFFIX}", std::process::id()));
             match OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
                 Ok(file) => return Ok(Self { path, file }),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -230,10 +212,7 @@ pub(crate) fn write_atomic_secret_file(path: &Path, bytes: &[u8]) -> io::Result<
         return Ok(());
     }
 
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        format!("could not allocate temporary secret file for {}", path.display()),
-    ))
+    Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("could not allocate temporary secret file for {}", path.display())))
 }
 
 #[cfg(not(windows))]
@@ -267,10 +246,7 @@ fn remove_file_destination_for_replace(path: &Path) -> io::Result<()> {
     };
 
     if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::IsADirectory,
-            format!("cannot replace directory {}", path.display()),
-        ));
+        return Err(io::Error::new(io::ErrorKind::IsADirectory, format!("cannot replace directory {}", path.display())));
     }
 
     fs::remove_file(path)

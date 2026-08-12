@@ -2,13 +2,10 @@
 //! private module internals live inside the module they belong to.
 
 use super::{
-    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapPublicSignatureStatus,
-    TzapRestoreOptions, TzapRestorePolicy, TzapX509SigningOptions, TzapX509TrustOptions, copy_tzap_file_to_writer,
-    copy_tzap_files_to_writer, create_tzap_from_manifest_with_context, extract_tzap, extract_tzap_file_to_destination,
-    list_tzap_index_with_optional_password, list_tzap_with_optional_password, list_tzap_with_password,
-    list_tzap_with_recipient_key, summarize_tzap_public_display, summarize_tzap_public_metadata,
-    test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust,
-    verify_tzap_x509_public_no_key,
+    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapPublicSignatureStatus, TzapRestoreOptions, TzapRestorePolicy, TzapX509SigningOptions, TzapX509TrustOptions,
+    copy_tzap_file_to_writer, copy_tzap_files_to_writer, create_tzap_from_manifest_with_context, extract_tzap, extract_tzap_file_to_destination, list_tzap_index_with_optional_password,
+    list_tzap_with_optional_password, list_tzap_with_password, list_tzap_with_recipient_key, summarize_tzap_public_display, summarize_tzap_public_metadata,
+    test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
 };
 use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
@@ -44,9 +41,7 @@ fn unix_process_is_elevated() -> bool {
 fn create_windows_relative_symlink(path: &Path, target: &str) {
     use std::os::windows::fs::OpenOptionsExt as _;
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-    };
+    use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE};
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
 
@@ -71,61 +66,29 @@ fn create_windows_relative_symlink(path: &Path, target: &str) {
         reparse.extend_from_slice(&unit.to_le_bytes());
     }
 
-    let file = fs::OpenOptions::new()
-        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-        .unwrap();
+    let file = fs::OpenOptions::new().access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(path).unwrap();
     let mut returned = 0u32;
-    let result = unsafe {
-        DeviceIoControl(
-            file.as_raw_handle().cast(),
-            FSCTL_SET_REPARSE_POINT,
-            reparse.as_ptr().cast(),
-            reparse.len() as u32,
-            std::ptr::null_mut(),
-            0,
-            &mut returned,
-            std::ptr::null_mut(),
-        )
-    };
+    let result =
+        unsafe { DeviceIoControl(file.as_raw_handle().cast(), FSCTL_SET_REPARSE_POINT, reparse.as_ptr().cast(), reparse.len() as u32, std::ptr::null_mut(), 0, &mut returned, std::ptr::null_mut()) };
     assert_ne!(result, 0, "failed to create relative symlink fixture: {}", std::io::Error::last_os_error());
 }
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn windows_basic_info(
-    path: &Path,
-    directory: bool,
-    reparse_point: bool,
-) -> windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO {
+fn windows_basic_info(path: &Path, directory: bool, reparse_point: bool) -> windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO {
     use std::mem::size_of;
     use std::os::windows::fs::OpenOptionsExt as _;
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FileBasicInfo,
-        GetFileInformationByHandleEx,
-    };
+    use windows_sys::Win32::Storage::FileSystem::{FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FileBasicInfo, GetFileInformationByHandleEx};
 
     let mut flags = if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 };
     if reparse_point {
         flags |= FILE_FLAG_OPEN_REPARSE_POINT;
     }
-    let file = fs::OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES)
-        .custom_flags(flags)
-        .open(path)
-        .unwrap_or_else(|error| panic!("failed to open {} for basic-info read: {error}", path.display()));
+    let file = fs::OpenOptions::new().access_mode(FILE_READ_ATTRIBUTES).custom_flags(flags).open(path).unwrap_or_else(|error| panic!("failed to open {} for basic-info read: {error}", path.display()));
     let mut info = FILE_BASIC_INFO::default();
     assert_ne!(
-        unsafe {
-            GetFileInformationByHandleEx(
-                file.as_raw_handle().cast(),
-                FileBasicInfo,
-                (&mut info as *mut FILE_BASIC_INFO).cast(),
-                size_of::<FILE_BASIC_INFO>() as u32,
-            )
-        },
+        unsafe { GetFileInformationByHandleEx(file.as_raw_handle().cast(), FileBasicInfo, (&mut info as *mut FILE_BASIC_INFO).cast(), size_of::<FILE_BASIC_INFO>() as u32,) },
         0,
         "failed to read basic info for {}: {}",
         path.display(),
@@ -136,38 +99,20 @@ fn windows_basic_info(
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn set_windows_basic_info(
-    path: &Path,
-    directory: bool,
-    reparse_point: bool,
-    info: windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO,
-) {
+fn set_windows_basic_info(path: &Path, directory: bool, reparse_point: bool, info: windows_sys::Win32::Storage::FileSystem::FILE_BASIC_INFO) {
     use std::mem::size_of;
     use std::os::windows::fs::OpenOptionsExt as _;
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_WRITE_ATTRIBUTES,
-        FileBasicInfo, SetFileInformationByHandle,
-    };
+    use windows_sys::Win32::Storage::FileSystem::{FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_WRITE_ATTRIBUTES, FileBasicInfo, SetFileInformationByHandle};
 
     let mut flags = if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 };
     if reparse_point {
         flags |= FILE_FLAG_OPEN_REPARSE_POINT;
     }
-    let file = fs::OpenOptions::new()
-        .access_mode(FILE_WRITE_ATTRIBUTES)
-        .custom_flags(flags)
-        .open(path)
-        .unwrap_or_else(|error| panic!("failed to open {} for basic-info write: {error}", path.display()));
+    let file =
+        fs::OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES).custom_flags(flags).open(path).unwrap_or_else(|error| panic!("failed to open {} for basic-info write: {error}", path.display()));
     assert_ne!(
-        unsafe {
-            SetFileInformationByHandle(
-                file.as_raw_handle().cast(),
-                FileBasicInfo,
-                (&info as *const FILE_BASIC_INFO).cast(),
-                size_of::<FILE_BASIC_INFO>() as u32,
-            )
-        },
+        unsafe { SetFileInformationByHandle(file.as_raw_handle().cast(), FileBasicInfo, (&info as *const FILE_BASIC_INFO).cast(), size_of::<FILE_BASIC_INFO>() as u32,) },
         0,
         "failed to set basic info for {}: {}",
         path.display(),
@@ -189,15 +134,7 @@ fn windows_process_is_elevated() -> bool {
     }
     let mut elevation = TOKEN_ELEVATION::default();
     let mut returned = 0u32;
-    let result = unsafe {
-        GetTokenInformation(
-            token,
-            TokenElevation,
-            (&mut elevation as *mut TOKEN_ELEVATION).cast(),
-            size_of::<TOKEN_ELEVATION>() as u32,
-            &mut returned,
-        )
-    };
+    let result = unsafe { GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut returned) };
     unsafe {
         CloseHandle(token);
     }
@@ -211,16 +148,10 @@ fn windows_security_descriptor(path: &Path, directory: bool) -> Vec<u8> {
     use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
-    use windows_sys::Win32::Security::{
-        DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, GetSecurityDescriptorLength, OWNER_SECURITY_INFORMATION,
-    };
+    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, GetSecurityDescriptorLength, OWNER_SECURITY_INFORMATION};
     use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT};
 
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 })
-        .open(path)
-        .unwrap();
+    let file = fs::OpenOptions::new().read(true).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 }).open(path).unwrap();
     let mut descriptor = std::ptr::null_mut();
     let status = unsafe {
         GetSecurityInfo(
@@ -266,16 +197,8 @@ fn windows_security_descriptors_equivalent(expected: &[u8], actual: &[u8]) -> bo
     if (expected_control ^ actual_control) & !ignorable != 0 {
         return false;
     }
-    for (offset_field, acl, represented) in [
-        (4usize, false, true),
-        (8, false, true),
-        (12, true, expected_control & SACL_PRESENT != 0),
-        (16, true, expected_control & DACL_PRESENT != 0),
-    ] {
-        if represented
-            && security_descriptor_component(expected, offset_field, acl)
-                != security_descriptor_component(actual, offset_field, acl)
-        {
+    for (offset_field, acl, represented) in [(4usize, false, true), (8, false, true), (12, true, expected_control & SACL_PRESENT != 0), (16, true, expected_control & DACL_PRESENT != 0)] {
+        if represented && security_descriptor_component(expected, offset_field, acl) != security_descriptor_component(actual, offset_field, acl) {
             return false;
         }
     }
@@ -301,20 +224,14 @@ fn security_descriptor_component(descriptor: &[u8], offset_field: usize, acl: bo
 
 use tzap_core::format::{CRITICAL_METADATA_RECOVERY_HEADER_LEN, CRITICAL_RECOVERY_LOCATOR_LEN, FormatError};
 use tzap_core::wire::CriticalRecoveryLocator;
-use tzap_core::{
-    KdfParams, MasterKey, RegularFile, RootAuthWriterConfig, WriterOptions, write_archive_with_kdf,
-    write_archive_with_root_auth,
-};
+use tzap_core::{KdfParams, MasterKey, RegularFile, RootAuthWriterConfig, WriterOptions, write_archive_with_kdf, write_archive_with_root_auth};
 use tzap_plugin_signing::x509_chain::{X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT, X509RootAuthSigner};
 
 #[test]
 fn selected_extract_uses_seekable_core_for_numbered_volumes() {
     let temp = TestDir::new("tzap_seekable_selected");
     let large = vec![7u8; 1024 * 1024];
-    let archive = create_test_tzap_archive(&[
-        RegularFile::new("large.bin", &large),
-        RegularFile::new("nested/small.txt", b"small target"),
-    ]);
+    let archive = create_test_tzap_archive(&[RegularFile::new("large.bin", &large), RegularFile::new("nested/small.txt", b"small target")]);
     for (index, volume) in archive.volumes.iter().enumerate() {
         fs::write(temp.path(format!("sample.vol{index:03}.tzap")), volume).unwrap();
     }
@@ -324,16 +241,9 @@ fn selected_extract_uses_seekable_core_for_numbered_volumes() {
     assert!(listing.entries.iter().any(|entry| entry.path == "nested/small.txt"));
 
     let destination = temp.path("out/selected.txt");
-    let written = extract_tzap_file_to_destination(
-        &selected_volume_path,
-        TzapExtractKeySource::Password("secret"),
-        "nested/small.txt",
-        &destination,
-        false,
-        TzapRestoreOptions::default(),
-    )
-    .unwrap()
-    .map(|report| report.written_bytes);
+    let written = extract_tzap_file_to_destination(&selected_volume_path, TzapExtractKeySource::Password("secret"), "nested/small.txt", &destination, false, TzapRestoreOptions::default())
+        .unwrap()
+        .map(|report| report.written_bytes);
 
     assert_eq!(written, Some(12));
     assert_eq!(fs::read(&destination).unwrap(), b"small target");
@@ -466,24 +376,19 @@ fn index_listing_matches_full_paths_kinds_and_sizes_and_exact_copy_skips_full_en
     let token = CancellationToken::new();
     let mut events = |_| {};
     let mut context = JobContext::new(&token, &mut events);
-    create_tzap_from_manifest_with_context(&manifest, &archive, &public_metadata_create_options(), &mut context)
-        .unwrap();
+    create_tzap_from_manifest_with_context(&manifest, &archive, &public_metadata_create_options(), &mut context).unwrap();
 
     let full = list_tzap_with_optional_password(&archive, None).unwrap();
     let indexed = list_tzap_index_with_optional_password(&archive, None).unwrap();
     let mut full_facts = full.entries.into_iter().map(|entry| (entry.path, entry.kind, entry.size)).collect::<Vec<_>>();
-    let mut indexed_facts =
-        indexed.entries.iter().map(|entry| (entry.path.clone(), entry.kind, entry.size)).collect::<Vec<_>>();
+    let mut indexed_facts = indexed.entries.iter().map(|entry| (entry.path.clone(), entry.kind, entry.size)).collect::<Vec<_>>();
     full_facts.sort_by(|left, right| left.0.cmp(&right.0));
     indexed_facts.sort_by(|left, right| left.0.cmp(&right.0));
     assert_eq!(indexed_facts, full_facts);
-    assert!(indexed.entries.iter().all(|entry| {
-        if entry.kind == super::TzapEntryKind::File && entry.size > 0 { entry.compressed_size > 0 } else { true }
-    }));
+    assert!(indexed.entries.iter().all(|entry| { if entry.kind == super::TzapEntryKind::File && entry.size > 0 { entry.compressed_size > 0 } else { true } }));
 
     let mut copied = Vec::new();
-    let report =
-        copy_tzap_file_to_writer(&archive, TzapExtractKeySource::None, "folder/payload.txt", &mut copied).unwrap();
+    let report = copy_tzap_file_to_writer(&archive, TzapExtractKeySource::None, "folder/payload.txt", &mut copied).unwrap();
     assert_eq!(copied, b"payload");
     assert_eq!(report.written_entries, 1);
     assert_eq!(report.written_bytes, 7);
@@ -492,9 +397,7 @@ fn index_listing_matches_full_paths_kinds_and_sizes_and_exact_copy_skips_full_en
 #[test]
 #[ignore = "performance characterization harness; set ZMANAGER_PERF_ARCHIVE"]
 fn characterize_full_and_index_tzap_listing() {
-    let archive = std::env::var_os("ZMANAGER_PERF_ARCHIVE")
-        .map(PathBuf::from)
-        .expect("set ZMANAGER_PERF_ARCHIVE to a local .tzap fixture");
+    let archive = std::env::var_os("ZMANAGER_PERF_ARCHIVE").map(PathBuf::from).expect("set ZMANAGER_PERF_ARCHIVE to a local .tzap fixture");
 
     let full_started = std::time::Instant::now();
     let full = list_tzap_with_optional_password(&archive, None).unwrap();
@@ -513,13 +416,10 @@ fn characterize_full_and_index_tzap_listing() {
         .map(|entry| entry.path.clone())
         .expect("fixture should contain a non-empty regular file");
     let old_copy_started = std::time::Instant::now();
-    let old_copy =
-        copy_tzap_files_to_writer(&archive, TzapExtractKeySource::None, |path| path == copy_path, &mut std::io::sink())
-            .unwrap();
+    let old_copy = copy_tzap_files_to_writer(&archive, TzapExtractKeySource::None, |path| path == copy_path, &mut std::io::sink()).unwrap();
     let old_copy_elapsed = old_copy_started.elapsed();
     let exact_copy_started = std::time::Instant::now();
-    let exact_copy =
-        copy_tzap_file_to_writer(&archive, TzapExtractKeySource::None, &copy_path, &mut std::io::sink()).unwrap();
+    let exact_copy = copy_tzap_file_to_writer(&archive, TzapExtractKeySource::None, &copy_path, &mut std::io::sink()).unwrap();
     let exact_copy_elapsed = exact_copy_started.elapsed();
     assert_eq!(exact_copy.written_bytes, old_copy.written_bytes);
     eprintln!(
@@ -653,11 +553,7 @@ fn fast_extract_restores_portable_mode_and_precise_mtime() {
         TzapExtractRequest {
             key: TzapExtractKeySource::None,
             policy: ExtractionPolicy::default(),
-            restore_options: TzapRestoreOptions {
-                policy: TzapRestorePolicy::Content,
-                allow_degraded: false,
-                ..Default::default()
-            },
+            restore_options: TzapRestoreOptions { policy: TzapRestorePolicy::Content, allow_degraded: false, ..Default::default() },
             overwrite_resolver: None,
             context: Some(&mut content_context),
             fast: true,
@@ -712,12 +608,7 @@ fn fast_extract_restores_directory_metadata_after_children() {
     fs::create_dir(&source_dir).unwrap();
     fs::write(&source_file, b"payload").unwrap();
     symlink("file.txt", &source_link).unwrap();
-    filetime::set_symlink_file_times(
-        &source_link,
-        filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012),
-        filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012),
-    )
-    .unwrap();
+    filetime::set_symlink_file_times(&source_link, filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012), filetime::FileTime::from_unix_time(1_675_000_000, 456_789_012)).unwrap();
     let directory_time = UNIX_EPOCH + Duration::new(1_650_000_000, 345_678_901);
     let manifest = ArchiveManifest {
         root: temp.root().to_path_buf(),
@@ -791,18 +682,8 @@ fn fast_extract_restores_directory_metadata_after_children() {
     assert_eq!(link_metadata.mtime_nsec(), 456_789_012);
     let listing = list_tzap_with_optional_password(&archive, None).unwrap();
     assert_eq!(listing.entries.len(), 3);
-    assert!(
-        listing
-            .entries
-            .iter()
-            .any(|entry| { entry.path == "payload" && entry.kind == super::TzapEntryKind::Directory })
-    );
-    assert!(
-        listing
-            .entries
-            .iter()
-            .any(|entry| { entry.path == "payload/link.txt" && entry.kind == super::TzapEntryKind::Symlink })
-    );
+    assert!(listing.entries.iter().any(|entry| { entry.path == "payload" && entry.kind == super::TzapEntryKind::Directory }));
+    assert!(listing.entries.iter().any(|entry| { entry.path == "payload/link.txt" && entry.kind == super::TzapEntryKind::Symlink }));
 }
 
 #[test]
@@ -869,8 +750,7 @@ fn create_tzap_with_recipient_certificate_opens_with_private_key() {
     assert_eq!(listing.entries.len(), 1);
     assert_eq!(listing.entries[0].path, "payload.txt");
 
-    let report =
-        test_tzap_with_recipient_key_filter_and_x509_trust(&archive, &recipient_key_path, |_| true, None).unwrap();
+    let report = test_tzap_with_recipient_key_filter_and_x509_trust(&archive, &recipient_key_path, |_| true, None).unwrap();
     assert_eq!(report.tested_entries, 1);
     assert_eq!(report.tested_bytes, 14);
 
@@ -928,10 +808,7 @@ fn multi_recipient_public_keys_can_open_same_archive() {
 
     let manifest = single_file_manifest(&temp, source, 14);
     let options = TzapCreateOptions {
-        key_source: TzapKeySource::RecipientPublicKeys(vec![
-            recipient_one_key.public_key_to_der().unwrap(),
-            recipient_two_key.public_key_to_der().unwrap(),
-        ]),
+        key_source: TzapKeySource::RecipientPublicKeys(vec![recipient_one_key.public_key_to_der().unwrap(), recipient_two_key.public_key_to_der().unwrap()]),
         level: 1,
         preserve_metadata: true,
         replace_existing: false,
@@ -1045,22 +922,14 @@ fn create_and_test_tzap_with_x509_root_auth() {
         volume_size: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
-        x509_signing: Some(TzapX509SigningOptions::InMemory {
-            signing_certificate: signer_certificate,
-            signing_private_key: SecretBytes::from(signer_private_key),
-            signing_chain: Vec::new(),
-        }),
+        x509_signing: Some(TzapX509SigningOptions::InMemory { signing_certificate: signer_certificate, signing_private_key: SecretBytes::from(signer_private_key), signing_chain: Vec::new() }),
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
     let mut context = JobContext::new(&token, &mut events);
     create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
 
-    let trust = TzapX509TrustOptions {
-        trusted_ca_certificates: vec![root_ca_path],
-        trusted_system_roots: false,
-        include_official_tzap_root: false,
-    };
+    let trust = TzapX509TrustOptions { trusted_ca_certificates: vec![root_ca_path], trusted_system_roots: false, include_official_tzap_root: false };
     let report = test_tzap_with_password_filter_and_x509_trust(&archive, "secret", |_| true, Some(&trust)).unwrap();
     let root_auth = report.x509_root_auth.unwrap();
 
@@ -1104,13 +973,7 @@ fn public_display_summary_reports_signed_authentic_footer() {
     let token = CancellationToken::new();
     let mut events = |_| {};
     let mut context = JobContext::new(&token, &mut events);
-    create_tzap_from_manifest_with_context(
-        &single_file_manifest(&temp, source, b"signed display payload".len() as u64),
-        &archive,
-        &options,
-        &mut context,
-    )
-    .unwrap();
+    create_tzap_from_manifest_with_context(&single_file_manifest(&temp, source, b"signed display payload".len() as u64), &archive, &options, &mut context).unwrap();
 
     let summary = summarize_tzap_public_display(&archive).unwrap();
     assert_eq!(summary.metadata.present_volume_count, 1);
@@ -1124,11 +987,7 @@ fn public_display_summary_reports_signed_authentic_footer() {
     // verification: both must agree on the signed payload's root commitment
     // and the data blocks it covers.
     fs::write(&root_ca_path, root_cert.to_pem().unwrap()).unwrap();
-    let trust = TzapX509TrustOptions {
-        trusted_ca_certificates: vec![root_ca_path],
-        trusted_system_roots: false,
-        include_official_tzap_root: false,
-    };
+    let trust = TzapX509TrustOptions { trusted_ca_certificates: vec![root_ca_path], trusted_system_roots: false, include_official_tzap_root: false };
     let report = verify_tzap_x509_public_no_key(&archive, &trust).unwrap();
     assert_eq!(report.archive_root, signer.archive_root);
     assert_eq!(report.total_data_block_count, signer.total_data_block_count);
@@ -1184,11 +1043,7 @@ fn public_display_summary_reports_not_authentic_for_parse_failed_footer() {
     fs::write(&archive, written.bytes).unwrap();
 
     let summary = summarize_tzap_public_display(&archive).unwrap();
-    assert!(
-        matches!(summary.signature, TzapPublicSignatureStatus::NotAuthentic { .. }),
-        "expected not-authentic status, got {:?}",
-        summary.signature
-    );
+    assert!(matches!(summary.signature, TzapPublicSignatureStatus::NotAuthentic { .. }), "expected not-authentic status, got {:?}", summary.signature);
 }
 
 #[test]
@@ -1199,23 +1054,14 @@ fn public_display_summary_reports_unavailable_for_non_x509_footer() {
         &[RegularFile::new("plain.txt", b"generic signing profile")],
         &crate::tzap::write::placeholder_master_key().unwrap(),
         WriterOptions { stripe_width: 1, volume_loss_tolerance: 0, ..WriterOptions::default() },
-        RootAuthWriterConfig {
-            authenticator_id: 0x7777,
-            signer_identity_type: 1,
-            signer_identity: b"test signer",
-            authenticator_value_length: 32,
-        },
+        RootAuthWriterConfig { authenticator_id: 0x7777, signer_identity_type: 1, signer_identity: b"test signer", authenticator_value_length: 32 },
         |request| Ok(request.archive_root.to_vec()),
     )
     .unwrap();
     fs::write(&archive, written.bytes).unwrap();
 
     let summary = summarize_tzap_public_display(&archive).unwrap();
-    assert!(
-        matches!(summary.signature, TzapPublicSignatureStatus::Unavailable { .. }),
-        "expected unavailable status, got {:?}",
-        summary.signature
-    );
+    assert!(matches!(summary.signature, TzapPublicSignatureStatus::Unavailable { .. }), "expected unavailable status, got {:?}", summary.signature);
 }
 
 #[test]
@@ -1265,19 +1111,14 @@ fn public_display_summary_reports_unavailable_for_corrupt_terminal() {
     let locator_offset = usize::try_from(locator.cmra_offset).expect("CMRA offset fits usize");
     let kill_shards = usize::from(locator.cmra_parity_shard_count) + 1;
     let start = locator_offset + CRITICAL_METADATA_RECOVERY_HEADER_LEN;
-    let end =
-        (start + kill_shards * locator.cmra_shard_size as usize).min(locator_offset + locator.cmra_length as usize);
+    let end = (start + kill_shards * locator.cmra_shard_size as usize).min(locator_offset + locator.cmra_length as usize);
     for byte in &mut bytes[start..end] {
         *byte ^= 0x55;
     }
     fs::write(&archive, bytes).unwrap();
 
     let summary = summarize_tzap_public_display(&archive).unwrap();
-    assert!(
-        matches!(summary.signature, TzapPublicSignatureStatus::Unavailable { .. }),
-        "expected unavailable status, got {:?}",
-        summary.signature
-    );
+    assert!(matches!(summary.signature, TzapPublicSignatureStatus::Unavailable { .. }), "expected unavailable status, got {:?}", summary.signature);
 }
 
 /// The footer embeds cert A's DER while the authenticator value is a real
@@ -1289,16 +1130,9 @@ fn public_display_summary_reports_not_authentic_for_forged_signature() {
     let temp = TestDir::new("tzap_display_forged_signature");
     let archive = temp.path("forged.tzap");
     let (root_cert, root_key) = test_ca_cert("ZManager Forged Root CA");
-    let (embedded_cert, _embedded_key) =
-        test_leaf_cert("ZManager Embedded Signer", root_cert.as_ref(), root_key.as_ref());
+    let (embedded_cert, _embedded_key) = test_leaf_cert("ZManager Embedded Signer", root_cert.as_ref(), root_key.as_ref());
     let (forger_cert, forger_key) = test_leaf_cert("ZManager Forger", root_cert.as_ref(), root_key.as_ref());
-    let forger = X509RootAuthSigner::from_pem_or_der(
-        &forger_cert.to_pem().unwrap(),
-        &forger_key.private_key_to_pem_pkcs8().unwrap(),
-        Vec::new(),
-        1_700_000_000,
-    )
-    .unwrap();
+    let forger = X509RootAuthSigner::from_pem_or_der(&forger_cert.to_pem().unwrap(), &forger_key.private_key_to_pem_pkcs8().unwrap(), Vec::new(), 1_700_000_000).unwrap();
     let written = write_archive_with_root_auth(
         &[RegularFile::new("forged.txt", b"forged payload")],
         &crate::tzap::write::placeholder_master_key().unwrap(),
@@ -1309,11 +1143,7 @@ fn public_display_summary_reports_not_authentic_for_forged_signature() {
             signer_identity: &embedded_cert.to_der().unwrap(),
             authenticator_value_length: forger.authenticator_value_length().unwrap(),
         },
-        |request| {
-            forger
-                .authenticator_value_for_request(request)
-                .map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))
-        },
+        |request| forger.authenticator_value_for_request(request).map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed")),
     )
     .unwrap();
     fs::write(&archive, written.bytes).unwrap();
@@ -1415,8 +1245,7 @@ fn public_display_summary_reports_unavailable_for_tampered_volume_footer() {
     let locator_offset = usize::try_from(locator.cmra_offset).expect("CMRA offset fits usize");
     let kill_shards = usize::from(locator.cmra_parity_shard_count) + 1;
     let start = locator_offset + CRITICAL_METADATA_RECOVERY_HEADER_LEN;
-    let end =
-        (start + kill_shards * locator.cmra_shard_size as usize).min(locator_offset + locator.cmra_length as usize);
+    let end = (start + kill_shards * locator.cmra_shard_size as usize).min(locator_offset + locator.cmra_length as usize);
     for byte in &mut volume[start..end] {
         *byte ^= 0x55;
     }
@@ -1486,10 +1315,8 @@ fn create_tzap_embeds_chain_from_signing_certificate_bundle() {
     fs::write(&source, b"signed payload").unwrap();
 
     let (root_cert, root_key) = test_ca_cert("ZManager Test Root CA");
-    let (intermediate_cert, intermediate_key) =
-        test_child_ca_cert("ZManager Test Intermediate CA", root_cert.as_ref(), root_key.as_ref());
-    let (signer_cert, signer_key) =
-        test_leaf_cert("ZManager Test Signer", intermediate_cert.as_ref(), intermediate_key.as_ref());
+    let (intermediate_cert, intermediate_key) = test_child_ca_cert("ZManager Test Intermediate CA", root_cert.as_ref(), root_key.as_ref());
+    let (signer_cert, signer_key) = test_leaf_cert("ZManager Test Signer", intermediate_cert.as_ref(), intermediate_key.as_ref());
     fs::write(&root_ca_path, root_cert.to_pem().unwrap()).unwrap();
     let mut signer_bundle = signer_cert.to_pem().unwrap();
     signer_bundle.extend(intermediate_cert.to_pem().unwrap());
@@ -1520,35 +1347,20 @@ fn create_tzap_embeds_chain_from_signing_certificate_bundle() {
         volume_size: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
-        x509_signing: Some(TzapX509SigningOptions::CertificateAndKey {
-            signing_certificate: signer_bundle_path,
-            signing_private_key: signer_key_path,
-            signing_chain: Vec::new(),
-        }),
+        x509_signing: Some(TzapX509SigningOptions::CertificateAndKey { signing_certificate: signer_bundle_path, signing_private_key: signer_key_path, signing_chain: Vec::new() }),
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
     let mut context = JobContext::new(&token, &mut events);
     create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
 
-    let trust = TzapX509TrustOptions {
-        trusted_ca_certificates: vec![root_ca_path],
-        trusted_system_roots: false,
-        include_official_tzap_root: false,
-    };
+    let trust = TzapX509TrustOptions { trusted_ca_certificates: vec![root_ca_path], trusted_system_roots: false, include_official_tzap_root: false };
     let report = test_tzap_with_password_filter_and_x509_trust(&archive, "secret", |_| true, Some(&trust)).unwrap();
     let root_auth = report.x509_root_auth.unwrap();
 
     assert_eq!(root_auth.subject, "CN=ZManager Test Signer");
     assert_eq!(root_auth.issuer, "CN=ZManager Test Intermediate CA");
-    assert_eq!(
-        root_auth.verified_chain_subjects,
-        vec![
-            "CN=ZManager Test Signer".to_owned(),
-            "CN=ZManager Test Intermediate CA".to_owned(),
-            "CN=ZManager Test Root CA".to_owned(),
-        ]
-    );
+    assert_eq!(root_auth.verified_chain_subjects, vec!["CN=ZManager Test Signer".to_owned(), "CN=ZManager Test Intermediate CA".to_owned(), "CN=ZManager Test Root CA".to_owned(),]);
     assert_eq!(root_auth.trust_anchor_subject.as_deref(), Some("CN=ZManager Test Root CA"));
 }
 
@@ -1562,20 +1374,12 @@ fn create_tzap_signs_with_pkcs12_identity() {
     fs::write(&source, b"signed payload").unwrap();
 
     let (root_cert, root_key) = test_ca_cert("ZManager Test Root CA");
-    let (intermediate_cert, intermediate_key) =
-        test_child_ca_cert("ZManager Test Intermediate CA", root_cert.as_ref(), root_key.as_ref());
-    let (signer_cert, signer_key) =
-        test_leaf_cert("ZManager Test Signer", intermediate_cert.as_ref(), intermediate_key.as_ref());
+    let (intermediate_cert, intermediate_key) = test_child_ca_cert("ZManager Test Intermediate CA", root_cert.as_ref(), root_key.as_ref());
+    let (signer_cert, signer_key) = test_leaf_cert("ZManager Test Signer", intermediate_cert.as_ref(), intermediate_key.as_ref());
     fs::write(&root_ca_path, root_cert.to_pem().unwrap()).unwrap();
     let mut chain = Stack::new().unwrap();
     chain.push(intermediate_cert).unwrap();
-    let identity = Pkcs12::builder()
-        .name("ZManager Test Signer")
-        .pkey(&signer_key)
-        .cert(&signer_cert)
-        .ca(chain)
-        .build2("identity-password")
-        .unwrap();
+    let identity = Pkcs12::builder().name("ZManager Test Signer").pkey(&signer_key).cert(&signer_cert).ca(chain).build2("identity-password").unwrap();
     fs::write(&identity_path, identity.to_der().unwrap()).unwrap();
 
     let manifest = ArchiveManifest {
@@ -1602,21 +1406,14 @@ fn create_tzap_signs_with_pkcs12_identity() {
         volume_size: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
-        x509_signing: Some(TzapX509SigningOptions::Pkcs12 {
-            identity: identity_path,
-            password: SecretString::from("identity-password"),
-        }),
+        x509_signing: Some(TzapX509SigningOptions::Pkcs12 { identity: identity_path, password: SecretString::from("identity-password") }),
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
     let mut context = JobContext::new(&token, &mut events);
     create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
 
-    let trust = TzapX509TrustOptions {
-        trusted_ca_certificates: vec![root_ca_path],
-        trusted_system_roots: false,
-        include_official_tzap_root: false,
-    };
+    let trust = TzapX509TrustOptions { trusted_ca_certificates: vec![root_ca_path], trusted_system_roots: false, include_official_tzap_root: false };
     let report = test_tzap_with_password_filter_and_x509_trust(&archive, "secret", |_| true, Some(&trust)).unwrap();
     let root_auth = report.x509_root_auth.unwrap();
 
@@ -1646,8 +1443,7 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
     fs::write(&source_file, b"windows core metadata").unwrap();
     create_windows_relative_symlink(&source_link, r"scripts\payload.txt");
     fs::write(PathBuf::from(format!("{}:zmanager-core", source_file.display())), b"file alternate data").unwrap();
-    fs::write(PathBuf::from(format!("{}:zmanager-core", source_directory.display())), b"directory alternate data")
-        .unwrap();
+    fs::write(PathBuf::from(format!("{}:zmanager-core", source_directory.display())), b"directory alternate data").unwrap();
 
     let mut file_basic = windows_basic_info(&source_file, false, false);
     file_basic.CreationTime = WINDOWS_EPOCH_OFFSET - 40_000_000_000;
@@ -1715,14 +1511,8 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
             symlink_target: Some(PathBuf::from(r"scripts\payload.txt")),
         },
     ];
-    let manifest = ArchiveManifest {
-        root: temp.root().to_path_buf(),
-        entries,
-        total_bytes: b"windows core metadata".len() as u64,
-        excluded_entries: Vec::new(),
-        excluded_bytes: 0,
-        warnings: Vec::new(),
-    };
+    let manifest =
+        ArchiveManifest { root: temp.root().to_path_buf(), entries, total_bytes: b"windows core metadata".len() as u64, excluded_entries: Vec::new(), excluded_bytes: 0, warnings: Vec::new() };
     let archive = temp.path("metadata.tzap");
     let options = public_metadata_create_options();
     let token = CancellationToken::new();
@@ -1745,11 +1535,8 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
     assert_eq!(listed_link.kind, BrowserEntryKind::Symlink);
     assert_eq!(listed_link.link_target.as_deref(), Some("scripts/payload.txt"));
 
-    let policies: &[TzapRestorePolicy] = if windows_process_is_elevated() {
-        &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs, TzapRestorePolicy::System]
-    } else {
-        &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs]
-    };
+    let policies: &[TzapRestorePolicy] =
+        if windows_process_is_elevated() { &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs, TzapRestorePolicy::System] } else { &[TzapRestorePolicy::Portable, TzapRestorePolicy::SameOs] };
     for &policy in policies {
         let policy_name = match policy {
             TzapRestorePolicy::Portable => "portable",
@@ -1787,14 +1574,8 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
         assert_eq!(fs::read(&restored_file).unwrap(), b"windows core metadata");
         assert_eq!(fs::read_link(&restored_link).unwrap(), PathBuf::from("scripts/payload.txt"));
         let expected_attribute_mask = if policy == TzapRestorePolicy::Portable { READONLY } else { MUTABLE_ATTRIBUTES };
-        assert_eq!(
-            actual_file_basic.FileAttributes & expected_attribute_mask,
-            file_basic.FileAttributes & expected_attribute_mask
-        );
-        assert_eq!(
-            actual_directory_basic.FileAttributes & expected_attribute_mask,
-            directory_basic.FileAttributes & expected_attribute_mask
-        );
+        assert_eq!(actual_file_basic.FileAttributes & expected_attribute_mask, file_basic.FileAttributes & expected_attribute_mask);
+        assert_eq!(actual_directory_basic.FileAttributes & expected_attribute_mask, directory_basic.FileAttributes & expected_attribute_mask);
         assert_eq!(actual_file_basic.LastWriteTime, file_basic.LastWriteTime);
         assert_eq!(actual_directory_basic.LastWriteTime, directory_basic.LastWriteTime);
         assert_eq!(actual_link_basic.LastWriteTime, link_basic.LastWriteTime);
@@ -1807,11 +1588,7 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
         } else {
             assert_eq!(fs::read(&restored_file_ads).unwrap(), b"file alternate data");
             assert_eq!(fs::read(&restored_directory_ads).unwrap(), b"directory alternate data");
-            for (actual, expected) in [
-                (actual_file_basic, file_basic),
-                (actual_directory_basic, directory_basic),
-                (actual_link_basic, link_basic),
-            ] {
+            for (actual, expected) in [(actual_file_basic, file_basic), (actual_directory_basic, directory_basic), (actual_link_basic, link_basic)] {
                 assert_eq!(actual.CreationTime, expected.CreationTime);
                 assert_eq!(actual.LastAccessTime, expected.LastAccessTime);
                 assert_eq!(actual.LastWriteTime, expected.LastWriteTime);
@@ -1819,17 +1596,11 @@ fn preserves_windows_file_directory_and_symlink_metadata_through_core() {
             }
         }
         if policy == TzapRestorePolicy::System {
-            for (actual_path, directory, expected) in [
-                (&restored_file, false, &source_file_security),
-                (&restored_directory, true, &source_directory_security),
-                (&restored_link, false, &source_link_security),
-            ] {
+            for (actual_path, directory, expected) in
+                [(&restored_file, false, &source_file_security), (&restored_directory, true, &source_directory_security), (&restored_link, false, &source_link_security)]
+            {
                 let actual = windows_security_descriptor(actual_path, directory);
-                assert!(
-                    windows_security_descriptors_equivalent(expected, &actual),
-                    "security descriptor mismatch for {}",
-                    actual_path.display()
-                );
+                assert!(windows_security_descriptors_equivalent(expected, &actual), "security descriptor mismatch for {}", actual_path.display());
             }
         }
 
@@ -1869,29 +1640,13 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         xattr::set(&file_path, "com.apple.FinderInfo", &[0x5a; 32]).unwrap();
         xattr::set(&directory_path, "com.apple.FinderInfo", &[0x5b; 32]).unwrap();
         fs::write(file_path.join("..namedfork/rsrc"), vec![0x6b; 2 * 1024 * 1024 + 31]).unwrap();
-        let acl_status = std::process::Command::new("/bin/chmod")
-            .args(["+a", "everyone deny delete"])
-            .arg(&file_path)
-            .status()
-            .expect("failed to set ACL");
+        let acl_status = std::process::Command::new("/bin/chmod").args(["+a", "everyone deny delete"]).arg(&file_path).status().expect("failed to set ACL");
         assert!(acl_status.success(), "chmod +a failed");
-        let directory_acl_status = std::process::Command::new("/bin/chmod")
-            .args(["+a", "everyone deny delete"])
-            .arg(&directory_path)
-            .status()
-            .expect("failed to set directory ACL");
+        let directory_acl_status = std::process::Command::new("/bin/chmod").args(["+a", "everyone deny delete"]).arg(&directory_path).status().expect("failed to set directory ACL");
         assert!(directory_acl_status.success(), "directory chmod +a failed");
-        let status = std::process::Command::new("/usr/bin/chflags")
-            .arg("hidden")
-            .arg(&file_path)
-            .status()
-            .expect("failed to run chflags");
+        let status = std::process::Command::new("/usr/bin/chflags").arg("hidden").arg(&file_path).status().expect("failed to run chflags");
         assert!(status.success(), "chflags failed");
-        let directory_status = std::process::Command::new("/usr/bin/chflags")
-            .arg("hidden")
-            .arg(&directory_path)
-            .status()
-            .expect("failed to run directory chflags");
+        let directory_status = std::process::Command::new("/usr/bin/chflags").arg("hidden").arg(&directory_path).status().expect("failed to run directory chflags");
         assert!(directory_status.success(), "directory chflags failed");
     }
 
@@ -1914,10 +1669,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         xattr::set(&directory_path, "user.zmanager.test", b"directory metadata").unwrap();
         xattr::set(&file_path, "system.posix_acl_access", &file_acl).unwrap();
         xattr::set(&directory_path, "system.posix_acl_access", &directory_acl).unwrap();
-        (
-            xattr::get(&file_path, "system.posix_acl_access").unwrap().unwrap(),
-            xattr::get(&directory_path, "system.posix_acl_access").unwrap().unwrap(),
-        )
+        (xattr::get(&file_path, "system.posix_acl_access").unwrap().unwrap(), xattr::get(&directory_path, "system.posix_acl_access").unwrap().unwrap())
     };
 
     #[cfg(unix)]
@@ -1929,22 +1681,8 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         #[cfg(target_os = "macos")]
         {
             xattr::set(&p, "com.tzap.link", b"zmanager link metadata").unwrap();
-            assert!(
-                std::process::Command::new("/bin/chmod")
-                    .args(["-h", "+a", "everyone deny delete"])
-                    .arg(&p)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-            assert!(
-                std::process::Command::new("/usr/bin/chflags")
-                    .args(["-h", "hidden"])
-                    .arg(&p)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
+            assert!(std::process::Command::new("/bin/chmod").args(["-h", "+a", "everyone deny delete"]).arg(&p).status().unwrap().success());
+            assert!(std::process::Command::new("/usr/bin/chflags").args(["-h", "hidden"]).arg(&p).status().unwrap().success());
         }
         p
     };
@@ -1989,14 +1727,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         }
     });
 
-    let manifest = ArchiveManifest {
-        root: temp.root().to_path_buf(),
-        entries,
-        total_bytes: payload.len() as u64,
-        excluded_entries: Vec::new(),
-        excluded_bytes: 0,
-        warnings: Vec::new(),
-    };
+    let manifest = ArchiveManifest { root: temp.root().to_path_buf(), entries, total_bytes: payload.len() as u64, excluded_entries: Vec::new(), excluded_bytes: 0, warnings: Vec::new() };
 
     let archive = temp.path("metadata.tzap");
     let options = TzapCreateOptions {
@@ -2102,14 +1833,8 @@ fn preserves_all_metadata_in_tzap_round_trip() {
     {
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
-        assert_eq!(
-            fs::symlink_metadata(portable_destination.join("data.bin")).unwrap().permissions().mode() & 0o7777,
-            0o640
-        );
-        assert_eq!(
-            fs::symlink_metadata(portable_destination.join("folder")).unwrap().permissions().mode() & 0o7777,
-            0o750
-        );
+        assert_eq!(fs::symlink_metadata(portable_destination.join("data.bin")).unwrap().permissions().mode() & 0o7777, 0o640);
+        assert_eq!(fs::symlink_metadata(portable_destination.join("folder")).unwrap().permissions().mode() & 0o7777, 0o750);
         assert_eq!(fs::read_link(portable_destination.join("link.txt")).unwrap(), std::path::Path::new(symlink_target));
         let restored = fs::symlink_metadata(portable_destination.join("data.bin")).unwrap();
         let source = fs::symlink_metadata(&file_path).unwrap();
@@ -2136,11 +1861,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
             TzapExtractRequest {
                 key: TzapExtractKeySource::None,
                 policy: ExtractionPolicy::default(),
-                restore_options: TzapRestoreOptions {
-                    policy: TzapRestorePolicy::SameOs,
-                    allow_degraded: false,
-                    allow_absolute_symlinks: false,
-                },
+                restore_options: TzapRestoreOptions { policy: TzapRestorePolicy::SameOs, allow_degraded: false, allow_absolute_symlinks: false },
                 overwrite_resolver: None,
                 context: None,
                 fast: false,
@@ -2154,32 +1875,17 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         let restored_directory = native_destination.join("folder");
         let restored_link = native_destination.join("link.txt");
         assert_eq!(fs::metadata(&restored).unwrap().st_flags(), fs::metadata(&file_path).unwrap().st_flags());
-        assert_eq!(
-            fs::symlink_metadata(&restored_directory).unwrap().st_flags(),
-            fs::symlink_metadata(&directory_path).unwrap().st_flags()
-        );
-        assert_eq!(
-            fs::symlink_metadata(&restored_link).unwrap().st_flags(),
-            fs::symlink_metadata(&symlink_path).unwrap().st_flags()
-        );
+        assert_eq!(fs::symlink_metadata(&restored_directory).unwrap().st_flags(), fs::symlink_metadata(&directory_path).unwrap().st_flags());
+        assert_eq!(fs::symlink_metadata(&restored_link).unwrap().st_flags(), fs::symlink_metadata(&symlink_path).unwrap().st_flags());
         assert_eq!(
             (fs::metadata(&restored).unwrap().st_birthtime(), fs::metadata(&restored).unwrap().st_birthtime_nsec(),),
             (fs::metadata(&file_path).unwrap().st_birthtime(), fs::metadata(&file_path).unwrap().st_birthtime_nsec(),)
         );
         assert_eq!(xattr::get(&restored, "com.tzap.test").unwrap().as_deref(), Some(b"zmanager metadata".as_slice()));
-        assert_eq!(
-            xattr::get(&restored_directory, "com.tzap.test").unwrap().as_deref(),
-            Some(b"zmanager directory metadata".as_slice())
-        );
-        assert_eq!(
-            xattr::get(&restored_link, "com.tzap.link").unwrap().as_deref(),
-            Some(b"zmanager link metadata".as_slice())
-        );
+        assert_eq!(xattr::get(&restored_directory, "com.tzap.test").unwrap().as_deref(), Some(b"zmanager directory metadata".as_slice()));
+        assert_eq!(xattr::get(&restored_link, "com.tzap.link").unwrap().as_deref(), Some(b"zmanager link metadata".as_slice()));
         assert_eq!(xattr::get(&restored, "com.apple.FinderInfo").unwrap().as_deref(), Some([0x5a; 32].as_slice()));
-        assert_eq!(
-            xattr::get(&restored_directory, "com.apple.FinderInfo").unwrap().as_deref(),
-            Some([0x5b; 32].as_slice())
-        );
+        assert_eq!(xattr::get(&restored_directory, "com.apple.FinderInfo").unwrap().as_deref(), Some([0x5b; 32].as_slice()));
         assert_eq!(fs::read(restored.join("..namedfork/rsrc")).unwrap(), vec![0x6b; 2 * 1024 * 1024 + 31]);
         for restored_path in [&restored, &restored_directory, &restored_link] {
             let acl = std::process::Command::new("/bin/ls").args(["-lde"]).arg(restored_path).output().unwrap();
@@ -2193,11 +1899,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
                 TzapExtractRequest {
                     key: TzapExtractKeySource::None,
                     policy: ExtractionPolicy::default(),
-                    restore_options: TzapRestoreOptions {
-                        policy: TzapRestorePolicy::System,
-                        allow_degraded: false,
-                        allow_absolute_symlinks: false,
-                    },
+                    restore_options: TzapRestoreOptions { policy: TzapRestorePolicy::System, allow_degraded: false, allow_absolute_symlinks: false },
                     overwrite_resolver: None,
                     context: None,
                     fast: false,
@@ -2206,9 +1908,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
                 &system_destination,
             )
             .expect("system extraction");
-            for (relative, source) in
-                [("data.bin", &file_path), ("folder", &directory_path), ("link.txt", &symlink_path)]
-            {
+            for (relative, source) in [("data.bin", &file_path), ("folder", &directory_path), ("link.txt", &symlink_path)] {
                 use std::os::unix::fs::MetadataExt as _;
                 let actual = fs::symlink_metadata(system_destination.join(relative)).unwrap();
                 let expected = fs::symlink_metadata(source).unwrap();
@@ -2222,11 +1922,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
     {
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
-        let policies: &[TzapRestorePolicy] = if unix_process_is_elevated() {
-            &[TzapRestorePolicy::SameOs, TzapRestorePolicy::System]
-        } else {
-            &[TzapRestorePolicy::SameOs]
-        };
+        let policies: &[TzapRestorePolicy] = if unix_process_is_elevated() { &[TzapRestorePolicy::SameOs, TzapRestorePolicy::System] } else { &[TzapRestorePolicy::SameOs] };
         for &policy in policies {
             let destination = temp.path(match policy {
                 TzapRestorePolicy::SameOs => "linux-same-os-extract",
@@ -2259,22 +1955,10 @@ fn preserves_all_metadata_in_tzap_round_trip() {
             assert_eq!(restored_directory.permissions().mode() & 0o7777, 0o750);
             assert!(restored_link.file_type().is_symlink());
             assert_eq!(fs::read_link(destination.join("link.txt")).unwrap(), std::path::Path::new(symlink_target));
-            assert_eq!(
-                xattr::get(destination.join("data.bin"), "user.zmanager.test").unwrap().as_deref(),
-                Some(b"file metadata".as_slice())
-            );
-            assert_eq!(
-                xattr::get(destination.join("folder"), "user.zmanager.test").unwrap().as_deref(),
-                Some(b"directory metadata".as_slice())
-            );
-            assert_eq!(
-                xattr::get(destination.join("data.bin"), "system.posix_acl_access").unwrap().as_deref(),
-                Some(expected_file_acl.as_slice())
-            );
-            assert_eq!(
-                xattr::get(destination.join("folder"), "system.posix_acl_access").unwrap().as_deref(),
-                Some(expected_directory_acl.as_slice())
-            );
+            assert_eq!(xattr::get(destination.join("data.bin"), "user.zmanager.test").unwrap().as_deref(), Some(b"file metadata".as_slice()));
+            assert_eq!(xattr::get(destination.join("folder"), "user.zmanager.test").unwrap().as_deref(), Some(b"directory metadata".as_slice()));
+            assert_eq!(xattr::get(destination.join("data.bin"), "system.posix_acl_access").unwrap().as_deref(), Some(expected_file_acl.as_slice()));
+            assert_eq!(xattr::get(destination.join("folder"), "system.posix_acl_access").unwrap().as_deref(), Some(expected_directory_acl.as_slice()));
             if policy == TzapRestorePolicy::System {
                 for (actual, source) in [
                     (restored_file, fs::symlink_metadata(&file_path).unwrap()),
@@ -2292,13 +1976,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
 fn create_test_tzap_archive(files: &[RegularFile<'_>]) -> tzap_core::writer::WrittenArchive {
     let kdf = KdfParams::Argon2id { t_cost: 1, m_cost_kib: 8, parallelism: 1, salt: b"12345678".to_vec() };
     let key = MasterKey::derive_from_passphrase(&kdf, "secret").unwrap();
-    let options = WriterOptions {
-        stripe_width: 4,
-        volume_loss_tolerance: 0,
-        bit_rot_buffer_pct: 0,
-        zstd_level: 1,
-        ..WriterOptions::default()
-    };
+    let options = WriterOptions { stripe_width: 4, volume_loss_tolerance: 0, bit_rot_buffer_pct: 0, zstd_level: 1, ..WriterOptions::default() };
     write_archive_with_kdf(files, &key, options, &kdf).unwrap()
 }
 
@@ -2307,40 +1985,16 @@ fn create_test_tzap_archive(files: &[RegularFile<'_>]) -> tzap_core::writer::Wri
 fn test_x509_root_auth_signer(signer_name: &str) -> X509RootAuthSigner {
     let (root_cert, root_key) = test_ca_cert("ZManager Test Root CA");
     let (leaf_cert, leaf_key) = test_leaf_cert(signer_name, root_cert.as_ref(), root_key.as_ref());
-    X509RootAuthSigner::from_pem_or_der(
-        &leaf_cert.to_pem().unwrap(),
-        &leaf_key.private_key_to_pem_pkcs8().unwrap(),
-        Vec::new(),
-        1_700_000_000,
-    )
-    .unwrap()
+    X509RootAuthSigner::from_pem_or_der(&leaf_cert.to_pem().unwrap(), &leaf_key.private_key_to_pem_pkcs8().unwrap(), Vec::new(), 1_700_000_000).unwrap()
 }
 
 /// Writes a stripe-N archive whose volumes carry an X.509 `RootAuth` footer
 /// produced by `signer`.
-fn write_signed_test_archive(
-    files: &[RegularFile<'_>],
-    stripe_width: u32,
-    signer: &X509RootAuthSigner,
-) -> tzap_core::writer::WrittenArchive {
-    let options = WriterOptions {
-        stripe_width,
-        volume_loss_tolerance: 0,
-        bit_rot_buffer_pct: 0,
-        zstd_level: 1,
-        ..WriterOptions::default()
-    };
-    write_archive_with_root_auth(
-        files,
-        &crate::tzap::write::placeholder_master_key().unwrap(),
-        options,
-        signer.root_auth_writer_config().unwrap(),
-        |request| {
-            signer
-                .authenticator_value_for_request(request)
-                .map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))
-        },
-    )
+fn write_signed_test_archive(files: &[RegularFile<'_>], stripe_width: u32, signer: &X509RootAuthSigner) -> tzap_core::writer::WrittenArchive {
+    let options = WriterOptions { stripe_width, volume_loss_tolerance: 0, bit_rot_buffer_pct: 0, zstd_level: 1, ..WriterOptions::default() };
+    write_archive_with_root_auth(files, &crate::tzap::write::placeholder_master_key().unwrap(), options, signer.root_auth_writer_config().unwrap(), |request| {
+        signer.authenticator_value_for_request(request).map_err(|_| FormatError::InvalidArchive("X.509 RootAuth signer failed"))
+    })
     .unwrap()
 }
 
@@ -2447,12 +2101,7 @@ fn random_serial_number() -> openssl::asn1::Asn1Integer {
 }
 
 fn deterministic_bytes(len: usize) -> Vec<u8> {
-    (0..len)
-        .map(|index| {
-            u8::try_from((index.wrapping_mul(31).wrapping_add(17)) % 251)
-                .expect("deterministic byte is reduced below u8::MAX")
-        })
-        .collect()
+    (0..len).map(|index| u8::try_from((index.wrapping_mul(31).wrapping_add(17)) % 251).expect("deterministic byte is reduced below u8::MAX")).collect()
 }
 
 fn public_metadata_create_options() -> TzapCreateOptions {

@@ -27,12 +27,10 @@ use tzap_core::wire::RecipientRecordV1;
 use tzap_core::wire::RootAuthFooterV1;
 use tzap_core::{MasterKey, OpenedArchive, TarEntryKind, public_no_key_verify_volumes_with};
 use tzap_plugin_keywrap::{
-    ArchiveIdentity as KeyWrapArchiveIdentity, KeyWrapOutcome, KeyWrapSuite, PrivateKeyLookup, RecipientRecordInput,
-    RecipientRecordMetadata, dispatch_key_wrap_record, wrap_master_key_for_recipient,
+    ArchiveIdentity as KeyWrapArchiveIdentity, KeyWrapOutcome, KeyWrapSuite, PrivateKeyLookup, RecipientRecordInput, RecipientRecordMetadata, dispatch_key_wrap_record, wrap_master_key_for_recipient,
 };
 use tzap_plugin_signing::x509_chain::{
-    X509_AUTHENTICATOR_ID, X509RootAuthReport, X509RootAuthSigner, certificate_der_from_pem_or_der,
-    certificates_der_from_pem_or_der, verify_root_auth_footer, verify_root_auth_signature,
+    X509_AUTHENTICATOR_ID, X509RootAuthReport, X509RootAuthSigner, certificate_der_from_pem_or_der, certificates_der_from_pem_or_der, verify_root_auth_footer, verify_root_auth_signature,
 };
 
 // The official root literals live in `trust::` (pinned there too), so the
@@ -103,11 +101,7 @@ pub fn tzap_x509_signing_options_from_inventory(
     use crate::trust::TzapCertificateStatus;
 
     let inventory = store.load_inventory(account_key).map_err(|error| error.to_string())?;
-    let certificate = inventory
-        .enrolled_certificates
-        .iter()
-        .find(|record| record.certificate_id == certificate_id)
-        .ok_or_else(|| format!("certificate not found: {certificate_id}"))?;
+    let certificate = inventory.enrolled_certificates.iter().find(|record| record.certificate_id == certificate_id).ok_or_else(|| format!("certificate not found: {certificate_id}"))?;
     if certificate.state != TzapLocalCertificateState::Active {
         return Err(format!("certificate is not active: {}", certificate.state.as_str()));
     }
@@ -120,16 +114,10 @@ pub fn tzap_x509_signing_options_from_inventory(
     if inventory.emergency_blocklist.blocked_issuer_sha256.contains(&certificate.issuer_certificate_sha256) {
         return Err("certificate issuer is locally blocked".to_owned());
     }
-    if inventory.certificate_status_cache.iter().any(|status| {
-        status.certificate_sha256 == certificate.certificate_sha256 && status.status != TzapCertificateStatus::Valid
-    }) {
+    if inventory.certificate_status_cache.iter().any(|status| status.certificate_sha256 == certificate.certificate_sha256 && status.status != TzapCertificateStatus::Valid) {
         return Err("certificate status blocks signing".to_owned());
     }
-    let signing_key = inventory
-        .device_signing_keys
-        .iter()
-        .find(|key| key.key_id == certificate.signing_key_id)
-        .ok_or_else(|| "certificate signing key is missing".to_owned())?;
+    let signing_key = inventory.device_signing_keys.iter().find(|key| key.key_id == certificate.signing_key_id).ok_or_else(|| "certificate signing key is missing".to_owned())?;
     Ok(TzapX509SigningOptions::InMemory {
         signing_certificate: certificate.leaf_certificate_der.clone(),
         signing_private_key: signing_key.private_key_der.clone(),
@@ -210,68 +198,43 @@ pub(crate) fn load_x509_signer(options: &TzapX509SigningOptions) -> Result<X509R
             load_x509_signer_from_certificate_files(signing_certificate, signing_private_key, signing_chain)
         }
         TzapX509SigningOptions::InMemory { signing_certificate, signing_private_key, signing_chain } => {
-            X509RootAuthSigner::from_pem_or_der(
-                signing_certificate,
-                signing_private_key.expose_secret(),
-                signing_chain.clone(),
-                current_unix_seconds_i64()?,
-            )
-            .map_err(|source| TzapError::X509RootAuth(source.to_string()))
+            X509RootAuthSigner::from_pem_or_der(signing_certificate, signing_private_key.expose_secret(), signing_chain.clone(), current_unix_seconds_i64()?)
+                .map_err(|source| TzapError::X509RootAuth(source.to_string()))
         }
     }
 }
 
-fn load_x509_signer_from_certificate_files(
-    signing_certificate: &Path,
-    signing_private_key: &Path,
-    signing_chain: &[PathBuf],
-) -> Result<X509RootAuthSigner, TzapError> {
+fn load_x509_signer_from_certificate_files(signing_certificate: &Path, signing_private_key: &Path, signing_chain: &[PathBuf]) -> Result<X509RootAuthSigner, TzapError> {
     let certificate = read_x509_input_file(signing_certificate)?;
-    let mut certificate_der =
-        certificates_der_from_pem_or_der(&certificate).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
+    let mut certificate_der = certificates_der_from_pem_or_der(&certificate).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
     let leaf_certificate_der = certificate_der.remove(0);
     let private_key = read_x509_input_file(signing_private_key)?;
     let mut chain_der = certificate_der;
     chain_der.extend(load_x509_certificate_files(signing_chain)?);
-    X509RootAuthSigner::from_pem_or_der(&leaf_certificate_der, &private_key, chain_der, current_unix_seconds_i64()?)
-        .map_err(|source| TzapError::X509RootAuth(source.to_string()))
+    X509RootAuthSigner::from_pem_or_der(&leaf_certificate_der, &private_key, chain_der, current_unix_seconds_i64()?).map_err(|source| TzapError::X509RootAuth(source.to_string()))
 }
 
 fn load_x509_signer_from_pkcs12(identity: &Path, password: &SecretString) -> Result<X509RootAuthSigner, TzapError> {
     let identity_bytes = read_x509_input_file(identity)?;
     let pkcs12 = Pkcs12::from_der(&identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
-    let parsed =
-        pkcs12.parse2(password.expose_secret()).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
-    let certificate =
-        parsed.cert.ok_or_else(|| TzapError::X509RootAuth("PKCS#12 identity has no certificate".to_owned()))?;
-    let private_key =
-        parsed.pkey.ok_or_else(|| TzapError::X509RootAuth("PKCS#12 identity has no private key".to_owned()))?;
+    let parsed = pkcs12.parse2(password.expose_secret()).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
+    let certificate = parsed.cert.ok_or_else(|| TzapError::X509RootAuth("PKCS#12 identity has no certificate".to_owned()))?;
+    let private_key = parsed.pkey.ok_or_else(|| TzapError::X509RootAuth("PKCS#12 identity has no private key".to_owned()))?;
     let chain_der = parsed
         .ca
-        .map(|chain| {
-            chain
-                .iter()
-                .map(|certificate| certificate.to_der().map_err(|source| TzapError::X509RootAuth(source.to_string())))
-                .collect::<Result<Vec<_>, _>>()
-        })
+        .map(|chain| chain.iter().map(|certificate| certificate.to_der().map_err(|source| TzapError::X509RootAuth(source.to_string()))).collect::<Result<Vec<_>, _>>())
         .transpose()?
         .unwrap_or_default();
 
-    X509RootAuthSigner::new(
-        certificate.to_der().map_err(|source| TzapError::X509RootAuth(source.to_string()))?,
-        private_key,
-        chain_der,
-        current_unix_seconds_i64()?,
-    )
-    .map_err(|source| TzapError::X509RootAuth(source.to_string()))
+    X509RootAuthSigner::new(certificate.to_der().map_err(|source| TzapError::X509RootAuth(source.to_string()))?, private_key, chain_der, current_unix_seconds_i64()?)
+        .map_err(|source| TzapError::X509RootAuth(source.to_string()))
 }
 
 pub(crate) fn load_x509_certificate_files(paths: &[PathBuf]) -> Result<Vec<Vec<u8>>, TzapError> {
     let mut certificates = Vec::new();
     for path in paths {
         let bytes = read_x509_input_file(path)?;
-        let mut parsed =
-            certificates_der_from_pem_or_der(&bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
+        let mut parsed = certificates_der_from_pem_or_der(&bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
         certificates.append(&mut parsed);
     }
     Ok(certificates)
@@ -284,19 +247,16 @@ fn read_x509_input_file(path: &Path) -> Result<Vec<u8>, TzapError> {
 pub(crate) fn load_x509_trusted_roots(trust: &TzapX509TrustOptions) -> Result<Vec<Vec<u8>>, TzapError> {
     let mut certificates = Vec::new();
     if trust.include_official_tzap_root {
-        certificates.push(certificate_der_from_pem_or_der(OFFICIAL_TZAP_ROOT_CERT_PEM).map_err(|source| {
-            TzapError::X509RootAuth(format!(
-                "failed to parse embedded TZAP root certificate {OFFICIAL_TZAP_ROOT_CERT_SHA256}: {source}"
-            ))
-        })?);
+        certificates.push(
+            certificate_der_from_pem_or_der(OFFICIAL_TZAP_ROOT_CERT_PEM)
+                .map_err(|source| TzapError::X509RootAuth(format!("failed to parse embedded TZAP root certificate {OFFICIAL_TZAP_ROOT_CERT_SHA256}: {source}")))?,
+        );
         // Staging is trusted by default alongside production (see
         // `trust::OFFICIAL_TZAP_ROOT_PINS`).
-        certificates.push(certificate_der_from_pem_or_der(OFFICIAL_TZAP_STAGING_ROOT_PEM).map_err(|source| {
-            TzapError::X509RootAuth(format!(
-                "failed to parse embedded TZAP staging root certificate {}: {source}",
-                crate::trust::TZAP_STAGING_ROOT_SHA256
-            ))
-        })?);
+        certificates.push(
+            certificate_der_from_pem_or_der(OFFICIAL_TZAP_STAGING_ROOT_PEM)
+                .map_err(|source| TzapError::X509RootAuth(format!("failed to parse embedded TZAP staging root certificate {}: {source}", crate::trust::TZAP_STAGING_ROOT_SHA256)))?,
+        );
     }
     certificates.extend(load_x509_certificate_files(&trust.trusted_ca_certificates)?);
     Ok(certificates)
@@ -304,18 +264,12 @@ pub(crate) fn load_x509_trusted_roots(trust: &TzapX509TrustOptions) -> Result<Ve
 
 pub(crate) fn validate_recipient_wrap_create_options(options: &TzapCreateOptions) -> Result<(), TzapError> {
     if options.volume_size.is_some() || options.volume_loss_tolerance != 0 {
-        return Err(TzapError::Format(FormatError::WriterUnsupported(
-            "recipient certificate encryption is currently supported only for single-volume TZAP create",
-        )));
+        return Err(TzapError::Format(FormatError::WriterUnsupported("recipient certificate encryption is currently supported only for single-volume TZAP create")));
     }
     Ok(())
 }
 
-pub(crate) fn build_recipient_wrap_record_from_certificate_path(
-    recipient_certificate_path: &Path,
-    master_key: &MasterKey,
-    options: &mut WriterOptions,
-) -> Result<RecipientRecordV1, TzapError> {
+pub(crate) fn build_recipient_wrap_record_from_certificate_path(recipient_certificate_path: &Path, master_key: &MasterKey, options: &mut WriterOptions) -> Result<RecipientRecordV1, TzapError> {
     let recipient_certificate = load_single_x509_certificate_file("recipient certificate", recipient_certificate_path)?;
     let archive_identity = recipient_wrap_archive_identity_for_writer(options);
     build_recipient_wrap_record_from_certificate_der(&recipient_certificate, master_key, &archive_identity)
@@ -334,9 +288,7 @@ pub(crate) fn build_recipient_wrap_record_from_certificate_der(
             Err(outcome) => return Err(key_wrap_outcome_error(&outcome)),
         }
     }
-    Err(TzapError::Format(FormatError::WriterUnsupported(
-        "recipient certificate is not supported by keywrap-v1 suites",
-    )))
+    Err(TzapError::Format(FormatError::WriterUnsupported("recipient certificate is not supported by keywrap-v1 suites")))
 }
 
 /// Wraps a raw recipient SPKI in a throwaway self-signed certificate so the
@@ -347,26 +299,16 @@ pub(crate) fn build_recipient_wrap_record_from_certificate_der(
 /// `adr/2026-08-06-synthetic-recipient-certificate.md` in the private
 /// implementation-docs repo; revisit when the plugin accepts raw SPKI.
 pub(crate) fn synthetic_recipient_certificate_der(public_key_spki_der: &[u8]) -> Result<Vec<u8>, TzapError> {
-    let public_key = PKey::<Public>::public_key_from_der(public_key_spki_der)
-        .map_err(|source| TzapError::KeyWrap(format!("recipient public key is invalid: {source}")))?;
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
+    let public_key = PKey::<Public>::public_key_from_der(public_key_spki_der).map_err(|source| TzapError::KeyWrap(format!("recipient public key is invalid: {source}")))?;
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?;
+    let issuer_key = PKey::from_ec_key(EcKey::generate(&group).map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?)
         .map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?;
-    let issuer_key = PKey::from_ec_key(
-        EcKey::generate(&group)
-            .map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?,
-    )
-    .map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?;
-    let mut name = openssl::x509::X509NameBuilder::new()
-        .map_err(|source| TzapError::KeyWrap(format!("recipient certificate name failed: {source}")))?;
-    name.append_entry_by_text("CN", "ZManager Contact Recipient")
-        .map_err(|source| TzapError::KeyWrap(format!("recipient certificate name failed: {source}")))?;
+    let mut name = openssl::x509::X509NameBuilder::new().map_err(|source| TzapError::KeyWrap(format!("recipient certificate name failed: {source}")))?;
+    name.append_entry_by_text("CN", "ZManager Contact Recipient").map_err(|source| TzapError::KeyWrap(format!("recipient certificate name failed: {source}")))?;
     let name = name.build();
-    let mut builder =
-        X509::builder().map_err(|source| TzapError::KeyWrap(format!("recipient certificate failed: {source}")))?;
+    let mut builder = X509::builder().map_err(|source| TzapError::KeyWrap(format!("recipient certificate failed: {source}")))?;
     builder.set_version(2).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    let serial = BigNum::from_u32(1)
-        .and_then(|number| number.to_asn1_integer())
-        .map_err(|source| TzapError::KeyWrap(format!("recipient certificate serial failed: {source}")))?;
+    let serial = BigNum::from_u32(1).and_then(|number| number.to_asn1_integer()).map_err(|source| TzapError::KeyWrap(format!("recipient certificate serial failed: {source}")))?;
     builder.set_serial_number(&serial).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
     builder.set_subject_name(&name).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
     builder.set_issuer_name(&name).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
@@ -375,35 +317,20 @@ pub(crate) fn synthetic_recipient_certificate_der(public_key_spki_der: &[u8]) ->
     let not_after = Asn1Time::days_from_now(365).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
     builder.set_not_before(&not_before).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
     builder.set_not_after(&not_after).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder
-        .append_extension(
-            BasicConstraints::new().critical().build().map_err(|source| TzapError::KeyWrap(source.to_string()))?,
-        )
-        .map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder
-        .append_extension(
-            KeyUsage::new()
-                .critical()
-                .key_agreement()
-                .build()
-                .map_err(|source| TzapError::KeyWrap(source.to_string()))?,
-        )
-        .map_err(|source| TzapError::KeyWrap(source.to_string()))?;
+    builder.append_extension(BasicConstraints::new().critical().build().map_err(|source| TzapError::KeyWrap(source.to_string()))?).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
+    builder.append_extension(KeyUsage::new().critical().key_agreement().build().map_err(|source| TzapError::KeyWrap(source.to_string()))?).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
     let subject_key_identifier = {
         let context = builder.x509v3_context(None, None);
         SubjectKeyIdentifier::new().build(&context).map_err(|source| TzapError::KeyWrap(source.to_string()))?
     };
     builder.append_extension(subject_key_identifier).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder
-        .sign(&issuer_key, MessageDigest::sha256())
-        .map_err(|source| TzapError::KeyWrap(format!("recipient certificate signing failed: {source}")))?;
+    builder.sign(&issuer_key, MessageDigest::sha256()).map_err(|source| TzapError::KeyWrap(format!("recipient certificate signing failed: {source}")))?;
     builder.build().to_der().map_err(|source| TzapError::KeyWrap(format!("recipient certificate DER failed: {source}")))
 }
 
 pub(crate) fn load_single_x509_certificate_file(label: &'static str, path: &Path) -> Result<Vec<u8>, TzapError> {
     let bytes = read_x509_input_file(path)?;
-    let certificates = certificates_der_from_pem_or_der(&bytes)
-        .map_err(|source| TzapError::KeyWrap(format!("failed to parse {label} {}: {source}", path.display())))?;
+    let certificates = certificates_der_from_pem_or_der(&bytes).map_err(|source| TzapError::KeyWrap(format!("failed to parse {label} {}: {source}", path.display())))?;
     match certificates.as_slice() {
         [certificate] => Ok(certificate.clone()),
         [] | [_, _, ..] => Err(TzapError::KeyWrap(format!("{label} must contain exactly one X.509 certificate"))),
@@ -413,12 +340,7 @@ pub(crate) fn load_single_x509_certificate_file(label: &'static str, path: &Path
 pub(crate) fn recipient_wrap_archive_identity_for_writer(options: &mut WriterOptions) -> KeyWrapArchiveIdentity {
     let archive_uuid = *options.archive_uuid.get_or_insert_with(random_16_bytes);
     let session_id = *options.session_id.get_or_insert_with(random_16_bytes);
-    KeyWrapArchiveIdentity {
-        archive_uuid,
-        session_id,
-        format_version: FORMAT_VERSION,
-        volume_format_rev: VOLUME_FORMAT_REV,
-    }
+    KeyWrapArchiveIdentity { archive_uuid, session_id, format_version: FORMAT_VERSION, volume_format_rev: VOLUME_FORMAT_REV }
 }
 
 fn random_16_bytes() -> [u8; 16] {
@@ -429,30 +351,14 @@ fn random_16_bytes() -> [u8; 16] {
 
 fn key_wrap_outcome_error(outcome: &KeyWrapOutcome) -> TzapError {
     match outcome {
-        KeyWrapOutcome::UnsupportedProfileId => {
-            TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap recipient profile"))
-        }
-        KeyWrapOutcome::UnsupportedArchiveIdentity => {
-            TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap archive identity"))
-        }
-        KeyWrapOutcome::UnsupportedRecipientIdentity => {
-            TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap recipient identity"))
-        }
-        KeyWrapOutcome::UnsupportedSuite => {
-            TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap recipient suite"))
-        }
-        KeyWrapOutcome::CertificatePolicyRejected => {
-            TzapError::Format(FormatError::ReaderUnsupported("recipient certificate policy rejected"))
-        }
-        KeyWrapOutcome::InvalidRecord => {
-            TzapError::Format(FormatError::InvalidArchive("invalid keywrap recipient record"))
-        }
-        KeyWrapOutcome::NoMatchingPrivateKey => {
-            TzapError::KeyWrap("no matching recipient private key for archive".to_owned())
-        }
-        KeyWrapOutcome::UnwrappedCandidateMasterKey { .. } => {
-            TzapError::Format(FormatError::WriterInvariant("keywrap success outcome cannot be converted to error"))
-        }
+        KeyWrapOutcome::UnsupportedProfileId => TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap recipient profile")),
+        KeyWrapOutcome::UnsupportedArchiveIdentity => TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap archive identity")),
+        KeyWrapOutcome::UnsupportedRecipientIdentity => TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap recipient identity")),
+        KeyWrapOutcome::UnsupportedSuite => TzapError::Format(FormatError::ReaderUnsupported("unsupported keywrap recipient suite")),
+        KeyWrapOutcome::CertificatePolicyRejected => TzapError::Format(FormatError::ReaderUnsupported("recipient certificate policy rejected")),
+        KeyWrapOutcome::InvalidRecord => TzapError::Format(FormatError::InvalidArchive("invalid keywrap recipient record")),
+        KeyWrapOutcome::NoMatchingPrivateKey => TzapError::KeyWrap("no matching recipient private key for archive".to_owned()),
+        KeyWrapOutcome::UnwrappedCandidateMasterKey { .. } => TzapError::Format(FormatError::WriterInvariant("keywrap success outcome cannot be converted to error")),
     }
 }
 
@@ -463,12 +369,7 @@ pub(crate) struct TzapRecipientPrivateKeyLookup {
 }
 
 impl PrivateKeyLookup for TzapRecipientPrivateKeyLookup {
-    fn lookup_private_key(
-        &self,
-        _archive_identity: &KeyWrapArchiveIdentity,
-        _metadata: &RecipientRecordMetadata,
-        recipient_identity_bytes: &[u8],
-    ) -> Option<Vec<u8>> {
+    fn lookup_private_key(&self, _archive_identity: &KeyWrapArchiveIdentity, _metadata: &RecipientRecordMetadata, recipient_identity_bytes: &[u8]) -> Option<Vec<u8>> {
         if let Some(private_key_spki_der) = self.private_key_spki_der.as_ref() {
             let certificate = X509::from_der(recipient_identity_bytes).ok()?;
             let certificate_spki_der = certificate.public_key().ok()?.public_key_to_der().ok()?;
@@ -485,22 +386,13 @@ pub(crate) fn load_recipient_private_key_lookup(path: &Path) -> Result<TzapRecip
     load_recipient_private_key_lookup_from_bytes(&bytes, &path.display().to_string())
 }
 
-pub(crate) fn load_recipient_private_key_lookup_from_bytes(
-    bytes: &[u8],
-    description: &str,
-) -> Result<TzapRecipientPrivateKeyLookup, TzapError> {
+pub(crate) fn load_recipient_private_key_lookup_from_bytes(bytes: &[u8], description: &str) -> Result<TzapRecipientPrivateKeyLookup, TzapError> {
     if bytes.len() == 32 {
         return Ok(TzapRecipientPrivateKeyLookup { private_key_bytes: bytes.to_vec(), private_key_spki_der: None });
     }
-    let private_key = if bytes.starts_with(b"-----BEGIN") {
-        PKey::private_key_from_pem(bytes)
-    } else {
-        PKey::private_key_from_der(bytes)
-    }
-    .map_err(|source| TzapError::KeyWrap(format!("failed to parse recipient private key {description}: {source}")))?;
-    let private_key_bytes = private_key.private_key_to_der().map_err(|source| {
-        TzapError::KeyWrap(format!("failed to normalize recipient private key {description}: {source}"))
-    })?;
+    let private_key = if bytes.starts_with(b"-----BEGIN") { PKey::private_key_from_pem(bytes) } else { PKey::private_key_from_der(bytes) }
+        .map_err(|source| TzapError::KeyWrap(format!("failed to parse recipient private key {description}: {source}")))?;
+    let private_key_bytes = private_key.private_key_to_der().map_err(|source| TzapError::KeyWrap(format!("failed to normalize recipient private key {description}: {source}")))?;
     let private_key_spki_der = private_key.public_key_to_der().ok();
     Ok(TzapRecipientPrivateKeyLookup { private_key_bytes, private_key_spki_der })
 }
@@ -514,11 +406,7 @@ pub(crate) struct RecipientWrapOpenStats {
     candidate_count: usize,
 }
 
-pub(crate) fn recipient_wrap_candidates_for_record(
-    context: &RecipientWrapRecordContext<'_>,
-    lookup: &TzapRecipientPrivateKeyLookup,
-    stats: &mut RecipientWrapOpenStats,
-) -> Vec<[u8; 32]> {
+pub(crate) fn recipient_wrap_candidates_for_record(context: &RecipientWrapRecordContext<'_>, lookup: &TzapRecipientPrivateKeyLookup, stats: &mut RecipientWrapOpenStats) -> Vec<[u8; 32]> {
     stats.records_seen += 1;
     let input = RecipientRecordInput {
         archive_identity: KeyWrapArchiveIdentity {
@@ -548,10 +436,7 @@ pub(crate) fn recipient_wrap_candidates_for_record(
             stats.invalid_record_or_unwrap += 1;
             Vec::new()
         }
-        KeyWrapOutcome::UnsupportedProfileId
-        | KeyWrapOutcome::UnsupportedArchiveIdentity
-        | KeyWrapOutcome::UnsupportedRecipientIdentity
-        | KeyWrapOutcome::UnsupportedSuite => {
+        KeyWrapOutcome::UnsupportedProfileId | KeyWrapOutcome::UnsupportedArchiveIdentity | KeyWrapOutcome::UnsupportedRecipientIdentity | KeyWrapOutcome::UnsupportedSuite => {
             stats.unsupported_record += 1;
             Vec::new()
         }
@@ -563,9 +448,7 @@ pub(crate) fn recipient_wrap_open_error(source: FormatError, stats: &RecipientWr
         return TzapError::Format(source);
     }
     if stats.candidate_count > 0 {
-        return TzapError::KeyWrap(format!(
-            "{source}: recipient private key unwrapped a candidate, but archive header HMAC did not verify"
-        ));
+        return TzapError::KeyWrap(format!("{source}: recipient private key unwrapped a candidate, but archive header HMAC did not verify"));
     }
     if stats.records_seen == 0 {
         return TzapError::KeyWrap(format!("{source}: recipient-wrap archive has no recipient records"));
@@ -573,54 +456,31 @@ pub(crate) fn recipient_wrap_open_error(source: FormatError, stats: &RecipientWr
     if stats.no_matching_private_key > 0 && stats.invalid_record_or_unwrap == 0 {
         return TzapError::KeyWrap(format!("{source}: no matching recipient private key for archive"));
     }
-    TzapError::KeyWrap(format!(
-        "{source}: recipient private key did not match any recipient record or failed recipient unwrap"
-    ))
+    TzapError::KeyWrap(format!("{source}: recipient private key did not match any recipient record or failed recipient unwrap"))
 }
 
 fn current_unix_seconds_i64() -> Result<i64, TzapError> {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|source| TzapError::X509RootAuth(source.to_string()))?
-        .as_secs();
+    let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|source| TzapError::X509RootAuth(source.to_string()))?.as_secs();
     i64::try_from(seconds).map_err(|_| TzapError::X509RootAuth("current Unix time exceeds i64".to_owned()))
 }
 
-fn verify_opened_x509_root_auth(
-    opened: &OpenedArchive,
-    trust: &TzapX509TrustOptions,
-) -> Result<TzapX509VerificationReport, TzapError> {
+fn verify_opened_x509_root_auth(opened: &OpenedArchive, trust: &TzapX509TrustOptions) -> Result<TzapX509VerificationReport, TzapError> {
     let trusted_roots_der = load_x509_trusted_roots(trust)?;
     let mut report = None;
     let mut x509_error = None;
     let verification = opened
-        .verify_root_auth_with(|footer, archive_root| {
-            match verify_root_auth_footer(
-                footer,
-                archive_root,
-                &trusted_roots_der,
-                trust.trusted_system_roots,
-                trust.include_official_tzap_root,
-            ) {
-                Ok(value) => {
-                    report = Some(value);
-                    Ok(true)
-                }
-                Err(error) => {
-                    x509_error = Some(error.to_string());
-                    Ok(false)
-                }
+        .verify_root_auth_with(|footer, archive_root| match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots, trust.include_official_tzap_root) {
+            Ok(value) => {
+                report = Some(value);
+                Ok(true)
+            }
+            Err(error) => {
+                x509_error = Some(error.to_string());
+                Ok(false)
             }
         })
-        .map_err(|source| {
-            if let Some(detail) = x509_error {
-                TzapError::X509RootAuth(format!("{source}: {detail}"))
-            } else {
-                TzapError::Format(source)
-            }
-        })?;
-    let report =
-        report.ok_or(TzapError::Format(FormatError::InvalidArchive("missing X.509 RootAuth verification report")))?;
+        .map_err(|source| if let Some(detail) = x509_error { TzapError::X509RootAuth(format!("{source}: {detail}")) } else { TzapError::Format(source) })?;
+    let report = report.ok_or(TzapError::Format(FormatError::InvalidArchive("missing X.509 RootAuth verification report")))?;
 
     Ok(x509_report_from_verification(
         verification.archive_root,
@@ -674,11 +534,7 @@ fn public_no_key_diagnostic_labels(diagnostics: &[PublicNoKeyDiagnostic]) -> Vec
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or verified.
-pub fn test_tzap_with_password_filter(
-    archive: impl AsRef<Path>,
-    password: &str,
-    selector: impl Fn(&str) -> bool,
-) -> Result<TzapTestReport, TzapError> {
+pub fn test_tzap_with_password_filter(archive: impl AsRef<Path>, password: &str, selector: impl Fn(&str) -> bool) -> Result<TzapTestReport, TzapError> {
     test_tzap_with_optional_password_filter_and_x509_trust(archive, Some(password), selector, None)
 }
 
@@ -732,16 +588,10 @@ pub fn test_tzap_with_recipient_key_filter_and_x509_trust(
     test_opened_tzap_archive(&opened, selector, x509_trust)
 }
 
-fn test_opened_tzap_archive(
-    opened: &OpenedArchive,
-    selector: impl Fn(&str) -> bool,
-    x509_trust: Option<&TzapX509TrustOptions>,
-) -> Result<TzapTestReport, TzapError> {
+fn test_opened_tzap_archive(opened: &OpenedArchive, selector: impl Fn(&str) -> bool, x509_trust: Option<&TzapX509TrustOptions>) -> Result<TzapTestReport, TzapError> {
     opened.verify()?;
     let x509_root_auth = match x509_trust.filter(|trust| trust.has_trust_source()) {
-        Some(trust) if should_verify_opened_x509_root_auth(opened, trust) => {
-            Some(verify_opened_x509_root_auth(opened, trust)?)
-        }
+        Some(trust) if should_verify_opened_x509_root_auth(opened, trust) => Some(verify_opened_x509_root_auth(opened, trust)?),
         _ => None,
     };
     let entries = opened.list_files()?;
@@ -755,19 +605,12 @@ fn test_opened_tzap_archive(
             }
         }
     }
-    Ok(TzapTestReport {
-        entries: entries.len(),
-        tested_entries,
-        skipped_entries: entries.len().saturating_sub(tested_entries),
-        tested_bytes,
-        x509_root_auth,
-    })
+    Ok(TzapTestReport { entries: entries.len(), tested_entries, skipped_entries: entries.len().saturating_sub(tested_entries), tested_bytes, x509_root_auth })
 }
 
 fn should_verify_opened_x509_root_auth(opened: &OpenedArchive, trust: &TzapX509TrustOptions) -> bool {
     let explicit_trust = !trust.trusted_ca_certificates.is_empty() || trust.trusted_system_roots;
-    let has_x509_root_auth =
-        opened.root_auth_footer.as_ref().is_some_and(|footer| footer.authenticator_id == X509_AUTHENTICATOR_ID);
+    let has_x509_root_auth = opened.root_auth_footer.as_ref().is_some_and(|footer| footer.authenticator_id == X509_AUTHENTICATOR_ID);
     explicit_trust || has_x509_root_auth
 }
 
@@ -780,10 +623,7 @@ fn should_verify_opened_x509_root_auth(opened: &OpenedArchive, trust: &TzapX509T
 ///
 /// Returns [`TzapError`] when the archive volumes cannot be read, the public
 /// commitment does not verify, or X.509 trust validation fails.
-pub fn verify_tzap_x509_public_no_key(
-    archive: impl AsRef<Path>,
-    trust: &TzapX509TrustOptions,
-) -> Result<TzapX509VerificationReport, TzapError> {
+pub fn verify_tzap_x509_public_no_key(archive: impl AsRef<Path>, trust: &TzapX509TrustOptions) -> Result<TzapX509VerificationReport, TzapError> {
     if !trust.has_trust_source() {
         return Err(TzapError::X509RootAuth("X.509 verification requires trusted roots".to_owned()));
     }
@@ -798,13 +638,7 @@ pub fn verify_tzap_x509_public_no_key(
         if footer.authenticator_id != X509_AUTHENTICATOR_ID {
             return Err(FormatError::ReaderUnsupported("X.509 trust can only verify X.509 RootAuth"));
         }
-        match verify_root_auth_footer(
-            footer,
-            archive_root,
-            &trusted_roots_der,
-            trust.trusted_system_roots,
-            trust.include_official_tzap_root,
-        ) {
+        match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots, trust.include_official_tzap_root) {
             Ok(value) => {
                 report = Some(value);
                 Ok(true)
@@ -815,15 +649,8 @@ pub fn verify_tzap_x509_public_no_key(
             }
         }
     })
-    .map_err(|source| {
-        if let Some(detail) = x509_error {
-            TzapError::X509RootAuth(format!("{source}: {detail}"))
-        } else {
-            TzapError::Format(source)
-        }
-    })?;
-    let report = report
-        .ok_or(TzapError::Format(FormatError::InvalidArchive("missing X.509 public no-key verification report")))?;
+    .map_err(|source| if let Some(detail) = x509_error { TzapError::X509RootAuth(format!("{source}: {detail}")) } else { TzapError::Format(source) })?;
+    let report = report.ok_or(TzapError::Format(FormatError::InvalidArchive("missing X.509 public no-key verification report")))?;
 
     Ok(x509_report_from_verification(
         verification.archive_root,
@@ -847,10 +674,7 @@ pub fn verify_tzap_x509_public_no_key(
 /// Returns [`TzapError`] when the archive cannot be opened, the `RootAuth`
 /// signature does not match the embedded certificate, or the archive is not
 /// signed with the X.509 `RootAuth` profile.
-pub fn inspect_tzap_x509_signer(
-    archive: impl AsRef<Path>,
-    password: Option<&str>,
-) -> Result<TzapX509SignerInspection, TzapError> {
+pub fn inspect_tzap_x509_signer(archive: impl AsRef<Path>, password: Option<&str>) -> Result<TzapX509SignerInspection, TzapError> {
     let opened = open_tzap_archive(archive, password)?;
     inspect_opened_x509_signer(&opened)
 }
@@ -866,36 +690,24 @@ pub fn inspect_tzap_x509_signer(
 /// Returns [`TzapError`] when public no-key inspection cannot read the volume
 /// set, the `RootAuth` signature does not match the embedded certificate, or the
 /// archive is not signed with the X.509 `RootAuth` profile.
-pub fn inspect_tzap_x509_public_no_key_signer(
-    archive: impl AsRef<Path>,
-) -> Result<TzapX509SignerInspection, TzapError> {
+pub fn inspect_tzap_x509_public_no_key_signer(archive: impl AsRef<Path>) -> Result<TzapX509SignerInspection, TzapError> {
     let archive_path = archive.as_ref();
     let volume_bytes = read_tzap_input_volume_bytes(archive_path)?;
     let volume_refs = volume_bytes.iter().map(Vec::as_slice).collect::<Vec<_>>();
     let mut inspection = None;
     let mut x509_error = None;
-    let verification = public_no_key_verify_volumes_with(&volume_refs, |footer, archive_root| {
-        match inspect_x509_root_auth_footer(footer, archive_root) {
-            Ok(value) => {
-                inspection = Some(value);
-                Ok(true)
-            }
-            Err(error) => {
-                x509_error = Some(error.to_string());
-                Ok(false)
-            }
+    let verification = public_no_key_verify_volumes_with(&volume_refs, |footer, archive_root| match inspect_x509_root_auth_footer(footer, archive_root) {
+        Ok(value) => {
+            inspection = Some(value);
+            Ok(true)
+        }
+        Err(error) => {
+            x509_error = Some(error.to_string());
+            Ok(false)
         }
     })
-    .map_err(|source| {
-        if let Some(detail) = x509_error {
-            TzapError::X509RootAuth(format!("{source}: {detail}"))
-        } else {
-            TzapError::Format(source)
-        }
-    })?;
-    let mut inspection = inspection.ok_or(TzapError::Format(FormatError::InvalidArchive(
-        "missing X.509 public no-key signer inspection report",
-    )))?;
+    .map_err(|source| if let Some(detail) = x509_error { TzapError::X509RootAuth(format!("{source}: {detail}")) } else { TzapError::Format(source) })?;
+    let mut inspection = inspection.ok_or(TzapError::Format(FormatError::InvalidArchive("missing X.509 public no-key signer inspection report")))?;
     inspection.diagnostics = public_no_key_diagnostic_labels(&verification.diagnostics);
     Ok(inspection)
 }
@@ -914,30 +726,18 @@ fn inspect_opened_x509_signer(opened: &OpenedArchive) -> Result<TzapX509SignerIn
                 Ok(false)
             }
         })
-        .map_err(|source| {
-            if let Some(detail) = x509_error {
-                TzapError::X509RootAuth(format!("{source}: {detail}"))
-            } else {
-                TzapError::Format(source)
-            }
-        })?;
-    let mut inspection =
-        inspection.ok_or(TzapError::Format(FormatError::InvalidArchive("missing X.509 signer inspection report")))?;
+        .map_err(|source| if let Some(detail) = x509_error { TzapError::X509RootAuth(format!("{source}: {detail}")) } else { TzapError::Format(source) })?;
+    let mut inspection = inspection.ok_or(TzapError::Format(FormatError::InvalidArchive("missing X.509 signer inspection report")))?;
     inspection.diagnostics = root_auth_diagnostic_labels(&verification.diagnostics);
     Ok(inspection)
 }
 
-pub(crate) fn inspect_x509_root_auth_footer(
-    footer: &RootAuthFooterV1,
-    archive_root: &[u8; 32],
-) -> Result<TzapX509SignerInspection, TzapError> {
+pub(crate) fn inspect_x509_root_auth_footer(footer: &RootAuthFooterV1, archive_root: &[u8; 32]) -> Result<TzapX509SignerInspection, TzapError> {
     // All crypto is delegated to the plugin's trust-less assertion-1 check
     // (scheme-aware: RSA-PKCS1 / ECDSA / RSA-PSS). This wrapper only adds the
     // display fields derived from the embedded leaf certificate.
-    let report =
-        verify_root_auth_signature(footer, archive_root).map_err(|error| TzapError::X509RootAuth(error.to_string()))?;
-    let leaf_certificate =
-        X509::from_der(&footer.signer_identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
+    let report = verify_root_auth_signature(footer, archive_root).map_err(|error| TzapError::X509RootAuth(error.to_string()))?;
+    let leaf_certificate = X509::from_der(&footer.signer_identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
     Ok(TzapX509SignerInspection {
         archive_root: *archive_root,
         authenticator_id: footer.authenticator_id,
@@ -946,12 +746,7 @@ pub(crate) fn inspect_x509_root_auth_footer(
         signed_at_unix_seconds: report.signed_at_unix_seconds,
         subject: x509_name_to_string(leaf_certificate.subject_name()),
         issuer: x509_name_to_string(leaf_certificate.issuer_name()),
-        serial_number_hex: leaf_certificate
-            .serial_number()
-            .to_bn()
-            .and_then(|serial| serial.to_hex_str())
-            .map_err(|source| TzapError::X509RootAuth(source.to_string()))?
-            .to_string(),
+        serial_number_hex: leaf_certificate.serial_number().to_bn().and_then(|serial| serial.to_hex_str()).map_err(|source| TzapError::X509RootAuth(source.to_string()))?.to_string(),
         certificate_sha256: report.certificate_sha256,
         diagnostics: Vec::new(),
     })
@@ -964,32 +759,16 @@ mod tests {
 
     #[test]
     fn x509_trust_options_can_include_embedded_official_root() {
-        let trust = TzapX509TrustOptions {
-            trusted_ca_certificates: Vec::new(),
-            trusted_system_roots: false,
-            include_official_tzap_root: true,
-        };
+        let trust = TzapX509TrustOptions { trusted_ca_certificates: Vec::new(), trusted_system_roots: false, include_official_tzap_root: true };
 
         let roots = load_x509_trusted_roots(&trust).unwrap();
 
         assert_eq!(roots.len(), 2);
-        assert_eq!(
-            crate::trust::certificate_sha256_identifier_for_der(&roots[0]),
-            crate::trust::TZAP_PRODUCTION_ROOT_SHA256
-        );
-        assert_eq!(
-            crate::trust::certificate_sha256_identifier_for_der(&roots[1]),
-            crate::trust::TZAP_STAGING_ROOT_SHA256
-        );
+        assert_eq!(crate::trust::certificate_sha256_identifier_for_der(&roots[0]), crate::trust::TZAP_PRODUCTION_ROOT_SHA256);
+        assert_eq!(crate::trust::certificate_sha256_identifier_for_der(&roots[1]), crate::trust::TZAP_STAGING_ROOT_SHA256);
         let root = X509::from_der(&roots[0]).unwrap();
-        assert_eq!(
-            crate::x509_format::x509_name_to_string(root.subject_name()),
-            "CN=TZAP Production Root CA 2026, O=TZAP, C=AU"
-        );
+        assert_eq!(crate::x509_format::x509_name_to_string(root.subject_name()), "CN=TZAP Production Root CA 2026, O=TZAP, C=AU");
         let staging = X509::from_der(&roots[1]).unwrap();
-        assert_eq!(
-            crate::x509_format::x509_name_to_string(staging.subject_name()),
-            "CN=TZAP Staging Root CA 2026, O=TZAP, C=AU"
-        );
+        assert_eq!(crate::x509_format::x509_name_to_string(staging.subject_name()), "CN=TZAP Staging Root CA 2026, O=TZAP, C=AU");
     }
 }

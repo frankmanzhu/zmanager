@@ -1,21 +1,11 @@
-use crate::cli::app::{
-    ExtractOutcome, ExtractRequest, InteractiveOverwriteResolver, ProgressReporter, default_extract_destination,
-    default_raw_stream_destination, expand_short_options,
-};
+use crate::cli::app::{ExtractOutcome, ExtractRequest, InteractiveOverwriteResolver, ProgressReporter, default_extract_destination, default_raw_stream_destination, expand_short_options};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
-use crate::cli::format::{
-    BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_LIBARCHIVE, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP,
-    FORMAT_ZIP, is_deb_archive,
-};
+use crate::cli::format::{BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_LIBARCHIVE, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, is_deb_archive};
 use crate::cli::open::entry_selected;
-use crate::cli::options::{
-    GlobalOptions, parse_global_option, parse_usize, read_optional_password_stdin, take_value,
-    validate_recipient_key_open_option,
-};
+use crate::cli::options::{GlobalOptions, parse_global_option, parse_usize, read_optional_password_stdin, take_value, validate_recipient_key_open_option};
 use crate::cli::usage::{
-    EXTRACT_HELP, command_usage_error, print_error_line, print_extract_summary, print_help_stdout,
-    print_raw_stream_extract_summary, retry_password_required, usage_failure, wants_help,
+    EXTRACT_HELP, command_usage_error, print_error_line, print_extract_summary, print_help_stdout, print_raw_stream_extract_summary, retry_password_required, usage_failure, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::env;
@@ -46,11 +36,7 @@ pub(crate) fn extract_command_from_expanded(args: &[String], mut global: GlobalO
     }
 }
 
-pub(crate) fn parse_extract_request(
-    args: &[String],
-    global: &mut GlobalOptions,
-    request: &mut ExtractRequest,
-) -> Result<(), String> {
+pub(crate) fn parse_extract_request(args: &[String], global: &mut GlobalOptions, request: &mut ExtractRequest) -> Result<(), String> {
     let mut index = 0usize;
     let mut positional = Vec::new();
     let mut after_double_dash = false;
@@ -140,13 +126,7 @@ pub(crate) fn parse_extract_request(
 
 #[allow(clippy::too_many_lines)]
 fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitCode {
-    if let Some(code) = validate_recipient_key_open_option(
-        "extract",
-        &request.archive,
-        request.password_stdin,
-        request.recipient_key.as_ref(),
-        global,
-    ) {
+    if let Some(code) = validate_recipient_key_open_option("extract", &request.archive, request.password_stdin, request.recipient_key.as_ref(), global) {
         return code;
     }
     if request.to_stdout {
@@ -158,26 +138,17 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
     };
     if request.extract_nested {
         if request.password_stdin {
-            return usage_failure(
-                global,
-                format_args!("extract failed: nested package extraction does not use passwords"),
-            );
+            return usage_failure(global, format_args!("extract failed: nested package extraction does not use passwords"));
         }
         if !is_deb_archive(&request.archive) {
-            return usage_failure(
-                global,
-                format_args!("extract failed: --extract-nested is currently supported only for .deb packages"),
-            );
+            return usage_failure(global, format_args!("extract failed: --extract-nested is currently supported only for .deb packages"));
         }
         let destination = request.destination.unwrap_or_else(|| default_extract_destination(&request.archive));
         return run_deb_nested_extract(&request.archive, &destination, policy, global);
     }
     if let Some(format) = zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive) {
         if request.password_stdin {
-            return usage_failure(
-                global,
-                format_args!("extract failed: raw streams are not encrypted; remove --password-stdin"),
-            );
+            return usage_failure(global, format_args!("extract failed: raw streams are not encrypted; remove --password-stdin"));
         }
         let destination = request.destination.unwrap_or_else(|| default_raw_stream_destination(&request.archive));
         return run_raw_stream_extract(&request.archive, format, &destination, policy, global);
@@ -190,38 +161,24 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
     match detect_archive_format(&request.archive) {
         // Raw streams are handled before the policy match above.
         ArchiveFormatKind::RawStream => unreachable!("raw streams handled before format dispatch"),
-        ArchiveFormatKind::Zip => {
-            run_zip_extract_with_policy(request.archive, destination, password.as_deref(), policy, global)
-        }
+        ArchiveFormatKind::Zip => run_zip_extract_with_policy(request.archive, destination, password.as_deref(), policy, global),
         // Split ZIP volume sets are read through libarchive, matching the
         // pre-CR-114 fallthrough behavior.
-        ArchiveFormatKind::SplitZip => {
-            run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
-        }
-        ArchiveFormatKind::SevenZ => {
-            run_7z_extract_with_policy(request.archive, destination, password.as_deref(), policy, global)
-        }
+        ArchiveFormatKind::SplitZip => run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
+        ArchiveFormatKind::SevenZ => run_7z_extract_with_policy(request.archive, destination, password.as_deref(), policy, global),
         // RAR needs a password; without --password-stdin it falls through to
         // the libarchive backend, which can read unencrypted RAR.
-        ArchiveFormatKind::Rar if request.password_stdin => {
-            run_rar_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
-        }
+        ArchiveFormatKind::Rar if request.password_stdin => run_rar_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::TarZst => run_tar_zst_extract_with_policy(request.archive, destination, policy, global),
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        ArchiveFormatKind::AppleArchive => {
-            run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
-        }
+        ArchiveFormatKind::AppleArchive => run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::Tzap => run_tzap_extract_with_policy(
             request.archive,
             destination,
             policy,
             password.as_deref(),
             request.recipient_key.as_deref(),
-            zmanager_core::tzap_backend::TzapRestoreOptions {
-                policy: request.tzap_restore_policy,
-                allow_degraded: request.tzap_allow_degraded,
-                allow_absolute_symlinks: false,
-            },
+            zmanager_core::tzap_backend::TzapRestoreOptions { policy: request.tzap_restore_policy, allow_degraded: request.tzap_allow_degraded, allow_absolute_symlinks: false },
             global,
         ),
         ArchiveFormatKind::TarGz
@@ -240,27 +197,15 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         | ArchiveFormatKind::Lha
         | ArchiveFormatKind::Ar
         | ArchiveFormatKind::Warc
-        | ArchiveFormatKind::Mtree => {
-            run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global)
-        }
+        | ArchiveFormatKind::Mtree => run_libarchive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
     }
 }
-fn run_deb_nested_extract(
-    archive: &str,
-    destination: &Path,
-    policy: zmanager_core::safety::ExtractionPolicy,
-    global: &GlobalOptions,
-) -> ExitCode {
+fn run_deb_nested_extract(archive: &str, destination: &Path, policy: zmanager_core::safety::ExtractionPolicy, global: &GlobalOptions) -> ExitCode {
     let result = if matches!(policy.overwrite, OverwritePolicy::Ask) {
         let stdin = io::stdin();
         let stderr = io::stderr();
         let mut overwrite_resolver = InteractiveOverwriteResolver::new(stdin.lock(), stderr.lock());
-        zmanager_core::deb_backend::extract_deb_nested_with_overwrite_resolver(
-            archive,
-            destination,
-            policy,
-            &mut overwrite_resolver,
-        )
+        zmanager_core::deb_backend::extract_deb_nested_with_overwrite_resolver(archive, destination, policy, &mut overwrite_resolver)
     } else {
         zmanager_core::deb_backend::extract_deb_nested(archive, destination, policy)
     };
@@ -296,13 +241,7 @@ fn run_raw_stream_extract(
         let stdin = io::stdin();
         let stderr = io::stderr();
         let mut overwrite_resolver = InteractiveOverwriteResolver::new(stdin.lock(), stderr.lock());
-        zmanager_core::raw_stream_backend::extract_raw_stream_with_overwrite_resolver(
-            archive,
-            format,
-            destination,
-            policy,
-            &mut overwrite_resolver,
-        )
+        zmanager_core::raw_stream_backend::extract_raw_stream_with_overwrite_resolver(archive, format, destination, policy, &mut overwrite_resolver)
     } else {
         zmanager_core::raw_stream_backend::extract_raw_stream(archive, format, destination, policy)
     };
@@ -324,10 +263,7 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
         return ExitCode::from(2);
     }
     if request.destination.is_some() {
-        print_error_line(
-            global,
-            format_args!("extract failed: --to-stdout cannot be combined with an extraction directory"),
-        );
+        print_error_line(global, format_args!("extract failed: --to-stdout cannot be combined with an extraction directory"));
         return ExitCode::from(2);
     }
     if request.strip_components > 0 {
@@ -339,14 +275,10 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
     // `run_extract_request`.
     if let Some(format) = zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive) {
         if request.password_stdin {
-            print_error_line(
-                global,
-                format_args!("extract to stdout failed: raw streams are not encrypted; remove --password-stdin"),
-            );
+            print_error_line(global, format_args!("extract to stdout failed: raw streams are not encrypted; remove --password-stdin"));
             return ExitCode::from(2);
         }
-        let Some(output_name) = zmanager_core::raw_stream_backend::output_name_for_raw_stream(&request.archive, format)
-        else {
+        let Some(output_name) = zmanager_core::raw_stream_backend::output_name_for_raw_stream(&request.archive, format) else {
             print_error_line(global, format_args!("extract to stdout failed: could not derive raw stream output name"));
             return ExitCode::FAILURE;
         };
@@ -378,13 +310,7 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             ArchiveFormatKind::TarZst => copy_tar_zst_archive_to_stdout(request, global),
             ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
-            ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(
-                &request.archive,
-                &request.include,
-                &request.exclude,
-                password.as_deref(),
-                global,
-            ),
+            ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(&request.archive, &request.include, &request.exclude, password.as_deref(), global),
             // Split ZIP volume sets, tgz, .deb, RAR, and unrecognized formats
             // are read through libarchive, matching the pre-CR-114
             // fallthrough behavior.
@@ -405,111 +331,59 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             | ArchiveFormatKind::Ar
             | ArchiveFormatKind::Warc
             | ArchiveFormatKind::Mtree
-            | ArchiveFormatKind::Unknown => copy_archive_to_stdout(
-                &request.include,
-                &request.exclude,
-                password.as_deref(),
-                "extract",
-                global,
-                None,
-                |password, selected, stdout| {
-                    zmanager_core::libarchive_backend::copy_archive_files_to_writer(
-                        &request.archive,
-                        password,
-                        selected,
-                        stdout,
-                    )
+            | ArchiveFormatKind::Unknown => copy_archive_to_stdout(&request.include, &request.exclude, password.as_deref(), "extract", global, None, |password, selected, stdout| {
+                zmanager_core::libarchive_backend::copy_archive_files_to_writer(&request.archive, password, selected, stdout)
                     .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
                     .map_err(|error| StdoutCopyError::Message(error.to_string()))
-                },
-            ),
+            }),
         }
     }
 }
 
 fn copy_zip_archive_to_stdout(request: &ExtractRequest, password: Option<&str>, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(
-        &request.include,
-        &request.exclude,
-        password,
-        "extract",
-        global,
-        Some("ZIP password: "),
-        |password, selected, stdout| {
-            zmanager_core::zip_backend::copy_zip_files_to_writer(&request.archive, password, selected, stdout)
-                .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-                .map_err(|error| match error {
-                    zmanager_core::zip_backend::ZipBackendError::PasswordRequired => {
-                        StdoutCopyError::PasswordRequired(error.to_string())
-                    }
-                    error => StdoutCopyError::Message(error.to_string()),
-                })
-        },
-    )
+    copy_archive_to_stdout(&request.include, &request.exclude, password, "extract", global, Some("ZIP password: "), |password, selected, stdout| {
+        zmanager_core::zip_backend::copy_zip_files_to_writer(&request.archive, password, selected, stdout).map(|report| (report.written_entries, report.skipped_entries, report.written_bytes)).map_err(
+            |error| match error {
+                zmanager_core::zip_backend::ZipBackendError::PasswordRequired => StdoutCopyError::PasswordRequired(error.to_string()),
+                error => StdoutCopyError::Message(error.to_string()),
+            },
+        )
+    })
 }
 
 fn copy_7z_archive_to_stdout(request: &ExtractRequest, password: Option<&str>, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(
-        &request.include,
-        &request.exclude,
-        password,
-        "extract",
-        global,
-        Some("7z password: "),
-        |password, selected, stdout| {
-            zmanager_core::sevenz_backend::copy_7z_files_to_writer(&request.archive, password, selected, stdout)
-                .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-                .map_err(|error| match error {
-                    zmanager_core::sevenz_backend::SevenZError::PasswordRequired => {
-                        StdoutCopyError::PasswordRequired(error.to_string())
-                    }
-                    error => StdoutCopyError::Message(error.to_string()),
-                })
-        },
-    )
+    copy_archive_to_stdout(&request.include, &request.exclude, password, "extract", global, Some("7z password: "), |password, selected, stdout| {
+        zmanager_core::sevenz_backend::copy_7z_files_to_writer(&request.archive, password, selected, stdout)
+            .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
+            .map_err(|error| match error {
+                zmanager_core::sevenz_backend::SevenZError::PasswordRequired => StdoutCopyError::PasswordRequired(error.to_string()),
+                error => StdoutCopyError::Message(error.to_string()),
+            })
+    })
 }
 
 fn copy_tar_zst_archive_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(
-        &request.include,
-        &request.exclude,
-        None,
-        "extract",
-        global,
-        None,
-        |_password, selected, stdout| {
-            zmanager_core::tar_zst_backend::copy_tar_zst_files_to_writer(&request.archive, selected, stdout)
-                .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-                .map_err(|error| StdoutCopyError::Message(error.to_string()))
-        },
-    )
+    copy_archive_to_stdout(&request.include, &request.exclude, None, "extract", global, None, |_password, selected, stdout| {
+        zmanager_core::tar_zst_backend::copy_tar_zst_files_to_writer(&request.archive, selected, stdout)
+            .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
+            .map_err(|error| StdoutCopyError::Message(error.to_string()))
+    })
 }
 
 fn copy_tzap_archive_to_stdout(request: &ExtractRequest, password: Option<&str>, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(
-        &request.include,
-        &request.exclude,
-        password,
-        "extract",
-        global,
-        None,
-        |password, _selected, stdout| {
-            zmanager_core::tzap_backend::copy_tzap_files_to_writer(
-                &request.archive,
-                tzap_extract_key(request.recipient_key.as_deref(), password),
-                |name| entry_selected(name, &request.include, &request.exclude),
-                stdout,
-            )
-            .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-            .map_err(|error| StdoutCopyError::Message(error.to_string()))
-        },
-    )
+    copy_archive_to_stdout(&request.include, &request.exclude, password, "extract", global, None, |password, _selected, stdout| {
+        zmanager_core::tzap_backend::copy_tzap_files_to_writer(
+            &request.archive,
+            tzap_extract_key(request.recipient_key.as_deref(), password),
+            |name| entry_selected(name, &request.include, &request.exclude),
+            stdout,
+        )
+        .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
+        .map_err(|error| StdoutCopyError::Message(error.to_string()))
+    })
 }
 
-fn tzap_extract_key<'a>(
-    recipient_key: Option<&'a Path>,
-    password: Option<&'a str>,
-) -> zmanager_core::tzap_backend::TzapExtractKeySource<'a> {
+fn tzap_extract_key<'a>(recipient_key: Option<&'a Path>, password: Option<&'a str>) -> zmanager_core::tzap_backend::TzapExtractKeySource<'a> {
     match recipient_key {
         Some(recipient_key) => zmanager_core::tzap_backend::TzapExtractKeySource::RecipientKeyPath(recipient_key),
         None => match password {
@@ -521,15 +395,7 @@ fn tzap_extract_key<'a>(
 
 fn print_extract_stdout_ok(global: &GlobalOptions, label: &str, entries_label: &str, skipped: usize, bytes: u64) {
     if global.verbose > 0 && !global.quiet {
-        output::stderr_line(
-            global.color,
-            format_args!(
-                "{} to stdout ok: {entries_label}, {} skipped, {} bytes",
-                output::styled(StyleRole::Success, format_args!("{label}")),
-                skipped,
-                bytes
-            ),
-        );
+        output::stderr_line(global.color, format_args!("{} to stdout ok: {entries_label}, {} skipped, {} bytes", output::styled(StyleRole::Success, format_args!("{label}")), skipped, bytes));
     }
 }
 
@@ -546,11 +412,7 @@ fn copy_archive_to_stdout(
     label: &str,
     global: &GlobalOptions,
     password_prompt: Option<&str>,
-    mut copy: impl FnMut(
-        Option<&str>,
-        &mut dyn Fn(&str) -> bool,
-        &mut io::StdoutLock<'_>,
-    ) -> Result<(usize, usize, u64), StdoutCopyError>,
+    mut copy: impl FnMut(Option<&str>, &mut dyn Fn(&str) -> bool, &mut io::StdoutLock<'_>) -> Result<(usize, usize, u64), StdoutCopyError>,
 ) -> ExitCode {
     let mut stdout = io::stdout().lock();
     let selected = |name: &str| entry_selected(name, include, exclude);
@@ -607,28 +469,12 @@ fn extraction_policy(request: &ExtractRequest) -> Result<zmanager_core::safety::
     })
 }
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-fn extract_apple_archive_stdout(
-    archive: &str,
-    include: &[String],
-    exclude: &[String],
-    password: Option<&str>,
-    global: &GlobalOptions,
-) -> ExitCode {
-    copy_archive_to_stdout(
-        include,
-        exclude,
-        password,
-        FORMAT_APPLE_ARCHIVE,
-        global,
-        None,
-        |password, selected, stdout| {
-            zmanager_core::apple_archive_backend::copy_apple_archive_files_to_writer(
-                archive, selected, stdout, password,
-            )
+fn extract_apple_archive_stdout(archive: &str, include: &[String], exclude: &[String], password: Option<&str>, global: &GlobalOptions) -> ExitCode {
+    copy_archive_to_stdout(include, exclude, password, FORMAT_APPLE_ARCHIVE, global, None, |password, selected, stdout| {
+        zmanager_core::apple_archive_backend::copy_apple_archive_files_to_writer(archive, selected, stdout, password)
             .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
             .map_err(|error| StdoutCopyError::Message(error.to_string()))
-        },
-    )
+    })
 }
 
 struct CliExtractReport {
@@ -640,79 +486,44 @@ struct CliExtractReport {
 
 impl From<zmanager_core::zip_backend::ZipExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::zip_backend::ZipExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
-        }
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
 
 impl From<zmanager_core::tar_zst_backend::TarZstdExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::tar_zst_backend::TarZstdExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
-        }
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
 
 impl From<zmanager_core::sevenz_backend::SevenZExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::sevenz_backend::SevenZExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
-        }
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
 
 impl From<zmanager_core::rar_backend::RarExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::rar_backend::RarExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
-        }
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
 
 impl From<zmanager_core::libarchive_backend::LibarchiveExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::libarchive_backend::LibarchiveExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
-        }
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 impl From<zmanager_core::apple_archive_backend::AppleArchiveExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::apple_archive_backend::AppleArchiveExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
-        }
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
 
 impl From<zmanager_core::tzap_backend::TzapExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::tzap_backend::TzapExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
-        }
+        Self { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings }
     }
 }
 
@@ -722,22 +533,8 @@ enum CliExtractError {
 }
 
 type CliOverwriteResolver = InteractiveOverwriteResolver<io::StdinLock<'static>, io::StderrLock<'static>>;
-type ExtractAskClosure<'a> = dyn Fn(
-        &Path,
-        &Path,
-        zmanager_core::safety::ExtractionPolicy,
-        Option<&str>,
-        &mut CliOverwriteResolver,
-    ) -> Result<CliExtractReport, CliExtractError>
-    + 'a;
-type ExtractPlainClosure<'a> = dyn for<'ctx> Fn(
-        &Path,
-        &Path,
-        zmanager_core::safety::ExtractionPolicy,
-        Option<&str>,
-        &mut JobContext<'ctx>,
-    ) -> Result<CliExtractReport, CliExtractError>
-    + 'a;
+type ExtractAskClosure<'a> = dyn Fn(&Path, &Path, zmanager_core::safety::ExtractionPolicy, Option<&str>, &mut CliOverwriteResolver) -> Result<CliExtractReport, CliExtractError> + 'a;
+type ExtractPlainClosure<'a> = dyn for<'ctx> Fn(&Path, &Path, zmanager_core::safety::ExtractionPolicy, Option<&str>, &mut JobContext<'ctx>) -> Result<CliExtractReport, CliExtractError> + 'a;
 
 #[derive(Clone, Copy)]
 struct ExtractBackendSpec<'a> {
@@ -804,16 +601,7 @@ fn run_extract_with_policy(
                 }
                 eprintln!("{message}");
             },
-            |password| {
-                run_extract_with_policy(
-                    &archive_path,
-                    &destination_path,
-                    policy,
-                    Some(password.expose_secret()),
-                    global,
-                    spec,
-                )
-            },
+            |password| run_extract_with_policy(&archive_path, &destination_path, policy, Some(password.expose_secret()), global, spec),
         ),
         Err(CliExtractError::PasswordRequired(message) | CliExtractError::Message(message)) => {
             if spec.progress {
@@ -845,34 +633,16 @@ fn run_zip_extract_with_policy(
             password_prompt: Some("ZIP password: "),
             progress: true,
             ask: &|archive_path, destination_path, policy, password, resolver| {
-                zmanager_core::zip_backend::extract_zip_with_overwrite_resolver_and_password(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    password,
-                    resolver,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| match error {
-                    zmanager_core::zip_backend::ZipBackendError::PasswordRequired => {
-                        CliExtractError::PasswordRequired(error.to_string())
+                zmanager_core::zip_backend::extract_zip_with_overwrite_resolver_and_password(archive_path, destination_path, policy, password, resolver).map(CliExtractReport::from).map_err(|error| {
+                    match error {
+                        zmanager_core::zip_backend::ZipBackendError::PasswordRequired => CliExtractError::PasswordRequired(error.to_string()),
+                        error => CliExtractError::Message(error.to_string()),
                     }
-                    error => CliExtractError::Message(error.to_string()),
                 })
             },
             plain: &|archive_path, destination_path, policy, password, context| {
-                zmanager_core::zip_backend::extract_zip_with_context_and_password(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    password,
-                    context,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| match error {
-                    zmanager_core::zip_backend::ZipBackendError::PasswordRequired => {
-                        CliExtractError::PasswordRequired(error.to_string())
-                    }
+                zmanager_core::zip_backend::extract_zip_with_context_and_password(archive_path, destination_path, policy, password, context).map(CliExtractReport::from).map_err(|error| match error {
+                    zmanager_core::zip_backend::ZipBackendError::PasswordRequired => CliExtractError::PasswordRequired(error.to_string()),
                     error => CliExtractError::Message(error.to_string()),
                 })
             },
@@ -899,24 +669,14 @@ fn run_tar_zst_extract_with_policy(
             password_prompt: None,
             progress: true,
             ask: &|archive_path, destination_path, policy, _password, resolver| {
-                zmanager_core::tar_zst_backend::extract_tar_zst_with_overwrite_resolver(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    resolver,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| CliExtractError::Message(error.to_string()))
+                zmanager_core::tar_zst_backend::extract_tar_zst_with_overwrite_resolver(archive_path, destination_path, policy, resolver)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
             },
             plain: &|archive_path, destination_path, policy, _password, context| {
-                zmanager_core::tar_zst_backend::extract_tar_zst_with_context(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    context,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| CliExtractError::Message(error.to_string()))
+                zmanager_core::tar_zst_backend::extract_tar_zst_with_context(archive_path, destination_path, policy, context)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
             },
         },
     )
@@ -943,26 +703,14 @@ fn run_apple_archive_extract_with_policy(
             password_prompt: None,
             progress: true,
             ask: &|archive_path, destination_path, policy, password, resolver| {
-                zmanager_core::apple_archive_backend::extract_apple_archive_with_overwrite_resolver(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    resolver,
-                    password,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| CliExtractError::Message(error.to_string()))
+                zmanager_core::apple_archive_backend::extract_apple_archive_with_overwrite_resolver(archive_path, destination_path, policy, resolver, password)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
             },
             plain: &|archive_path, destination_path, policy, password, context| {
-                zmanager_core::apple_archive_backend::extract_apple_archive_with_context(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    password,
-                    context,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| CliExtractError::Message(error.to_string()))
+                zmanager_core::apple_archive_backend::extract_apple_archive_with_context(archive_path, destination_path, policy, password, context)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
             },
         },
     )
@@ -992,36 +740,17 @@ fn run_tzap_extract_with_policy(
             ask: &|archive_path, destination_path, policy, password, resolver| {
                 let key = tzap_extract_key(recipient_key, password);
                 zmanager_core::tzap_backend::extract_tzap(
-                    zmanager_core::tzap_backend::TzapExtractRequest {
-                        key,
-                        policy,
-                        restore_options,
-                        overwrite_resolver: Some(resolver),
-                        context: None,
-                        fast: false,
-                    },
+                    zmanager_core::tzap_backend::TzapExtractRequest { key, policy, restore_options, overwrite_resolver: Some(resolver), context: None, fast: false },
                     archive_path,
                     destination_path,
                 )
-                .map(|report| CliExtractReport {
-                    written_entries: report.written_entries,
-                    skipped_entries: report.skipped_entries,
-                    written_bytes: report.written_bytes,
-                    warnings: report.warnings,
-                })
+                .map(|report| CliExtractReport { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings })
                 .map_err(|error| CliExtractError::Message(error.to_string()))
             },
             plain: &|archive_path, destination_path, policy, password, _context| {
                 let key = tzap_extract_key(recipient_key, password);
                 zmanager_core::tzap_backend::extract_tzap(
-                    zmanager_core::tzap_backend::TzapExtractRequest {
-                        key,
-                        policy,
-                        restore_options,
-                        overwrite_resolver: None,
-                        context: None,
-                        fast: false,
-                    },
+                    zmanager_core::tzap_backend::TzapExtractRequest { key, policy, restore_options, overwrite_resolver: None, context: None, fast: false },
                     archive_path,
                     destination_path,
                 )
@@ -1052,33 +781,16 @@ fn run_7z_extract_with_policy(
             password_prompt: Some("7z password: "),
             progress: true,
             ask: &|archive_path, destination_path, policy, password, resolver| {
-                zmanager_core::sevenz_backend::extract_7z_with_overwrite_resolver(
-                    archive_path,
-                    destination_path,
-                    password,
-                    policy,
-                    resolver,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| match error {
-                    zmanager_core::sevenz_backend::SevenZError::PasswordRequired => {
-                        CliExtractError::PasswordRequired(error.to_string())
-                    }
+                zmanager_core::sevenz_backend::extract_7z_with_overwrite_resolver(archive_path, destination_path, password, policy, resolver).map(CliExtractReport::from).map_err(|error| match error {
+                    zmanager_core::sevenz_backend::SevenZError::PasswordRequired => CliExtractError::PasswordRequired(error.to_string()),
                     error => CliExtractError::Message(error.to_string()),
                 })
             },
             plain: &|archive_path, destination_path, policy, password, _context| {
                 zmanager_core::sevenz_backend::extract_7z(archive_path, destination_path, password, policy)
-                    .map(|report| CliExtractReport {
-                        written_entries: report.written_entries,
-                        skipped_entries: report.skipped_entries,
-                        written_bytes: report.written_bytes,
-                        warnings: report.warnings,
-                    })
+                    .map(|report| CliExtractReport { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings })
                     .map_err(|error| match error {
-                        zmanager_core::sevenz_backend::SevenZError::PasswordRequired => {
-                            CliExtractError::PasswordRequired(error.to_string())
-                        }
+                        zmanager_core::sevenz_backend::SevenZError::PasswordRequired => CliExtractError::PasswordRequired(error.to_string()),
                         error => CliExtractError::Message(error.to_string()),
                     })
             },
@@ -1106,24 +818,13 @@ fn run_rar_extract_with_policy(
             password_prompt: None,
             progress: false,
             ask: &|archive_path, destination_path, policy, password, resolver| {
-                zmanager_core::rar_backend::extract_rar_with_overwrite_resolver_and_password(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    password,
-                    resolver,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| CliExtractError::Message(error.to_string()))
+                zmanager_core::rar_backend::extract_rar_with_overwrite_resolver_and_password(archive_path, destination_path, policy, password, resolver)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
             },
             plain: &|archive_path, destination_path, policy, password, _context| {
                 zmanager_core::rar_backend::extract_rar_with_password(archive_path, destination_path, policy, password)
-                    .map(|report| CliExtractReport {
-                        written_entries: report.written_entries,
-                        skipped_entries: report.skipped_entries,
-                        written_bytes: report.written_bytes,
-                        warnings: report.warnings,
-                    })
+                    .map(|report| CliExtractReport { written_entries: report.written_entries, skipped_entries: report.skipped_entries, written_bytes: report.written_bytes, warnings: report.warnings })
                     .map_err(|error| CliExtractError::Message(error.to_string()))
             },
         },
@@ -1150,25 +851,14 @@ fn run_libarchive_extract_with_policy(
             password_prompt: None,
             progress: true,
             ask: &|archive_path, destination_path, policy, password, resolver| {
-                zmanager_core::libarchive_backend::extract_archive_with_overwrite_resolver_and_password(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    password,
-                    resolver,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| CliExtractError::Message(error.to_string()))
+                zmanager_core::libarchive_backend::extract_archive_with_overwrite_resolver_and_password(archive_path, destination_path, policy, password, resolver)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
             },
             plain: &|archive_path, destination_path, policy, password, _context| {
-                zmanager_core::libarchive_backend::extract_archive_with_password(
-                    archive_path,
-                    destination_path,
-                    policy,
-                    password,
-                )
-                .map(CliExtractReport::from)
-                .map_err(|error| CliExtractError::Message(error.to_string()))
+                zmanager_core::libarchive_backend::extract_archive_with_password(archive_path, destination_path, policy, password)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
             },
         },
     )

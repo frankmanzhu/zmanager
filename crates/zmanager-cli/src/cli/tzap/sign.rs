@@ -1,13 +1,7 @@
 use super::TzapCliContext;
-use super::support::{
-    current_unix_seconds, parse_tzap_context_option, print_stable_tzap_error, read_json_argument, service_envelope,
-    service_request, write_json_file,
-};
+use super::support::{current_unix_seconds, parse_tzap_context_option, print_stable_tzap_error, read_json_argument, service_envelope, service_request, write_json_file};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
-use crate::cli::usage::{
-    SIGN_HELP, VERIFY_HELP, command_usage_error, json_escape, json_optional_string, print_error_line,
-    print_help_stdout, print_success_line, wants_help,
-};
+use crate::cli::usage::{SIGN_HELP, VERIFY_HELP, command_usage_error, json_escape, json_optional_string, print_error_line, print_help_stdout, print_success_line, wants_help};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -138,12 +132,10 @@ pub(crate) fn verify_command(args: &[String], mut global: GlobalOptions) -> Exit
                 });
             }
             "--custom-trust-root-cert" => {
-                custom_root_cert_paths.push(PathBuf::from(
-                    match take_value(args, &mut index, "--custom-trust-root-cert") {
-                        Ok(value) => value,
-                        Err(error) => return command_usage_error("verify", &error, &global),
-                    },
-                ));
+                custom_root_cert_paths.push(PathBuf::from(match take_value(args, &mut index, "--custom-trust-root-cert") {
+                    Ok(value) => value,
+                    Err(error) => return command_usage_error("verify", &error, &global),
+                }));
             }
             "--status-response" => {
                 status_response_path = Some(match take_value(args, &mut index, "--status-response") {
@@ -196,8 +188,7 @@ pub(crate) fn verify_command(args: &[String], mut global: GlobalOptions) -> Exit
         }
         None => None,
     };
-    let custom_root_cert_paths =
-        custom_root_cert_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
+    let custom_root_cert_paths = custom_root_cert_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
     let mut request = service_request(
         &TzapCliContext::default(),
         json!({

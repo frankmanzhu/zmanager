@@ -1,13 +1,8 @@
 //! Local TZAP document-envelope signing.
 
-use crate::document_envelope::{
-    self, FIELD_DOCUMENT_PAYLOAD, FIELD_INTERMEDIATE_CHAIN_DER, FIELD_LEAF_CERTIFICATE_DER, FIELD_SIGNATURE,
-    FIELD_SIGNED_PAYLOAD,
-};
+use crate::document_envelope::{self, FIELD_DOCUMENT_PAYLOAD, FIELD_INTERMEDIATE_CHAIN_DER, FIELD_LEAF_CERTIFICATE_DER, FIELD_SIGNATURE, FIELD_SIGNED_PAYLOAD};
 use crate::jcs;
-use crate::local_identity_store::{
-    TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore,
-};
+use crate::local_identity_store::{TzapDeviceSigningKeyRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityStore};
 use crate::p256_signature;
 use crate::trust::{self, TzapCertificateStatus};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -93,43 +88,23 @@ impl From<document_envelope::TzapDocumentEnvelopeError> for TzapDocumentSigningE
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub fn sign_tzap_document_payload(
-    store: &impl TzapLocalIdentityStore,
-    request: &TzapDocumentSigningRequest,
-    document_payload: Value,
-) -> Result<Value, TzapDocumentSigningError> {
+pub fn sign_tzap_document_payload(store: &impl TzapLocalIdentityStore, request: &TzapDocumentSigningRequest, document_payload: Value) -> Result<Value, TzapDocumentSigningError> {
     if request.signature_algorithm != trust::TZAP_DOCUMENT_SIGNATURE_ALGORITHM {
         return Err(TzapDocumentSigningError::UnsupportedAlgorithm);
     }
     let inventory = store.load_inventory(&request.account_key)?;
-    let certificate = inventory
-        .enrolled_certificates
-        .iter()
-        .find(|record| record.certificate_id == request.certificate_id)
-        .ok_or(TzapDocumentSigningError::CertificateNotFound)?;
+    let certificate = inventory.enrolled_certificates.iter().find(|record| record.certificate_id == request.certificate_id).ok_or(TzapDocumentSigningError::CertificateNotFound)?;
     validate_certificate_gate(certificate, request.now_unix_seconds)?;
-    if inventory
-        .emergency_blocklist
-        .blocked_issuer_sha256
-        .iter()
-        .any(|issuer| issuer == &certificate.issuer_certificate_sha256)
-    {
+    if inventory.emergency_blocklist.blocked_issuer_sha256.iter().any(|issuer| issuer == &certificate.issuer_certificate_sha256) {
         return Err(TzapDocumentSigningError::IssuerBlocked);
     }
-    if inventory.certificate_status_cache.iter().any(|status| {
-        status.certificate_sha256 == certificate.certificate_sha256 && status.status != TzapCertificateStatus::Valid
-    }) {
+    if inventory.certificate_status_cache.iter().any(|status| status.certificate_sha256 == certificate.certificate_sha256 && status.status != TzapCertificateStatus::Valid) {
         return Err(TzapDocumentSigningError::CertificateStatusBlocked);
     }
 
-    let signing_key = inventory
-        .device_signing_keys
-        .iter()
-        .find(|record| record.key_id == certificate.signing_key_id)
-        .ok_or(TzapDocumentSigningError::PrivateKeyNotFound)?;
+    let signing_key = inventory.device_signing_keys.iter().find(|record| record.key_id == certificate.signing_key_id).ok_or(TzapDocumentSigningError::PrivateKeyNotFound)?;
 
-    let payload_hash = jcs::canonical_sha256_digest(&document_payload)
-        .map_err(|error| TzapDocumentSigningError::Canonicalization(format!("{error:?}")))?;
+    let payload_hash = jcs::canonical_sha256_digest(&document_payload).map_err(|error| TzapDocumentSigningError::Canonicalization(format!("{error:?}")))?;
     let mut signed_payload = json!({
         "envelope_version": trust::TZAP_ENVELOPE_VERSION,
         "domain_separator": trust::TZAP_DOCUMENT_DOMAIN_SEPARATOR,
@@ -144,8 +119,7 @@ pub fn sign_tzap_document_payload(
     if let Some(claimed_signing_time) = &request.claimed_signing_time {
         signed_payload["claimed_signing_time"] = json!(claimed_signing_time);
     }
-    let canonical_signed_payload = jcs::canonicalize_json_bytes(&signed_payload)
-        .map_err(|error| TzapDocumentSigningError::Canonicalization(format!("{error:?}")))?;
+    let canonical_signed_payload = jcs::canonicalize_json_bytes(&signed_payload).map_err(|error| TzapDocumentSigningError::Canonicalization(format!("{error:?}")))?;
     let signature = sign_signed_payload(signing_key, &canonical_signed_payload)?;
 
     let envelope = json!({
@@ -162,10 +136,7 @@ pub fn sign_tzap_document_payload(
     Ok(envelope)
 }
 
-fn validate_certificate_gate(
-    certificate: &TzapEnrolledCertificateRecord,
-    now_unix_seconds: u64,
-) -> Result<(), TzapDocumentSigningError> {
+fn validate_certificate_gate(certificate: &TzapEnrolledCertificateRecord, now_unix_seconds: u64) -> Result<(), TzapDocumentSigningError> {
     if !matches!(certificate.state, TzapLocalCertificateState::Active) {
         return Err(TzapDocumentSigningError::CertificateNotActive);
     }
@@ -178,14 +149,9 @@ fn validate_certificate_gate(
     Ok(())
 }
 
-fn sign_signed_payload(
-    signing_key: &TzapDeviceSigningKeyRecord,
-    canonical_signed_payload: &[u8],
-) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], TzapDocumentSigningError> {
-    let private_key = PKey::<Private>::private_key_from_der(signing_key.private_key_der.expose_secret())
-        .map_err(|error| TzapDocumentSigningError::Crypto(error.to_string()))?;
-    p256_signature::sign_p256_sha256_p1363(&private_key, canonical_signed_payload)
-        .map_err(|error| TzapDocumentSigningError::Crypto(format!("{error:?}")))
+fn sign_signed_payload(signing_key: &TzapDeviceSigningKeyRecord, canonical_signed_payload: &[u8]) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], TzapDocumentSigningError> {
+    let private_key = PKey::<Private>::private_key_from_der(signing_key.private_key_der.expose_secret()).map_err(|error| TzapDocumentSigningError::Crypto(error.to_string()))?;
+    p256_signature::sign_p256_sha256_p1363(&private_key, canonical_signed_payload).map_err(|error| TzapDocumentSigningError::Crypto(format!("{error:?}")))
 }
 
 #[cfg(test)]
@@ -194,10 +160,8 @@ mod tests {
     use crate::device_identity::{TzapDeviceCsrOptions, generate_device_signing_key_and_csr};
     use crate::document_envelope::validate_tzap_document_envelope_value;
     use crate::local_identity_store::{
-        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapCertificateStatusCacheRecord,
-        TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord,
-        TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore,
-        TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
+        DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapCertificateStatusCacheRecord, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord,
+        TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
     };
     use crate::p256_signature::verify_p256_sha256_p1363;
     use crate::secrets::SecretBytes;
@@ -232,14 +196,9 @@ mod tests {
         let mut inventory = store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
         inventory.device_signing_keys.clear();
         store.save_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, inventory).unwrap();
-        assert!(matches!(
-            sign_tzap_document_payload(&store, &SigningFixture::request(), payload.clone()),
-            Err(TzapDocumentSigningError::PrivateKeyNotFound)
-        ));
+        assert!(matches!(sign_tzap_document_payload(&store, &SigningFixture::request(), payload.clone()), Err(TzapDocumentSigningError::PrivateKeyNotFound)));
 
-        for (state, expected) in
-            [(TzapLocalCertificateState::Revoked, "not_active"), (TzapLocalCertificateState::Suspended, "not_active")]
-        {
+        for (state, expected) in [(TzapLocalCertificateState::Revoked, "not_active"), (TzapLocalCertificateState::Suspended, "not_active")] {
             let store = fixture.store(state, false, None);
             let error = sign_tzap_document_payload(&store, &SigningFixture::request(), payload.clone()).unwrap_err();
             assert!(matches!(error, TzapDocumentSigningError::CertificateNotActive));
@@ -249,17 +208,11 @@ mod tests {
         let mut future = SigningFixture::request();
         future.now_unix_seconds = 50;
         let store = fixture.store(TzapLocalCertificateState::Active, false, None);
-        assert!(matches!(
-            sign_tzap_document_payload(&store, &future, payload.clone()),
-            Err(TzapDocumentSigningError::CertificateNotYetValid)
-        ));
+        assert!(matches!(sign_tzap_document_payload(&store, &future, payload.clone()), Err(TzapDocumentSigningError::CertificateNotYetValid)));
 
         let mut expired = SigningFixture::request();
         expired.now_unix_seconds = 200;
-        assert!(matches!(
-            sign_tzap_document_payload(&store, &expired, payload.clone()),
-            Err(TzapDocumentSigningError::CertificateExpired)
-        ));
+        assert!(matches!(sign_tzap_document_payload(&store, &expired, payload.clone()), Err(TzapDocumentSigningError::CertificateExpired)));
     }
 
     #[test]
@@ -268,31 +221,19 @@ mod tests {
         let payload = valid_payload();
 
         let store = fixture.store(TzapLocalCertificateState::Active, true, None);
-        assert!(matches!(
-            sign_tzap_document_payload(&store, &SigningFixture::request(), payload.clone()),
-            Err(TzapDocumentSigningError::IssuerBlocked)
-        ));
+        assert!(matches!(sign_tzap_document_payload(&store, &SigningFixture::request(), payload.clone()), Err(TzapDocumentSigningError::IssuerBlocked)));
 
         let store = fixture.store(TzapLocalCertificateState::Active, false, Some(TzapCertificateStatus::Suspended));
-        assert!(matches!(
-            sign_tzap_document_payload(&store, &SigningFixture::request(), payload.clone()),
-            Err(TzapDocumentSigningError::CertificateStatusBlocked)
-        ));
+        assert!(matches!(sign_tzap_document_payload(&store, &SigningFixture::request(), payload.clone()), Err(TzapDocumentSigningError::CertificateStatusBlocked)));
 
         let store = fixture.store(TzapLocalCertificateState::Active, false, None);
         let mut request = SigningFixture::request();
         request.signature_algorithm = "RSA".to_owned();
-        assert!(matches!(
-            sign_tzap_document_payload(&store, &request, payload.clone()),
-            Err(TzapDocumentSigningError::UnsupportedAlgorithm)
-        ));
+        assert!(matches!(sign_tzap_document_payload(&store, &request, payload.clone()), Err(TzapDocumentSigningError::UnsupportedAlgorithm)));
 
         let mut bad_payload = valid_payload();
         bad_payload["tzap_signature"] = json!("nope");
-        assert!(matches!(
-            sign_tzap_document_payload(&store, &SigningFixture::request(), bad_payload),
-            Err(TzapDocumentSigningError::Envelope(_))
-        ));
+        assert!(matches!(sign_tzap_document_payload(&store, &SigningFixture::request(), bad_payload), Err(TzapDocumentSigningError::Envelope(_))));
     }
 
     struct SigningFixture {
@@ -319,12 +260,7 @@ mod tests {
             TzapDocumentSigningRequest::new(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, "cert-1", 150)
         }
 
-        fn store(
-            &self,
-            state: TzapLocalCertificateState,
-            block_issuer: bool,
-            status: Option<TzapCertificateStatus>,
-        ) -> InMemoryTzapLocalIdentityStore {
+        fn store(&self, state: TzapLocalCertificateState, block_issuer: bool, status: Option<TzapCertificateStatus>) -> InMemoryTzapLocalIdentityStore {
             let mut inventory = TzapLocalIdentityInventory::empty();
             inventory.device_signing_keys.push(TzapDeviceSigningKeyRecord {
                 key_id: self.signing_key.key_id.clone(),
@@ -336,11 +272,7 @@ mod tests {
             inventory.recipient_encryption_keys = Vec::<TzapRecipientEncryptionKeyRecord>::new();
             inventory.enrolled_certificates.push(certificate_record(state));
             if block_issuer {
-                inventory.emergency_blocklist = TzapEmergencyBlocklistState {
-                    blocked_root_sha256: Vec::new(),
-                    blocked_issuer_sha256: vec![canonical_sha(0x04)],
-                    updated_at_unix_seconds: Some(140),
-                };
+                inventory.emergency_blocklist = TzapEmergencyBlocklistState { blocked_root_sha256: Vec::new(), blocked_issuer_sha256: vec![canonical_sha(0x04)], updated_at_unix_seconds: Some(140) };
             }
             if let Some(status) = status {
                 inventory.certificate_status_cache.push(TzapCertificateStatusCacheRecord {

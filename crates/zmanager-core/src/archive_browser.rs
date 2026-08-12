@@ -3,10 +3,7 @@ use crate::apple_archive_backend::{self, AppleArchiveEntryKind, AppleArchiveErro
 use crate::libarchive_backend::{self, LibarchiveEntryKind, LibarchiveError};
 use crate::rar_backend::{self, RarBackendError, RarListEntryKind};
 use crate::raw_stream_backend::{self, RawStreamError, RawStreamFormat};
-use crate::safety::{
-    ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError,
-    ExtractionSafetyPlanner, OverwritePolicy,
-};
+use crate::safety::{ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwritePolicy};
 use crate::sevenz_backend::{SevenZEntryKind, SevenZError};
 use crate::tar_zst_backend::TarZstdError;
 use crate::tzap_backend::{TzapEntryKind, TzapError, TzapRestoreOptions, TzapRestorePolicy, is_tzap_archive_path};
@@ -307,10 +304,7 @@ pub fn list_entries(path: impl AsRef<Path>) -> Result<BrowserListing, ArchiveBro
 /// # Errors
 ///
 /// Returns [`ArchiveBrowserError`] when the archive cannot be read.
-pub fn list_entries_with_options(
-    path: impl AsRef<Path>,
-    options: BrowserListOptions<'_>,
-) -> Result<BrowserListing, ArchiveBrowserError> {
+pub fn list_entries_with_options(path: impl AsRef<Path>, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let path = path.as_ref();
     if is_zip_family_archive(path) && !libarchive_backend::is_split_zip_path(path) {
         list_zip_entries(path)
@@ -332,11 +326,7 @@ pub fn list_entries_with_options(
                 return list_apple_archive_entries(path, options.password);
             }
         }
-        if let Some(format) = raw_stream_backend::detect_raw_stream_format(path) {
-            list_raw_stream_entry(path, format)
-        } else {
-            list_libarchive_entries(path)
-        }
+        if let Some(format) = raw_stream_backend::detect_raw_stream_format(path) { list_raw_stream_entry(path, format) } else { list_libarchive_entries(path) }
     }
 }
 
@@ -349,18 +339,12 @@ pub fn supports_on_demand_directories(path: impl AsRef<Path>) -> bool {
 /// Lists only the immediate children of a given directory path.
 ///
 /// If `dir_path` is empty, lists the root directory.
-pub fn list_directory_with_options(
-    path: impl AsRef<Path>,
-    dir_path: &str,
-    options: BrowserListOptions<'_>,
-) -> Result<BrowserListing, ArchiveBrowserError> {
+pub fn list_directory_with_options(path: impl AsRef<Path>, dir_path: &str, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let path = path.as_ref();
     if is_tzap_archive_path(path) {
         list_tzap_directory(path, dir_path, options.password)
     } else {
-        Err(ArchiveBrowserError::UnsupportedOperation(
-            "Archive format does not support on-demand directory listing.".to_string(),
-        ))
+        Err(ArchiveBrowserError::UnsupportedOperation("Archive format does not support on-demand directory listing.".to_string()))
     }
 }
 
@@ -374,11 +358,7 @@ pub fn list_directory_with_options(
 ///
 /// Returns [`ArchiveBrowserError`] when the archive cannot be read or the visitor
 /// cancels enumeration.
-pub fn visit_entries_with_options(
-    path: impl AsRef<Path>,
-    options: BrowserListOptions<'_>,
-    mut visitor: impl FnMut(BrowserEntry) -> bool,
-) -> Result<usize, ArchiveBrowserError> {
+pub fn visit_entries_with_options(path: impl AsRef<Path>, options: BrowserListOptions<'_>, mut visitor: impl FnMut(BrowserEntry) -> bool) -> Result<usize, ArchiveBrowserError> {
     let path = path.as_ref();
     if is_zip_family_archive(path) && !libarchive_backend::is_split_zip_path(path) {
         return visit_zip_entries(path, visitor);
@@ -415,11 +395,7 @@ pub fn visit_entries_with_options(
 ///
 /// Returns [`ArchiveBrowserError`] when the archive cannot be read, the entry
 /// is not found, the entry is unsafe, or filesystem writes fail.
-pub fn extract_entry(
-    archive_path: impl AsRef<Path>,
-    entry_path: &str,
-    destination: impl AsRef<Path>,
-) -> Result<EntryExtractReport, ArchiveBrowserError> {
+pub fn extract_entry(archive_path: impl AsRef<Path>, entry_path: &str, destination: impl AsRef<Path>) -> Result<EntryExtractReport, ArchiveBrowserError> {
     extract_entry_with_options(archive_path, entry_path, destination, BrowserExtractOptions::default())
 }
 
@@ -439,8 +415,7 @@ pub fn extract_entry_with_options(
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
-    let destination_root = crate::safety::prepare_destination_root(destination)
-        .map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
+    let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
 
     if is_zip_family_archive(archive_path) && !libarchive_backend::is_split_zip_path(archive_path) {
@@ -454,11 +429,7 @@ pub fn extract_entry_with_options(
             &destination_root,
             &policy,
             options.password,
-            TzapRestoreOptions {
-                policy: options.tzap_restore_policy,
-                allow_degraded: options.tzap_allow_degraded,
-                allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
-            },
+            TzapRestoreOptions { policy: options.tzap_restore_policy, allow_degraded: options.tzap_allow_degraded, allow_absolute_symlinks: options.tzap_allow_absolute_symlinks },
         )
     } else {
         // Apple Archive runs after TZAP and before raw streams, matching the
@@ -467,34 +438,16 @@ pub fn extract_entry_with_options(
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         {
             if is_apple_archive_path_browser(archive_path) {
-                return extract_apple_archive_entry_browser(
-                    archive_path,
-                    entry_path,
-                    &destination_root,
-                    destination,
-                    &policy,
-                    options.password,
-                );
+                return extract_apple_archive_entry_browser(archive_path, entry_path, &destination_root, destination, &policy, options.password);
             }
         }
         if let Some(format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
             extract_raw_stream_entry(archive_path, format, entry_path, &destination_root, &policy)
         } else {
-            let report = libarchive_backend::extract_archive_entry_with_password(
-                archive_path,
-                entry_path,
-                &destination_root,
-                policy,
-                options.password,
-            )?;
+            let report = libarchive_backend::extract_archive_entry_with_password(archive_path, entry_path, &destination_root, policy, options.password)?;
             let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
-            let destination_path =
-                if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) };
-            Ok(EntryExtractReport {
-                destination_path,
-                written_bytes: report.written_bytes,
-                metadata_diagnostics: Vec::new(),
-            })
+            let destination_path = if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) };
+            Ok(EntryExtractReport { destination_path, written_bytes: report.written_bytes, metadata_diagnostics: Vec::new() })
         }
     }
 }
@@ -508,10 +461,7 @@ pub fn extract_entry_with_options(
 ///
 /// Returns [`ArchiveBrowserError`] when temporary directory creation,
 /// extraction, or safety validation fails.
-pub fn preview_entry(
-    archive_path: impl AsRef<Path>,
-    entry_path: &str,
-) -> Result<PreviewExtractReport, ArchiveBrowserError> {
+pub fn preview_entry(archive_path: impl AsRef<Path>, entry_path: &str) -> Result<PreviewExtractReport, ArchiveBrowserError> {
     preview_entry_with_options(archive_path, entry_path, BrowserExtractOptions::default())
 }
 
@@ -525,14 +475,9 @@ pub fn preview_entry(
 ///
 /// Returns [`ArchiveBrowserError`] when temporary directory creation,
 /// extraction, password validation, or safety validation fails.
-pub fn preview_entry_with_options(
-    archive_path: impl AsRef<Path>,
-    entry_path: &str,
-    options: BrowserExtractOptions<'_>,
-) -> Result<PreviewExtractReport, ArchiveBrowserError> {
+pub fn preview_entry_with_options(archive_path: impl AsRef<Path>, entry_path: &str, options: BrowserExtractOptions<'_>) -> Result<PreviewExtractReport, ArchiveBrowserError> {
     let cleanup_root = std::env::temp_dir().join(crate::temp_names::unique_temp_name(PREVIEW_TEMP_PREFIX));
-    fs::create_dir_all(&cleanup_root)
-        .map_err(|source| ArchiveBrowserError::Io { path: cleanup_root.clone(), source })?;
+    fs::create_dir_all(&cleanup_root).map_err(|source| ArchiveBrowserError::Io { path: cleanup_root.clone(), source })?;
 
     // The freshly-created, app-controlled preview root cannot contain a user
     // destination. Replacing therefore keeps the normal safety planner while
@@ -547,11 +492,7 @@ pub fn preview_entry_with_options(
             return Err(error);
         }
     };
-    Ok(PreviewExtractReport {
-        cleanup_root,
-        preview_path: report.destination_path,
-        written_bytes: report.written_bytes,
-    })
+    Ok(PreviewExtractReport { cleanup_root, preview_path: report.destination_path, written_bytes: report.written_bytes })
 }
 
 fn list_zip_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
@@ -602,19 +543,14 @@ fn visit_zip_entries(path: &Path, mut visitor: impl FnMut(BrowserEntry) -> bool)
 
 fn list_tar_zst_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
     let file = File::open(path).map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
-    let decoder = zstd::stream::read::Decoder::new(file)
-        .map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
+    let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
     let mut archive = tar::Archive::new(decoder);
     let entries = archive
         .entries()
         .map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?
         .map(|entry| {
             let entry = entry.map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
-            let path = entry
-                .path()
-                .map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?
-                .to_string_lossy()
-                .into_owned();
+            let path = entry.path().map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?.to_string_lossy().into_owned();
             let header = entry.header();
             Ok(BrowserEntry {
                 path,
@@ -685,8 +621,7 @@ fn list_libarchive_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowser
 }
 
 fn list_raw_stream_entry(path: &Path, format: RawStreamFormat) -> Result<BrowserListing, ArchiveBrowserError> {
-    let entry_name = raw_stream_backend::output_name_for_raw_stream(path, format)
-        .ok_or_else(|| RawStreamError::MissingOutputName { archive_path: path.to_path_buf() })?;
+    let entry_name = raw_stream_backend::output_name_for_raw_stream(path, format).ok_or_else(|| RawStreamError::MissingOutputName { archive_path: path.to_path_buf() })?;
     let compressed_size = path.metadata().ok().map(|metadata| metadata.len());
     Ok(BrowserListing {
         entries: vec![BrowserEntry {
@@ -787,11 +722,7 @@ fn list_tzap_entries(path: &Path, password: Option<&str>) -> Result<BrowserListi
     Ok(BrowserListing { entries })
 }
 
-fn list_tzap_directory(
-    path: &Path,
-    dir_path: &str,
-    password: Option<&str>,
-) -> Result<BrowserListing, ArchiveBrowserError> {
+fn list_tzap_directory(path: &Path, dir_path: &str, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_directory_with_optional_password(path, dir_path, password)?;
     let entries = listing.entries.iter().map(|entry| tzap_browser_entry(&listing, entry)).collect();
     Ok(BrowserListing { entries })
@@ -801,10 +732,7 @@ fn list_tzap_directory(
 ///
 /// Shared by the progressive visitor, the full listing, and the directory
 /// listing so the three mapping paths cannot drift.
-fn tzap_browser_entry(
-    listing: &crate::tzap_backend::TzapIndexListing,
-    entry: &crate::tzap_backend::TzapIndexEntry,
-) -> BrowserEntry {
+fn tzap_browser_entry(listing: &crate::tzap_backend::TzapIndexListing, entry: &crate::tzap_backend::TzapIndexEntry) -> BrowserEntry {
     let method = if listing.encrypted {
         match listing.kdf_algo {
             tzap_core::format::KdfAlgo::Argon2id => "Zstd (Argon2id)",
@@ -889,18 +817,8 @@ fn extract_apple_archive_entry_browser(
     policy: &ExtractionPolicy,
     password: Option<&str>,
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    let report = apple_archive_backend::extract_apple_archive_entry(
-        archive_path,
-        entry_path,
-        destination_root,
-        policy.clone(),
-        password,
-    )?;
-    Ok(EntryExtractReport {
-        destination_path: destination.join(entry_path),
-        written_bytes: report.written_bytes,
-        metadata_diagnostics: Vec::new(),
-    })
+    let report = apple_archive_backend::extract_apple_archive_entry(archive_path, entry_path, destination_root, policy.clone(), password)?;
+    Ok(EntryExtractReport { destination_path: destination.join(entry_path), written_bytes: report.written_bytes, metadata_diagnostics: Vec::new() })
 }
 
 fn extract_tzap_entry(
@@ -912,11 +830,7 @@ fn extract_tzap_entry(
     restore_options: TzapRestoreOptions,
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_index_with_optional_password(archive_path, password)?;
-    let matching_entries: Vec<_> = listing
-        .entries
-        .into_iter()
-        .filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, entry_path))
-        .collect();
+    let matching_entries: Vec<_> = listing.entries.into_iter().filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, entry_path)).collect();
 
     if matching_entries.is_empty() {
         return Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() });
@@ -928,12 +842,7 @@ fn extract_tzap_entry(
 
     for entry in matching_entries {
         let extraction_kind = tzap_extraction_kind(entry.kind, &entry.path)?;
-        let safety_entry = ExtractionEntry {
-            archive_path: entry.path.clone(),
-            kind: extraction_kind,
-            uncompressed_size: Some(entry.size),
-            compressed_size: None,
-        };
+        let safety_entry = ExtractionEntry { archive_path: entry.path.clone(), kind: extraction_kind, uncompressed_size: Some(entry.size), compressed_size: None };
         let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
         let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
         if primary_destination_path.is_none() {
@@ -951,14 +860,8 @@ fn extract_tzap_entry(
                     Some(password) => crate::tzap_backend::TzapExtractKeySource::Password(password),
                     None => crate::tzap_backend::TzapExtractKeySource::None,
                 };
-                if let Some(report) = crate::tzap_backend::extract_tzap_file_to_destination(
-                    archive_path,
-                    key,
-                    &entry.path,
-                    &write_plan.destination_path,
-                    write_plan.replace_existing,
-                    restore_options,
-                )? {
+                if let Some(report) = crate::tzap_backend::extract_tzap_file_to_destination(archive_path, key, &entry.path, &write_plan.destination_path, write_plan.replace_existing, restore_options)?
+                {
                     total_written_bytes = total_written_bytes.saturating_add(report.written_bytes);
                     all_diagnostics.extend(report.metadata_diagnostics);
                 }
@@ -968,43 +871,25 @@ fn extract_tzap_entry(
     }
 
     let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
-    let destination_path = primary_destination_path
-        .unwrap_or_else(|| if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) });
+    let destination_path = primary_destination_path.unwrap_or_else(|| if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) });
 
-    Ok(EntryExtractReport {
-        destination_path,
-        written_bytes: total_written_bytes,
-        metadata_diagnostics: all_diagnostics,
-    })
+    Ok(EntryExtractReport { destination_path, written_bytes: total_written_bytes, metadata_diagnostics: all_diagnostics })
 }
 
-fn extract_zip_entry(
-    archive_path: &Path,
-    entry_path: &str,
-    destination: &Path,
-    policy: &ExtractionPolicy,
-    password: Option<&str>,
-) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    let file = File::open(archive_path)
-        .map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
+fn extract_zip_entry(archive_path: &Path, entry_path: &str, destination: &Path, policy: &ExtractionPolicy, password: Option<&str>) -> Result<EntryExtractReport, ArchiveBrowserError> {
+    let file = File::open(archive_path).map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = ZipArchive::new(file).map_err(ZipBackendError::from)?;
     let password = password_bytes(password);
     let mut matched_any = false;
     let mut written_bytes = 0u64;
 
     for index in 0..archive.len() {
-        let mut file = archive
-            .by_index_with_options(index, ZipReadOptions::new().password(password))
-            .map_err(ZipBackendError::from)?;
+        let mut file = archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(ZipBackendError::from)?;
         if !crate::safety::archive_entry_matches_selected(file.name(), entry_path) {
             continue;
         }
-        let entry = ExtractionEntry {
-            archive_path: file.name().to_owned(),
-            kind: zip_extraction_kind(&mut file)?,
-            uncompressed_size: Some(file.size()),
-            compressed_size: Some(file.compressed_size()),
-        };
+        let entry =
+            ExtractionEntry { archive_path: file.name().to_owned(), kind: zip_extraction_kind(&mut file)?, uncompressed_size: Some(file.size()), compressed_size: Some(file.compressed_size()) };
         let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&entry)?;
         let write_plan = decision_write_plan(decision, &entry.archive_path, policy.overwrite)?;
         let bytes = write_selected_entry(&mut file, &entry, &write_plan)?;
@@ -1013,48 +898,26 @@ fn extract_zip_entry(
     }
 
     if matched_any {
-        return Ok(EntryExtractReport {
-            destination_path: destination.join(entry_path),
-            written_bytes,
-            metadata_diagnostics: Vec::new(),
-        });
+        return Ok(EntryExtractReport { destination_path: destination.join(entry_path), written_bytes, metadata_diagnostics: Vec::new() });
     }
 
     Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() })
 }
 
-fn extract_tar_zst_entry(
-    archive_path: &Path,
-    entry_path: &str,
-    destination: &Path,
-    policy: &ExtractionPolicy,
-) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    let file = File::open(archive_path)
-        .map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
-    let decoder = zstd::stream::read::Decoder::new(file)
-        .map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
+fn extract_tar_zst_entry(archive_path: &Path, entry_path: &str, destination: &Path, policy: &ExtractionPolicy) -> Result<EntryExtractReport, ArchiveBrowserError> {
+    let file = File::open(archive_path).map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
+    let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
     let mut archive = tar::Archive::new(decoder);
     let mut matched_any = false;
     let mut written_bytes = 0u64;
 
-    for entry in
-        archive.entries().map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?
-    {
+    for entry in archive.entries().map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })? {
         let mut entry = entry.map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
-        let path = entry
-            .path()
-            .map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?
-            .to_string_lossy()
-            .into_owned();
+        let path = entry.path().map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?.to_string_lossy().into_owned();
         if !crate::safety::archive_entry_matches_selected(&path, entry_path) {
             continue;
         }
-        let safety_entry = ExtractionEntry {
-            archive_path: path,
-            kind: tar_extraction_kind(&entry)?,
-            uncompressed_size: entry.header().size().ok(),
-            compressed_size: None,
-        };
+        let safety_entry = ExtractionEntry { archive_path: path, kind: tar_extraction_kind(&entry)?, uncompressed_size: entry.header().size().ok(), compressed_size: None };
         let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
         let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
         let bytes = write_selected_entry(&mut entry, &safety_entry, &write_plan)?;
@@ -1063,80 +926,44 @@ fn extract_tar_zst_entry(
     }
 
     if matched_any {
-        return Ok(EntryExtractReport {
-            destination_path: destination.join(entry_path),
-            written_bytes,
-            metadata_diagnostics: Vec::new(),
-        });
+        return Ok(EntryExtractReport { destination_path: destination.join(entry_path), written_bytes, metadata_diagnostics: Vec::new() });
     }
 
     Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() })
 }
 
-fn extract_raw_stream_entry(
-    archive_path: &Path,
-    format: RawStreamFormat,
-    entry_path: &str,
-    destination: &Path,
-    policy: &ExtractionPolicy,
-) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    let expected_entry = raw_stream_backend::output_name_for_raw_stream(archive_path, format)
-        .ok_or_else(|| RawStreamError::MissingOutputName { archive_path: archive_path.to_path_buf() })?;
+fn extract_raw_stream_entry(archive_path: &Path, format: RawStreamFormat, entry_path: &str, destination: &Path, policy: &ExtractionPolicy) -> Result<EntryExtractReport, ArchiveBrowserError> {
+    let expected_entry = raw_stream_backend::output_name_for_raw_stream(archive_path, format).ok_or_else(|| RawStreamError::MissingOutputName { archive_path: archive_path.to_path_buf() })?;
     if entry_path != expected_entry {
         return Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() });
     }
 
     let mut reader = raw_stream_backend::open_decoder(archive_path, format)?;
-    let safety_entry = ExtractionEntry {
-        archive_path: expected_entry,
-        kind: ExtractionEntryKind::File,
-        uncompressed_size: None,
-        compressed_size: archive_path.metadata().ok().map(|metadata| metadata.len()),
-    };
+    let safety_entry =
+        ExtractionEntry { archive_path: expected_entry, kind: ExtractionEntryKind::File, uncompressed_size: None, compressed_size: archive_path.metadata().ok().map(|metadata| metadata.len()) };
     let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&safety_entry)?;
     let write_plan = decision_write_plan(decision, &safety_entry.archive_path, policy.overwrite)?;
     let written_bytes = write_selected_entry(&mut reader, &safety_entry, &write_plan)?;
-    Ok(EntryExtractReport {
-        destination_path: write_plan.destination_path,
-        written_bytes,
-        metadata_diagnostics: Vec::new(),
-    })
+    Ok(EntryExtractReport { destination_path: write_plan.destination_path, written_bytes, metadata_diagnostics: Vec::new() })
 }
 
-fn write_selected_entry<R: Read>(
-    reader: &mut R,
-    entry: &ExtractionEntry,
-    write_plan: &SelectedEntryWritePlan,
-) -> Result<u64, ArchiveBrowserError> {
+fn write_selected_entry<R: Read>(reader: &mut R, entry: &ExtractionEntry, write_plan: &SelectedEntryWritePlan) -> Result<u64, ArchiveBrowserError> {
     let destination_path = &write_plan.destination_path;
     match &entry.kind {
         ExtractionEntryKind::Directory => {
-            fs::create_dir_all(destination_path)
-                .map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?;
+            fs::create_dir_all(destination_path).map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?;
             Ok(0)
         }
         ExtractionEntryKind::File => {
-            let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path)
+            let mut output = crate::atomic_file::AtomicOutputFile::create(destination_path).map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?;
+            let written_bytes = io::copy(reader, output.file_mut().map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?)
                 .map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?;
-            let written_bytes = io::copy(
-                reader,
-                output
-                    .file_mut()
-                    .map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?,
-            )
-            .map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?;
-            output
-                .commit_with_replace(write_plan.replace_existing)
-                .map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?;
+            output.commit_with_replace(write_plan.replace_existing).map_err(|source| ArchiveBrowserError::Io { path: destination_path.clone(), source })?;
             Ok(written_bytes)
         }
-        ExtractionEntryKind::Symlink { .. }
-        | ExtractionEntryKind::Hardlink { .. }
-        | ExtractionEntryKind::Device
-        | ExtractionEntryKind::Special => Err(ArchiveBrowserError::UnsupportedEntry {
-            path: entry.archive_path.clone(),
-            kind: BrowserEntryKind::Special,
-        }),
+        ExtractionEntryKind::Symlink { .. } | ExtractionEntryKind::Hardlink { .. } | ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
+            Err(ArchiveBrowserError::UnsupportedEntry { path: entry.archive_path.clone(), kind: BrowserEntryKind::Special })
+        }
     }
 }
 
@@ -1145,20 +972,12 @@ struct SelectedEntryWritePlan {
     replace_existing: bool,
 }
 
-fn decision_write_plan(
-    decision: ExtractionDecision,
-    archive_path: &str,
-    overwrite: OverwritePolicy,
-) -> Result<SelectedEntryWritePlan, ArchiveBrowserError> {
+fn decision_write_plan(decision: ExtractionDecision, archive_path: &str, overwrite: OverwritePolicy) -> Result<SelectedEntryWritePlan, ArchiveBrowserError> {
     match decision {
-        ExtractionDecision::Write { destination_path, replace_existing, .. } => Ok(SelectedEntryWritePlan {
-            destination_path,
-            replace_existing: replace_existing || overwrite == OverwritePolicy::Replace,
-        }),
-        ExtractionDecision::Skip { reason, .. } => Err(ArchiveBrowserError::UnsupportedEntry {
-            path: format!("{archive_path}: {reason}"),
-            kind: BrowserEntryKind::Special,
-        }),
+        ExtractionDecision::Write { destination_path, replace_existing, .. } => {
+            Ok(SelectedEntryWritePlan { destination_path, replace_existing: replace_existing || overwrite == OverwritePolicy::Replace })
+        }
+        ExtractionDecision::Skip { reason, .. } => Err(ArchiveBrowserError::UnsupportedEntry { path: format!("{archive_path}: {reason}"), kind: BrowserEntryKind::Special }),
     }
 }
 
@@ -1180,16 +999,13 @@ fn zip_entry_kind<R: Read>(file: &zip::read::ZipFile<'_, R>) -> BrowserEntryKind
     }
 }
 
-fn zip_extraction_kind<R: Read>(
-    file: &mut zip::read::ZipFile<'_, R>,
-) -> Result<ExtractionEntryKind, ArchiveBrowserError> {
+fn zip_extraction_kind<R: Read>(file: &mut zip::read::ZipFile<'_, R>) -> Result<ExtractionEntryKind, ArchiveBrowserError> {
     if file.is_dir() {
         return Ok(ExtractionEntryKind::Directory);
     }
     if file.is_symlink() {
         let mut target = String::new();
-        file.read_to_string(&mut target)
-            .map_err(|source| ArchiveBrowserError::Io { path: PathBuf::from(file.name()), source })?;
+        file.read_to_string(&mut target).map_err(|source| ArchiveBrowserError::Io { path: PathBuf::from(file.name()), source })?;
         return Ok(ExtractionEntryKind::Symlink { target: PathBuf::from(target) });
     }
     Ok(ExtractionEntryKind::File)
@@ -1216,20 +1032,12 @@ fn tar_extraction_kind<R: Read>(entry: &tar::Entry<'_, R>) -> Result<ExtractionE
     } else if entry_type.is_file() {
         Ok(ExtractionEntryKind::File)
     } else if entry_type.is_symlink() {
-        let target = entry.link_name().map_err(|source| ArchiveBrowserError::Io {
-            path: PathBuf::from(
-                entry.path().map_or_else(|_| String::new(), |path| path.to_string_lossy().into_owned()),
-            ),
-            source,
-        })?;
+        let target =
+            entry.link_name().map_err(|source| ArchiveBrowserError::Io { path: PathBuf::from(entry.path().map_or_else(|_| String::new(), |path| path.to_string_lossy().into_owned())), source })?;
         Ok(ExtractionEntryKind::Symlink { target: target.unwrap_or_default().into_owned() })
     } else if entry_type.is_hard_link() {
-        let target = entry.link_name().map_err(|source| ArchiveBrowserError::Io {
-            path: PathBuf::from(
-                entry.path().map_or_else(|_| String::new(), |path| path.to_string_lossy().into_owned()),
-            ),
-            source,
-        })?;
+        let target =
+            entry.link_name().map_err(|source| ArchiveBrowserError::Io { path: PathBuf::from(entry.path().map_or_else(|_| String::new(), |path| path.to_string_lossy().into_owned())), source })?;
         Ok(ExtractionEntryKind::Hardlink { target: target.unwrap_or_default().into_owned() })
     } else {
         Ok(ExtractionEntryKind::Special)
@@ -1288,12 +1096,8 @@ fn tzap_extraction_kind(kind: TzapEntryKind, path: &str) -> Result<ExtractionEnt
     match kind {
         TzapEntryKind::File => Ok(ExtractionEntryKind::File),
         TzapEntryKind::Directory => Ok(ExtractionEntryKind::Directory),
-        TzapEntryKind::Symlink | TzapEntryKind::Hardlink => {
-            Err(ArchiveBrowserError::UnsupportedEntry { path: path.to_owned(), kind: tzap_entry_kind(kind) })
-        }
-        TzapEntryKind::CharacterDevice | TzapEntryKind::BlockDevice | TzapEntryKind::Fifo => {
-            Err(ArchiveBrowserError::UnsupportedEntry { path: path.to_owned(), kind: BrowserEntryKind::Special })
-        }
+        TzapEntryKind::Symlink | TzapEntryKind::Hardlink => Err(ArchiveBrowserError::UnsupportedEntry { path: path.to_owned(), kind: tzap_entry_kind(kind) }),
+        TzapEntryKind::CharacterDevice | TzapEntryKind::BlockDevice | TzapEntryKind::Fifo => Err(ArchiveBrowserError::UnsupportedEntry { path: path.to_owned(), kind: BrowserEntryKind::Special }),
     }
 }
 
@@ -1314,10 +1118,7 @@ fn system_time_string(time: SystemTime) -> Option<String> {
 
 // Path detection delegates to the canonical core detector (CR-114).
 fn is_zip_family_archive(path: &Path) -> bool {
-    matches!(
-        crate::archive_format::detect_archive_format(path),
-        crate::archive_format::ArchiveFormatKind::Zip | crate::archive_format::ArchiveFormatKind::SplitZip
-    )
+    matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::Zip | crate::archive_format::ArchiveFormatKind::SplitZip)
 }
 
 fn is_tar_zst_archive(path: &Path) -> bool {
@@ -1334,14 +1135,9 @@ fn is_rar_archive(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ArchiveBrowserError, BrowserListOptions, extract_entry, list_entries, list_entries_with_options, preview_entry,
-        visit_entries_with_options,
-    };
+    use super::{ArchiveBrowserError, BrowserListOptions, extract_entry, list_entries, list_entries_with_options, preview_entry, visit_entries_with_options};
     use crate::jobs::{CancellationToken, JobContext};
-    use crate::manifest::{
-        ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot, PlanOptions, plan_archive,
-    };
+    use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot, PlanOptions, plan_archive};
     use crate::secrets::SecretString;
     use crate::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
     use crate::tar_zst_backend::{TarZstdCreateOptions, create_tar_zst_from_path};
@@ -1459,12 +1255,7 @@ mod tests {
         create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
 
         let listing = list_entries(&archive).unwrap();
-        let payload_entry = listing
-            .entries
-            .iter()
-            .find(|entry| entry.path == "payload.txt")
-            .expect("payload entry should be listed")
-            .clone();
+        let payload_entry = listing.entries.iter().find(|entry| entry.path == "payload.txt").expect("payload entry should be listed").clone();
 
         assert_eq!(payload_entry.path, "payload.txt");
         assert_eq!(payload_entry.kind, super::BrowserEntryKind::File);
@@ -1481,12 +1272,7 @@ mod tests {
         temp.write_file("project/a.txt", b"a");
         temp.write_file("project/b.txt", b"b");
         let archive = temp.path("archive.tar.zst");
-        create_tar_zst_from_path(
-            temp.path("project"),
-            &archive,
-            &TarZstdCreateOptions { level: 1, threads: Some(1), preserve_metadata: true, replace_existing: false },
-        )
-        .unwrap();
+        create_tar_zst_from_path(temp.path("project"), &archive, &TarZstdCreateOptions { level: 1, threads: Some(1), preserve_metadata: true, replace_existing: false }).unwrap();
 
         let listing = list_entries(&archive).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.path == "project/b.txt"));
@@ -1502,37 +1288,25 @@ mod tests {
         let temp = TestDir::new("browser_7z_encrypted_headers");
         temp.write_file("project/a.txt", b"a");
         let archive = temp.path("archive.7z");
-        create_7z_from_path(
-            temp.path("project"),
-            &archive,
-            &SevenZCreateOptions {
-                password: Some(SecretString::from("correct horse")),
-                encrypt_file_names: true,
-                ..SevenZCreateOptions::default()
-            },
-        )
-        .unwrap();
+        create_7z_from_path(temp.path("project"), &archive, &SevenZCreateOptions { password: Some(SecretString::from("correct horse")), encrypt_file_names: true, ..SevenZCreateOptions::default() })
+            .unwrap();
 
         let error = list_entries(&archive).unwrap_err();
         assert!(error.to_string().contains("password required"));
 
-        let listing =
-            list_entries_with_options(&archive, BrowserListOptions { password: Some("correct horse") }).unwrap();
+        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("correct horse") }).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.path == "project/a.txt"));
     }
 
     #[test]
     fn passworded_multipart_rar_listing_uses_the_rar_backend() {
-        let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fixtures/archives/rar5-passworded-multipart.part1.rar");
+        let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/rar5-passworded-multipart.part1.rar");
 
         let missing_password = list_entries(&archive).unwrap_err().to_string();
         assert!(missing_password.contains("password"), "{missing_password}");
         assert!(!missing_password.contains("libarchive"), "{missing_password}");
 
-        let listing =
-            list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password") })
-                .unwrap();
+        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password") }).unwrap();
         assert_eq!(listing.entries.iter().filter(|entry| entry.path == "rar-fixture/data/stream.bin").count(), 1);
         assert!(listing.entries.iter().any(|entry| entry.path == "rar-fixture/docs/readme.txt"));
     }
@@ -1557,10 +1331,7 @@ mod tests {
 
         let listing = list_entries(&archive).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.path == "b.txt"));
-        assert!(
-            listing.entries.iter().all(|entry| entry.compressed_size.is_none()),
-            "per-entry packed size must remain unknown when the backend does not report it"
-        );
+        assert!(listing.entries.iter().all(|entry| entry.compressed_size.is_none()), "per-entry packed size must remain unknown when the backend does not report it");
 
         let report = extract_entry(&archive, "b.txt", temp.path("out")).unwrap();
         assert_eq!(report.written_bytes, 1);
@@ -1650,9 +1421,7 @@ mod tests {
         let file = File::create(path).unwrap();
         let mut writer = ZipWriter::new(file);
         for (name, contents) in entries {
-            writer
-                .start_file(*name, SimpleFileOptions::default().compression_method(CompressionMethod::Stored))
-                .unwrap();
+            writer.start_file(*name, SimpleFileOptions::default().compression_method(CompressionMethod::Stored)).unwrap();
             writer.write_all(contents).unwrap();
         }
         writer.finish().unwrap();

@@ -80,16 +80,8 @@ const RIJNDAEL_CPU_FEATURE_REPLACEMENT: &str = concat!(
 );
 
 const PORTABLE_CPU_DISPATCH_PATCHES: &[SourcePatch] = &[
-    SourcePatch {
-        file_name: "system.cpp",
-        needle: SYSTEM_CPU_FEATURE_NEEDLE,
-        replacement: SYSTEM_CPU_FEATURE_REPLACEMENT,
-    },
-    SourcePatch {
-        file_name: "rijndael.cpp",
-        needle: RIJNDAEL_CPU_FEATURE_NEEDLE,
-        replacement: RIJNDAEL_CPU_FEATURE_REPLACEMENT,
-    },
+    SourcePatch { file_name: "system.cpp", needle: SYSTEM_CPU_FEATURE_NEEDLE, replacement: SYSTEM_CPU_FEATURE_REPLACEMENT },
+    SourcePatch { file_name: "rijndael.cpp", needle: RIJNDAEL_CPU_FEATURE_NEEDLE, replacement: RIJNDAEL_CPU_FEATURE_REPLACEMENT },
 ];
 
 struct SourcePatch {
@@ -175,12 +167,7 @@ fn target_env() -> String {
     env::var("CARGO_CFG_TARGET_ENV").expect("CARGO_CFG_TARGET_ENV is set by Cargo")
 }
 
-fn copy_build_source(
-    unrar_dir: &Path,
-    build_source_dir: &Path,
-    source: &str,
-    use_portable_cpu_dispatch: bool,
-) -> PathBuf {
+fn copy_build_source(unrar_dir: &Path, build_source_dir: &Path, source: &str, use_portable_cpu_dispatch: bool) -> PathBuf {
     let original = unrar_dir.join(source);
     let copied = build_source_dir.join(source);
 
@@ -202,9 +189,6 @@ fn copy_build_source(
 }
 
 fn apply_source_patch(source: &str, contents: &str, patch: &SourcePatch) -> String {
-    assert!(
-        contents.contains(patch.needle),
-        "UnRAR source patch no longer applies to {source}; review crates/zmanager-unrar/README.md"
-    );
+    assert!(contents.contains(patch.needle), "UnRAR source patch no longer applies to {source}; review crates/zmanager-unrar/README.md");
     contents.replace(patch.needle, patch.replacement)
 }

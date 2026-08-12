@@ -1,7 +1,4 @@
-use super::support::{
-    CliHttpJsonTransport, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error,
-    retirement_completion_label, service_envelope, service_request,
-};
+use super::support::{CliHttpJsonTransport, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error, retirement_completion_label, service_envelope, service_request};
 use super::{MISSING_TZAP_SESSION, TzapCliContext};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{DEVICE_HELP, command_usage_error, print_help_stdout, print_success_line, wants_help};
@@ -88,11 +85,7 @@ pub(super) fn device_revoke_command(args: &[String], mut global: GlobalOptions) 
         return ExitCode::FAILURE;
     };
     let transport = CliHttpJsonTransport;
-    let lifecycle = zmanager_core::certificate_lifecycle::TzapCertificateLifecycleClient::new(
-        &sign_base_url,
-        zmanager_core::auth_client::LOGIN_TZAP_BASE_URL,
-        &transport,
-    );
+    let lifecycle = zmanager_core::certificate_lifecycle::TzapCertificateLifecycleClient::new(&sign_base_url, zmanager_core::auth_client::LOGIN_TZAP_BASE_URL, &transport);
     match lifecycle.revoke_personal_device(&session, &sign_device_id) {
         Ok(completion) => {
             if global.json {

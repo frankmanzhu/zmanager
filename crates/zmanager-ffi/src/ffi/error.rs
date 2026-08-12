@@ -60,81 +60,39 @@ pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerG
         ArchiveBrowserError::Libarchive(source) => map_libarchive_error(source),
         ArchiveBrowserError::RawStream(source) => map_raw_stream_error(source),
         ArchiveBrowserError::Io { path, source } => map_io_error(path, source),
-        ArchiveBrowserError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        ArchiveBrowserError::EntryNotFound { path } => bridge_error(
-            ERROR_NOT_FOUND,
-            format!("Archive entry not found: {path}"),
-            hint("Open a different archive or choose a different entry."),
-            BridgeSeverity::Warning,
-            false,
-        ),
-        ArchiveBrowserError::UnsupportedEntry { path, .. } => bridge_error(
-            ERROR_UNSUPPORTED_FORMAT,
-            format!("Entry cannot be extracted or previewed here: {path}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        ArchiveBrowserError::Cancelled | ArchiveBrowserError::UnsupportedOperation(_) => bridge_error(
-            ERROR_OPERATION_FAILED,
-            "Operation cancelled or unsupported.".to_string(),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
+        ArchiveBrowserError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        ArchiveBrowserError::EntryNotFound { path } => {
+            bridge_error(ERROR_NOT_FOUND, format!("Archive entry not found: {path}"), hint("Open a different archive or choose a different entry."), BridgeSeverity::Warning, false)
+        }
+        ArchiveBrowserError::UnsupportedEntry { path, .. } => {
+            bridge_error(ERROR_UNSUPPORTED_FORMAT, format!("Entry cannot be extracted or previewed here: {path}"), None, BridgeSeverity::Warning, false)
+        }
+        ArchiveBrowserError::Cancelled | ArchiveBrowserError::UnsupportedOperation(_) => {
+            bridge_error(ERROR_OPERATION_FAILED, "Operation cancelled or unsupported.".to_string(), None, BridgeSeverity::Warning, false)
+        }
     }
 }
 
 pub(crate) fn map_plan_error(error: PlanError) -> ZmanagerGuiError {
     match error {
-        PlanError::MissingFileName { path } => bridge_error(
-            ERROR_INVALID_REQUEST,
-            format!("Source path has no archive name: {}", path.display()),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
+        PlanError::MissingFileName { path } => bridge_error(ERROR_INVALID_REQUEST, format!("Source path has no archive name: {}", path.display()), None, BridgeSeverity::Warning, false),
         PlanError::Metadata { path, source } | PlanError::ReadDir { path, source } => map_io_error(path, source),
     }
 }
 
 pub(crate) fn map_zip_error(error: ZipBackendError) -> ZmanagerGuiError {
     match error {
-        ZipBackendError::PasswordRequired => bridge_error(
-            ERROR_PASSWORD_REQUIRED,
-            "This ZIP archive is encrypted and requires a password.",
-            hint("Enter the archive password."),
-            BridgeSeverity::Warning,
-            true,
-        ),
-        ZipBackendError::InvalidPassword => {
-            bridge_error(ERROR_INVALID_PASSWORD, "The ZIP password was incorrect.", None, BridgeSeverity::Warning, true)
+        ZipBackendError::PasswordRequired => {
+            bridge_error(ERROR_PASSWORD_REQUIRED, "This ZIP archive is encrypted and requires a password.", hint("Enter the archive password."), BridgeSeverity::Warning, true)
         }
+        ZipBackendError::InvalidPassword => bridge_error(ERROR_INVALID_PASSWORD, "The ZIP password was incorrect.", None, BridgeSeverity::Warning, true),
         ZipBackendError::Io { path, source } => map_io_error(path, source),
-        ZipBackendError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        ZipBackendError::UnsupportedSplitZip { .. } => bridge_error(
-            ERROR_UNSUPPORTED_FORMAT,
-            "ZIP split archives are unsupported for this operation in this path.",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        ZipBackendError::Zip(source) => damaged_archive(format!("ZIP archive could not be read: {source}")),
-        ZipBackendError::Cancelled => {
-            bridge_error(ERROR_CANCELLED, "ZIP job was cancelled.", None, BridgeSeverity::Info, true)
+        ZipBackendError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        ZipBackendError::UnsupportedSplitZip { .. } => {
+            bridge_error(ERROR_UNSUPPORTED_FORMAT, "ZIP split archives are unsupported for this operation in this path.", None, BridgeSeverity::Warning, false)
         }
+        ZipBackendError::Zip(source) => damaged_archive(format!("ZIP archive could not be read: {source}")),
+        ZipBackendError::Cancelled => bridge_error(ERROR_CANCELLED, "ZIP job was cancelled.", None, BridgeSeverity::Info, true),
         source => operation_failed(format!("ZIP operation failed: {source}")),
     }
 }
@@ -142,77 +100,35 @@ pub(crate) fn map_zip_error(error: ZipBackendError) -> ZmanagerGuiError {
 pub(crate) fn map_tar_zst_error(error: TarZstdError) -> ZmanagerGuiError {
     match error {
         TarZstdError::Io { path, source } => map_io_error(path, source),
-        TarZstdError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        TarZstdError::Cancelled => {
-            bridge_error(ERROR_CANCELLED, "TAR/ZST job was cancelled.", None, BridgeSeverity::Info, true)
-        }
+        TarZstdError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        TarZstdError::Cancelled => bridge_error(ERROR_CANCELLED, "TAR/ZST job was cancelled.", None, BridgeSeverity::Info, true),
         source => operation_failed(format!("TAR/ZST operation failed: {source}")),
     }
 }
 
 pub(crate) fn map_7z_error(error: SevenZError) -> ZmanagerGuiError {
     match error {
-        SevenZError::PasswordRequired => bridge_error(
-            ERROR_PASSWORD_REQUIRED,
-            "This 7z archive is encrypted and requires a password.",
-            hint("Enter the archive password."),
-            BridgeSeverity::Warning,
-            true,
-        ),
-        SevenZError::InvalidPassword => {
-            bridge_error(ERROR_INVALID_PASSWORD, "The 7z password was incorrect.", None, BridgeSeverity::Warning, true)
+        SevenZError::PasswordRequired => {
+            bridge_error(ERROR_PASSWORD_REQUIRED, "This 7z archive is encrypted and requires a password.", hint("Enter the archive password."), BridgeSeverity::Warning, true)
         }
+        SevenZError::InvalidPassword => bridge_error(ERROR_INVALID_PASSWORD, "The 7z password was incorrect.", None, BridgeSeverity::Warning, true),
         SevenZError::Io { path, source } => map_io_error(path, source),
-        SevenZError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        SevenZError::Cancelled => {
-            bridge_error(ERROR_CANCELLED, "7z job was cancelled.", None, BridgeSeverity::Info, true)
-        }
+        SevenZError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        SevenZError::Cancelled => bridge_error(ERROR_CANCELLED, "7z job was cancelled.", None, BridgeSeverity::Info, true),
         source => operation_failed(format!("7z operation failed: {source}")),
     }
 }
 
 pub(crate) fn map_tzap_error(error: TzapError) -> ZmanagerGuiError {
     match error {
-        TzapError::PasswordRequired => bridge_error(
-            ERROR_PASSWORD_REQUIRED,
-            "This TZAP archive requires a password.",
-            hint("Enter the archive password."),
-            BridgeSeverity::Warning,
-            true,
-        ),
-        TzapError::RecipientKeyRequired => bridge_error(
-            ERROR_UNSUPPORTED_FORMAT,
-            "This TZAP archive requires a recipient key that mobile has not been given.",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
+        TzapError::PasswordRequired => bridge_error(ERROR_PASSWORD_REQUIRED, "This TZAP archive requires a password.", hint("Enter the archive password."), BridgeSeverity::Warning, true),
+        TzapError::RecipientKeyRequired => bridge_error(ERROR_UNSUPPORTED_FORMAT, "This TZAP archive requires a recipient key that mobile has not been given.", None, BridgeSeverity::Warning, false),
         TzapError::Format(source) => damaged_archive(format!("TZAP archive could not be verified: {source}")),
         TzapError::X509RootAuth(_) => damaged_archive("TZAP root-auth verification failed."),
         TzapError::KeyWrap(_) => damaged_archive("TZAP recipient key wrapping failed."),
         TzapError::Io { path, source } => map_io_error(path, source),
-        TzapError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        TzapError::Cancelled => {
-            bridge_error(ERROR_CANCELLED, "TZAP job was cancelled.", None, BridgeSeverity::Info, true)
-        }
+        TzapError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        TzapError::Cancelled => bridge_error(ERROR_CANCELLED, "TZAP job was cancelled.", None, BridgeSeverity::Info, true),
         source => operation_failed(format!("TZAP operation failed: {source}")),
     }
 }
@@ -223,60 +139,28 @@ pub(crate) fn map_apple_archive_error(error: AppleArchiveError) -> ZmanagerGuiEr
         AppleArchiveError::Plan(source) => map_plan_error(source),
         AppleArchiveError::Native(source) => operation_failed(format!("AppleArchive operation failed: {source}")),
         AppleArchiveError::Io { path, source } => map_io_error(path, source),
-        AppleArchiveError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        AppleArchiveError::MissingLinkTarget { path } => {
-            damaged_archive(format!("AppleArchive symlink entry has no target: {path}"))
+        AppleArchiveError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        AppleArchiveError::MissingLinkTarget { path } => damaged_archive(format!("AppleArchive symlink entry has no target: {path}")),
+        AppleArchiveError::MissingFileData { path } => damaged_archive(format!("AppleArchive file entry has no data blob: {path}")),
+        AppleArchiveError::EntryNotFound { path } => {
+            bridge_error(ERROR_NOT_FOUND, format!("Archive entry not found: {path}"), hint("Open a different archive or choose a different entry."), BridgeSeverity::Warning, false)
         }
-        AppleArchiveError::MissingFileData { path } => {
-            damaged_archive(format!("AppleArchive file entry has no data blob: {path}"))
+        AppleArchiveError::StdoutSelectionNotSingleFile { selected_files } => {
+            bridge_error(ERROR_INVALID_REQUEST, format!("AppleArchive stdout extraction needs exactly one file, found {selected_files}."), None, BridgeSeverity::Warning, false)
         }
-        AppleArchiveError::EntryNotFound { path } => bridge_error(
-            ERROR_NOT_FOUND,
-            format!("Archive entry not found: {path}"),
-            hint("Open a different archive or choose a different entry."),
-            BridgeSeverity::Warning,
-            false,
-        ),
-        AppleArchiveError::StdoutSelectionNotSingleFile { selected_files } => bridge_error(
-            ERROR_INVALID_REQUEST,
-            format!("AppleArchive stdout extraction needs exactly one file, found {selected_files}."),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        AppleArchiveError::Cancelled => {
-            bridge_error(ERROR_CANCELLED, "AppleArchive job was cancelled.", None, BridgeSeverity::Info, true)
-        }
+        AppleArchiveError::Cancelled => bridge_error(ERROR_CANCELLED, "AppleArchive job was cancelled.", None, BridgeSeverity::Info, true),
     }
 }
 
 pub(crate) fn map_rar_error(error: RarBackendError) -> ZmanagerGuiError {
     match error {
         RarBackendError::Io { path, source } => map_io_error(path, source),
-        RarBackendError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
+        RarBackendError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
         RarBackendError::Unrar(source) => {
             let message = source.to_string();
             let lower_message = message.to_ascii_lowercase();
             if lower_message.contains("password") {
-                bridge_error(
-                    ERROR_INVALID_PASSWORD,
-                    "The RAR password was missing or incorrect.",
-                    hint("Enter the archive password and try again."),
-                    BridgeSeverity::Warning,
-                    true,
-                )
+                bridge_error(ERROR_INVALID_PASSWORD, "The RAR password was missing or incorrect.", hint("Enter the archive password and try again."), BridgeSeverity::Warning, true)
             } else {
                 damaged_archive(format!("RAR archive could not be read: {message}"))
             }
@@ -290,23 +174,11 @@ pub(crate) fn map_libarchive_error(error: LibarchiveError) -> ZmanagerGuiError {
         LibarchiveError::Archive(source) => damaged_archive(format!("Archive could not be read: {source}")),
         LibarchiveError::RawStream(source) => map_raw_stream_error(source),
         LibarchiveError::Io { path, source } => map_io_error(path, source),
-        LibarchiveError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        LibarchiveError::EntryNotFound { path } => bridge_error(
-            ERROR_NOT_FOUND,
-            format!("Archive entry not found: {path}"),
-            hint("Open a different archive or choose a different entry."),
-            BridgeSeverity::Warning,
-            false,
-        ),
-        LibarchiveError::Cancelled => {
-            bridge_error(ERROR_CANCELLED, "Archive job was cancelled.", None, BridgeSeverity::Info, true)
+        LibarchiveError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        LibarchiveError::EntryNotFound { path } => {
+            bridge_error(ERROR_NOT_FOUND, format!("Archive entry not found: {path}"), hint("Open a different archive or choose a different entry."), BridgeSeverity::Warning, false)
         }
+        LibarchiveError::Cancelled => bridge_error(ERROR_CANCELLED, "Archive job was cancelled.", None, BridgeSeverity::Info, true),
         source => operation_failed(format!("Archive operation failed: {source}")),
     }
 }
@@ -314,23 +186,9 @@ pub(crate) fn map_libarchive_error(error: LibarchiveError) -> ZmanagerGuiError {
 pub(crate) fn map_raw_stream_error(error: RawStreamError) -> ZmanagerGuiError {
     match error {
         RawStreamError::Io { path, source } => map_io_error(path, source),
-        RawStreamError::Safety(source) => bridge_error(
-            ERROR_UNSAFE_ARCHIVE,
-            format!("Entry blocked by safety policy: {source}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        RawStreamError::ExternalToolUnavailable { tool, .. } => bridge_error(
-            ERROR_UNSUPPORTED_FORMAT,
-            format!("Required decoder tool is unavailable: {tool}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        RawStreamError::ExternalToolFailed { tool, .. } => {
-            damaged_archive(format!("{tool} could not decode this stream."))
-        }
+        RawStreamError::Safety(source) => bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false),
+        RawStreamError::ExternalToolUnavailable { tool, .. } => bridge_error(ERROR_UNSUPPORTED_FORMAT, format!("Required decoder tool is unavailable: {tool}"), None, BridgeSeverity::Warning, false),
+        RawStreamError::ExternalToolFailed { tool, .. } => damaged_archive(format!("{tool} could not decode this stream.")),
         source => operation_failed(format!("Raw stream operation failed: {source}")),
     }
 }
@@ -345,13 +203,7 @@ pub(crate) fn map_io_error(path: PathBuf, source: io::Error) -> ZmanagerGuiError
             false,
         )
     } else {
-        bridge_error(
-            ERROR_IO_ERROR,
-            format!("I/O failed for {}: {source}", path.display()),
-            None,
-            BridgeSeverity::Error,
-            is_retryable_io_error(source.kind()),
-        )
+        bridge_error(ERROR_IO_ERROR, format!("I/O failed for {}: {source}", path.display()), None, BridgeSeverity::Error, is_retryable_io_error(source.kind()))
     }
 }
 
@@ -360,13 +212,7 @@ pub(crate) fn operation_failed(message: impl Into<String>) -> ZmanagerGuiError {
 }
 
 pub(crate) fn damaged_archive(message: impl Into<String>) -> ZmanagerGuiError {
-    bridge_error(
-        ERROR_DAMAGED_ARCHIVE,
-        message,
-        hint("Choose a different archive or verify the source file."),
-        BridgeSeverity::Warning,
-        false,
-    )
+    bridge_error(ERROR_DAMAGED_ARCHIVE, message, hint("Choose a different archive or verify the source file."), BridgeSeverity::Warning, false)
 }
 
 pub(crate) fn cancelled_bridge_error(message: impl Into<String>) -> ZmanagerGuiError {
@@ -375,9 +221,7 @@ pub(crate) fn cancelled_bridge_error(message: impl Into<String>) -> ZmanagerGuiE
 
 pub(crate) fn bridge_error_from_mobile(error: ZmanagerGuiError) -> BridgeError {
     match error {
-        ZmanagerGuiError::Bridge { code, user_message, recovery_hint, severity, retryable } => {
-            BridgeError { code, message: user_message, recovery_hint, severity, retryable }
-        }
+        ZmanagerGuiError::Bridge { code, user_message, recovery_hint, severity, retryable } => BridgeError { code, message: user_message, recovery_hint, severity, retryable },
     }
 }
 
@@ -386,22 +230,10 @@ pub(crate) fn bridge_warning(message: impl Into<String>) -> BridgeError {
 }
 
 pub(crate) fn bridge_warning_with_code(code: impl Into<String>, message: impl Into<String>) -> BridgeError {
-    BridgeError {
-        code: code.into(),
-        message: message.into(),
-        recovery_hint: None,
-        severity: BridgeSeverity::Warning,
-        retryable: false,
-    }
+    BridgeError { code: code.into(), message: message.into(), recovery_hint: None, severity: BridgeSeverity::Warning, retryable: false }
 }
 
-pub(crate) fn bridge_error(
-    code: impl Into<String>,
-    message: impl Into<String>,
-    recovery_hint: Option<String>,
-    severity: BridgeSeverity,
-    retryable: bool,
-) -> ZmanagerGuiError {
+pub(crate) fn bridge_error(code: impl Into<String>, message: impl Into<String>, recovery_hint: Option<String>, severity: BridgeSeverity, retryable: bool) -> ZmanagerGuiError {
     BridgeError { code: code.into(), message: message.into(), recovery_hint, severity, retryable }.into()
 }
 
@@ -410,8 +242,5 @@ pub(crate) fn hint(value: impl Into<String>) -> Option<String> {
 }
 
 pub(crate) fn is_retryable_io_error(kind: io::ErrorKind) -> bool {
-    matches!(
-        kind,
-        io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::UnexpectedEof
-    )
+    matches!(kind, io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::UnexpectedEof)
 }

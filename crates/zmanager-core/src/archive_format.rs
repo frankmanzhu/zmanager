@@ -8,8 +8,7 @@
 use std::path::Path;
 
 /// Canonical extension lists for path-based format detection.
-pub const ZIP_FAMILY_EXTENSIONS: &[&str] =
-    &[".zip", ".zipx", ".jar", ".war", ".ipa", ".apk", ".appx", ".xpi", ".cbz", ".epub"];
+pub const ZIP_FAMILY_EXTENSIONS: &[&str] = &[".zip", ".zipx", ".jar", ".war", ".ipa", ".apk", ".appx", ".xpi", ".cbz", ".epub"];
 pub const SEVEN_Z_EXTENSIONS: &[&str] = &[".7z", ".cb7"];
 pub const RAR_EXTENSIONS: &[&str] = &[".rar", ".cbr"];
 pub const TAR_EXTENSIONS: &[&str] = &[".tar", ".cbt"];
@@ -97,11 +96,7 @@ pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
         return ArchiveFormatKind::RawStream;
     }
     if ends_with_any(path, ZIP_FAMILY_EXTENSIONS) {
-        return if crate::libarchive_backend::is_split_zip_path(path) {
-            ArchiveFormatKind::SplitZip
-        } else {
-            ArchiveFormatKind::Zip
-        };
+        return if crate::libarchive_backend::is_split_zip_path(path) { ArchiveFormatKind::SplitZip } else { ArchiveFormatKind::Zip };
     }
     if ends_with_any(path, SEVEN_Z_EXTENSIONS) || crate::sevenz_backend::is_7z_volume_path(path) {
         return ArchiveFormatKind::SevenZ;

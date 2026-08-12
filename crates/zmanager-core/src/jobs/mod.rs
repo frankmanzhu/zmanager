@@ -14,22 +14,17 @@ mod progress;
 mod tests;
 
 pub use adapters::{
-    run_7z_create_job_from_sources_with_plan_options, run_7z_extract_job_with_password_and_policy,
-    run_libarchive_extract_job_with_password_and_policy, run_rar_extract_job_with_password_and_policy,
-    run_raw_stream_extract_job_with_policy, run_tar_zst_create_job_from_sources_with_plan_options,
-    run_tar_zst_extract_job_with_policy, run_tzap_create_job_from_sources_with_plan_options,
-    run_tzap_extract_job_with_password_and_policy, run_tzap_extract_job_with_password_and_policy_and_restore_options,
-    run_zip_create_job_from_sources_with_plan_options, run_zip_extract_job_with_password_and_policy,
+    run_7z_create_job_from_sources_with_plan_options, run_7z_extract_job_with_password_and_policy, run_libarchive_extract_job_with_password_and_policy, run_rar_extract_job_with_password_and_policy,
+    run_raw_stream_extract_job_with_policy, run_tar_zst_create_job_from_sources_with_plan_options, run_tar_zst_extract_job_with_policy, run_tzap_create_job_from_sources_with_plan_options,
+    run_tzap_extract_job_with_password_and_policy, run_tzap_extract_job_with_password_and_policy_and_restore_options, run_zip_create_job_from_sources_with_plan_options,
+    run_zip_extract_job_with_password_and_policy,
 };
 // The `AppleArchive` adapter is only defined where its backend module is
 // (macOS/iOS); re-exporting it unconditionally broke every non-Apple build.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use adapters::run_apple_archive_extract_job_with_policy;
 pub use cancellation::{CancellationToken, JobCancelled};
-pub use progress::{
-    JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT,
-    PROGRESS_RECENT_PATH_LIMIT,
-};
+pub use progress::{JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT, PROGRESS_RECENT_PATH_LIMIT};
 #[cfg(test)]
 pub(crate) use progress::{PROGRESS_ENTRY_STEP, PROGRESS_MIN_BYTE_STEP};
 pub(crate) use progress::{ProgressBatch, ProgressCoalescer};
@@ -210,19 +205,8 @@ impl<'a> JobContext<'a> {
     }
 
     /// Creates a context with a known logical byte total for progress batching.
-    pub fn new_with_progress_total(
-        token: &'a CancellationToken,
-        sink: &'a mut dyn JobEventSink,
-        total_bytes: Option<u64>,
-    ) -> Self {
-        Self {
-            token,
-            sink,
-            total_bytes_processed: 0,
-            total_entries_processed: 0,
-            progress: ProgressCoalescer::new(total_bytes),
-            phase_bytes_processed: BTreeMap::new(),
-        }
+    pub fn new_with_progress_total(token: &'a CancellationToken, sink: &'a mut dyn JobEventSink, total_bytes: Option<u64>) -> Self {
+        Self { token, sink, total_bytes_processed: 0, total_entries_processed: 0, progress: ProgressCoalescer::new(total_bytes), phase_bytes_processed: BTreeMap::new() }
     }
 
     /// Emits an event.
@@ -294,25 +278,9 @@ impl<'a> JobContext<'a> {
     }
 
     /// Emits phase-scoped byte progress with a capped recent-path activity list.
-    pub fn phase_bytes_processed_with_recent_paths(
-        &mut self,
-        phase: JobPhase,
-        path: Option<&str>,
-        recent_paths: Vec<String>,
-        bytes: u64,
-        total_bytes: Option<u64>,
-        recent_paths_truncated: bool,
-    ) {
+    pub fn phase_bytes_processed_with_recent_paths(&mut self, phase: JobPhase, path: Option<&str>, recent_paths: Vec<String>, bytes: u64, total_bytes: Option<u64>, recent_paths_truncated: bool) {
         let recent_path_identities = recent_paths.iter().map(|path| path_identity(path)).collect();
-        self.phase_bytes_processed_with_path_identities(
-            phase,
-            path,
-            recent_paths,
-            recent_path_identities,
-            bytes,
-            total_bytes,
-            recent_paths_truncated,
-        );
+        self.phase_bytes_processed_with_path_identities(phase, path, recent_paths, recent_path_identities, bytes, total_bytes, recent_paths_truncated);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -331,16 +299,7 @@ impl<'a> JobContext<'a> {
             *processed = processed.saturating_add(bytes);
             *processed
         };
-        self.emit(JobEvent::PhaseBytesProcessed {
-            phase,
-            path: path.map(ToOwned::to_owned),
-            recent_paths,
-            recent_path_identities,
-            bytes,
-            total_bytes_processed,
-            total_bytes,
-            recent_paths_truncated,
-        });
+        self.emit(JobEvent::PhaseBytesProcessed { phase, path: path.map(ToOwned::to_owned), recent_paths, recent_path_identities, bytes, total_bytes_processed, total_bytes, recent_paths_truncated });
     }
 
     /// Returns an error if cancellation was requested.

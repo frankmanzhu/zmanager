@@ -1,19 +1,11 @@
 use super::TzapCliContext;
-use super::support::{
-    current_unix_seconds, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error,
-    read_json_argument, service_envelope, service_request, write_json_file,
-};
+use super::support::{current_unix_seconds, parse_tzap_context_args, parse_tzap_context_option, print_stable_tzap_error, read_json_argument, service_envelope, service_request, write_json_file};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
-use crate::cli::usage::{
-    CONTACT_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help,
-};
+use crate::cli::usage::{CONTACT_HELP, command_usage_error, json_escape, print_error_line, print_help_stdout, print_success_line, wants_help};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zmanager_core::tzap_service::{
-    tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json,
-    tzap_recipient_key_generate_json,
-};
+use zmanager_core::tzap_service::{tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json, tzap_recipient_key_generate_json};
 
 pub(crate) fn contact_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) || args.is_empty() {
@@ -190,12 +182,10 @@ pub(super) fn contact_import_command(args: &[String], mut global: GlobalOptions)
                 });
             }
             "--custom-trust-root-cert" => {
-                custom_root_cert_paths.push(PathBuf::from(
-                    match take_value(args, &mut index, "--custom-trust-root-cert") {
-                        Ok(value) => value,
-                        Err(error) => return command_usage_error("contact", &error, &global),
-                    },
-                ));
+                custom_root_cert_paths.push(PathBuf::from(match take_value(args, &mut index, "--custom-trust-root-cert") {
+                    Ok(value) => value,
+                    Err(error) => return command_usage_error("contact", &error, &global),
+                }));
             }
             value if value.starts_with('-') => {
                 return command_usage_error("contact", &format!("unknown contact option: {value}"), &global);
@@ -217,8 +207,7 @@ pub(super) fn contact_import_command(args: &[String], mut global: GlobalOptions)
             return ExitCode::FAILURE;
         }
     };
-    let custom_root_cert_paths =
-        custom_root_cert_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
+    let custom_root_cert_paths = custom_root_cert_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
     let request = service_request(
         &context,
         json!({

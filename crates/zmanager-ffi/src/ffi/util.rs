@@ -8,9 +8,7 @@ use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::tzap_backend::{has_existing_tzap_input_volume, is_tzap_archive_path};
 
 use crate::ffi::error::{ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, bridge_error, hint, map_io_error};
-use crate::ffi::types::{
-    ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CreateArchiveFormat, ZmanagerGuiError,
-};
+use crate::ffi::types::{ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CreateArchiveFormat, ZmanagerGuiError};
 
 /// Empty passwords are treated as absent: callers that own the value use
 /// this, callers that only borrow it use [`password_ref`].
@@ -28,23 +26,11 @@ pub(crate) fn password_ref(password: &Option<String>) -> Option<&str> {
 fn sanitize_path_value(value: String, field: &str, provider_hint: &str) -> Result<String, ZmanagerGuiError> {
     let value = value.trim().to_string();
     if value.is_empty() {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            format!("{field} cannot be empty"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_INVALID_REQUEST, format!("{field} cannot be empty"), None, BridgeSeverity::Warning, false));
     }
 
     if value.contains("://") {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            format!("{field} must be an app-controlled filesystem path"),
-            hint(provider_hint),
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_INVALID_REQUEST, format!("{field} must be an app-controlled filesystem path"), hint(provider_hint), BridgeSeverity::Warning, false));
     }
 
     Ok(value)
@@ -52,34 +38,18 @@ fn sanitize_path_value(value: String, field: &str, provider_hint: &str) -> Resul
 
 pub(crate) fn ensure_non_empty_entry_path(value: String) -> Result<String, ZmanagerGuiError> {
     if value.is_empty() {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            "entryPath cannot be empty",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_INVALID_REQUEST, "entryPath cannot be empty", None, BridgeSeverity::Warning, false));
     }
 
     Ok(value)
 }
 
 pub(crate) fn ensure_destination_root_path(value: String) -> Result<String, ZmanagerGuiError> {
-    let value = sanitize_path_value(
-        value,
-        "destinationRoot",
-        "Resolve provider destinations to app-controlled staging before calling the Rust bridge.",
-    )?;
+    let value = sanitize_path_value(value, "destinationRoot", "Resolve provider destinations to app-controlled staging before calling the Rust bridge.")?;
 
     let path = Path::new(&value);
     match fs::metadata(path) {
-        Ok(metadata) if !metadata.is_dir() => Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            "destinationRoot must point to a directory when it already exists",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        )),
+        Ok(metadata) if !metadata.is_dir() => Err(bridge_error(ERROR_INVALID_REQUEST, "destinationRoot must point to a directory when it already exists", None, BridgeSeverity::Warning, false)),
         Ok(_) => Ok(value),
         Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(value),
         Err(source) => Err(map_io_error(path.to_path_buf(), source)),
@@ -88,36 +58,19 @@ pub(crate) fn ensure_destination_root_path(value: String) -> Result<String, Zman
 
 pub(crate) fn ensure_existing_source_paths(values: Vec<String>) -> Result<Vec<String>, ZmanagerGuiError> {
     if values.is_empty() {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            "sourcePaths cannot be empty",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_INVALID_REQUEST, "sourcePaths cannot be empty", None, BridgeSeverity::Warning, false));
     }
 
-    values
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| ensure_existing_source_path(value, &format!("sourcePaths[{index}]")))
-        .collect()
+    values.into_iter().enumerate().map(|(index, value)| ensure_existing_source_path(value, &format!("sourcePaths[{index}]"))).collect()
 }
 
 pub(crate) fn ensure_existing_source_path(value: String, field: &str) -> Result<String, ZmanagerGuiError> {
-    let value =
-        sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
+    let value = sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
 
     let path = Path::new(&value);
     fs::metadata(path).map_err(|source| {
         if source.kind() == io::ErrorKind::NotFound {
-            bridge_error(
-                ERROR_NOT_FOUND,
-                format!("{field} does not exist"),
-                hint("Choose sources that have already been copied into app-controlled storage."),
-                BridgeSeverity::Warning,
-                false,
-            )
+            bridge_error(ERROR_NOT_FOUND, format!("{field} does not exist"), hint("Choose sources that have already been copied into app-controlled storage."), BridgeSeverity::Warning, false)
         } else {
             map_io_error(path.to_path_buf(), source)
         }
@@ -127,33 +80,17 @@ pub(crate) fn ensure_existing_source_path(value: String, field: &str) -> Result<
 }
 
 pub(crate) fn ensure_destination_archive_path(value: String) -> Result<String, ZmanagerGuiError> {
-    let value = sanitize_path_value(
-        value,
-        "destinationArchivePath",
-        "Use an app-controlled staging path for archive creation, then let the native shell commit it.",
-    )?;
+    let value = sanitize_path_value(value, "destinationArchivePath", "Use an app-controlled staging path for archive creation, then let the native shell commit it.")?;
 
     let path = Path::new(&value);
     if path.parent().is_none_or(|parent| parent.as_os_str().is_empty()) {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            "destinationArchivePath must include a parent directory",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_INVALID_REQUEST, "destinationArchivePath must include a parent directory", None, BridgeSeverity::Warning, false));
     }
 
     if let Some(parent) = path.parent() {
         match fs::metadata(parent) {
             Ok(metadata) if !metadata.is_dir() => {
-                return Err(bridge_error(
-                    ERROR_INVALID_REQUEST,
-                    "destinationArchivePath parent must be a directory",
-                    None,
-                    BridgeSeverity::Warning,
-                    false,
-                ));
+                return Err(bridge_error(ERROR_INVALID_REQUEST, "destinationArchivePath parent must be a directory", None, BridgeSeverity::Warning, false));
             }
             Ok(_) => {}
             Err(source) if source.kind() == io::ErrorKind::NotFound => {
@@ -172,57 +109,30 @@ pub(crate) fn ensure_destination_archive_path(value: String) -> Result<String, Z
     if let Ok(metadata) = fs::metadata(path)
         && metadata.is_dir()
     {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            "destinationArchivePath must point to an archive file, not a directory",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_INVALID_REQUEST, "destinationArchivePath must point to an archive file, not a directory", None, BridgeSeverity::Warning, false));
     }
 
     Ok(value)
 }
 
 pub(crate) fn usize_from_u64(value: u64, field: &str) -> Result<usize, ZmanagerGuiError> {
-    usize::try_from(value).map_err(|_| {
-        bridge_error(
-            ERROR_INVALID_REQUEST,
-            format!("{field} is too large for this device"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        )
-    })
+    usize::try_from(value).map_err(|_| bridge_error(ERROR_INVALID_REQUEST, format!("{field} is too large for this device"), None, BridgeSeverity::Warning, false))
 }
 
 pub(crate) fn ensure_existing_file_path(value: String, field: &str) -> Result<String, ZmanagerGuiError> {
-    let value =
-        sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
+    let value = sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
 
     let path = Path::new(&value);
     let metadata = fs::metadata(path).map_err(|source| {
         if source.kind() == io::ErrorKind::NotFound {
-            bridge_error(
-                ERROR_NOT_FOUND,
-                format!("{field} does not exist"),
-                hint("Choose an archive that has already been copied into app-controlled storage."),
-                BridgeSeverity::Warning,
-                false,
-            )
+            bridge_error(ERROR_NOT_FOUND, format!("{field} does not exist"), hint("Choose an archive that has already been copied into app-controlled storage."), BridgeSeverity::Warning, false)
         } else {
             map_io_error(path.to_path_buf(), source)
         }
     })?;
 
     if !metadata.is_file() {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            format!("{field} must point to a file"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ));
+        return Err(bridge_error(ERROR_INVALID_REQUEST, format!("{field} must point to a file"), None, BridgeSeverity::Warning, false));
     }
 
     Ok(value)
@@ -235,19 +145,12 @@ pub(crate) fn ensure_existing_file_path(value: String, field: &str) -> Result<St
 /// beside it — a multi-volume archive is addressed by its non-existent base
 /// name (e.g. `sample.tzap`), and the core discovery resolves the volumes.
 pub(crate) fn ensure_existing_tzap_archive_path(value: String, field: &str) -> Result<String, ZmanagerGuiError> {
-    let value =
-        sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
+    let value = sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
 
     let path = Path::new(&value);
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => Ok(value),
-        Ok(_) => Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            format!("{field} must point to a file"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        )),
+        Ok(_) => Err(bridge_error(ERROR_INVALID_REQUEST, format!("{field} must point to a file"), None, BridgeSeverity::Warning, false)),
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
             if is_tzap_archive_path(path) && has_existing_tzap_input_volume(path) {
                 Ok(value)

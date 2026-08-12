@@ -32,19 +32,13 @@ impl TzapFfiSessionStore {
 }
 
 impl TzapSessionStore for TzapFfiSessionStore {
-    fn save_session(
-        &mut self,
-        account_key: &str,
-        session: crate::auth_client::TzapSessionRecord,
-    ) -> Result<(), crate::auth_client::TzapAuthError> {
+    fn save_session(&mut self, account_key: &str, session: crate::auth_client::TzapSessionRecord) -> Result<(), crate::auth_client::TzapAuthError> {
         let mut root = read_json_file(&self.path).unwrap_or_else(|| json!({ "sessions": {} }));
         if !root.is_object() {
             root = json!({ "sessions": {} });
         }
         root["sessions"][account_key] = session_json(&session, true);
-        write_secret_json_file(&self.path, &root).map_err(|error| crate::auth_client::TzapAuthError::Storage {
-            message: format!("could not write {}: {error}", self.path.display()),
-        })
+        write_secret_json_file(&self.path, &root).map_err(|error| crate::auth_client::TzapAuthError::Storage { message: format!("could not write {}: {error}", self.path.display()) })
     }
 
     fn load_session(&self, account_key: &str) -> Option<crate::auth_client::TzapSessionRecord> {
@@ -59,9 +53,7 @@ impl TzapSessionStore for TzapFfiSessionStore {
         if let Some(sessions) = root.get_mut("sessions").and_then(Value::as_object_mut) {
             sessions.remove(account_key);
         }
-        write_secret_json_file(&self.path, &root).map_err(|error| crate::auth_client::TzapAuthError::Storage {
-            message: format!("could not write {}: {error}", self.path.display()),
-        })
+        write_secret_json_file(&self.path, &root).map_err(|error| crate::auth_client::TzapAuthError::Storage { message: format!("could not write {}: {error}", self.path.display()) })
     }
 }
 
@@ -86,10 +78,7 @@ pub fn default_tzap_state_dir() -> PathBuf {
             return PathBuf::from(path);
         }
     }
-    std::env::var_os("HOME").map_or_else(
-        || PathBuf::from(".").join(".zmanager").join("tzap"),
-        |home| PathBuf::from(home).join(".zmanager").join("tzap"),
-    )
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from(".").join(".zmanager").join("tzap"), |home| PathBuf::from(home).join(".zmanager").join("tzap"))
 }
 
 pub(crate) fn current_unix_seconds() -> u64 {
@@ -114,11 +103,7 @@ fn write_secret_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
 /// Persists the pending handoff; the login metadata (`client_id`,
 /// `auth_base_url`) lets the callback exchange a handoff code without the
 /// caller repeating the login options (CR-113: adopted from the CLI).
-pub fn save_pending_auth(
-    state_dir: &Path,
-    pending: &crate::auth_client::TzapPendingAuthState,
-    config: &crate::auth_client::TzapHostedAuthLaunchConfig,
-) -> std::io::Result<()> {
+pub fn save_pending_auth(state_dir: &Path, pending: &crate::auth_client::TzapPendingAuthState, config: &crate::auth_client::TzapHostedAuthLaunchConfig) -> std::io::Result<()> {
     write_secret_json_file(
         &state_dir.join(AUTH_PENDING_FILE),
         &json!({
@@ -144,15 +129,11 @@ pub fn load_pending_auth_metadata(state_dir: &Path) -> TzapPendingAuthMetadata {
     let Some(value) = read_json_file(&state_dir.join(AUTH_PENDING_FILE)) else {
         return TzapPendingAuthMetadata::default();
     };
-    TzapPendingAuthMetadata {
-        client_id: request_string(&value, "client_id").ok().flatten(),
-        auth_base_url: request_string(&value, "auth_base_url").ok().flatten(),
-    }
+    TzapPendingAuthMetadata { client_id: request_string(&value, "client_id").ok().flatten(), auth_base_url: request_string(&value, "auth_base_url").ok().flatten() }
 }
 
 pub fn load_pending_auth(state_dir: &Path) -> Result<crate::auth_client::TzapPendingAuthState, String> {
-    let value = read_json_file(&state_dir.join(AUTH_PENDING_FILE))
-        .ok_or_else(|| "no pending hosted-auth handoff".to_owned())?;
+    let value = read_json_file(&state_dir.join(AUTH_PENDING_FILE)).ok_or_else(|| "no pending hosted-auth handoff".to_owned())?;
     let verifier = required_request_string(&value, "pkce_verifier")?;
     let pkce = crate::auth_client::TzapPkcePair::from_verifier(&verifier).map_err(|error| error.to_string())?;
     Ok(crate::auth_client::TzapPendingAuthState {
@@ -160,8 +141,7 @@ pub fn load_pending_auth(state_dir: &Path) -> Result<crate::auth_client::TzapPen
         provider_id: required_request_string(&value, "provider_id")?,
         redirect_uri: required_request_string(&value, "redirect_uri")?,
         pkce,
-        created_at_unix_seconds: request_u64(&value, "created_at_unix_seconds")?
-            .ok_or_else(|| "missing or invalid field: created_at_unix_seconds".to_owned())?,
+        created_at_unix_seconds: request_u64(&value, "created_at_unix_seconds")?.ok_or_else(|| "missing or invalid field: created_at_unix_seconds".to_owned())?,
     })
 }
 
@@ -196,14 +176,11 @@ pub(crate) fn session_summary_json_at(session: &crate::auth_client::TzapSessionR
 
 fn session_from_json(value: &Value) -> Result<crate::auth_client::TzapSessionRecord, String> {
     let assurance = required_request_string(value, "identity_assurance")?;
-    let identity_assurance =
-        trust::TzapIdentityAssurance::parse(&assurance).ok_or_else(|| "invalid identity assurance".to_owned())?;
+    let identity_assurance = trust::TzapIdentityAssurance::parse(&assurance).ok_or_else(|| "invalid identity assurance".to_owned())?;
     Ok(crate::auth_client::TzapSessionRecord {
         audience: required_request_string(value, "audience")?,
-        access_token: crate::auth_client::TzapBearerToken::new(required_request_string(value, "access_token")?)
-            .map_err(|error| error.to_string())?,
-        expires_at_unix_seconds: request_u64(value, "expires_at_unix_seconds")?
-            .ok_or_else(|| "missing or invalid field: expires_at_unix_seconds".to_owned())?,
+        access_token: crate::auth_client::TzapBearerToken::new(required_request_string(value, "access_token")?).map_err(|error| error.to_string())?,
+        expires_at_unix_seconds: request_u64(value, "expires_at_unix_seconds")?.ok_or_else(|| "missing or invalid field: expires_at_unix_seconds".to_owned())?,
         identity_assurance,
         selected_org_id: request_string(value, "selected_org_id")?,
         login_session_id: request_string(value, "login_session_id")?,

@@ -1,9 +1,7 @@
 use super::TzapCliContext;
 use super::support::{parse_tzap_context_option, service_envelope, service_request};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
-use crate::cli::usage::{
-    SHARE_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help,
-};
+use crate::cli::usage::{SHARE_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help};
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -108,10 +106,7 @@ pub(crate) fn share_command(args: &[String], mut global: GlobalOptions) -> ExitC
                 println!("{output}");
             } else {
                 if recipient_warning_count > 0 {
-                    print_error_line(
-                        &global,
-                        format_args!("{recipient_warning_count} recipient contact(s) have offline-only status caveats"),
-                    );
+                    print_error_line(&global, format_args!("{recipient_warning_count} recipient contact(s) have offline-only status caveats"));
                 }
                 print_success_line(&global, format_args!("created shared tzap {}", archive.display()));
             }

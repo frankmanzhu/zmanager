@@ -1,10 +1,7 @@
 use super::{
-    CancellationToken, JobEvent, JobOutcome, JobPhase, JobProgressState, PROGRESS_MIN_BYTE_STEP, ProgressCoalescer,
-    run_7z_create_job_from_sources_with_plan_options, run_7z_extract_job_with_password_and_policy,
-    run_libarchive_extract_job_with_password_and_policy, run_raw_stream_extract_job_with_policy,
-    run_tar_zst_create_job_from_sources_with_plan_options, run_tzap_create_job_from_sources_with_plan_options,
-    run_tzap_extract_job_with_password_and_policy, run_zip_create_job_from_sources_with_plan_options,
-    run_zip_extract_job_with_password_and_policy,
+    CancellationToken, JobEvent, JobOutcome, JobPhase, JobProgressState, PROGRESS_MIN_BYTE_STEP, ProgressCoalescer, run_7z_create_job_from_sources_with_plan_options,
+    run_7z_extract_job_with_password_and_policy, run_libarchive_extract_job_with_password_and_policy, run_raw_stream_extract_job_with_policy, run_tar_zst_create_job_from_sources_with_plan_options,
+    run_tzap_create_job_from_sources_with_plan_options, run_tzap_extract_job_with_password_and_policy, run_zip_create_job_from_sources_with_plan_options, run_zip_extract_job_with_password_and_policy,
 };
 use crate::test_support::TestDir;
 
@@ -84,8 +81,7 @@ fn progress_coalescer_flushes_entry_and_time_thresholds_without_sleeping() {
     for index in 0..127 {
         assert!(entries.record_activity_at(Some("tiny"), 0, 1, start + Duration::from_millis(index)).is_none());
     }
-    let batch =
-        entries.record_activity_at(Some("tiny"), 0, 1, start + Duration::from_millis(127)).expect("128 entries flush");
+    let batch = entries.record_activity_at(Some("tiny"), 0, 1, start + Duration::from_millis(127)).expect("128 entries flush");
     assert_eq!(batch.entries, super::PROGRESS_ENTRY_STEP);
 
     let mut timed = ProgressCoalescer::new_at(None, start);
@@ -147,10 +143,7 @@ fn job_context_preserves_truncation_and_flushes_before_phase_start() {
         context.phase_started(JobPhase::PlanningPayload, Some(2));
     }
     assert!(matches!(events.first(), Some(JobEvent::BytesProcessed { recent_paths_truncated: true, .. })));
-    let pending = events
-        .iter()
-        .position(|event| matches!(event, JobEvent::BytesProcessed { path: Some(path), .. } if path == "pending"))
-        .expect("pending logical progress flushed");
+    let pending = events.iter().position(|event| matches!(event, JobEvent::BytesProcessed { path: Some(path), .. } if path == "pending")).expect("pending logical progress flushed");
     let phase = events.iter().position(|event| matches!(event, JobEvent::PhaseStarted { .. })).expect("phase started");
     assert!(pending < phase);
 }
@@ -214,14 +207,8 @@ fn zip_extract_job_emits_failure_event() {
     let temp = TestDir::new("zip_extract_job_emits_failure_event");
     let mut events = Vec::new();
 
-    let result = run_zip_extract_job_with_password_and_policy(
-        temp.path("missing.zip"),
-        temp.path("out"),
-        None,
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    );
+    let result =
+        run_zip_extract_job_with_password_and_policy(temp.path("missing.zip"), temp.path("out"), None, ExtractionPolicy::default(), &CancellationToken::new(), &mut |event| events.push(event));
 
     assert!(result.is_err());
     assert!(matches!(events.first(), Some(JobEvent::Started { .. })));
@@ -232,26 +219,11 @@ fn zip_extract_job_emits_failure_event() {
 fn zip_extract_job_starts_without_progress_only_listing() {
     let temp = TestDir::new("zip_extract_without_progress_listing");
     temp.write_file("project/file.txt", b"hello");
-    run_zip_create_job_from_sources_with_plan_options(
-        &[temp.path("project")],
-        temp.path("archive.zip"),
-        &ZipCreateOptions::default(),
-        &PlanOptions::default(),
-        &CancellationToken::new(),
-        &mut |_| {},
-    )
-    .unwrap();
+    run_zip_create_job_from_sources_with_plan_options(&[temp.path("project")], temp.path("archive.zip"), &ZipCreateOptions::default(), &PlanOptions::default(), &CancellationToken::new(), &mut |_| {})
+        .unwrap();
     let mut events = Vec::new();
 
-    run_zip_extract_job_with_password_and_policy(
-        temp.path("archive.zip"),
-        temp.path("out"),
-        None,
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    )
-    .unwrap();
+    run_zip_extract_job_with_password_and_policy(temp.path("archive.zip"), temp.path("out"), None, ExtractionPolicy::default(), &CancellationToken::new(), &mut |event| events.push(event)).unwrap();
 
     assert_extract_started_with_unknown_total(&events, super::JobKind::ZipExtract);
 }
@@ -271,15 +243,7 @@ fn sevenz_extract_job_starts_without_progress_only_listing() {
     .unwrap();
     let mut events = Vec::new();
 
-    run_7z_extract_job_with_password_and_policy(
-        temp.path("archive.7z"),
-        temp.path("out"),
-        None,
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    )
-    .unwrap();
+    run_7z_extract_job_with_password_and_policy(temp.path("archive.7z"), temp.path("out"), None, ExtractionPolicy::default(), &CancellationToken::new(), &mut |event| events.push(event)).unwrap();
 
     assert_extract_started_with_unknown_total(&events, super::JobKind::SevenZExtract);
 }
@@ -288,26 +252,12 @@ fn sevenz_extract_job_starts_without_progress_only_listing() {
 fn libarchive_extract_job_starts_without_progress_only_listing() {
     let temp = TestDir::new("libarchive_extract_without_progress_listing");
     temp.write_file("project/file.txt", b"hello");
-    run_zip_create_job_from_sources_with_plan_options(
-        &[temp.path("project")],
-        temp.path("archive.zip"),
-        &ZipCreateOptions::default(),
-        &PlanOptions::default(),
-        &CancellationToken::new(),
-        &mut |_| {},
-    )
-    .unwrap();
+    run_zip_create_job_from_sources_with_plan_options(&[temp.path("project")], temp.path("archive.zip"), &ZipCreateOptions::default(), &PlanOptions::default(), &CancellationToken::new(), &mut |_| {})
+        .unwrap();
     let mut events = Vec::new();
 
-    run_libarchive_extract_job_with_password_and_policy(
-        temp.path("archive.zip"),
-        temp.path("out"),
-        None,
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    )
-    .unwrap();
+    run_libarchive_extract_job_with_password_and_policy(temp.path("archive.zip"), temp.path("out"), None, ExtractionPolicy::default(), &CancellationToken::new(), &mut |event| events.push(event))
+        .unwrap();
 
     assert_extract_started_with_unknown_total(&events, super::JobKind::ArchiveExtract);
 }
@@ -324,20 +274,9 @@ fn raw_stream_extract_job_emits_progress_events() {
     }
     let mut events = Vec::new();
 
-    run_raw_stream_extract_job_with_policy(
-        &archive_path,
-        RawStreamFormat::Zstd,
-        temp.path("out"),
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    )
-    .unwrap();
+    run_raw_stream_extract_job_with_policy(&archive_path, RawStreamFormat::Zstd, temp.path("out"), ExtractionPolicy::default(), &CancellationToken::new(), &mut |event| events.push(event)).unwrap();
 
-    assert!(matches!(
-        events.first(),
-        Some(JobEvent::Started { kind: super::JobKind::RawStreamExtract, total_bytes: Some(_) })
-    ));
+    assert!(matches!(events.first(), Some(JobEvent::Started { kind: super::JobKind::RawStreamExtract, total_bytes: Some(_) })));
     assert!(events.iter().any(|event| matches!(event, JobEvent::BytesProcessed { .. })));
 }
 
@@ -355,31 +294,14 @@ fn raw_stream_extract_progress_tracks_compressed_bytes_for_bz2() {
     let source_size = fs::metadata(&archive_path).unwrap().len();
     let mut events = Vec::new();
 
-    run_raw_stream_extract_job_with_policy(
-        &archive_path,
-        RawStreamFormat::Bzip2,
-        temp.path("out"),
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    )
-    .unwrap();
+    run_raw_stream_extract_job_with_policy(&archive_path, RawStreamFormat::Bzip2, temp.path("out"), ExtractionPolicy::default(), &CancellationToken::new(), &mut |event| events.push(event)).unwrap();
 
-    let last_progress = events.iter().rev().find_map(|event| {
-        if let JobEvent::BytesProcessed { total_bytes_processed, .. } = event {
-            Some(*total_bytes_processed)
-        } else {
-            None
-        }
-    });
+    let last_progress = events.iter().rev().find_map(|event| if let JobEvent::BytesProcessed { total_bytes_processed, .. } = event { Some(*total_bytes_processed) } else { None });
     let Some(last_processed_bytes) = last_progress else {
         panic!("expected at least one progress event");
     };
 
-    assert_eq!(
-        events.first(),
-        Some(&JobEvent::Started { kind: super::JobKind::RawStreamExtract, total_bytes: Some(source_size) })
-    );
+    assert_eq!(events.first(), Some(&JobEvent::Started { kind: super::JobKind::RawStreamExtract, total_bytes: Some(source_size) }));
     assert!(last_processed_bytes <= source_size);
 }
 
@@ -407,25 +329,12 @@ fn tzap_create_job_emits_phase_progress_through_output_commit() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        phases,
-        vec![
-            JobPhase::PlanningPayload,
-            JobPhase::PlanningMetadata,
-            JobPhase::EmittingPayload,
-            JobPhase::EmittingMetadata,
-            JobPhase::CommittingOutput,
-        ]
-    );
+    assert_eq!(phases, vec![JobPhase::PlanningPayload, JobPhase::PlanningMetadata, JobPhase::EmittingPayload, JobPhase::EmittingMetadata, JobPhase::CommittingOutput,]);
     for phase in [JobPhase::PlanningPayload, JobPhase::EmittingPayload] {
         let phase_progress = events
             .iter()
             .filter_map(|event| match event {
-                JobEvent::PhaseBytesProcessed { phase: event_phase, total_bytes_processed, .. }
-                    if *event_phase == phase =>
-                {
-                    Some(*total_bytes_processed)
-                }
+                JobEvent::PhaseBytesProcessed { phase: event_phase, total_bytes_processed, .. } if *event_phase == phase => Some(*total_bytes_processed),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -455,14 +364,11 @@ fn tzap_create_job_emits_entry_finished_during_multi_file_progress() {
     .unwrap();
 
     let first_finished_index = events
-            .iter()
-            .position(|event| matches!(event, JobEvent::BytesProcessed { total_entries_processed, .. } if *total_entries_processed > 0))
-            .expect("expected at least one aggregate with a finished entry");
+        .iter()
+        .position(|event| matches!(event, JobEvent::BytesProcessed { total_entries_processed, .. } if *total_entries_processed > 0))
+        .expect("expected at least one aggregate with a finished entry");
 
-    assert!(
-        events.iter().skip(first_finished_index + 1).any(|event| matches!(event, JobEvent::BytesProcessed { .. })),
-        "expected later byte progress after the first finished entry"
-    );
+    assert!(events.iter().skip(first_finished_index + 1).any(|event| matches!(event, JobEvent::BytesProcessed { .. })), "expected later byte progress after the first finished entry");
     assert!(events.iter().all(|event| !matches!(event, JobEvent::PhaseBytesProcessed { path: None, .. })));
 }
 
@@ -518,19 +424,13 @@ fn assert_tzap_create_cancels_at(cancellation_point: TzapCreateCancellationPoint
     let token_for_sink = token.clone();
     let mut events = Vec::new();
 
-    let result = run_tzap_create_job_from_sources_with_plan_options(
-        &[temp.path("project")],
-        &destination,
-        &test_tzap_create_options(),
-        &crate::manifest::PlanOptions::default(),
-        &token,
-        &mut |event| {
+    let result =
+        run_tzap_create_job_from_sources_with_plan_options(&[temp.path("project")], &destination, &test_tzap_create_options(), &crate::manifest::PlanOptions::default(), &token, &mut |event| {
             if cancellation_point.matches(&event) {
                 token_for_sink.cancel();
             }
             events.push(event);
-        },
-    );
+        });
 
     assert!(matches!(result, Err(crate::tzap_backend::TzapError::Cancelled)));
     assert!(events.iter().any(|event| matches!(event, JobEvent::Cancelled { .. })));
@@ -636,15 +536,7 @@ fn tzap_extract_job_emits_progress_before_completion_for_large_file() {
     .unwrap();
 
     let mut events = Vec::new();
-    run_tzap_extract_job_with_password_and_policy(
-        temp.path("archive.tzap"),
-        temp.path("out"),
-        None,
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    )
-    .unwrap();
+    run_tzap_extract_job_with_password_and_policy(temp.path("archive.tzap"), temp.path("out"), None, ExtractionPolicy::default(), &CancellationToken::new(), &mut |event| events.push(event)).unwrap();
 
     assert_extract_started_with_unknown_total(&events, super::JobKind::TzapExtract);
     assert_monotonic_progress_reaches_total_before_completion(&events, payload.len() as u64);
@@ -663,19 +555,12 @@ fn zip_create_job_can_be_cancelled() {
     let token_for_sink = token.clone();
     let mut events = Vec::new();
 
-    let result = run_zip_create_job_from_sources_with_plan_options(
-        &[temp.path("project")],
-        temp.path("archive.zip"),
-        &ZipCreateOptions::default(),
-        &PlanOptions::default(),
-        &token,
-        &mut |event| {
-            if matches!(event, JobEvent::BytesProcessed { .. }) {
-                token_for_sink.cancel();
-            }
-            events.push(event);
-        },
-    );
+    let result = run_zip_create_job_from_sources_with_plan_options(&[temp.path("project")], temp.path("archive.zip"), &ZipCreateOptions::default(), &PlanOptions::default(), &token, &mut |event| {
+        if matches!(event, JobEvent::BytesProcessed { .. }) {
+            token_for_sink.cancel();
+        }
+        events.push(event);
+    });
 
     assert!(matches!(result, Err(ZipBackendError::Cancelled)));
     assert!(events.iter().any(|event| matches!(event, JobEvent::Cancelled { .. })));
@@ -702,10 +587,7 @@ fn zip_create_job_accepts_multiple_source_roots() {
 
     assert_eq!(report.written_entries, 3);
     assert_eq!(report.written_bytes, 3);
-    assert!(matches!(
-        events.first(),
-        Some(JobEvent::Started { kind: super::JobKind::ZipCreate, total_bytes: Some(3) })
-    ));
+    assert!(matches!(events.first(), Some(JobEvent::Started { kind: super::JobKind::ZipCreate, total_bytes: Some(3) })));
 
     let listing = list_zip(&archive).unwrap();
     let names = listing.entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>();
@@ -825,8 +707,7 @@ fn assert_extract_started_with_unknown_total(events: &[JobEvent], kind: super::J
 }
 
 fn progress_totals_before_completion(events: &[JobEvent]) -> Vec<u64> {
-    let completed_index =
-        events.iter().position(|event| matches!(event, JobEvent::Completed { .. })).expect("expected completed event");
+    let completed_index = events.iter().position(|event| matches!(event, JobEvent::Completed { .. })).expect("expected completed event");
     events[..completed_index]
         .iter()
         .filter_map(|event| match event {

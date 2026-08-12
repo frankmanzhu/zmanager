@@ -1,25 +1,14 @@
 use crate::cli::app::{
-    ArchiveFormat, CreateOutcome, CreateRequest, ProgressReporter, TestRequest, create_progress_kind,
-    create_test_archive_path, expand_short_options, publish_archive, temp_archive_path,
+    ArchiveFormat, CreateOutcome, CreateRequest, ProgressReporter, TestRequest, create_progress_kind, create_test_archive_path, expand_short_options, publish_archive, temp_archive_path,
 };
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
-use crate::cli::format::{
-    FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TGZ, FORMAT_TZAP, FORMAT_ZIP, TZAP_DEFAULT_RECOVERY_PERCENTAGE,
-    ZIP_CREATE_EXTENSIONS, path_has_known_extension,
-};
+use crate::cli::format::{FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TGZ, FORMAT_TZAP, FORMAT_ZIP, TZAP_DEFAULT_RECOVERY_PERCENTAGE, ZIP_CREATE_EXTENSIONS, path_has_known_extension};
 use crate::cli::open::{run_test_request, tzap_default_volume_loss_tolerance};
-use crate::cli::options::{
-    GlobalOptions, infer_create_format, parse_archive_format, parse_global_option, parse_i32, parse_volume_size,
-    resolve_input_path, take_value,
-};
-use crate::cli::planning::{
-    append_files_from, append_stdin_paths, apply_junk_paths, apply_manifest_filters, manifest_has_symlinks,
-    plan_sources,
-};
+use crate::cli::options::{GlobalOptions, infer_create_format, parse_archive_format, parse_global_option, parse_i32, parse_volume_size, resolve_input_path, take_value};
+use crate::cli::planning::{append_files_from, append_stdin_paths, apply_junk_paths, apply_manifest_filters, manifest_has_symlinks, plan_sources};
 use crate::cli::usage::{
-    CREATE_HELP, command_usage_error, normalize_prompted_password, print_create_summary, print_error_line,
-    print_help_stdout, print_manifest, print_optional_error_line, prompt_password, wants_help,
+    CREATE_HELP, command_usage_error, normalize_prompted_password, print_create_summary, print_error_line, print_help_stdout, print_manifest, print_optional_error_line, prompt_password, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::fs;
@@ -50,11 +39,7 @@ pub(crate) fn create_command_from_expanded(args: &[String], mut global: GlobalOp
 }
 
 #[allow(clippy::too_many_lines)]
-pub(crate) fn parse_create_request(
-    args: &[String],
-    global: &mut GlobalOptions,
-    request: &mut CreateRequest,
-) -> Result<(), String> {
+pub(crate) fn parse_create_request(args: &[String], global: &mut GlobalOptions, request: &mut CreateRequest) -> Result<(), String> {
     let mut index = 0usize;
     let mut current_dir: Option<PathBuf> = None;
     let mut positional_after_double_dash = false;
@@ -234,10 +219,7 @@ fn push_create_positional(request: &mut CreateRequest, value: &str, current_dir:
 #[allow(clippy::too_many_lines)]
 fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCode {
     let Some(format) = request.format.or_else(|| infer_create_format(&request.archive)) else {
-        print_error_line(
-            global,
-            format_args!("could not infer archive format; pass --format <zip|tar.zst|tzap|aar|7z|tgz>"),
-        );
+        print_error_line(global, format_args!("could not infer archive format; pass --format <zip|tar.zst|tzap|aar|7z|tgz>"));
         return ExitCode::from(2);
     };
 
@@ -258,13 +240,7 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
 
     let manifest = match plan_sources(&request.sources, request.clean, request.no_ignore, follow_symlinks) {
         Ok(mut manifest) => {
-            if let Err(error) = apply_manifest_filters(
-                &mut manifest,
-                &request.include,
-                &request.exclude,
-                &request.exclude_from,
-                request.no_hidden,
-            ) {
+            if let Err(error) = apply_manifest_filters(&mut manifest, &request.include, &request.exclude, &request.exclude_from, request.no_hidden) {
                 print_error_line(global, format_args!("create failed: {error}"));
                 return ExitCode::FAILURE;
             }
@@ -275,12 +251,7 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
                 return ExitCode::FAILURE;
             }
             if format == ArchiveFormat::SevenZ && request.preserve_symlinks && manifest_has_symlinks(&manifest) {
-                print_error_line(
-                    global,
-                    format_args!(
-                        "create failed: 7z symlink preservation is not supported by the current backend; use --follow-symlinks"
-                    ),
-                );
+                print_error_line(global, format_args!("create failed: 7z symlink preservation is not supported by the current backend; use --follow-symlinks"));
                 return ExitCode::from(2);
             }
             manifest
@@ -302,10 +273,7 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
 
     let destination = PathBuf::from(&request.archive);
     if destination.exists() && !request.force {
-        print_error_line(
-            global,
-            format_args!("create failed: destination exists: {}; pass --force to replace it", destination.display()),
-        );
+        print_error_line(global, format_args!("create failed: destination exists: {}; pass --force to replace it", destination.display()));
         return ExitCode::FAILURE;
     }
 
@@ -326,66 +294,13 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
     let backend_replace_existing = split_output && request.force;
 
     let outcome_result = match format {
-        ArchiveFormat::Zip => run_zip_create_backend(
-            request,
-            &manifest,
-            &temp,
-            create_destination,
-            password,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
-        ArchiveFormat::TarZst => {
-            run_tar_zst_create_backend(request, &manifest, &temp, split_output, &mut progress, &token, global)
-        }
-        ArchiveFormat::Tgz => run_tgz_create_backend(
-            request,
-            &manifest,
-            &temp,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
-        ArchiveFormat::Tzap => run_tzap_create_backend(
-            request,
-            &manifest,
-            &temp,
-            create_destination,
-            password,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
+        ArchiveFormat::Zip => run_zip_create_backend(request, &manifest, &temp, create_destination, password, backend_replace_existing, split_output, &mut progress, &token, global),
+        ArchiveFormat::TarZst => run_tar_zst_create_backend(request, &manifest, &temp, split_output, &mut progress, &token, global),
+        ArchiveFormat::Tgz => run_tgz_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global),
+        ArchiveFormat::Tzap => run_tzap_create_backend(request, &manifest, &temp, create_destination, password, backend_replace_existing, split_output, &mut progress, &token, global),
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        ArchiveFormat::AppleArchive => run_apple_archive_create_backend(
-            request,
-            &manifest,
-            &temp,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
-        ArchiveFormat::SevenZ => run_seven_z_create_backend(
-            request,
-            &manifest,
-            &temp,
-            create_destination,
-            password,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
+        ArchiveFormat::AppleArchive => run_apple_archive_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global),
+        ArchiveFormat::SevenZ => run_seven_z_create_backend(request, &manifest, &temp, create_destination, password, backend_replace_existing, split_output, &mut progress, &token, global),
     };
     let outcome = match outcome_result {
         Ok(outcome) => outcome,
@@ -395,10 +310,7 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
     if !split_output && let Err(error) = publish_archive(&temp, &destination, request.force) {
         let _ = fs::remove_file(&temp);
         progress.emit(JobEvent::Failed { message: error.to_string() });
-        print_error_line(
-            global,
-            format_args!("create failed: failed to move {} to {}: {error}", temp.display(), destination.display()),
-        );
+        print_error_line(global, format_args!("create failed: failed to move {} to {}: {error}", temp.display(), destination.display()));
         return ExitCode::FAILURE;
     }
     progress.emit(JobEvent::Completed { entries: outcome.entries, bytes: outcome.bytes });
@@ -442,23 +354,9 @@ fn run_zip_create_backend(
         manifest,
         progress,
         token,
-        |context| {
-            zmanager_core::zip_backend::create_zip_from_manifest_with_context(
-                manifest,
-                create_destination,
-                &options,
-                context,
-            )
-            .map_err(|error| error.to_string())
-        },
+        |context| zmanager_core::zip_backend::create_zip_from_manifest_with_context(manifest, create_destination, &options, context).map_err(|error| error.to_string()),
         |report| CreateOutcome {
-            summary: format!(
-                "created zip: {} entries, {} bytes, encrypted {}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                report.encrypted,
-                report.warnings.len()
-            ),
+            summary: format!("created zip: {} entries, {} bytes, encrypted {}, {} warnings", report.written_entries, report.written_bytes, report.encrypted, report.warnings.len()),
             format: FORMAT_ZIP,
             backend: FORMAT_ZIP,
             entries: report.written_entries,
@@ -492,10 +390,7 @@ fn run_tar_zst_create_backend(
         manifest,
         progress,
         token,
-        |context| {
-            zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(manifest, temp, &options, context)
-                .map_err(|error| error.to_string())
-        },
+        |context| zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string()),
         |report| CreateOutcome {
             summary: format!(
                 "created tar.zst: {} entries, {} bytes, level {}, threads {:?}, {} warnings",
@@ -539,18 +434,9 @@ fn run_tgz_create_backend(
         manifest,
         progress,
         token,
-        |context| {
-            zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(manifest, temp, &options, context)
-                .map_err(|error| error.to_string())
-        },
+        |context| zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string()),
         |report| CreateOutcome {
-            summary: format!(
-                "created tar.gz: {} entries, {} bytes, level {}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                report.level,
-                report.warnings.len()
-            ),
+            summary: format!("created tar.gz: {} entries, {} bytes, level {}, {} warnings", report.written_entries, report.written_bytes, report.level, report.warnings.len()),
             format: FORMAT_TGZ,
             backend: FORMAT_TGZ,
             entries: report.written_entries,
@@ -582,18 +468,12 @@ fn run_tzap_create_backend(
     let key_source = if let Some(recipient_certificate) = &request.tzap_recipient_cert {
         zmanager_core::tzap_backend::TzapKeySource::RecipientCertificate(recipient_certificate.clone())
     } else {
-        password.map_or(
-            zmanager_core::tzap_backend::TzapKeySource::NoPassword,
-            zmanager_core::tzap_backend::TzapKeySource::Passphrase,
-        )
+        password.map_or(zmanager_core::tzap_backend::TzapKeySource::NoPassword, zmanager_core::tzap_backend::TzapKeySource::Passphrase)
     };
     let x509_signing = match &request.tzap_signing_cert {
         Some(certificate) => {
             let Some(private_key) = &request.tzap_signing_private_key else {
-                print_error_line(
-                    global,
-                    format_args!("create failed: --signing-cert and --signing-private-key must be used together"),
-                );
+                print_error_line(global, format_args!("create failed: --signing-cert and --signing-private-key must be used together"));
                 return Err(ExitCode::from(2));
             };
             Some(zmanager_core::tzap_backend::TzapX509SigningOptions::CertificateAndKey {
@@ -618,15 +498,7 @@ fn run_tzap_create_backend(
         manifest,
         progress,
         token,
-        |context| {
-            zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(
-                manifest,
-                create_destination,
-                &options,
-                context,
-            )
-            .map_err(|error| error.to_string())
-        },
+        |context| zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(manifest, create_destination, &options, context).map_err(|error| error.to_string()),
         |report| CreateOutcome {
             summary: format!(
                 "created tzap: {} entries, {} bytes, encrypted {}, level {}, {} warnings",
@@ -679,20 +551,9 @@ fn run_apple_archive_create_backend(
         manifest,
         progress,
         token,
-        |context| {
-            zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(
-                manifest, temp, &options, context,
-            )
-            .map_err(|error| error.to_string())
-        },
+        |context| zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string()),
         |report| CreateOutcome {
-            summary: format!(
-                "created aar: {} entries, {} bytes, compression {:?}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                options.compression,
-                report.warnings.len()
-            ),
+            summary: format!("created aar: {} entries, {} bytes, compression {:?}, {} warnings", report.written_entries, report.written_bytes, options.compression, report.warnings.len()),
             format: FORMAT_APPLE_ARCHIVE,
             backend: FORMAT_APPLE_ARCHIVE,
             entries: report.written_entries,
@@ -734,10 +595,7 @@ fn run_seven_z_create_backend(
         manifest,
         progress,
         token,
-        |_context| {
-            zmanager_core::sevenz_backend::create_7z_from_manifest(manifest, create_destination, &options)
-                .map_err(|error| error.to_string())
-        },
+        |_context| zmanager_core::sevenz_backend::create_7z_from_manifest(manifest, create_destination, &options).map_err(|error| error.to_string()),
         |report| CreateOutcome {
             summary: format!(
                 "created 7z: {} entries, {} bytes, solid {}, threads {:?}, encrypted {}, {} warnings",
@@ -764,13 +622,7 @@ fn run_seven_z_create_backend(
 
 /// Shared create-failure path: cleans up the temp archive and reports the
 /// error (CR-144).
-fn fail_create(
-    progress: &mut ProgressReporter,
-    global: &GlobalOptions,
-    temp: &Path,
-    split_output: bool,
-    error: &str,
-) -> ExitCode {
+fn fail_create(progress: &mut ProgressReporter, global: &GlobalOptions, temp: &Path, split_output: bool, error: &str) -> ExitCode {
     if !split_output {
         let _ = fs::remove_file(temp);
     }
@@ -796,13 +648,7 @@ fn run_create_backend<R>(
     result.map(map_outcome)
 }
 
-fn create_stream(
-    format: ArchiveFormat,
-    manifest: &zmanager_core::manifest::ArchiveManifest,
-    request: &CreateRequest,
-    password: Option<SecretString>,
-    global: &GlobalOptions,
-) -> ExitCode {
+fn create_stream(format: ArchiveFormat, manifest: &zmanager_core::manifest::ArchiveManifest, request: &CreateRequest, password: Option<SecretString>, global: &GlobalOptions) -> ExitCode {
     if format != ArchiveFormat::Zip {
         print_error_line(global, format_args!("create failed: stdout output is currently supported only for ZIP"));
         return ExitCode::from(2);
@@ -815,14 +661,7 @@ fn create_stream(
             return ExitCode::from(2);
         }
     };
-    let options = zmanager_core::zip_backend::ZipCreateOptions {
-        compression,
-        level,
-        preserve_metadata: !request.no_metadata,
-        replace_existing: false,
-        password,
-        volume_size: None,
-    };
+    let options = zmanager_core::zip_backend::ZipCreateOptions { compression, level, preserve_metadata: !request.no_metadata, replace_existing: false, password, volume_size: None };
     let stdout = io::stdout();
     match zmanager_core::zip_backend::create_zip_stream_from_manifest(manifest, stdout.lock(), &options) {
         Ok((_output, report)) => {
@@ -853,10 +692,7 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
         if request.encrypt || request.password_stdin {
             return Err("--recipient-cert cannot be combined with --encrypt or --password-stdin".to_owned());
         }
-        if request.tzap_signing_cert.is_some()
-            || request.tzap_signing_private_key.is_some()
-            || !request.tzap_signing_chain.is_empty()
-        {
+        if request.tzap_signing_cert.is_some() || request.tzap_signing_private_key.is_some() || !request.tzap_signing_chain.is_empty() {
             return Err("--recipient-cert cannot be combined with X.509 signing options".to_owned());
         }
         if request.volume_size.is_some() {
@@ -864,10 +700,7 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
         }
     }
 
-    if request.tzap_signing_cert.is_some()
-        || request.tzap_signing_private_key.is_some()
-        || !request.tzap_signing_chain.is_empty()
-    {
+    if request.tzap_signing_cert.is_some() || request.tzap_signing_private_key.is_some() || !request.tzap_signing_chain.is_empty() {
         if format != ArchiveFormat::Tzap {
             return Err("certificate signing is supported only for TZAP archives".to_owned());
         }
@@ -903,10 +736,7 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
 
     if let Some(method) = request.method.as_deref() {
         match (format, method) {
-            (ArchiveFormat::Zip, "deflate" | "store")
-            | (ArchiveFormat::TarZst | ArchiveFormat::Tzap, "zstd" | "zst")
-            | (ArchiveFormat::SevenZ, "lzma2")
-            | (ArchiveFormat::Tgz, "gzip" | "gz") => {}
+            (ArchiveFormat::Zip, "deflate" | "store") | (ArchiveFormat::TarZst | ArchiveFormat::Tzap, "zstd" | "zst") | (ArchiveFormat::SevenZ, "lzma2") | (ArchiveFormat::Tgz, "gzip" | "gz") => {}
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             (ArchiveFormat::AppleArchive, "lzfse" | "lz4" | "zlib" | "lzma" | "raw") => {}
             _ => {
@@ -917,14 +747,10 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
 
     if let Some(level) = request.level {
         match format {
-            ArchiveFormat::Zip | ArchiveFormat::SevenZ | ArchiveFormat::Tzap | ArchiveFormat::Tgz
-                if !(0..=9).contains(&level) =>
-            {
+            ArchiveFormat::Zip | ArchiveFormat::SevenZ | ArchiveFormat::Tzap | ArchiveFormat::Tgz if !(0..=9).contains(&level) => {
                 return Err(format!("unsupported compression level for selected archive format: {level}"));
             }
-            ArchiveFormat::Zip
-                if request.compression == zmanager_core::zip_backend::ZipCompression::Store && level != 0 =>
-            {
+            ArchiveFormat::Zip if request.compression == zmanager_core::zip_backend::ZipCompression::Store && level != 0 => {
                 return Err(format!("cannot combine ZIP store compression with compression level {level}"));
             }
             #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -939,9 +765,7 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-fn apple_archive_compression(
-    request: &CreateRequest,
-) -> Result<zmanager_core::apple_archive_backend::AppleArchiveCompression, String> {
+fn apple_archive_compression(request: &CreateRequest) -> Result<zmanager_core::apple_archive_backend::AppleArchiveCompression, String> {
     use zmanager_core::apple_archive_backend::AppleArchiveCompression;
 
     match request.method.as_deref() {
@@ -955,9 +779,7 @@ fn apple_archive_compression(
     }
 }
 
-fn zip_compression_options(
-    request: &CreateRequest,
-) -> Result<(zmanager_core::zip_backend::ZipCompression, Option<i64>), String> {
+fn zip_compression_options(request: &CreateRequest) -> Result<(zmanager_core::zip_backend::ZipCompression, Option<i64>), String> {
     let mut compression = request.compression;
     if let Some(method) = request.method.as_deref() {
         compression = match method {
@@ -991,16 +813,10 @@ fn sevenz_level(request: &CreateRequest) -> Option<u32> {
 }
 
 fn follow_symlinks_for_create(format: ArchiveFormat, request: &CreateRequest) -> bool {
-    request.follow_symlinks
-        || (!request.preserve_symlinks
-            && matches!(format, ArchiveFormat::Zip | ArchiveFormat::SevenZ | ArchiveFormat::Tzap))
+    request.follow_symlinks || (!request.preserve_symlinks && matches!(format, ArchiveFormat::Zip | ArchiveFormat::SevenZ | ArchiveFormat::Tzap))
 }
 
-fn create_password(
-    format: ArchiveFormat,
-    request: &CreateRequest,
-    global: &GlobalOptions,
-) -> Result<Option<SecretString>, ExitCode> {
+fn create_password(format: ArchiveFormat, request: &CreateRequest, global: &GlobalOptions) -> Result<Option<SecretString>, ExitCode> {
     if !request.encrypt && !request.password_stdin {
         return Ok(None);
     }
@@ -1016,10 +832,7 @@ fn create_password(
         return Err(ExitCode::from(2));
     }
     if global.quiet || !io::stdin().is_terminal() {
-        print_error_line(
-            global,
-            format_args!("password prompt requires an interactive terminal; use --password-stdin"),
-        );
+        print_error_line(global, format_args!("password prompt requires an interactive terminal; use --password-stdin"));
         return Err(ExitCode::from(2));
     }
     let prompt = match format {

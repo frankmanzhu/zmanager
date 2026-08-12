@@ -19,10 +19,7 @@ fn get_git_rev() -> Option<String> {
         return None;
     }
 
-    let is_dirty = Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .is_ok_and(|o| o.status.success() && !o.stdout.is_empty());
+    let is_dirty = Command::new("git").args(["status", "--porcelain"]).output().is_ok_and(|o| o.status.success() && !o.stdout.is_empty());
 
     if is_dirty { Some(format!("{sha}-dirty")) } else { Some(sha) }
 }
