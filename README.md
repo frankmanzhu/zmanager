@@ -5,6 +5,9 @@
 [![Release version](https://img.shields.io/github/v/release/tzap-org/zmanager?include_prereleases&label=release)](https://github.com/tzap-org/zmanager/releases)
 [![Downloads](https://img.shields.io/github/downloads/tzap-org/zmanager/total)](https://github.com/tzap-org/zmanager/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-100%25%20lines-brightgreen.svg)](https://github.com/tzap-org/zmanager/actions/workflows/ci.yml)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
+[![Security audit](https://img.shields.io/badge/security-cargo--deny%20%2B%20vet-brightgreen.svg)](deny.toml)
 
 `zm` is a universal file archiver for macOS, Linux, and Windows, built for
 high-performance compression, safe extraction, and seamless handling of
