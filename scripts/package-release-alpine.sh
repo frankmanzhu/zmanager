@@ -70,9 +70,13 @@ docker run --rm \
   "$IMAGE" \
   /bin/sh -c '
     set -eu
+    # git is required: the workspace .cargo/config.toml sets
+    # net.git-fetch-with-cli, so cargo shells out to the git CLI for the
+    # dpp/tzap/forensic-vfs-engine git dependencies.
     apk add --no-cache \
       bash \
       binutils \
+      git \
       build-base \
       clang20-libclang \
       cmake \
