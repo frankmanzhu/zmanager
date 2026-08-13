@@ -1,0 +1,103 @@
+//! Native ZIP listing adapter for single and supported split ZIP archives (ARC-106).
+
+use zip::ZipArchive;
+
+use crate::archive_browser::BrowserEntryKind;
+use crate::engine::format::FormatId;
+use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
+use crate::engine::source::SourceAccess;
+use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind};
+use crate::zip_backend::ZipBackendError;
+use crate::zip_split::open_zip_reader;
+
+static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_zip_lister",
+    format: FormatId::ZIP,
+    operations: &[ArchiveOperation::List],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: true,
+};
+
+static SPLIT_ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_split_zip_lister",
+    format: FormatId::SPLIT_ZIP,
+    operations: &[ArchiveOperation::List],
+    required_source_access: SourceAccess::MultiVolumeSet,
+    supports_encryption: true,
+};
+
+/// Native ZIP read adapter factory.
+#[derive(Debug, Default)]
+pub struct ZipListAdapter {
+    format: FormatId,
+}
+
+impl ZipListAdapter {
+    /// Creates a native ZIP list adapter factory for standard single-volume ZIP.
+    #[must_use]
+    pub const fn single_volume() -> Self {
+        Self { format: FormatId::ZIP }
+    }
+
+    /// Creates a native ZIP list adapter factory for split-volume ZIP.
+    #[must_use]
+    pub const fn split_volume() -> Self {
+        Self { format: FormatId::SPLIT_ZIP }
+    }
+}
+
+impl ReadAdapterFactory for ZipListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        if self.format == FormatId::SPLIT_ZIP { &SPLIT_ZIP_LIST_DESCRIPTOR } else { &ZIP_LIST_DESCRIPTOR }
+    }
+
+    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.source.primary_path();
+
+        let reader = match open_zip_reader(primary_path) {
+            Ok(reader) => reader,
+            Err(ZipBackendError::UnsupportedSplitZip { reason }) => {
+                return Err(
+                    ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("ZIP64 split archive is not supported: {reason}")).with_path(primary_path)
+                );
+            }
+            Err(err) => {
+                return Err(ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path));
+            }
+        };
+
+        let mut zip_archive = ZipArchive::new(reader)
+            .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Failed to parse ZIP central directory: {err}")).with_path(primary_path))?;
+
+        let len = zip_archive.len();
+        let mut entries = Vec::with_capacity(len);
+
+        for index in 0..len {
+            let file = zip_archive.by_index_raw(index).map_err(|err| {
+                ArchiveError::unusable(ErrorKind::CorruptData, format!("Failed to read ZIP entry header #{index}: {err}")).with_path(primary_path)
+            })?;
+
+            let kind = if file.is_dir() { BrowserEntryKind::Directory } else { BrowserEntryKind::File };
+
+            let comment = file.comment();
+            let comment_opt = (!comment.is_empty()).then(|| comment.to_owned());
+
+            entries.push(EngineEntry {
+                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                path: file.name().to_owned(),
+                kind,
+                size: Some(file.size()),
+                compressed_size: Some(file.compressed_size()),
+                modified: file.last_modified().map(|m| m.to_string()),
+                mode: file.unix_mode(),
+                encrypted: Some(file.encrypted()),
+                method: Some(file.compression().to_string()),
+                crc: Some(file.crc32()),
+                comment: comment_opt,
+                link_target: None,
+            });
+        }
+
+        Ok(ArchiveListing { entries })
+    }
+}

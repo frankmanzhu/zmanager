@@ -53,6 +53,7 @@ pub mod apple_dmg_backend;
 pub mod apple_pkg_backend;
 pub mod archive_browser;
 pub mod deb_backend;
+pub mod engine;
 pub mod jobs;
 pub mod libarchive_backend;
 pub mod manifest;

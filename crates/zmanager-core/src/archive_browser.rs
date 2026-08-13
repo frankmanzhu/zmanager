@@ -307,8 +307,8 @@ pub fn list_entries(path: impl AsRef<Path>) -> Result<BrowserListing, ArchiveBro
 /// Returns [`ArchiveBrowserError`] when the archive cannot be read.
 pub fn list_entries_with_options(path: impl AsRef<Path>, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let path = path.as_ref();
-    if is_zip_family_archive(path) {
-        list_zip_entries(path)
+    if is_zip_family_archive(path) || path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("tar")) {
+        list_entries_via_engine(path, options)
     } else if is_tar_zst_archive(path) {
         list_tar_zst_entries(path)
     } else if is_rar_archive(path) {
@@ -503,6 +503,48 @@ pub fn preview_entry_with_options(
     Ok(PreviewExtractReport { cleanup_root, preview_path: report.destination_path, written_bytes: report.written_bytes })
 }
 
+fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
+    let engine = crate::engine::create_default_engine().map_err(|err| ArchiveBrowserError::UnsupportedOperation(err.to_string()))?;
+    let source = crate::engine::ArchiveSource::from_path_autodetect(path);
+    let open_options = crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned) };
+    let mut handle = engine
+        .open(source, open_options)
+        .map_err(|err| ArchiveBrowserError::Io { path: path.to_path_buf(), source: std::io::Error::other(err.to_string()) })?;
+    let listing = handle
+        .list()
+        .map_err(|err| ArchiveBrowserError::Io { path: path.to_path_buf(), source: std::io::Error::other(err.to_string()) })?;
+
+    let entries = listing
+        .entries
+        .into_iter()
+        .map(|entry| BrowserEntry {
+            path: entry.path,
+            kind: entry.kind,
+            size: entry.size,
+            compressed_size: entry.compressed_size,
+            modified: entry.modified,
+            mode: entry.mode,
+            metadata_diagnostics: Vec::new(),
+            encrypted: entry.encrypted,
+            method: entry.method,
+            crc: entry.crc,
+            comment: entry.comment,
+            created: None,
+            accessed: None,
+            solid: None,
+            link_target: entry.link_target,
+            attributes: None,
+            uid: None,
+            gid: None,
+            owner: None,
+            group: None,
+        })
+        .collect();
+
+    Ok(BrowserListing { entries })
+}
+
+#[allow(dead_code)]
 fn list_zip_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
     let mut entries = Vec::new();
     visit_zip_entries(path, |entry| {
