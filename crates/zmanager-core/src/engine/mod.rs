@@ -40,6 +40,21 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::native::TarZstListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TarGzListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TarListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_BZ2,
+            crate::raw_stream_backend::RawStreamFormat::Bzip2,
+            "bzip2",
+        )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_XZ,
+            crate::raw_stream_backend::RawStreamFormat::Xz,
+            "xz",
+        )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_LZMA,
+            crate::raw_stream_backend::RawStreamFormat::Lzma,
+            "lzma",
+        )))?;
         builder.register_read_adapter(Arc::new(adapters::native::TzapListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RarListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RawStreamListAdapter))?;

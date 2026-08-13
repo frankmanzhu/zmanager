@@ -2,6 +2,7 @@
 
 use flate2::read::GzDecoder;
 use std::fs::File;
+use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::Archive as TarArchive;
 
@@ -250,6 +251,138 @@ fn tar_error(path: &std::path::Path, error: &crate::tar_backend::TarError) -> Ar
         message: error.to_string(),
         disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
         path: Some(path.to_path_buf()),
+    }
+}
+
+static TAR_BZ2_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_bz2_adapter",
+    format: FormatId::TAR_BZ2,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static TAR_XZ_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_xz_adapter",
+    format: FormatId::TAR_XZ,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static TAR_LZMA_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_lzma_adapter",
+    format: FormatId::TAR_LZMA,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+/// Native filtered-TAR adapter backed by the shared TAR reader.
+#[derive(Debug, Clone, Copy)]
+pub struct FilteredTarAdapter {
+    format: FormatId,
+    decoder: raw_stream_backend::RawStreamFormat,
+    method: &'static str,
+}
+
+impl FilteredTarAdapter {
+    /// Creates a filtered TAR adapter for one canonical format.
+    #[must_use]
+    pub const fn new(format: FormatId, decoder: raw_stream_backend::RawStreamFormat, method: &'static str) -> Self {
+        Self { format, decoder, method }
+    }
+
+    fn open_reader(&self, path: &std::path::Path) -> Result<Box<dyn Read>, ArchiveError> {
+        raw_stream_backend::open_decoder(path, self.decoder).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))
+    }
+}
+
+impl ReadAdapterFactory for FilteredTarAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        match self.format {
+            FormatId::TAR_BZ2 => &TAR_BZ2_DESCRIPTOR,
+            FormatId::TAR_XZ => &TAR_XZ_DESCRIPTOR,
+            FormatId::TAR_LZMA => &TAR_LZMA_DESCRIPTOR,
+            _ => unreachable!("filtered TAR adapter format must be TAR.BZ2, TAR.XZ, or TAR.LZMA"),
+        }
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let reader = self.open_reader(path)?;
+        let entries = crate::tar_backend::list(reader, path).map_err(|error| tar_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_tar_entries(entries, self.method) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let reader = self.open_reader(path)?;
+        let report = crate::tar_backend::test(reader, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
+            .map_err(|error| tar_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let reader = self.open_reader(path)?;
+        let report = crate::tar_backend::extract(
+            reader,
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            None,
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract<'a>(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let reader = self.open_reader(path)?;
+        let report = crate::tar_backend::extract(
+            reader,
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let reader = self.open_reader(path)?;
+        let written_bytes = crate::tar_backend::copy(
+            reader,
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
     }
 }
 

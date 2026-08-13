@@ -189,8 +189,15 @@ fn native_tar_family_uses_shared_reader_for_all_read_operations() {
     let gzip_tar = temp.path("payload.tar.gz");
     zmanager_core::tar_gz_backend::create_tar_gz_from_path(&source, &gzip_tar, &zmanager_core::tar_gz_backend::TarGzCreateOptions::default()).unwrap();
 
+    let bzip_tar = temp.path("payload.tar.bz2");
+    let file = File::create(&bzip_tar).unwrap();
+    let encoder = bzip2::write::BzEncoder::new(file, bzip2::Compression::default());
+    let mut builder = tar::Builder::new(encoder);
+    builder.append_path_with_name(&source, "payload.txt").unwrap();
+    builder.into_inner().unwrap().finish().unwrap();
+
     let engine = create_default_engine().unwrap();
-    for archive in [&plain_tar, &gzip_tar] {
+    for archive in [&plain_tar, &gzip_tar, &bzip_tar] {
         let mut handle = engine.open(ArchiveSource::from_path_autodetect(archive), OpenOptions::default()).unwrap();
         let listing = handle.list().unwrap();
         assert_eq!(listing.entries.len(), 1);
@@ -204,7 +211,11 @@ fn native_tar_family_uses_shared_reader_for_all_read_operations() {
         assert_eq!(copied, b"shared tar payload");
         handle.close().unwrap();
 
-        let destination = temp.path(if archive.extension().and_then(|value| value.to_str()) == Some("gz") { "out-gzip" } else { "out-plain" });
+        let destination = temp.path(match archive.extension().and_then(|value| value.to_str()) {
+            Some("gz") => "out-gzip",
+            Some("bz2") => "out-bzip2",
+            _ => "out-plain",
+        });
         let mut handle = engine.open(ArchiveSource::from_path_autodetect(archive), OpenOptions::default()).unwrap();
         let mut options = ExtractOptions { destination: destination.clone(), ..ExtractOptions::default() };
         let report = handle.extract(&mut options).unwrap();

@@ -19,9 +19,6 @@ fn system_time_string(time: SystemTime) -> Option<String> {
 
 /// Allow-list of formats accepted by the libarchive listing compatibility adapter.
 pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
-    FormatId::TAR_BZ2,
-    FormatId::TAR_XZ,
-    FormatId::TAR_LZMA,
     FormatId::TAR_LZ,
     FormatId::TAR_LZO,
     FormatId::TAR_COMPRESS,
