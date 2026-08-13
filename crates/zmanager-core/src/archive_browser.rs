@@ -1,7 +1,9 @@
 use crate::apple_archive_backend::{self, AppleArchiveEntryKind, AppleArchiveError};
 use crate::engine::types::ArchiveError;
 use crate::libarchive_backend::{self, LibarchiveEntryKind, LibarchiveError};
-use crate::rar_backend::{self, RarBackendError, RarListEntryKind};
+#[cfg(test)]
+use crate::rar_backend;
+use crate::rar_backend::{RarBackendError, RarListEntryKind};
 use crate::raw_stream_backend::{self, RawStreamError, RawStreamFormat};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwritePolicy,
@@ -546,93 +548,32 @@ pub fn list_entries_from_engine_handle(handle: &mut crate::engine::ArchiveHandle
     Ok(BrowserListing { entries })
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_zip_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
-    let mut entries = Vec::new();
-    visit_zip_entries(path, |entry| {
-        entries.push(entry);
-        true
-    })?;
-    Ok(BrowserListing { entries })
+    list_entries(path)
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn visit_zip_entries(path: &Path, mut visitor: impl FnMut(BrowserEntry) -> bool) -> Result<usize, ArchiveBrowserError> {
-    let reader = open_zip_reader(path).map_err(ArchiveBrowserError::from)?;
-    let mut archive = ZipArchive::new(reader).map_err(ZipBackendError::from)?;
-    let entry_count = archive.len();
-
-    for index in 0..entry_count {
-        let file = archive.by_index_raw(index).map_err(ZipBackendError::from)?;
-        let comment = file.comment();
-        if !visitor(BrowserEntry {
-            path: file.name().to_owned(),
-            kind: zip_entry_kind(&file),
-            size: Some(file.size()),
-            compressed_size: Some(file.compressed_size()),
-            modified: file.last_modified().map(|modified| modified.to_string()),
-            mode: file.unix_mode(),
-            metadata_diagnostics: Vec::new(),
-            encrypted: Some(file.encrypted()),
-            method: Some(file.compression().to_string()),
-            crc: Some(file.crc32()),
-            comment: (!comment.is_empty()).then(|| comment.to_owned()),
-            created: None,
-            accessed: None,
-            solid: None,
-            link_target: None,
-            attributes: None,
-            uid: None,
-            gid: None,
-            owner: None,
-            group: None,
-        }) {
+    let listing = list_entries(path)?;
+    let entry_count = listing.entries.len();
+    for entry in listing.entries {
+        if !visitor(entry) {
             return Err(ArchiveBrowserError::Cancelled);
         }
     }
-
     Ok(entry_count)
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_tar_zst_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
-    let file = File::open(path).map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
-    let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
-    let mut archive = tar::Archive::new(decoder);
-    let entries = archive
-        .entries()
-        .map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?
-        .map(|entry| {
-            let entry = entry.map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
-            let path = entry.path().map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?.to_string_lossy().into_owned();
-            let header = entry.header();
-            Ok(BrowserEntry {
-                path,
-                kind: tar_entry_kind(header.entry_type()),
-                size: header.size().ok(),
-                compressed_size: None,
-                modified: header.mtime().ok().map(|mtime| mtime.to_string()),
-                mode: header.mode().ok(),
-                metadata_diagnostics: Vec::new(),
-                encrypted: None,
-                method: None,
-                crc: None,
-                comment: None,
-                created: None,
-                accessed: None,
-                solid: Some(true),
-                link_target: entry.link_name().ok().flatten().map(|p| p.to_string_lossy().into_owned()),
-                attributes: None,
-                uid: header.uid().ok().and_then(|uid| u32::try_from(uid).ok()),
-                gid: header.gid().ok().and_then(|gid| u32::try_from(gid).ok()),
-                owner: header.username().ok().flatten().map(std::borrow::ToOwned::to_owned),
-                group: header.groupname().ok().flatten().map(std::borrow::ToOwned::to_owned),
-            })
-        })
-        .collect::<Result<Vec<_>, ArchiveBrowserError>>()?;
-
-    Ok(BrowserListing { entries })
+    list_entries(path)
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_libarchive_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = libarchive_backend::list_archive(path)?;
@@ -674,6 +615,7 @@ fn list_libarchive_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowser
     Ok(BrowserListing { entries })
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_raw_stream_entry(path: &Path, format: RawStreamFormat) -> Result<BrowserListing, ArchiveBrowserError> {
     let entry_name =
@@ -705,6 +647,7 @@ fn list_raw_stream_entry(path: &Path, format: RawStreamFormat) -> Result<Browser
     })
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::sevenz_backend::list_7z(path, password)?;
@@ -742,6 +685,7 @@ fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing
     Ok(BrowserListing { entries })
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_rar_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = rar_backend::list_rar_with_password(path, password)?;
@@ -774,6 +718,7 @@ fn list_rar_entries(path: &Path, password: Option<&str>) -> Result<BrowserListin
     Ok(BrowserListing { entries })
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_tzap_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, password)?;
@@ -785,6 +730,7 @@ fn list_tzap_entries(path: &Path, password: Option<&str>) -> Result<BrowserListi
 ///
 /// Shared by the progressive visitor, the full listing, and the directory
 /// listing so the three mapping paths cannot drift.
+#[cfg(test)]
 fn tzap_browser_entry(listing: &crate::tzap_backend::TzapIndexListing, entry: &crate::tzap_backend::TzapIndexEntry) -> BrowserEntry {
     let method = if listing.encrypted {
         match listing.kdf_algo {
@@ -823,6 +769,7 @@ fn is_apple_archive_path_browser(path: &Path) -> bool {
     apple_archive_backend::is_apple_archive_path(path)
 }
 
+#[cfg(test)]
 #[allow(dead_code)]
 fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = apple_archive_backend::list_apple_archive(path, password)?;
@@ -1077,6 +1024,7 @@ fn password_bytes(password: Option<&str>) -> Option<&[u8]> {
     crate::secrets::normalized_password(password).map(str::as_bytes)
 }
 
+#[allow(dead_code)]
 fn zip_entry_kind<R: Read>(file: &zip::read::ZipFile<'_, R>) -> BrowserEntryKind {
     if file.is_dir() {
         BrowserEntryKind::Directory
@@ -1148,6 +1096,7 @@ fn libarchive_entry_kind(kind: LibarchiveEntryKind) -> BrowserEntryKind {
     }
 }
 
+#[allow(dead_code)]
 fn sevenz_entry_kind(kind: SevenZEntryKind) -> BrowserEntryKind {
     match kind {
         SevenZEntryKind::File => BrowserEntryKind::File,
@@ -1156,6 +1105,7 @@ fn sevenz_entry_kind(kind: SevenZEntryKind) -> BrowserEntryKind {
     }
 }
 
+#[allow(dead_code)]
 fn rar_entry_kind(kind: RarListEntryKind) -> BrowserEntryKind {
     match kind {
         RarListEntryKind::File => BrowserEntryKind::File,
@@ -1176,6 +1126,7 @@ fn tzap_entry_kind(kind: TzapEntryKind) -> BrowserEntryKind {
     }
 }
 
+#[allow(dead_code)]
 fn apple_archive_entry_kind(kind: AppleArchiveEntryKind) -> BrowserEntryKind {
     match kind {
         AppleArchiveEntryKind::File => BrowserEntryKind::File,
@@ -1196,6 +1147,7 @@ fn tzap_extraction_kind(kind: TzapEntryKind, path: &str) -> Result<ExtractionEnt
     }
 }
 
+#[allow(dead_code)]
 fn tzap_modified_string(seconds: i64, nanoseconds: u32) -> Option<String> {
     if seconds == 0 && nanoseconds == 0 {
         return None;
@@ -1207,6 +1159,7 @@ fn tzap_modified_string(seconds: i64, nanoseconds: u32) -> Option<String> {
     Some(format!("{seconds}.{}", fraction.trim_end_matches('0')))
 }
 
+#[allow(dead_code)]
 fn system_time_string(time: SystemTime) -> Option<String> {
     time.duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_secs().to_string())
 }
