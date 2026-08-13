@@ -1,5 +1,6 @@
 //! Stateful archive handle lifecycle and engine entry points (ARC-105).
 
+use std::io::Write;
 use std::sync::Arc;
 
 use crate::archive_format::detect_archive_format;
@@ -7,8 +8,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterRegistry, ReadAdapterFactory};
 use crate::engine::source::ArchiveSource;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, ExtractOptions, ExtractReport, HandleCapabilities, OpenOptions,
-    SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EntryId, ErrorKind, ExtractOptions, ExtractReport, HandleCapabilities,
+    OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
 };
 
 /// The stateful archive engine instance.
@@ -65,6 +66,8 @@ impl ArchiveEngine {
             cached_session: None,
             cached_test_session: None,
             cached_extract_session: None,
+            cached_selected_extract_session: None,
+            cached_copy_session: None,
             disposition: SessionDisposition::Usable,
         })
     }
@@ -78,6 +81,8 @@ pub struct ArchiveHandle {
     cached_session: Option<Arc<dyn ReadAdapterFactory>>,
     cached_test_session: Option<Arc<dyn ReadAdapterFactory>>,
     cached_extract_session: Option<Arc<dyn ReadAdapterFactory>>,
+    cached_selected_extract_session: Option<Arc<dyn ReadAdapterFactory>>,
+    cached_copy_session: Option<Arc<dyn ReadAdapterFactory>>,
     disposition: SessionDisposition,
 }
 
@@ -210,6 +215,65 @@ impl ArchiveHandle {
         }
     }
 
+    /// Extracts one retained entry by its session-scoped ID.
+    pub fn extract_selected<'a>(&mut self, entry_id: EntryId, options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        if self.disposition == SessionDisposition::Unusable {
+            return Err(ArchiveError::unusable(ErrorKind::CorruptData, "Archive handle session is unusable; close and reopen the archive"));
+        }
+        if options.destination.as_os_str().is_empty() {
+            return Err(ArchiveError::usable(ErrorKind::Io, "Extraction destination must not be empty"));
+        }
+        if options.cancellation.as_ref().is_some_and(crate::jobs::CancellationToken::is_cancelled) {
+            return Err(ArchiveError::usable(ErrorKind::Cancelled, "Archive extraction was cancelled"));
+        }
+        let factory = if let Some(factory) = &self.cached_selected_extract_session {
+            factory.clone()
+        } else {
+            let factory = self.engine_registry.resolve(self.detected.format, ArchiveOperation::SelectedExtract).ok_or_else(|| {
+                ArchiveError::usable(
+                    ErrorKind::UnsupportedOperation,
+                    format!("No selected extraction adapter registered for format '{}'", self.detected.format),
+                )
+            })?;
+            self.cached_selected_extract_session = Some(factory.clone());
+            factory
+        };
+        match factory.selected_extract(&self.detected, &self.options, entry_id, options) {
+            Ok(report) => Ok(report),
+            Err(error) => {
+                if error.disposition == SessionDisposition::Unusable {
+                    self.disposition = SessionDisposition::Unusable;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// Copies one retained regular-file entry to a caller-owned writer.
+    pub fn copy_entry(&mut self, entry_id: EntryId, writer: &mut dyn Write) -> Result<CopyReport, ArchiveError> {
+        if self.disposition == SessionDisposition::Unusable {
+            return Err(ArchiveError::unusable(ErrorKind::CorruptData, "Archive handle session is unusable; close and reopen the archive"));
+        }
+        let factory = if let Some(factory) = &self.cached_copy_session {
+            factory.clone()
+        } else {
+            let factory = self.engine_registry.resolve(self.detected.format, ArchiveOperation::CopyToWriter).ok_or_else(|| {
+                ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("No writer-copy adapter registered for format '{}'", self.detected.format))
+            })?;
+            self.cached_copy_session = Some(factory.clone());
+            factory
+        };
+        match factory.copy_to_writer(&self.detected, &self.options, entry_id, writer) {
+            Ok(report) => Ok(report),
+            Err(error) => {
+                if error.disposition == SessionDisposition::Unusable {
+                    self.disposition = SessionDisposition::Unusable;
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Consumes the handle and explicitly closes the archive session (ARC-105).
     ///
     /// # Errors
@@ -219,6 +283,8 @@ impl ArchiveHandle {
         self.cached_session = None;
         self.cached_test_session = None;
         self.cached_extract_session = None;
+        self.cached_selected_extract_session = None;
+        self.cached_copy_session = None;
         Ok(())
     }
 }

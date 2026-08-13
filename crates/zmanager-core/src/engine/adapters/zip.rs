@@ -7,8 +7,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
-    SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
+    SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
 };
 use crate::zip_backend::ZipBackendError;
 use crate::zip_split::open_zip_reader;
@@ -16,7 +16,7 @@ use crate::zip_split::open_zip_reader;
 static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_zip_lister",
     format: FormatId::ZIP,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -24,7 +24,7 @@ static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 static SPLIT_ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_split_zip_lister",
     format: FormatId::SPLIT_ZIP,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::MultiVolumeSet,
     supports_encryption: true,
 };
@@ -172,5 +172,66 @@ impl ReadAdapterFactory for ZipListAdapter {
             }
         })?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn selected_extract<'a>(
+        &self,
+        archive: &DetectedArchive,
+        open_options: &OpenOptions,
+        entry_id: EntryId,
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entry_index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "ZIP entry ID is not representable"))?;
+        let report = crate::zip_backend::extract_zip_entry_by_index(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            open_options.password.as_deref(),
+            entry_index,
+            options.overwrite_resolver.as_deref_mut(),
+        )
+        .map_err(|error| {
+            let kind = match error {
+                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
+                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
+                ZipBackendError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
+                ZipBackendError::Io { .. } => ErrorKind::Io,
+                _ => ErrorKind::CorruptData,
+            };
+            ArchiveError {
+                kind,
+                message: error.to_string(),
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entry_index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "ZIP entry ID is not representable"))?;
+        let written_bytes = crate::zip_backend::copy_zip_entry_by_index(path, open_options.password.as_deref(), entry_index, writer).map_err(|error| {
+            let kind = match error {
+                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
+                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
+                ZipBackendError::Io { .. } => ErrorKind::Io,
+                _ => ErrorKind::CorruptData,
+            };
+            ArchiveError {
+                kind,
+                message: error.to_string(),
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(CopyReport { written_bytes })
     }
 }

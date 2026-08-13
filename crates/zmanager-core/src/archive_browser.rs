@@ -12,14 +12,12 @@ use crate::sevenz_backend::{SevenZEntryKind, SevenZError};
 use crate::tar_zst_backend::TarZstdError;
 use crate::tzap_backend::{TzapEntryKind, TzapError, TzapRestoreOptions, TzapRestorePolicy, is_tzap_archive_path};
 use crate::zip_backend::ZipBackendError;
-use crate::zip_split::open_zip_reader;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::EntryType;
-use zip::{ZipArchive, ZipReadOptions};
 
 const PREVIEW_TEMP_PREFIX: &str = "zmanager-preview";
 // Suffixes that identify a solid-compressed tar stream when listing through
@@ -423,7 +421,7 @@ pub fn extract_entry_with_options(
     let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
 
     if is_zip_family_archive(archive_path) {
-        extract_zip_entry(archive_path, entry_path, &destination_root, &policy, options.password)
+        extract_zip_entry_via_engine(archive_path, entry_path, &destination_root, &policy, options.password)
     } else if is_tar_zst_archive(archive_path) {
         extract_tar_zst_entry(archive_path, entry_path, &destination_root, &policy)
     } else if is_tzap_archive_path(archive_path) {
@@ -511,6 +509,41 @@ fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Resu
         crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: options.recipient_key.map(Path::to_path_buf) };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     list_entries_from_engine_handle(&mut handle)
+}
+
+fn extract_zip_entry_via_engine(
+    archive_path: &Path,
+    entry_path: &str,
+    destination: &Path,
+    policy: &ExtractionPolicy,
+    password: Option<&str>,
+) -> Result<EntryExtractReport, ArchiveBrowserError> {
+    let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
+    let open_options = crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: None };
+    let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let format = handle.detected().format;
+    let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+    let matching_entries: Vec<_> = listing.entries.into_iter().filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, entry_path)).collect();
+    if matching_entries.is_empty() {
+        return Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() });
+    }
+
+    // Browser selection preserves the historical folder semantics: a selected
+    // directory extracts its retained directory entry and every retained
+    // descendant. Each operation still uses the session-scoped ID, so duplicate
+    // names and central-directory order remain unambiguous to the engine.
+    let mut written_bytes = 0_u64;
+    let mut metadata_diagnostics = Vec::new();
+    for entry in matching_entries {
+        let mut options = crate::engine::SelectedExtractOptions { destination: destination.to_path_buf(), policy: policy.clone(), ..Default::default() };
+        let report = handle.extract_selected(entry.id, &mut options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+        written_bytes = written_bytes.saturating_add(report.written_bytes);
+        metadata_diagnostics.extend(report.warnings);
+    }
+
+    let destination_path = destination.join(entry_path.replace('\\', "/").trim_matches('/'));
+    Ok(EntryExtractReport { destination_path, written_bytes, metadata_diagnostics })
 }
 
 /// Maps a retained engine handle listing into the browser-facing entry model.
@@ -881,44 +914,6 @@ fn extract_tzap_entry(
     Ok(EntryExtractReport { destination_path, written_bytes: total_written_bytes, metadata_diagnostics: all_diagnostics })
 }
 
-fn extract_zip_entry(
-    archive_path: &Path,
-    entry_path: &str,
-    destination: &Path,
-    policy: &ExtractionPolicy,
-    password: Option<&str>,
-) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    let reader = open_zip_reader(archive_path).map_err(ArchiveBrowserError::from)?;
-    let mut archive = ZipArchive::new(reader).map_err(ZipBackendError::from)?;
-    let password = password_bytes(password);
-    let mut matched_any = false;
-    let mut written_bytes = 0u64;
-
-    for index in 0..archive.len() {
-        let mut file = archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(ZipBackendError::from)?;
-        if !crate::safety::archive_entry_matches_selected(file.name(), entry_path) {
-            continue;
-        }
-        let entry = ExtractionEntry {
-            archive_path: file.name().to_owned(),
-            kind: zip_extraction_kind(&mut file)?,
-            uncompressed_size: Some(file.size()),
-            compressed_size: Some(file.compressed_size()),
-        };
-        let decision = ExtractionSafetyPlanner::new(destination, policy.clone()).validate_entry(&entry)?;
-        let write_plan = decision_write_plan(decision, &entry.archive_path, policy.overwrite)?;
-        let bytes = write_selected_entry(&mut file, &entry, &write_plan)?;
-        written_bytes = written_bytes.saturating_add(bytes);
-        matched_any = true;
-    }
-
-    if matched_any {
-        return Ok(EntryExtractReport { destination_path: destination.join(entry_path), written_bytes, metadata_diagnostics: Vec::new() });
-    }
-
-    Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() })
-}
-
 fn extract_tar_zst_entry(
     archive_path: &Path,
     entry_path: &str,
@@ -1020,10 +1015,6 @@ fn extraction_policy(overwrite: OverwritePolicy, strip_components: usize, ignore
     ExtractionPolicy { overwrite, strip_components, ignore_symlinks, ..ExtractionPolicy::default() }
 }
 
-fn password_bytes(password: Option<&str>) -> Option<&[u8]> {
-    crate::secrets::normalized_password(password).map(str::as_bytes)
-}
-
 #[allow(dead_code)]
 fn zip_entry_kind<R: Read>(file: &zip::read::ZipFile<'_, R>) -> BrowserEntryKind {
     if file.is_dir() {
@@ -1033,18 +1024,6 @@ fn zip_entry_kind<R: Read>(file: &zip::read::ZipFile<'_, R>) -> BrowserEntryKind
     } else {
         BrowserEntryKind::File
     }
-}
-
-fn zip_extraction_kind<R: Read>(file: &mut zip::read::ZipFile<'_, R>) -> Result<ExtractionEntryKind, ArchiveBrowserError> {
-    if file.is_dir() {
-        return Ok(ExtractionEntryKind::Directory);
-    }
-    if file.is_symlink() {
-        let mut target = String::new();
-        file.read_to_string(&mut target).map_err(|source| ArchiveBrowserError::Io { path: PathBuf::from(file.name()), source })?;
-        return Ok(ExtractionEntryKind::Symlink { target: PathBuf::from(target) });
-    }
-    Ok(ExtractionEntryKind::File)
 }
 
 #[allow(dead_code)]

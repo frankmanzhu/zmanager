@@ -428,6 +428,26 @@ pub fn copy_zip_files_to_writer<W: Write>(
     Ok(report)
 }
 
+/// Copies exactly one regular ZIP entry by its retained central-directory index.
+pub fn copy_zip_entry_by_index<W: Write + ?Sized>(
+    archive_path: impl AsRef<Path>,
+    password: Option<&str>,
+    entry_index: usize,
+    output: &mut W,
+) -> Result<u64, ZipBackendError> {
+    let archive_path = archive_path.as_ref();
+    let reader = open_zip_reader(archive_path)?;
+    let mut archive = ZipArchive::new(reader)?;
+    let mut file = archive.by_index_with_options(entry_index, ZipReadOptions::new().password(password_bytes(password))).map_err(map_zip_error)?;
+    if zip_entry_kind(&file) != ZipEntryKind::File {
+        return Err(ZipBackendError::Io {
+            path: PathBuf::from(file.name()),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "retained ZIP entry is not a regular file"),
+        });
+    }
+    io::copy(&mut file, output).map_err(|source| ZipBackendError::Io { path: PathBuf::from(file.name()), source })
+}
+
 /// Extracts a ZIP archive with an optional password while emitting job events.
 ///
 /// # Errors
@@ -442,7 +462,7 @@ pub fn extract_zip_with_context_and_password(
     password: Option<&str>,
     context: &mut JobContext<'_>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, Some(context), None)
+    extract_zip_inner(archive_path, destination, policy, password, Some(context), None, None)
 }
 
 /// Extracts a ZIP archive without job progress callbacks.
@@ -452,7 +472,7 @@ pub fn extract_zip_with_password(
     policy: ExtractionPolicy,
     password: Option<&str>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, None, None)
+    extract_zip_inner(archive_path, destination, policy, password, None, None, None)
 }
 
 /// Extracts a ZIP archive with an overwrite resolver and optional password.
@@ -469,7 +489,19 @@ pub fn extract_zip_with_overwrite_resolver_and_password(
     password: Option<&str>,
     overwrite_resolver: &mut dyn OverwriteResolver,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, None, Some(overwrite_resolver))
+    extract_zip_inner(archive_path, destination, policy, password, None, Some(overwrite_resolver), None)
+}
+
+/// Extracts exactly one ZIP entry by its retained central-directory index.
+pub fn extract_zip_entry_by_index(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    password: Option<&str>,
+    entry_index: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<ZipExtractReport, ZipBackendError> {
+    extract_zip_inner(archive_path, destination, policy, password, None, overwrite_resolver, Some(entry_index))
 }
 
 fn extract_zip_inner(
@@ -479,6 +511,7 @@ fn extract_zip_inner(
     password: Option<&str>,
     mut context: Option<&mut JobContext<'_>>,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+    selected_index: Option<usize>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
@@ -488,12 +521,22 @@ fn extract_zip_inner(
     let reader = open_zip_reader(archive_path)?;
     let mut archive = ZipArchive::new(reader)?;
     let password = password_bytes(password);
+    if selected_index.is_some_and(|selected| selected >= archive.len()) {
+        return Err(ZipBackendError::Io {
+            path: archive_path.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::NotFound, "retained ZIP entry ID is not present in this archive"),
+        });
+    }
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report = ZipExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
     let mut deferred_directories: Vec<(PathBuf, Option<u32>, Option<zip::DateTime>)> = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
     for index in 0..archive.len() {
+        if selected_index.is_some_and(|selected| selected != index) {
+            report.skipped_entries += 1;
+            continue;
+        }
         let mut file = archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(map_zip_error)?;
         let entry_size = file.size();
         let unix_mode = file.unix_mode();

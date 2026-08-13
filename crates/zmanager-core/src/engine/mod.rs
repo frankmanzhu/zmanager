@@ -16,8 +16,8 @@ pub use plugins::{ArchivePlugin, build_engine_with_plugins};
 pub use registry::{AdapterDescriptor, AdapterRegistry, ArchiveEngineBuilder, ReadAdapterFactory};
 pub use source::{ArchiveSource, SourceAccess, discover_split_zip_volumes, is_split_zip_archive_path};
 pub use types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities,
-    HandleCapabilities, OpenOptions, SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport,
+    FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
 };
 
 /// Default compile-time plugin packaging for Phase 1 listing.

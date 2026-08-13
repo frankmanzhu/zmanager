@@ -147,6 +147,32 @@ fn engine_extracts_native_zip_with_normalized_report() {
 }
 
 #[test]
+fn engine_extracts_and_copies_zip_entries_by_retained_id() {
+    let temp = TestDir::new("engine-conformance-selected-zip");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("first.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"first").unwrap();
+    zip.start_file("second.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"second").unwrap();
+    zip.finish().unwrap();
+
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::from_path_autodetect(&zip_path), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    let second_id = listing.entries[1].id;
+    let mut selected = zmanager_core::engine::SelectedExtractOptions { destination: temp.path("out"), ..Default::default() };
+    let report = handle.extract_selected(second_id, &mut selected).unwrap();
+    assert_eq!(report.written_entries, 1);
+    assert_eq!(fs::read(temp.path("out/second.txt")).unwrap(), b"second");
+
+    let mut copied = Vec::new();
+    let copy_report = handle.copy_entry(listing.entries[0].id, &mut copied).unwrap();
+    assert_eq!(copy_report.written_bytes, 5);
+    assert_eq!(copied, b"first");
+}
+
+#[test]
 fn engine_extract_cancellation_is_reported_before_adapter_work() {
     let temp = TestDir::new("engine-conformance-extract-cancelled");
     let zip_path = temp.path("test.zip");

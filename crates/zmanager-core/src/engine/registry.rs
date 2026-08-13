@@ -3,10 +3,11 @@
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities, HandleCapabilities,
-    OpenOptions, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EntryId, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities,
+    HandleCapabilities, OpenOptions, SelectedExtractOptions, TestOptions, TestReport,
 };
 use std::collections::HashMap;
+use std::io::Write;
 use std::sync::Arc;
 
 /// Static metadata descriptor for an archive adapter.
@@ -45,6 +46,28 @@ pub trait ReadAdapterFactory: Send + Sync {
         _options: &'a mut ExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
         Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide full extraction"))
+    }
+
+    /// Extracts one entry selected by its retained session ID.
+    fn selected_extract<'a>(
+        &self,
+        _archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        _entry_id: EntryId,
+        _options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide selected extraction"))
+    }
+
+    /// Copies one regular-file entry selected by its retained session ID.
+    fn copy_to_writer(
+        &self,
+        _archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        _entry_id: EntryId,
+        _writer: &mut dyn Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide writer copy"))
     }
 }
 

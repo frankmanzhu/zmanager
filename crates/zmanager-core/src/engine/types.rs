@@ -239,6 +239,42 @@ pub struct ExtractReport {
     pub warnings: Vec<String>,
 }
 
+/// Request for extracting one retained archive entry by session-scoped ID.
+pub struct SelectedExtractOptions<'a> {
+    /// Destination directory for the selected entry.
+    pub destination: PathBuf,
+    /// Shared safety and overwrite policy.
+    pub policy: ExtractionPolicy,
+    /// Optional cancellation token.
+    pub cancellation: Option<CancellationToken>,
+    /// Optional overwrite resolver for `Ask` policy.
+    pub overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
+}
+
+impl std::fmt::Debug for SelectedExtractOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SelectedExtractOptions")
+            .field("destination", &self.destination)
+            .field("policy", &self.policy)
+            .field("cancellation", &self.cancellation)
+            .field("overwrite_resolver", &self.overwrite_resolver.is_some())
+            .finish()
+    }
+}
+
+impl Default for SelectedExtractOptions<'_> {
+    fn default() -> Self {
+        Self { destination: PathBuf::new(), policy: ExtractionPolicy::default(), cancellation: None, overwrite_resolver: None }
+    }
+}
+
+/// Normalized result for copying one entry payload to a caller-owned writer.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct CopyReport {
+    /// Decoded regular-file bytes written to the caller's writer.
+    pub written_bytes: u64,
+}
+
 /// Archive operation supported by the engine seam.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum ArchiveOperation {
