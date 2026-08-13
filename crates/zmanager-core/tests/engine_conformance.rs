@@ -49,6 +49,10 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
         assert_eq!(capabilities.source_access, source_access, "{format} advertised the wrong source access");
     }
+    let mtree = engine.registry().capabilities_for_format(FormatId::MTREE).expect("missing MTREE capabilities");
+    assert!(mtree.operations.contains(&ArchiveOperation::List));
+    assert!(mtree.operations.contains(&ArchiveOperation::Test));
+    assert!(!mtree.operations.contains(&ArchiveOperation::Extract));
     #[cfg(feature = "libarchive-fallback")]
     assert!(!zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&FormatId::RAR));
     for format in
@@ -475,6 +479,48 @@ fn native_warc_adapter_materializes_record_bodies_when_bsdtar_available() {
     assert_eq!(report.written_entries, listing.entries.len() as u64);
     assert_eq!(fs::read(destination.join("project/file.txt")).unwrap(), b"warc engine payload\n");
     handle.close().unwrap();
+}
+
+#[test]
+fn native_mtree_adapter_lists_and_verifies_manifest_metadata_without_materializing_payloads() {
+    let Some(bsdtar) = std::env::var("PATH")
+        .ok()
+        .and_then(|path| path.split(':').map(std::path::PathBuf::from).map(|directory| directory.join("bsdtar")).find(|candidate| candidate.is_file()))
+    else {
+        return;
+    };
+    let temp = TestDir::new("engine-conformance-mtree");
+    let source = temp.path("project");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("file.txt"), b"mtree engine payload\n").unwrap();
+    let archive = temp.path("payload.mtree");
+    let create =
+        std::process::Command::new(bsdtar).current_dir(temp.root()).arg("--format").arg("mtree").arg("-cf").arg(&archive).arg("project").output().unwrap();
+    assert!(create.status.success(), "bsdtar failed: {}", String::from_utf8_lossy(&create.stderr));
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    assert!(listing.entries.iter().any(|entry| entry.path == "project/file.txt"));
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert_eq!(test.tested_entries, listing.entries.len() as u64);
+    assert_eq!(test.tested_bytes, b"mtree engine payload\n".len() as u64);
+    let mut options = ExtractOptions { destination: temp.path("out"), ..ExtractOptions::default() };
+    let error = handle.extract(&mut options).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::UnsupportedOperation);
+    handle.close().unwrap();
+}
+
+#[test]
+fn native_mtree_adapter_rejects_unsupported_unset_directives_without_panicking() {
+    let temp = TestDir::new("engine-conformance-mtree-unset");
+    let archive = temp.path("unsupported.mtree");
+    fs::write(&archive, b"/set type=file\n/unset type\n./file.txt size=1\n").unwrap();
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let error = handle.list().unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::CorruptData);
+    assert_eq!(error.disposition, zmanager_core::engine::SessionDisposition::Unusable);
 }
 
 #[test]

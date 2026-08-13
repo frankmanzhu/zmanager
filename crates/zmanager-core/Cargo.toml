@@ -52,6 +52,7 @@ zstd = { version = "0.13.3", features = ["zstdmt"] }
 dpp = { git = "https://github.com/frankmanzhu/dpp", branch = "fix-apfs-symlink-xattr" }
 delharc = { version = "0.8.0", default-features = false, features = ["std", "lh1", "lz", "lhx"] }
 warc = { version = "0.4.0", default-features = false }
+mtree = "0.5.0"
 # Forensic disk-image stack: VHD/VMDK containers, MBR/GPT volume systems, and
 # NTFS/FAT/ext4/UDF filesystems (SecurityRonin family, Apache-2.0/MIT, read-only).
 # Path dependency on the sibling checkout so engine/adapter bugs can be patched

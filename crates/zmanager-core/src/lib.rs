@@ -67,6 +67,7 @@ pub mod libarchive_backend;
 pub mod libarchive_backend;
 pub mod manifest;
 pub mod msi_backend;
+pub mod mtree_backend;
 pub mod rar_backend;
 pub mod raw_stream_backend;
 pub mod rpm_backend;

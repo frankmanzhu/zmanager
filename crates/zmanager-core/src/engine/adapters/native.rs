@@ -317,6 +317,14 @@ static WARC_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static MTREE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_mtree_adapter",
+    format: FormatId::MTREE,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 /// Native Debian package adapter composing AR with the registered payload engines.
 #[derive(Debug, Default)]
 pub struct DebListAdapter;
@@ -834,6 +842,64 @@ fn warc_error(path: &std::path::Path, error: &crate::warc_backend::WarcError) ->
         crate::warc_backend::WarcError::Invalid { .. } => ErrorKind::CorruptData,
         crate::warc_backend::WarcError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::warc_backend::WarcError::Cancelled => ErrorKind::Cancelled,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
+
+/// Native MTREE manifest adapter backed by the `mtree` parser.
+#[derive(Debug, Default)]
+pub struct MtreeListAdapter;
+
+impl ReadAdapterFactory for MtreeListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &MTREE_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entries = crate::mtree_backend::list(path).map_err(|error| mtree_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_mtree_entries(entries) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::mtree_backend::test(path, test_options).map_err(|error| mtree_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+}
+
+fn map_mtree_entries(entries: Vec<crate::mtree_backend::MtreeEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| EngineEntry {
+            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            path: entry.path,
+            kind: entry.kind,
+            size: entry.size,
+            compressed_size: None,
+            encrypted: Some(false),
+            method: Some(format!("mtree/{}", entry.file_type)),
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn mtree_error(path: &std::path::Path, error: &crate::mtree_backend::MtreeError) -> ArchiveError {
+    let kind = match error {
+        crate::mtree_backend::MtreeError::Io { .. } => ErrorKind::Io,
+        crate::mtree_backend::MtreeError::Invalid { .. } => ErrorKind::CorruptData,
+        crate::mtree_backend::MtreeError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::mtree_backend::MtreeError::Cancelled => ErrorKind::Cancelled,
     };
     ArchiveError {
         kind,

@@ -1120,7 +1120,7 @@ fn competitor_warc_format_extract_with_zm() {
 }
 
 #[test]
-fn competitor_mtree_format_extract_with_zm() {
+fn competitor_mtree_format_list_and_test_with_zm() {
     let Some(bsdtar) = find_on_path("bsdtar") else {
         return;
     };
@@ -1138,10 +1138,8 @@ fn competitor_mtree_format_extract_with_zm() {
     assert_success("zm list mtree", &list_output);
     assert!(String::from_utf8_lossy(&list_output.stdout).contains("project/file.txt"));
 
-    let out_mtree = temp.path("out_mtree");
-    let extract_mtree = Command::new(zm_path()).arg("extract").arg(&archive_mtree).arg("-C").arg(&out_mtree).output().unwrap();
-    assert_success("zm extract mtree", &extract_mtree);
-    assert!(out_mtree.join("project/file.txt").exists(), "mtree extraction failed to create file metadata placeholder");
+    let test_output = Command::new(zm_path()).arg("test").arg(&archive_mtree).output().unwrap();
+    assert_success("zm test mtree", &test_output);
 }
 
 /// The Apple formats must handle entries beyond the shared complex payload:
