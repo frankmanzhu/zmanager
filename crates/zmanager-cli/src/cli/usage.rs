@@ -675,17 +675,6 @@ pub(crate) fn json_string_array(values: &[impl AsRef<str>]) -> String {
     output.push(']');
     output
 }
-pub(crate) fn tzap_timestamp_string(seconds: i64, nanoseconds: u32) -> Option<String> {
-    if seconds == 0 && nanoseconds == 0 {
-        return None;
-    }
-    if nanoseconds == 0 {
-        return Some(seconds.to_string());
-    }
-    let fraction = format!("{nanoseconds:09}");
-    Some(format!("{seconds}.{}", fraction.trim_end_matches('0')))
-}
-
 pub(crate) fn print_create_summary(archive: &Path, outcome: &CreateOutcome, global: &GlobalOptions) {
     if global.json {
         print_create_summary_json(archive, outcome);

@@ -2,7 +2,7 @@
 
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities};
+use crate::engine::types::{ArchiveError, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities, OpenOptions};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ pub trait ReadAdapterFactory: Send + Sync {
     fn descriptor(&self) -> &'static AdapterDescriptor;
 
     /// Lists entries for the given detected archive and optional password.
-    fn list(&self, archive: &DetectedArchive, password: Option<&str>) -> Result<crate::engine::types::ArchiveListing, ArchiveError>;
+    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<crate::engine::types::ArchiveListing, ArchiveError>;
 }
 
 /// Immutable registry mapping `(FormatId, ArchiveOperation)` to an adapter factory.

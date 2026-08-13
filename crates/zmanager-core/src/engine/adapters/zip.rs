@@ -6,7 +6,7 @@ use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind};
+use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions};
 use crate::zip_backend::ZipBackendError;
 use crate::zip_split::open_zip_reader;
 
@@ -51,7 +51,7 @@ impl ReadAdapterFactory for ZipListAdapter {
         if self.format == FormatId::SPLIT_ZIP { &SPLIT_ZIP_LIST_DESCRIPTOR } else { &ZIP_LIST_DESCRIPTOR }
     }
 
-    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
 
         let reader = match open_zip_reader(primary_path) {
@@ -77,7 +77,13 @@ impl ReadAdapterFactory for ZipListAdapter {
                 ArchiveError::unusable(ErrorKind::CorruptData, format!("Failed to read ZIP entry header #{index}: {err}")).with_path(primary_path)
             })?;
 
-            let kind = if file.is_dir() { BrowserEntryKind::Directory } else { BrowserEntryKind::File };
+            let kind = if file.is_dir() {
+                BrowserEntryKind::Directory
+            } else if file.is_symlink() {
+                BrowserEntryKind::Symlink
+            } else {
+                BrowserEntryKind::File
+            };
 
             let comment = file.comment();
             let comment_opt = (!comment.is_empty()).then(|| comment.to_owned());
@@ -95,6 +101,7 @@ impl ReadAdapterFactory for ZipListAdapter {
                 crc: Some(file.crc32()),
                 comment: comment_opt,
                 link_target: None,
+                ..EngineEntry::default()
             });
         }
 

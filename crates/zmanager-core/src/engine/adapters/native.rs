@@ -11,7 +11,7 @@ use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind};
+use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions};
 use crate::msi_backend;
 use crate::rar_backend;
 use crate::raw_stream_backend;
@@ -22,6 +22,35 @@ use crate::virtual_disk_backend;
 fn system_time_string(time: SystemTime) -> Option<String> {
     let duration = time.duration_since(UNIX_EPOCH).ok()?;
     Some(duration.as_secs().to_string())
+}
+
+fn tzap_timestamp_string(seconds: i64, nanoseconds: u32) -> Option<String> {
+    if seconds == 0 && nanoseconds == 0 {
+        return None;
+    }
+    if nanoseconds == 0 {
+        return Some(seconds.to_string());
+    }
+    let fraction = format!("{nanoseconds:09}");
+    Some(format!("{seconds}.{}", fraction.trim_end_matches('0')))
+}
+
+fn sevenz_archive_error(error: sevenz_backend::SevenZError, path: &std::path::Path) -> ArchiveError {
+    match error {
+        sevenz_backend::SevenZError::PasswordRequired => {
+            ArchiveError::usable(ErrorKind::PasswordRequired, "password required to decrypt 7z data").with_path(path)
+        }
+        sevenz_backend::SevenZError::InvalidPassword => ArchiveError::usable(ErrorKind::WrongPassword, "provided 7z password is incorrect").with_path(path),
+        sevenz_backend::SevenZError::Io { path, source } => ArchiveError::usable(ErrorKind::Io, source.to_string()).with_path(path),
+        sevenz_backend::SevenZError::Safety(source) => ArchiveError::unusable(ErrorKind::SafetyViolation, source.to_string()).with_path(path),
+        sevenz_backend::SevenZError::Cancelled => ArchiveError::usable(ErrorKind::UnsupportedOperation, "7z listing was cancelled").with_path(path),
+        sevenz_backend::SevenZError::VolumeSizeTooSmall { size, minimum } => {
+            ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("7z volume size {size} bytes is smaller than the minimum {minimum} bytes"))
+                .with_path(path)
+        }
+        sevenz_backend::SevenZError::Plan(source) => ArchiveError::usable(ErrorKind::InvalidFormat, source.to_string()).with_path(path),
+        sevenz_backend::SevenZError::SevenZ(source) => ArchiveError::usable(ErrorKind::InvalidFormat, source.to_string()).with_path(path),
+    }
 }
 
 // --- 7z ---
@@ -42,10 +71,9 @@ impl ReadAdapterFactory for SevenZListAdapter {
         &SEVEN_Z_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
-        let listing = sevenz_backend::list_7z(primary_path, password)
-            .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
+        let listing = sevenz_backend::list_7z(primary_path, options.password.as_deref()).map_err(|err| sevenz_archive_error(err, primary_path))?;
 
         let entries = listing
             .entries
@@ -68,6 +96,7 @@ impl ReadAdapterFactory for SevenZListAdapter {
                 crc: entry.crc,
                 comment: None,
                 link_target: None,
+                ..EngineEntry::default()
             })
             .collect();
 
@@ -93,7 +122,7 @@ impl ReadAdapterFactory for TarZstListAdapter {
         &TAR_ZST_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
         let file = File::open(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::Io, err.to_string()).with_path(primary_path))?;
         let decoder =
@@ -135,6 +164,7 @@ impl ReadAdapterFactory for TarZstListAdapter {
                 crc: None,
                 comment: None,
                 link_target: entry.link_name().ok().flatten().map(|p| p.to_string_lossy().into_owned()),
+                ..EngineEntry::default()
             });
         }
 
@@ -160,11 +190,24 @@ impl ReadAdapterFactory for TzapListAdapter {
         &TZAP_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
-        let listing = tzap_backend::list_tzap_index_with_optional_password(primary_path, password)
-            .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
+        let listing = match options.recipient_key_path() {
+            Some(recipient_key) => tzap_backend::list_tzap_index_with_recipient_key(primary_path, recipient_key),
+            None => tzap_backend::list_tzap_index_with_optional_password(primary_path, options.password.as_deref()),
+        }
+        .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
+        let encrypted = listing.encrypted;
+        let method = if encrypted {
+            match listing.kdf_algo {
+                tzap_core::format::KdfAlgo::Argon2id => "Zstd (Argon2id)",
+                tzap_core::format::KdfAlgo::RecipientWrap => "Zstd (Recipient)",
+                _ => "Zstd (Encrypted)",
+            }
+        } else {
+            "Zstd"
+        };
         let entries = listing
             .entries
             .into_iter()
@@ -183,13 +226,21 @@ impl ReadAdapterFactory for TzapListAdapter {
                 },
                 size: Some(entry.size),
                 compressed_size: (entry.compressed_size != 0).then_some(entry.compressed_size),
-                modified: Some(entry.mtime.to_string()),
+                modified: tzap_timestamp_string(entry.mtime, entry.mtime_nanoseconds),
                 mode: Some(entry.mode),
-                encrypted: Some(true),
-                method: None,
+                encrypted: Some(encrypted),
+                method: Some(method.to_owned()),
                 crc: None,
                 comment: None,
                 link_target: entry.link_target,
+                created: entry.created.and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
+                accessed: entry.accessed.and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
+                solid: Some(true),
+                attributes: entry.attributes.map(|value| format!("{value:#010X}")),
+                uid: entry.uid.and_then(|value| u32::try_from(value).ok()),
+                gid: entry.gid.and_then(|value| u32::try_from(value).ok()),
+                owner: entry.uname,
+                group: entry.gname,
             })
             .collect();
 
@@ -215,13 +266,17 @@ impl ReadAdapterFactory for RarListAdapter {
         &RAR_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
-        let listing = rar_backend::list_rar_with_password(primary_path, password).map_err(|err| {
+        let listing = rar_backend::list_rar_with_password(primary_path, options.password.as_deref()).map_err(|err| {
             let msg = err.to_string();
             let lower = msg.to_lowercase();
             if lower.contains("password") {
-                if password.is_some() { ArchiveError::usable(ErrorKind::WrongPassword, msg) } else { ArchiveError::usable(ErrorKind::PasswordRequired, msg) }
+                // The existing RAR bridge intentionally reports both a missing
+                // and a rejected password as invalid_password; preserve that
+                // compatibility while keeping the distinction for formats
+                // whose backends expose it.
+                ArchiveError::usable(ErrorKind::WrongPassword, msg)
             } else {
                 ArchiveError::usable(ErrorKind::InvalidFormat, msg)
             }
@@ -252,6 +307,7 @@ impl ReadAdapterFactory for RarListAdapter {
                 crc: None,
                 comment: None,
                 link_target: entry.link_target,
+                ..EngineEntry::default()
             })
             .collect();
 
@@ -277,7 +333,7 @@ impl ReadAdapterFactory for RawStreamListAdapter {
         &RAW_STREAM_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
         let format = raw_stream_backend::detect_raw_stream_format(primary_path)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(primary_path))?;
@@ -300,6 +356,7 @@ impl ReadAdapterFactory for RawStreamListAdapter {
             crc: None,
             comment: None,
             link_target: None,
+            ..EngineEntry::default()
         };
 
         Ok(ArchiveListing { entries: vec![entry] })
@@ -324,9 +381,9 @@ impl ReadAdapterFactory for AppleArchiveListAdapter {
         &APPLE_ARCHIVE_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
-        let listing = apple_archive_backend::list_apple_archive(primary_path, password)
+        let listing = apple_archive_backend::list_apple_archive(primary_path, options.password.as_deref())
             .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
         let entries = listing
@@ -351,6 +408,7 @@ impl ReadAdapterFactory for AppleArchiveListAdapter {
                 crc: entry.crc,
                 comment: None,
                 link_target: entry.link_target,
+                ..EngineEntry::default()
             })
             .collect();
 
@@ -376,7 +434,7 @@ impl ReadAdapterFactory for DmgListAdapter {
         &DMG_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
         let raw_entries =
             apple_dmg_backend::list_dmg(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
@@ -397,6 +455,7 @@ impl ReadAdapterFactory for DmgListAdapter {
                 crc: None,
                 comment: None,
                 link_target: None,
+                ..EngineEntry::default()
             })
             .collect();
 
@@ -422,7 +481,7 @@ impl ReadAdapterFactory for PkgListAdapter {
         &PKG_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
         let raw_entries =
             apple_pkg_backend::list_pkg(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
@@ -443,6 +502,7 @@ impl ReadAdapterFactory for PkgListAdapter {
                 crc: None,
                 comment: None,
                 link_target: None,
+                ..EngineEntry::default()
             })
             .collect();
 
@@ -468,7 +528,7 @@ impl ReadAdapterFactory for MsiListAdapter {
         &MSI_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
         let raw_entries =
             msi_backend::list_msi(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
@@ -489,6 +549,7 @@ impl ReadAdapterFactory for MsiListAdapter {
                 crc: None,
                 comment: None,
                 link_target: None,
+                ..EngineEntry::default()
             })
             .collect();
 
@@ -522,7 +583,7 @@ impl ReadAdapterFactory for VirtualDiskListAdapter {
         }))
     }
 
-    fn list(&self, archive: &DetectedArchive, _password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
         let raw_entries = match self.format {
             FormatId::VHD => virtual_disk_backend::list_vhd(primary_path).map_err(|err| err.to_string()),
@@ -548,6 +609,7 @@ impl ReadAdapterFactory for VirtualDiskListAdapter {
                 crc: None,
                 comment: None,
                 link_target: None,
+                ..EngineEntry::default()
             })
             .collect();
 

@@ -200,6 +200,11 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         | ArchiveFormatKind::TarBz2
         | ArchiveFormatKind::TarXz
         | ArchiveFormatKind::TarLzma
+        | ArchiveFormatKind::TarLz
+        | ArchiveFormatKind::TarLzo
+        | ArchiveFormatKind::TarCompress
+        | ArchiveFormatKind::TarLz4
+        | ArchiveFormatKind::TarLrz
         | ArchiveFormatKind::Iso
         | ArchiveFormatKind::Cab
         | ArchiveFormatKind::Cpio
@@ -342,6 +347,11 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
             | ArchiveFormatKind::TarBz2
             | ArchiveFormatKind::TarXz
             | ArchiveFormatKind::TarLzma
+            | ArchiveFormatKind::TarLz
+            | ArchiveFormatKind::TarLzo
+            | ArchiveFormatKind::TarCompress
+            | ArchiveFormatKind::TarLz4
+            | ArchiveFormatKind::TarLrz
             | ArchiveFormatKind::Iso
             | ArchiveFormatKind::Cab
             | ArchiveFormatKind::Cpio

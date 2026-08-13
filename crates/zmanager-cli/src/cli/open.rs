@@ -10,7 +10,7 @@ use crate::cli::options::{
 use crate::cli::planning::{append_files_from, append_stdin_paths, apply_manifest_filters, plan_sources};
 use crate::cli::usage::{
     LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json, print_entries_tree, print_error_line, print_help_stdout,
-    print_manifest, print_success_line, print_warning_stderr, retry_password_required, tzap_timestamp_string, usage_failure, wants_help,
+    print_manifest, print_success_line, print_warning_stderr, retry_password_required, usage_failure, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::io;
@@ -702,15 +702,7 @@ fn run_plan_request(request: &PlanRequest, global: &GlobalOptions) -> ExitCode {
     }
 }
 fn list_entries_with_password(archive: &str, password: Option<&str>, recipient_key: Option<&Path>) -> Result<Vec<GenericEntry>, String> {
-    if is_tzap_archive(archive)
-        && let Some(recipient_key) = recipient_key
-    {
-        let listing = zmanager_core::tzap_backend::list_tzap_index_with_recipient_key(archive, recipient_key).map_err(|error| error.to_string())?;
-        let encrypted = listing.encrypted;
-        return Ok(map_generic_entries(listing.entries, |entry| tzap_index_entry_to_generic(entry, encrypted)));
-    }
-
-    let options = zmanager_core::archive_browser::BrowserListOptions { password };
+    let options = zmanager_core::archive_browser::BrowserListOptions { password, recipient_key };
     let listing = zmanager_core::archive_browser::list_entries_with_options(archive, options).map_err(|error| error.to_string())?;
 
     let generic_entries = listing
@@ -782,38 +774,6 @@ fn seven_z_list_entry_to_generic(entry: zmanager_core::sevenz_backend::SevenZLis
         size: entry.size,
         compressed_size: Some(entry.compressed_size),
         ..GenericEntry::default()
-    }
-}
-
-fn tzap_index_entry_to_generic(entry: zmanager_core::tzap_backend::TzapIndexEntry, encrypted: bool) -> GenericEntry {
-    GenericEntry {
-        kind: match entry.kind {
-            zmanager_core::tzap_backend::TzapEntryKind::File => "file",
-            zmanager_core::tzap_backend::TzapEntryKind::Directory => "directory",
-            zmanager_core::tzap_backend::TzapEntryKind::Symlink => "symlink",
-            zmanager_core::tzap_backend::TzapEntryKind::Hardlink => "hardlink",
-            zmanager_core::tzap_backend::TzapEntryKind::CharacterDevice => "character-device",
-            zmanager_core::tzap_backend::TzapEntryKind::BlockDevice => "block-device",
-            zmanager_core::tzap_backend::TzapEntryKind::Fifo => "fifo",
-        }
-        .to_owned(),
-        name: entry.path,
-        size: entry.size,
-        compressed_size: Some(entry.compressed_size),
-        mode: Some(entry.mode),
-        modified: tzap_timestamp_string(entry.mtime, entry.mtime_nanoseconds),
-        created: entry.created.and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
-        accessed: entry.accessed.and_then(|(seconds, nanoseconds)| tzap_timestamp_string(seconds, nanoseconds)),
-        encrypted: Some(encrypted),
-        method: Some("Zstd".to_owned()),
-        solid: Some(true),
-        link_target: entry.link_target,
-        attributes: entry.attributes.map(|value| format!("{value:#010X}")),
-        uid: entry.uid.and_then(|uid| u32::try_from(uid).ok()),
-        gid: entry.gid.and_then(|gid| u32::try_from(gid).ok()),
-        owner: entry.uname,
-        group: entry.gname,
-        metadata_diagnostics: vec![],
     }
 }
 

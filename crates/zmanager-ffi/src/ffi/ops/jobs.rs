@@ -448,7 +448,8 @@ fn run_selected_extract_job(
     let archive_path = Path::new(&input.archive_path);
     let destination_root = Path::new(&input.destination_root);
     let password = input.password.as_deref();
-    let listing = archive_browser::list_entries_with_options(archive_path, BrowserListOptions { password }).map_err(map_archive_browser_error)?;
+    let listing =
+        archive_browser::list_entries_with_options(archive_path, BrowserListOptions { password, recipient_key: None }).map_err(map_archive_browser_error)?;
     let entries: Vec<_> = listing.entries.into_iter().filter(|entry| selected_path_matches(&input.selected_paths, &entry.path)).collect();
 
     if entries.is_empty() {

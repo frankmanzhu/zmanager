@@ -5,7 +5,7 @@ use crate::engine::format::FormatId;
 use crate::engine::source::{ArchiveSource, SourceAccess};
 use std::fmt;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Session-scoped entry identifier (ARC-103).
 ///
@@ -28,6 +28,23 @@ pub struct DetectedArchive {
     pub format: FormatId,
     /// Resolved source descriptor.
     pub source: ArchiveSource,
+}
+
+/// Immutable credentials and source options bound to an opened archive handle.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct OpenOptions {
+    /// Optional password for encrypted headers or entries.
+    pub password: Option<String>,
+    /// Optional private key used to unwrap recipient-encrypted TZAP archives.
+    pub recipient_key: Option<PathBuf>,
+}
+
+impl OpenOptions {
+    /// Returns the optional recipient key path as a borrowed path.
+    #[must_use]
+    pub fn recipient_key_path(&self) -> Option<&Path> {
+        self.recipient_key.as_deref()
+    }
 }
 
 /// One normalized entry record returned by engine listing.
@@ -57,6 +74,49 @@ pub struct EngineEntry {
     pub comment: Option<String>,
     /// Symlink or hardlink target path when applicable.
     pub link_target: Option<String>,
+    /// Creation time string when available.
+    pub created: Option<String>,
+    /// Access time string when available.
+    pub accessed: Option<String>,
+    /// Solid archive member indicator.
+    pub solid: Option<bool>,
+    /// Format-specific attribute flags.
+    pub attributes: Option<String>,
+    /// User identifier.
+    pub uid: Option<u32>,
+    /// Group identifier.
+    pub gid: Option<u32>,
+    /// Owner username.
+    pub owner: Option<String>,
+    /// Group name.
+    pub group: Option<String>,
+}
+
+impl Default for EngineEntry {
+    fn default() -> Self {
+        Self {
+            id: EntryId(0),
+            path: String::new(),
+            kind: BrowserEntryKind::File,
+            size: None,
+            compressed_size: None,
+            modified: None,
+            mode: None,
+            encrypted: None,
+            method: None,
+            crc: None,
+            comment: None,
+            link_target: None,
+            created: None,
+            accessed: None,
+            solid: None,
+            attributes: None,
+            uid: None,
+            gid: None,
+            owner: None,
+            group: None,
+        }
+    }
 }
 
 /// Archive listing returned by an opened engine handle.

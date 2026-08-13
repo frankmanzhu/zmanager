@@ -1,4 +1,5 @@
 use crate::apple_archive_backend::{self, AppleArchiveEntryKind, AppleArchiveError};
+use crate::engine::types::ArchiveError;
 use crate::libarchive_backend::{self, LibarchiveEntryKind, LibarchiveError};
 use crate::rar_backend::{self, RarBackendError, RarListEntryKind};
 use crate::raw_stream_backend::{self, RawStreamError, RawStreamFormat};
@@ -100,6 +101,8 @@ pub struct BrowserListing {
 pub struct BrowserListOptions<'a> {
     /// Optional password for archive formats that encrypt headers or metadata.
     pub password: Option<&'a str>,
+    /// Optional private key for recipient-encrypted TZAP metadata.
+    pub recipient_key: Option<&'a Path>,
 }
 
 /// Report for selected-entry extraction.
@@ -178,6 +181,8 @@ pub enum ArchiveBrowserError {
     Libarchive(LibarchiveError),
     /// Raw single-file stream backend failed.
     RawStream(RawStreamError),
+    /// The stateful archive engine rejected a listing request.
+    Engine { format: Option<crate::engine::FormatId>, source: ArchiveError },
     /// Filesystem I/O failed.
     Io { path: PathBuf, source: io::Error },
     /// Extraction safety rejected an entry.
@@ -204,6 +209,8 @@ impl fmt::Display for ArchiveBrowserError {
             }
             Self::Libarchive(source) => write!(f, "libarchive browser operation failed: {source}"),
             Self::RawStream(source) => write!(f, "raw stream browser operation failed: {source}"),
+            Self::Engine { format: Some(crate::engine::FormatId::TZAP), source } => write!(f, "TZAP browser operation failed: {source}"),
+            Self::Engine { source, .. } => write!(f, "archive engine listing failed: {source}"),
             Self::Io { path, source } => write!(f, "I/O failed for {}: {source}", path.display()),
             Self::Safety(source) => write!(f, "extraction safety rejected entry: {source}"),
             Self::EntryNotFound { path } => write!(f, "archive entry not found: {path}"),
@@ -232,6 +239,7 @@ impl std::error::Error for ArchiveBrowserError {
             Self::AppleArchive(source) => Some(source),
             Self::Libarchive(source) => Some(source),
             Self::RawStream(source) => Some(source),
+            Self::Engine { source, .. } => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::Safety(source) => Some(source),
             Self::EntryNotFound { .. } => None,
@@ -352,7 +360,10 @@ pub fn visit_entries_with_options(
         return visit_zip_entries(path, visitor);
     }
     if is_tzap_archive_path(path) {
-        let mut listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, options.password)?;
+        let mut listing = match options.recipient_key {
+            Some(recipient_key) => crate::tzap_backend::list_tzap_index_with_recipient_key(path, recipient_key)?,
+            None => crate::tzap_backend::list_tzap_index_with_optional_password(path, options.password)?,
+        };
         listing.entries.sort_by_key(|entry| entry.path.matches('/').count());
 
         let mut visited = 0;
@@ -490,13 +501,13 @@ pub fn preview_entry_with_options(
 }
 
 fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
-    let engine = crate::engine::create_default_engine().map_err(|err| ArchiveBrowserError::UnsupportedOperation(err.to_string()))?;
+    let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(path);
-    let open_options = crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned) };
-    let mut handle = engine
-        .open(source, open_options)
-        .map_err(|err| ArchiveBrowserError::Io { path: path.to_path_buf(), source: std::io::Error::other(err.to_string()) })?;
-    let listing = handle.list().map_err(|err| ArchiveBrowserError::Io { path: path.to_path_buf(), source: std::io::Error::other(err.to_string()) })?;
+    let open_options =
+        crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: options.recipient_key.map(Path::to_path_buf) };
+    let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let format = handle.detected().format;
+    let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
 
     let entries = listing
         .entries
@@ -513,15 +524,15 @@ fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Resu
             method: entry.method,
             crc: entry.crc,
             comment: entry.comment,
-            created: None,
-            accessed: None,
-            solid: None,
+            created: entry.created,
+            accessed: entry.accessed,
+            solid: entry.solid,
             link_target: entry.link_target,
-            attributes: None,
-            uid: None,
-            gid: None,
-            owner: None,
-            group: None,
+            attributes: entry.attributes,
+            uid: entry.uid,
+            gid: entry.gid,
+            owner: entry.owner,
+            group: entry.group,
         })
         .collect();
 
@@ -1391,7 +1402,7 @@ mod tests {
         let error = list_entries(&archive).unwrap_err();
         assert!(error.to_string().contains("password required"));
 
-        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("correct horse") }).unwrap();
+        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("correct horse"), recipient_key: None }).unwrap();
         assert!(listing.entries.iter().any(|entry| entry.path == "project/a.txt"));
     }
 
@@ -1403,7 +1414,7 @@ mod tests {
         assert!(missing_password.contains("password"), "{missing_password}");
         assert!(!missing_password.contains("libarchive"), "{missing_password}");
 
-        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password") }).unwrap();
+        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password"), recipient_key: None }).unwrap();
         assert_eq!(listing.entries.iter().filter(|entry| entry.path.replace('\\', "/") == "rar-fixture/data/stream.bin").count(), 1);
         assert!(listing.entries.iter().any(|entry| entry.path.replace('\\', "/") == "rar-fixture/docs/readme.txt"));
     }

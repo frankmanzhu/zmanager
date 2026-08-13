@@ -233,7 +233,7 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_split_zip_extension(&extension) => ArchiveFormat::SplitZip,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_rar_sidecar_extension(&extension) => ArchiveFormat::MultipartRar,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if extension == "xip" => ArchiveFormat::Xip,
-        // Kinds with no FFI variant (TarLzma, Iso, Cab, Cpio, Rpm, Xar, Pkg,
+        // Kinds with no FFI variant (TarLzma, TarLz, TarLzo, TarCompress, TarLz4, TarLrz, Iso, Cab, Cpio, Rpm, Xar, Pkg,
         // Dmg, Msi, Lha, Ar, Warc, Mtree, Deb) and unknown paths: generic fallback.
         _ => ArchiveFormat::Other,
     };
@@ -294,6 +294,11 @@ pub(crate) fn format_capabilities_for_kind(kind: zmanager_core::archive_format::
         | ArchiveFormatKind::TarBz2
         | ArchiveFormatKind::TarXz
         | ArchiveFormatKind::TarLzma
+        | ArchiveFormatKind::TarLz
+        | ArchiveFormatKind::TarLzo
+        | ArchiveFormatKind::TarCompress
+        | ArchiveFormatKind::TarLz4
+        | ArchiveFormatKind::TarLrz
         | ArchiveFormatKind::RawStream
         | ArchiveFormatKind::Iso
         | ArchiveFormatKind::Cab
@@ -330,6 +335,11 @@ pub(crate) fn kind_label(kind: zmanager_core::archive_format::ArchiveFormatKind)
         ArchiveFormatKind::TarBz2 => "TAR.BZ2",
         ArchiveFormatKind::TarXz => "TAR.XZ",
         ArchiveFormatKind::TarLzma => "TAR.LZMA",
+        ArchiveFormatKind::TarLz => "TAR.LZ",
+        ArchiveFormatKind::TarLzo => "TAR.LZO",
+        ArchiveFormatKind::TarCompress => "TAR.Z",
+        ArchiveFormatKind::TarLz4 => "TAR.LZ4",
+        ArchiveFormatKind::TarLrz => "TAR.LRZ",
         ArchiveFormatKind::Iso => "ISO",
         ArchiveFormatKind::Cab => "CAB",
         ArchiveFormatKind::Cpio => "CPIO",

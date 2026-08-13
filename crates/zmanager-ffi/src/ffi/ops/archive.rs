@@ -227,7 +227,7 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
 
-    let listing = archive_browser::list_entries_with_options(path, BrowserListOptions { password }).map_err(map_archive_browser_error)?;
+    let listing = archive_browser::list_entries_with_options(path, BrowserListOptions { password, recipient_key: None }).map_err(map_archive_browser_error)?;
 
     let mut total_size = 0u64;
     let mut has_size = false;
@@ -366,7 +366,7 @@ pub fn planExtract(request: PlanExtractRequest) -> Result<PlanExtractResult, Zma
     )?;
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
-    let listing = archive_browser::list_entries_with_options(path, BrowserListOptions { password }).map_err(map_archive_browser_error)?;
+    let listing = archive_browser::list_entries_with_options(path, BrowserListOptions { password, recipient_key: None }).map_err(map_archive_browser_error)?;
 
     let policy = ExtractionPolicy { overwrite: map_collision_policy(request.collision_policy), strip_components, ..ExtractionPolicy::default() };
     let mut planner = ExtractionSafetyPlanner::new(PathBuf::from(&destination_root), policy);

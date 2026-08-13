@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use zmanager_core::apple_archive_backend::AppleArchiveError;
 use zmanager_core::archive_browser::ArchiveBrowserError;
+use zmanager_core::engine::{ArchiveError, ErrorKind};
 use zmanager_core::libarchive_backend::LibarchiveError;
 use zmanager_core::manifest::PlanError;
 use zmanager_core::rar_backend::RarBackendError;
@@ -60,6 +61,7 @@ pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerG
         ArchiveBrowserError::AppleArchive(source) => map_apple_archive_error(source),
         ArchiveBrowserError::Libarchive(source) => map_libarchive_error(source),
         ArchiveBrowserError::RawStream(source) => map_raw_stream_error(source),
+        ArchiveBrowserError::Engine { source, .. } => map_archive_engine_error(source),
         ArchiveBrowserError::Io { path, source } => map_io_error(path, source),
         ArchiveBrowserError::Safety(source) => {
             bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false)
@@ -76,6 +78,20 @@ pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerG
         }
         ArchiveBrowserError::Cancelled | ArchiveBrowserError::UnsupportedOperation(_) => {
             bridge_error(ERROR_OPERATION_FAILED, "Operation cancelled or unsupported.".to_string(), None, BridgeSeverity::Warning, false)
+        }
+    }
+}
+
+pub(crate) fn map_archive_engine_error(error: ArchiveError) -> ZmanagerGuiError {
+    let message = error.message;
+    match error.kind {
+        ErrorKind::PasswordRequired => bridge_error(ERROR_PASSWORD_REQUIRED, message, hint("Enter the archive password."), BridgeSeverity::Warning, true),
+        ErrorKind::WrongPassword => bridge_error(ERROR_INVALID_PASSWORD, message, None, BridgeSeverity::Warning, true),
+        ErrorKind::SafetyViolation => bridge_error(ERROR_UNSAFE_ARCHIVE, message, None, BridgeSeverity::Warning, false),
+        ErrorKind::Io => map_io_error(error.path.unwrap_or_default(), io::Error::other(message)),
+        ErrorKind::CorruptData => damaged_archive(message),
+        ErrorKind::InvalidFormat | ErrorKind::UnsupportedOperation | ErrorKind::ResourceLimitExceeded => {
+            bridge_error(ERROR_UNSUPPORTED_FORMAT, message, None, BridgeSeverity::Warning, false)
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind};
+use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions};
 use crate::libarchive_backend::{self, LibarchiveEntryKind};
 
 fn system_time_string(time: SystemTime) -> Option<String> {
@@ -21,6 +21,11 @@ pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
     FormatId::TAR_BZ2,
     FormatId::TAR_XZ,
     FormatId::TAR_LZMA,
+    FormatId::TAR_LZ,
+    FormatId::TAR_LZO,
+    FormatId::TAR_COMPRESS,
+    FormatId::TAR_LZ4,
+    FormatId::TAR_LRZ,
     FormatId::ISO,
     FormatId::CAB,
     FormatId::CPIO,
@@ -30,6 +35,7 @@ pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
     FormatId::AR,
     FormatId::WARC,
     FormatId::MTREE,
+    FormatId::DEB,
 ];
 
 /// Libarchive listing compatibility adapter factory.
@@ -70,13 +76,13 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
         }))
     }
 
-    fn list(&self, archive: &DetectedArchive, password: Option<&str>) -> Result<ArchiveListing, ArchiveError> {
+    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         if !LIBARCHIVE_ALLOW_LIST.contains(&archive.format) {
             return Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Format '{}' is rejected prior to libarchive probing", archive.format)));
         }
 
         let primary_path = archive.source.primary_path();
-        let listing = libarchive_backend::list_archive_with_password(primary_path, password)
+        let listing = libarchive_backend::list_archive_with_password(primary_path, options.password.as_deref())
             .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
         let entries = listing
@@ -102,6 +108,14 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
                 crc: None,
                 comment: None,
                 link_target: entry.link_target,
+                created: None,
+                accessed: None,
+                solid: None,
+                attributes: None,
+                uid: entry.uid,
+                gid: entry.gid,
+                owner: entry.owner,
+                group: entry.group,
             })
             .collect();
 

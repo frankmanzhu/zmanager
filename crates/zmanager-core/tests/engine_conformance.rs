@@ -8,8 +8,35 @@ use std::io::Write as _;
 
 use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{
-    ArchiveEngineBuilder, ArchiveError, ArchivePlugin, ArchiveSource, FormatId, OpenOptions, create_default_engine, is_split_zip_archive_path,
+    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchiveSource, FormatId, OpenOptions, SourceAccess, create_default_engine,
+    is_split_zip_archive_path,
 };
+
+#[test]
+fn default_engine_registers_every_phase_two_native_listing_adapter() {
+    let engine = create_default_engine().unwrap();
+    let expected = [
+        (FormatId::SEVEN_Z, SourceAccess::Seekable),
+        (FormatId::TAR_ZST, SourceAccess::Seekable),
+        (FormatId::TZAP, SourceAccess::Seekable),
+        (FormatId::RAR, SourceAccess::Seekable),
+        (FormatId::RAW_STREAM, SourceAccess::Seekable),
+        (FormatId::APPLE_ARCHIVE, SourceAccess::Seekable),
+        (FormatId::DMG, SourceAccess::Seekable),
+        (FormatId::PKG, SourceAccess::Seekable),
+        (FormatId::MSI, SourceAccess::Seekable),
+        (FormatId::VHD, SourceAccess::Seekable),
+        (FormatId::VMDK, SourceAccess::Seekable),
+        (FormatId::UDF, SourceAccess::Seekable),
+    ];
+
+    for (format, source_access) in expected {
+        let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
+        assert!(capabilities.operations.contains(&ArchiveOperation::List), "{format} must claim listing");
+        assert_eq!(capabilities.source_access, source_access, "{format} advertised the wrong source access");
+    }
+    assert!(!zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&FormatId::RAR));
+}
 
 #[test]
 fn engine_lists_native_zip_fixture() {

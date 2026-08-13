@@ -27,6 +27,11 @@ impl FormatId {
     pub const TAR_BZ2: FormatId = FormatId("tar.bz2");
     pub const TAR_XZ: FormatId = FormatId("tar.xz");
     pub const TAR_LZMA: FormatId = FormatId("tar.lzma");
+    pub const TAR_LZ: FormatId = FormatId("tar.lz");
+    pub const TAR_LZO: FormatId = FormatId("tar.lzo");
+    pub const TAR_COMPRESS: FormatId = FormatId("tar.compress");
+    pub const TAR_LZ4: FormatId = FormatId("tar.lz4");
+    pub const TAR_LRZ: FormatId = FormatId("tar.lrz");
     pub const ISO: FormatId = FormatId("iso");
     pub const CAB: FormatId = FormatId("cab");
     pub const CPIO: FormatId = FormatId("cpio");
@@ -79,6 +84,11 @@ impl From<ArchiveFormatKind> for Option<FormatId> {
             ArchiveFormatKind::TarBz2 => Some(FormatId::TAR_BZ2),
             ArchiveFormatKind::TarXz => Some(FormatId::TAR_XZ),
             ArchiveFormatKind::TarLzma => Some(FormatId::TAR_LZMA),
+            ArchiveFormatKind::TarLz => Some(FormatId::TAR_LZ),
+            ArchiveFormatKind::TarLzo => Some(FormatId::TAR_LZO),
+            ArchiveFormatKind::TarCompress => Some(FormatId::TAR_COMPRESS),
+            ArchiveFormatKind::TarLz4 => Some(FormatId::TAR_LZ4),
+            ArchiveFormatKind::TarLrz => Some(FormatId::TAR_LRZ),
             ArchiveFormatKind::Iso => Some(FormatId::ISO),
             ArchiveFormatKind::Cab => Some(FormatId::CAB),
             ArchiveFormatKind::Cpio => Some(FormatId::CPIO),

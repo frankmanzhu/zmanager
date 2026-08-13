@@ -6,14 +6,7 @@ use crate::archive_format::detect_archive_format;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterRegistry, ReadAdapterFactory};
 use crate::engine::source::ArchiveSource;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities, SessionDisposition};
-
-/// Options supplied when opening an archive handle.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct OpenOptions {
-    /// Optional password for encrypted headers or entries.
-    pub password: Option<String>,
-}
+use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities, OpenOptions, SessionDisposition};
 
 /// The stateful archive engine instance.
 #[derive(Clone, Debug)]
@@ -41,11 +34,13 @@ impl ArchiveEngine {
     /// Returns [`ArchiveError`] if format detection fails or no adapter is registered.
     pub fn open(&self, source: ArchiveSource, options: OpenOptions) -> Result<ArchiveHandle, ArchiveError> {
         let primary_path = source.primary_path();
-        if !primary_path.exists() {
+        let kind = detect_archive_format(primary_path);
+        let source_exists = primary_path.exists()
+            || (matches!(kind, crate::archive_format::ArchiveFormatKind::SevenZ) && crate::sevenz_backend::has_existing_7z_input(primary_path));
+        if !source_exists {
             return Err(ArchiveError::usable(ErrorKind::Io, format!("Archive path does not exist: {}", primary_path.display())).with_path(primary_path));
         }
 
-        let kind = detect_archive_format(primary_path);
         let format_id: Option<FormatId> = kind.into();
         let format = format_id.ok_or_else(|| {
             ArchiveError::usable(ErrorKind::InvalidFormat, format!("Unsupported or unrecognized archive format for {}", primary_path.display()))
@@ -112,7 +107,7 @@ impl ArchiveHandle {
             factory
         };
 
-        match factory.list(&self.detected, self.options.password.as_deref()) {
+        match factory.list(&self.detected, &self.options) {
             Ok(listing) => Ok(listing),
             Err(error) => {
                 if error.disposition == SessionDisposition::Unusable {

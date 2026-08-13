@@ -381,6 +381,14 @@ pub fn is_7z_volume_path(path: &Path) -> bool {
     })
 }
 
+/// Returns whether a requested 7z path has an existing file or numbered input
+/// volume beside it. This keeps logical base-path compatibility at the 7z
+/// source seam instead of making the archive engine probe unknown formats.
+#[must_use]
+pub fn has_existing_7z_input(path: &Path) -> bool {
+    discover_7z_read_volume_paths(path).is_ok_and(|paths| paths.iter().any(|candidate| candidate.is_file()))
+}
+
 fn open_7z_reader(path: &Path) -> Result<SevenZReadSource, SevenZError> {
     let volume_paths = discover_7z_read_volume_paths(path)?;
     if volume_paths.len() > 1 {
