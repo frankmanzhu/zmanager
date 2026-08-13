@@ -1,5 +1,5 @@
 use super::{ArchiveFormat, CreateRequest, ExtractRequest, InteractiveOverwriteResolver, ListRequest, TestRequest, publish_archive};
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 use crate::cli::auth::*;
 use crate::cli::create::*;
 use crate::cli::extract::*;
@@ -10,17 +10,17 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 use zmanager_core::local_identity_store::TzapLocalIdentityStore as _;
 use zmanager_core::safety::{OverwriteConflict, OverwriteDecision, OverwriteResolver};
 
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 #[test]
 fn native_auth_defaults_match_registered_zmanager_cli_redirect() {
     assert_eq!(DEFAULT_TZAP_REDIRECT_URI, "tzap://auth/callback");
 }
 
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 #[test]
 fn hosted_http_transport_accepts_https_urls() {
     let client = reqwest::blocking::Client::new();
@@ -31,7 +31,7 @@ fn hosted_http_transport_accepts_https_urls() {
     assert_eq!(request.url().path(), "/v1/me");
 }
 
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 #[test]
 fn contact_keygen_persists_a_distinct_recipient_key() {
     let temp = TestDir::new("contact-keygen");
@@ -46,7 +46,7 @@ fn contact_keygen_persists_a_distinct_recipient_key() {
     assert!(inventory.device_signing_keys.is_empty());
 }
 
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 #[test]
 fn pending_organization_enrollment_reuses_the_same_device_key() {
     let temp = TestDir::new("organization-enrollment-key-retry");

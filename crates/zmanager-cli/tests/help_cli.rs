@@ -342,7 +342,7 @@ fn every_public_command_has_targeted_help() {
 
 // The auth subcommand surface only exists in the full build; the offline
 // binary's `zm auth` stub rejects everything.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 #[test]
 fn me_has_targeted_help_through_both_navigation_paths() {
     let direct = Command::new(zm_path()).args(["auth", "me", "--help"]).output().unwrap();

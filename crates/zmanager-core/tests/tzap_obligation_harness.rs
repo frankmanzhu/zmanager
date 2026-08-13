@@ -1,4 +1,4 @@
-#![cfg(feature = "auth")]
+#![cfg(feature = "tzap-online")]
 mod common;
 
 use common::TestDir;

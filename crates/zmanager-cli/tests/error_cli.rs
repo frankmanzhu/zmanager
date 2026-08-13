@@ -1,10 +1,10 @@
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 use std::process::Command;
 
 #[test]
 // Auth-command argument handling only exists in the full build; the
 // offline binary's `zm auth` is a stub that rejects everything.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn test_missing_argument_value_does_not_panic() {
     let output = Command::new(env!("CARGO_BIN_EXE_zm"))
         .arg("auth")

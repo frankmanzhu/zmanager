@@ -18,8 +18,8 @@ name = "zm"
 path = "src/bin/zm.rs"
 
 [features]
-default = ["auth"]
-auth = ["zmanager-core/auth"]
+default = ["tzap-online"]
+tzap-online = ["zmanager-core/tzap-online"]
 
 [dependencies]
 anstream = "1.0.0"

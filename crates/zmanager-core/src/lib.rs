@@ -49,6 +49,50 @@ mod tzap;
 mod wire_profile;
 mod zip_split;
 
+// Offline identity, catalog, signing, and verification remain part of the
+// core contract in every profile. The files stay under the historical auth
+// directory while their ownership is now explicit at the crate root.
+#[path = "auth/auth_client.rs"]
+pub mod auth_client;
+#[path = "auth/certificate_lifecycle.rs"]
+pub mod certificate_lifecycle;
+#[path = "auth/contact_card.rs"]
+pub mod contact_card;
+#[path = "auth/crl.rs"]
+pub mod crl;
+#[path = "auth/device_identity.rs"]
+pub mod device_identity;
+#[path = "auth/document_envelope.rs"]
+pub mod document_envelope;
+#[path = "auth/document_signing.rs"]
+pub mod document_signing;
+#[path = "auth/document_verification.rs"]
+pub mod document_verification;
+#[path = "auth/enrollment_client.rs"]
+pub mod enrollment_client;
+#[path = "auth/http_client.rs"]
+pub(crate) mod http_client;
+#[path = "auth/identity_catalog.rs"]
+pub mod identity_catalog;
+#[path = "auth/identity_migration.rs"]
+pub(crate) mod identity_migration;
+#[path = "auth/jcs.rs"]
+pub mod jcs;
+#[path = "auth/json_util.rs"]
+pub(crate) mod json_util;
+#[path = "auth/local_identity_store.rs"]
+pub mod local_identity_store;
+#[path = "auth/local_tzap_service.rs"]
+pub mod local_tzap_service;
+#[path = "auth/p256_signature.rs"]
+pub mod p256_signature;
+#[path = "auth/status_client.rs"]
+pub mod status_client;
+#[path = "auth/tzap_service.rs"]
+pub mod tzap_service;
+#[path = "auth/tzap_service_auth.rs"]
+pub mod tzap_service_auth;
+
 pub mod apple_archive_backend;
 pub mod apple_dmg_backend;
 pub mod apple_pkg_backend;
@@ -78,20 +122,6 @@ pub mod warc_backend;
 pub mod x509_format;
 pub mod xar_backend;
 pub mod zip_backend;
-
-// The online/identity surface is one gated unit: everything under `auth`
-// (see auth/mod.rs). The public re-exports keep the historical flat paths
-// (`zmanager_core::auth_client`, …) working for the CLI, FFI, and tests; the
-// crate-private re-exports cover the helpers the auth modules share.
-#[cfg(feature = "auth")]
-mod auth;
-#[cfg(feature = "auth")]
-pub use auth::{
-    auth_client, certificate_lifecycle, contact_card, crl, device_identity, document_envelope, document_signing, document_verification, enrollment_client,
-    identity_catalog, jcs, local_identity_store, local_tzap_service, p256_signature, status_client, tzap_service, tzap_service_auth,
-};
-#[cfg(feature = "auth")]
-pub(crate) use auth::{http_client, identity_migration, json_util};
 
 mod hex;
 

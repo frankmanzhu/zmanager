@@ -9,7 +9,6 @@
 
 /// Which hosted-service wire profile a client speaks.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[cfg(feature = "auth")]
 pub(crate) enum TzapWireProfile {
     /// The specification wire format.
     Spec,

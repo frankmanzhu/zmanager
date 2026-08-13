@@ -75,7 +75,6 @@ pub fn decode_base64url_no_padding(value: &str) -> Result<Vec<u8>, String> {
 /// Builds verification chains: the embedded chain alone plus one candidate
 /// per supplied root appended to it (CR-124).
 #[must_use]
-#[cfg(feature = "auth")]
 pub(crate) fn candidate_chains(embedded_chain_der: &[Vec<u8>], roots_der: &[Vec<u8>]) -> Vec<Vec<Vec<u8>>> {
     let mut candidates = Vec::with_capacity(1 + roots_der.len());
     candidates.push(embedded_chain_der.to_vec());

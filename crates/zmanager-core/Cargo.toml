@@ -12,8 +12,8 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [features]
-default = ["auth"]
-auth = []
+default = ["tzap-online"]
+tzap-online = []
 
 [dependencies]
 base64 = "0.22.1"

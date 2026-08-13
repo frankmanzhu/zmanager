@@ -13,11 +13,11 @@ use zmanager_core::manifest::{PlanOptions, plan_archive, plan_archives};
 use zmanager_core::sevenz_backend::{SevenZCreateOptions, create_7z_from_manifest};
 use zmanager_core::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
 
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 use tzap_core::format::FormatError;
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 use tzap_core::{MasterKey, RegularFile, RootAuthWriterConfig, WriterOptions, write_archive_with_root_auth};
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 use tzap_plugin_signing::x509_chain::X509RootAuthSigner;
 
 static JOB_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -30,6 +30,16 @@ fn healthcheck_reports_real_core() {
     assert!(result.ready);
     assert_eq!(result.status, "ready");
     assert!(result.summary.contains("zmanager-core"));
+}
+
+#[cfg(not(feature = "tzap-online"))]
+#[test]
+fn offline_profile_keeps_local_tzap_contract_and_blocks_hosted_auth() {
+    let response = tzap_auth_login_json("{}".to_owned());
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&response).unwrap()["error"], "tzap-online feature not enabled in this build");
+
+    let response = tzap_document_verify_json("{}".to_owned());
+    assert_ne!(serde_json::from_str::<serde_json::Value>(&response).unwrap()["error"], "tzap-online feature not enabled in this build");
 }
 
 #[test]
@@ -882,7 +892,7 @@ fn cancel_job_rejects_unknown_job_id() {
 
 #[test]
 // TZAP online surface; only present in the full (auth) build.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn tzap_service_endpoints_return_validation_error_instead_of_continuing() {
     let temp = TestDir::new("tzap-service-validation");
 
@@ -900,7 +910,7 @@ fn tzap_service_endpoints_return_validation_error_instead_of_continuing() {
 
 #[test]
 // TZAP online surface; only present in the full (auth) build.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn tzap_public_metadata_display_summary_reports_unsigned_archive() {
     use zmanager_core::jobs::JobContext;
     use zmanager_core::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
@@ -955,7 +965,7 @@ fn tzap_public_metadata_display_summary_reports_unsigned_archive() {
 //   openssl req -x509 -newkey rsa:2048 -keyout ffi_signer.key -out ffi_signer.pem \
 //     -days 36500 -nodes -subj "/CN=ZManager FFI Test Signer" \
 //     -addext "keyUsage=critical,digitalSignature"
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 const TEST_LEAF_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----
 MIIDOTCCAiGgAwIBAgIUKpN56sqVOMaPXsi55AM0RNv2od8wDQYJKoZIhvcNAQEL
 BQAwIzEhMB8GA1UEAwwYWk1hbmFnZXIgRkZJIFRlc3QgU2lnbmVyMCAXDTI2MDgw
@@ -976,7 +986,7 @@ yS1IWF/IMcvCy9/vOlOWEfN95szohp1qS3+wZEu6+rmjTBIys7ExzSMx1iZknuoy
 M1+kurEbOjjg6QKMUdlrlhj8k4FM5uHoHRpnS2Qlwx89VntwsWkjQq33OwJ9LJ9G
 ZZxolvHTPjCTdshjwQ==
 -----END CERTIFICATE-----";
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 const TEST_LEAF_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7Dlev5I2sPsnE
 Ix5QlgRH/F6UnLSPTqMxvNZUz9r95DiHB5K3Rec/vWDgR7OuZ3KnoeoYBpKWI9aS
@@ -1008,7 +1018,7 @@ VfwBjNLu/eSndu5yGiwpZ+3g
 
 /// Writes a stripe-N archive whose volumes carry an X.509 `RootAuth` footer
 /// produced by the fixture signer.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn write_x509_signed_archive(stripe_width: u32) -> tzap_core::writer::WrittenArchive {
     let signer = X509RootAuthSigner::from_pem_or_der(TEST_LEAF_CERT_PEM.as_bytes(), TEST_LEAF_KEY_PEM.as_bytes(), Vec::new(), 1_700_000_000).unwrap();
     write_archive_with_root_auth(
@@ -1023,7 +1033,7 @@ fn write_x509_signed_archive(stripe_width: u32) -> tzap_core::writer::WrittenArc
 
 #[test]
 // TZAP online surface; only present in the full (auth) build.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn tzap_public_metadata_display_summary_reports_signed_x509_footer() {
     let temp = TestDir::new("tzap-display-signed");
     let archive = temp.path("signed.tzap");
@@ -1042,7 +1052,7 @@ fn tzap_public_metadata_display_summary_reports_signed_x509_footer() {
 
 #[test]
 // TZAP online surface; only present in the full (auth) build.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn tzap_public_metadata_display_summary_reports_not_authentic_for_tampered_signature() {
     let temp = TestDir::new("tzap-display-not-authentic");
     let archive = temp.path("tampered.tzap");
@@ -1072,7 +1082,7 @@ fn tzap_public_metadata_display_summary_reports_not_authentic_for_tampered_signa
 
 #[test]
 // TZAP online surface; only present in the full (auth) build.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn tzap_public_metadata_display_summary_reports_unavailable_for_non_x509_footer() {
     let temp = TestDir::new("tzap-display-non-x509");
     let archive = temp.path("signed.tzap");
@@ -1094,7 +1104,7 @@ fn tzap_public_metadata_display_summary_reports_unavailable_for_non_x509_footer(
 
 #[test]
 // TZAP online surface; only present in the full (auth) build.
-#[cfg(feature = "auth")]
+#[cfg(feature = "tzap-online")]
 fn tzap_public_metadata_display_summary_accepts_multi_volume_base_path() {
     let temp = TestDir::new("tzap-display-multi-volume");
     let written = write_x509_signed_archive(4);
