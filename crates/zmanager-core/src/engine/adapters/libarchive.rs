@@ -30,7 +30,6 @@ pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
     FormatId::RPM,
     FormatId::XAR,
     FormatId::LHA,
-    FormatId::AR,
     FormatId::WARC,
     FormatId::MTREE,
     FormatId::DEB,

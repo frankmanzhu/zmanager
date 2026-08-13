@@ -52,6 +52,7 @@ mod zip_split;
 pub mod apple_archive_backend;
 pub mod apple_dmg_backend;
 pub mod apple_pkg_backend;
+pub mod ar_backend;
 pub mod archive_browser;
 pub mod deb_backend;
 pub mod engine;

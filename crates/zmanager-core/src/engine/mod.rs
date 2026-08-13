@@ -55,6 +55,7 @@ impl ArchivePlugin for DefaultArchivePlugin {
             crate::raw_stream_backend::RawStreamFormat::Lzma,
             "lzma",
         )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::ArListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TzapListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RarListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RawStreamListAdapter))?;

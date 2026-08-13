@@ -254,6 +254,122 @@ fn tar_error(path: &std::path::Path, error: &crate::tar_backend::TarError) -> Ar
     }
 }
 
+static AR_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_ar_adapter",
+    format: FormatId::AR,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+/// Native AR reader adapter.
+#[derive(Debug, Default)]
+pub struct ArListAdapter;
+
+impl ReadAdapterFactory for ArListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &AR_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entries = crate::ar_backend::list(path).map_err(|error| ar_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_ar_entries(entries) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::ar_backend::test(path, test_options).map_err(|error| ar_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::ar_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            None,
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| ar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract<'a>(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::ar_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| ar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let written_bytes = crate::ar_backend::copy(
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| ar_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn map_ar_entries(entries: Vec<crate::ar_backend::ArEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| EngineEntry {
+            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            path: entry.path,
+            kind: BrowserEntryKind::File,
+            size: Some(entry.size),
+            compressed_size: Some(entry.size),
+            method: Some("ar".to_owned()),
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn ar_error(path: &std::path::Path, error: &crate::ar_backend::ArError) -> ArchiveError {
+    let kind = match error {
+        crate::ar_backend::ArError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::ar_backend::ArError::Cancelled => ErrorKind::Cancelled,
+        crate::ar_backend::ArError::Io { .. } => ErrorKind::Io,
+        crate::ar_backend::ArError::Invalid { .. } => ErrorKind::CorruptData,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
+
 static TAR_BZ2_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_tar_bz2_adapter",
     format: FormatId::TAR_BZ2,
