@@ -6,7 +6,7 @@ use crate::cli::options::{
 use crate::cli::planning::{append_files_from, append_stdin_paths, apply_manifest_filters, plan_sources};
 use crate::cli::usage::{
     LIST_HELP, PLAN_HELP, TEST_HELP, command_usage_error, hex_lower, json_escape, print_entries_json, print_entries_tree, print_error_line, print_help_stdout,
-    print_manifest, print_success_line, print_warning_stderr, usage_failure, wants_help,
+    print_manifest, print_success_line, print_warning_stderr, retry_password_required, usage_failure, wants_help,
 };
 use crate::output::{self, StyleRole};
 use std::path::{Path, PathBuf};
@@ -276,59 +276,62 @@ pub(crate) fn run_test_request(request: &TestRequest, global: &GlobalOptions) ->
         Err(code) => return code,
     };
 
-    let engine = match zmanager_core::engine::create_default_engine() {
-        Ok(engine) => engine,
+    match run_engine_test(request, password.as_ref().map(zmanager_core::secrets::SecretString::expose_secret)) {
+        Ok((format, report)) => {
+            print_data_test_success(&format, report.tested_entries, report.skipped_entries, report.tested_bytes, global);
+            for warning in report.warnings {
+                print_warning_stderr(global, format_args!("test warning: {warning}"));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) if error.kind == zmanager_core::engine::ErrorKind::PasswordRequired && password.is_none() => retry_password_required(
+            global,
+            "test failed: ",
+            Some("Archive password: "),
+            |message| print_error_line(global, format_args!("{message}")),
+            |password| match run_engine_test(request, Some(password.expose_secret())) {
+                Ok((format, report)) => {
+                    print_data_test_success(&format, report.tested_entries, report.skipped_entries, report.tested_bytes, global);
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    print_error_line(global, format_args!("test failed: {error}"));
+                    ExitCode::FAILURE
+                }
+            },
+        ),
+        Err(error) if error.kind == zmanager_core::engine::ErrorKind::UnsupportedOperation => {
+            print_warning_stderr(global, format_args!("test unavailable: {}", error.message));
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             print_error_line(global, format_args!("test failed: {error}"));
-            return ExitCode::FAILURE;
+            ExitCode::FAILURE
         }
-    };
-    let source = zmanager_core::engine::ArchiveSource::from_path_autodetect(&request.archive);
-    let mut handle = match engine.open(
-        source,
-        zmanager_core::engine::OpenOptions {
-            password: password.as_ref().map(|value| value.expose_secret().to_owned()),
-            recipient_key: request.recipient_key.clone(),
-        },
-    ) {
-        Ok(handle) => handle,
-        Err(error) => {
-            print_error_line(global, format_args!("test failed: {error}"));
-            return ExitCode::FAILURE;
-        }
-    };
+    }
+}
+
+fn run_engine_test(request: &TestRequest, password: Option<&str>) -> Result<(String, zmanager_core::engine::TestReport), zmanager_core::engine::ArchiveError> {
+    let engine = zmanager_core::engine::create_default_engine()?;
+    let mut handle = engine.open(
+        zmanager_core::engine::ArchiveSource::from_path_autodetect(&request.archive),
+        zmanager_core::engine::OpenOptions { password: password.map(str::to_owned), recipient_key: request.recipient_key.clone() },
+    )?;
     let selected_paths = if request.include.is_empty() && request.exclude.is_empty() {
         Vec::new()
     } else {
-        match handle.list() {
-            Ok(listing) => {
-                listing.entries.into_iter().filter(|entry| entry_selected(&entry.path, &request.include, &request.exclude)).map(|entry| entry.path).collect()
-            }
-            Err(error) => {
-                print_error_line(global, format_args!("test failed: {error}"));
-                return ExitCode::FAILURE;
-            }
-        }
+        handle.list()?.entries.into_iter().filter(|entry| entry_selected(&entry.path, &request.include, &request.exclude)).map(|entry| entry.path).collect()
     };
-    let report = match handle.test(&zmanager_core::engine::TestOptions {
+    let report = handle.test(&zmanager_core::engine::TestOptions {
         selected_paths,
         recipient_key: request.recipient_key.clone(),
         tzap_x509_trust: is_tzap_archive(&request.archive).then(|| test_request_x509_trust(request)),
         cancellation: None,
-    }) {
-        Ok(report) => report,
-        Err(error) => {
-            print_error_line(global, format_args!("test failed: {error}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let format = handle.detected().format.as_str();
-    print_data_test_success(format, report.tested_entries, report.skipped_entries, report.tested_bytes, global);
-    for warning in report.warnings {
-        print_warning_stderr(global, format_args!("test warning: {warning}"));
-    }
-    let _ = handle.close();
-    ExitCode::SUCCESS
+    })?;
+    let format =
+        if handle.detected().format == zmanager_core::engine::FormatId::SPLIT_ZIP { "zip".to_owned() } else { handle.detected().format.as_str().to_owned() };
+    handle.close()?;
+    Ok((format, report))
 }
 
 fn test_request_has_x509_trust(request: &TestRequest) -> bool {

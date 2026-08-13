@@ -197,8 +197,8 @@ fn engine_test_corruption_invalidates_the_session() {
     fs::write(&corrupt_zip, b"this is not a valid zip archive").unwrap();
 
     let mut handle = create_default_engine().unwrap().open(ArchiveSource::Path(corrupt_zip), OpenOptions::default()).unwrap();
-    let error = handle.test(&Default::default()).unwrap_err();
+    let error = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap_err();
     assert_eq!(error.kind, zmanager_core::engine::ErrorKind::CorruptData);
     assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
-    assert!(handle.test(&Default::default()).is_err());
+    assert!(handle.test(&zmanager_core::engine::TestOptions::default()).is_err());
 }
