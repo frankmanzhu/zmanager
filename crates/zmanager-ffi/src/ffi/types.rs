@@ -153,6 +153,62 @@ pub struct ListArchiveResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionOpenRequest {
+    pub archive_path: String,
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionOpenResult {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionListRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionEntry {
+    pub entry_id: u64,
+    pub path: String,
+    pub kind: ArchiveEntryKind,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionListResult {
+    pub session_id: String,
+    pub entries: Vec<ArchiveSessionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionExtractRequest {
+    pub session_id: String,
+    pub entry_id: u64,
+    pub destination_root: String,
+    pub collision_policy: ExtractionCollisionPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionExtractResult {
+    pub session_id: String,
+    pub entry_id: u64,
+    pub written_bytes: u64,
+    pub warnings: Vec<BridgeError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionCloseRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSessionCloseResult {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestArchiveRequest {
     pub archive_path: String,
     pub password: Option<String>,

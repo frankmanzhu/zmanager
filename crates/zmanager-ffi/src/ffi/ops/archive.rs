@@ -25,17 +25,26 @@ use crate::ffi::ops::jobs::{
 };
 use crate::ffi::session::session_registry;
 use crate::ffi::types::{
-    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreatePlanEntry,
-    DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntryStatus, FormatDescriptor, HealthcheckResult, ListArchiveRequest,
-    ListArchiveResult, ListFormatsResult, MaterializePreviewRequest, MaterializePreviewResult, PlanCreateRequest, PlanCreateResult, PlanExtractRequest,
-    PlanExtractResult, PollJobEventsRequest, PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest,
-    TestArchiveResult, ZmanagerGuiError, usize_to_u64,
+    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, ArchiveSessionCloseRequest, ArchiveSessionCloseResult, ArchiveSessionEntry, ArchiveSessionExtractRequest,
+    ArchiveSessionExtractResult, ArchiveSessionListRequest, ArchiveSessionListResult, ArchiveSessionOpenRequest, ArchiveSessionOpenResult, BridgeError,
+    BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreatePlanEntry, DetectArchiveRequest, DetectArchiveResult,
+    ExtractionCollisionPolicy, ExtractionPlanEntryStatus, FormatDescriptor, HealthcheckResult, ListArchiveRequest, ListArchiveResult, ListFormatsResult,
+    MaterializePreviewRequest, MaterializePreviewResult, PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult, PollJobEventsRequest,
+    PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest, TestArchiveResult, ZmanagerGuiError, usize_to_u64,
 };
 use crate::ffi::util::{
     classify_archive_path, create_format_label, ensure_destination_archive_path, ensure_destination_root_path, ensure_existing_file_path,
     ensure_existing_source_paths, ensure_non_empty_entry_path, format_capabilities, format_capabilities_for_kind, format_label, kind_label,
     map_browser_entry_kind, password_ref, sanitize_password, usize_from_u64,
 };
+
+fn map_archive_session_error(error: zmanager_core::engine::ArchiveError) -> ZmanagerGuiError {
+    if error.kind == zmanager_core::engine::ErrorKind::InvalidFormat && error.message.starts_with("Unknown or closed archive session") {
+        return bridge_error(ERROR_INVALID_REQUEST, error.message, hint("Open a new archive session before using this entry."), BridgeSeverity::Warning, false)
+            .into();
+    }
+    crate::ffi::error::map_archive_engine_error(error)
+}
 
 const MAX_RETAINED_EXTRACTION_PLANS: usize = 64;
 
@@ -283,6 +292,52 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
         entries,
         warnings: Vec::new(),
     })
+}
+
+#[allow(non_snake_case)]
+pub fn openArchiveSession(request: ArchiveSessionOpenRequest) -> Result<ArchiveSessionOpenResult, ZmanagerGuiError> {
+    let archive_path = ensure_existing_file_path(request.archive_path, "archivePath")?;
+    let password = password_ref(&request.password).map(ToOwned::to_owned);
+    let mut sessions = session_registry().lock().unwrap_or_else(|error| error.into_inner());
+    let session_id = sessions
+        .open_session(ArchiveSource::from_path_autodetect(Path::new(&archive_path)), OpenOptions { password, recipient_key: None })
+        .map_err(crate::ffi::error::map_archive_engine_error)?;
+    Ok(ArchiveSessionOpenResult { session_id })
+}
+
+#[allow(non_snake_case)]
+pub fn listArchiveSession(request: ArchiveSessionListRequest) -> Result<ArchiveSessionListResult, ZmanagerGuiError> {
+    let mut sessions = session_registry().lock().unwrap_or_else(|error| error.into_inner());
+    let listing = sessions.list_session(&request.session_id).map_err(map_archive_session_error)?;
+    let entries = listing
+        .entries
+        .into_iter()
+        .map(|entry| ArchiveSessionEntry { entry_id: entry.id.0, path: entry.path, kind: map_browser_entry_kind(entry.kind), size: entry.size })
+        .collect();
+    Ok(ArchiveSessionListResult { session_id: request.session_id, entries })
+}
+
+#[allow(non_snake_case)]
+pub fn extractArchiveSessionEntry(request: ArchiveSessionExtractRequest) -> Result<ArchiveSessionExtractResult, ZmanagerGuiError> {
+    let destination_root = ensure_destination_root_path(request.destination_root)?;
+    let overwrite = match request.collision_policy {
+        ExtractionCollisionPolicy::Refuse => zmanager_core::safety::OverwritePolicy::Refuse,
+        ExtractionCollisionPolicy::Replace => zmanager_core::safety::OverwritePolicy::Replace,
+        ExtractionCollisionPolicy::Rename => zmanager_core::safety::OverwritePolicy::Rename,
+    };
+    let mut sessions = session_registry().lock().unwrap_or_else(|error| error.into_inner());
+    let report = sessions
+        .extract_session_entry(&request.session_id, zmanager_core::engine::EntryId(request.entry_id), Path::new(&destination_root), overwrite)
+        .map_err(map_archive_session_error)?;
+    let warnings = report.warnings.into_iter().map(bridge_warning).collect();
+    Ok(ArchiveSessionExtractResult { session_id: request.session_id, entry_id: request.entry_id, written_bytes: report.written_bytes, warnings })
+}
+
+#[allow(non_snake_case)]
+pub fn closeArchiveSession(request: ArchiveSessionCloseRequest) -> Result<ArchiveSessionCloseResult, ZmanagerGuiError> {
+    let mut sessions = session_registry().lock().unwrap_or_else(|error| error.into_inner());
+    sessions.close_session(&request.session_id).map_err(map_archive_session_error)?;
+    Ok(ArchiveSessionCloseResult { session_id: request.session_id })
 }
 
 #[allow(non_snake_case)]

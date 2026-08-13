@@ -16,8 +16,8 @@ mod util;
 mod tests;
 
 pub use ops::archive::{
-    cancelJob, clearSensitiveState, detectArchive, healthcheck, listArchive, listFormats, materializePreview, planCreate, planExtract, pollJobEvents,
-    startCreate, startExtract, testArchive,
+    cancelJob, clearSensitiveState, closeArchiveSession, detectArchive, extractArchiveSessionEntry, healthcheck, listArchive, listArchiveSession, listFormats,
+    materializePreview, openArchiveSession, planCreate, planExtract, pollJobEvents, startCreate, startExtract, testArchive,
 };
 pub use ops::tzap::{
     createTzapSelfSignedIdentity, inspectTzapX509PublicNoKeySigner, inspectTzapX509Signer, tzap_auth_account_url_json, tzap_auth_callback_json,
@@ -27,10 +27,11 @@ pub use ops::tzap::{
     tzap_share_create_json, tzapPublicMetadataDisplaySummary, tzapPublicMetadataSummary, verifyTzapX509, verifyTzapX509PublicNoKey,
 };
 pub use types::{
-    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult,
-    CreateArchiveFormat, CreatePlanEntry, DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntry, ExtractionPlanEntryStatus,
-    FormatDescriptor, HealthcheckResult, JobTerminalSummary, ListArchiveRequest, ListArchiveResult, ListFormatsResult, MaterializePreviewRequest,
-    MaterializePreviewResult, MobileJobEvent, MobileJobEventKind, MobileJobKind, MobileJobStatus, PlanCreateRequest, PlanCreateResult, PlanExtractRequest,
-    PlanExtractResult, PollJobEventsRequest, PollJobEventsResult, StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest,
-    TestArchiveResult, ZmanagerGuiError,
+    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, ArchiveSessionCloseRequest, ArchiveSessionCloseResult, ArchiveSessionEntry, ArchiveSessionExtractRequest,
+    ArchiveSessionExtractResult, ArchiveSessionListRequest, ArchiveSessionListResult, ArchiveSessionOpenRequest, ArchiveSessionOpenResult, BridgeError,
+    BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreateArchiveFormat, CreatePlanEntry, DetectArchiveRequest,
+    DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntry, ExtractionPlanEntryStatus, FormatDescriptor, HealthcheckResult, JobTerminalSummary,
+    ListArchiveRequest, ListArchiveResult, ListFormatsResult, MaterializePreviewRequest, MaterializePreviewResult, MobileJobEvent, MobileJobEventKind,
+    MobileJobKind, MobileJobStatus, PlanCreateRequest, PlanCreateResult, PlanExtractRequest, PlanExtractResult, PollJobEventsRequest, PollJobEventsResult,
+    StartCreateRequest, StartExtractRequest, StartJobResult, TestArchiveRequest, TestArchiveResult, ZmanagerGuiError,
 };

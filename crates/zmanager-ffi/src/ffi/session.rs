@@ -3,7 +3,12 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use zmanager_core::engine::{ArchiveError, ArchiveHandle, ArchiveListing, ArchiveSource, ErrorKind, OpenOptions, create_default_engine};
+use std::path::Path;
+
+use zmanager_core::engine::{
+    ArchiveError, ArchiveHandle, ArchiveListing, ArchiveSource, EntryId, ErrorKind, ExtractReport, OpenOptions, SelectedExtractOptions, create_default_engine,
+};
+use zmanager_core::safety::{ExtractionPolicy, OverwritePolicy};
 
 const MAX_RETAINED_SESSIONS: usize = 64;
 
@@ -66,6 +71,27 @@ impl ArchiveSessionRegistry {
             .get_mut(session_id)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Unknown or closed archive session: '{session_id}'")))?;
         handle.list()
+    }
+
+    /// Extracts one retained entry without exposing the core handle across the
+    /// FFI boundary. The entry ID is valid only for the named session.
+    pub fn extract_session_entry(
+        &mut self,
+        session_id: &str,
+        entry_id: EntryId,
+        destination_root: &Path,
+        overwrite: OverwritePolicy,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let handle = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Unknown or closed archive session: '{session_id}'")))?;
+        let mut options = SelectedExtractOptions {
+            destination: destination_root.to_path_buf(),
+            policy: ExtractionPolicy { overwrite, ..ExtractionPolicy::default() },
+            ..Default::default()
+        };
+        handle.extract_selected(entry_id, &mut options)
     }
 
     /// Explicitly closes and removes a session handle, releasing underlying resources.

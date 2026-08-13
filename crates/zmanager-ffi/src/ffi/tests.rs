@@ -442,6 +442,27 @@ fn materialize_preview_rejects_empty_entry_path() {
 }
 
 #[test]
+fn archive_session_entry_ids_are_rejected_after_close() {
+    let fixture = create_test_zip("archive-session-entry-id");
+    let opened = openArchiveSession(ArchiveSessionOpenRequest { archive_path: fixture.archive.to_string_lossy().to_string(), password: None })
+        .expect("archive session should open");
+    let listing = listArchiveSession(ArchiveSessionListRequest { session_id: opened.session_id.clone() }).expect("archive session should list");
+    let entry = listing.entries.iter().find(|entry| entry.path.ends_with("readme.txt")).expect("session listing should expose readme");
+    let destination = fixture.temp.path("session-out");
+    let extracted = extractArchiveSessionEntry(ArchiveSessionExtractRequest {
+        session_id: opened.session_id.clone(),
+        entry_id: entry.entry_id,
+        destination_root: destination.to_string_lossy().to_string(),
+        collision_policy: ExtractionCollisionPolicy::Refuse,
+    })
+    .expect("retained entry should extract");
+    assert!(extracted.written_bytes > 0);
+    closeArchiveSession(ArchiveSessionCloseRequest { session_id: opened.session_id.clone() }).expect("session should close");
+    let error = listArchiveSession(ArchiveSessionListRequest { session_id: opened.session_id }).unwrap_err();
+    assert_bridge_error_code(error, ERROR_INVALID_REQUEST);
+}
+
+#[test]
 fn plan_extract_returns_write_plan_without_creating_destination() {
     let fixture = create_test_zip("plan-extract-real-zip");
     let destination = fixture.temp.path("out");

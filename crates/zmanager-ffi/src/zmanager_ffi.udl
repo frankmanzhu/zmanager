@@ -6,6 +6,14 @@ namespace zmanager {
     [Throws=ZmanagerGuiError]
     ListArchiveResult listArchive(ListArchiveRequest request);
     [Throws=ZmanagerGuiError]
+    ArchiveSessionOpenResult openArchiveSession(ArchiveSessionOpenRequest request);
+    [Throws=ZmanagerGuiError]
+    ArchiveSessionListResult listArchiveSession(ArchiveSessionListRequest request);
+    [Throws=ZmanagerGuiError]
+    ArchiveSessionExtractResult extractArchiveSessionEntry(ArchiveSessionExtractRequest request);
+    [Throws=ZmanagerGuiError]
+    ArchiveSessionCloseResult closeArchiveSession(ArchiveSessionCloseRequest request);
+    [Throws=ZmanagerGuiError]
     TestArchiveResult testArchive(TestArchiveRequest request);
     [Throws=ZmanagerGuiError]
     MaterializePreviewResult materializePreview(MaterializePreviewRequest request);
@@ -161,6 +169,53 @@ dictionary ListArchiveResult {
     u64 entry_count;
     u64? total_size;
     sequence<BridgeError> warnings;
+};
+
+dictionary ArchiveSessionOpenRequest {
+    string archive_path;
+    string? password;
+};
+
+dictionary ArchiveSessionOpenResult {
+    string session_id;
+};
+
+dictionary ArchiveSessionListRequest {
+    string session_id;
+};
+
+dictionary ArchiveSessionEntry {
+    u64 entry_id;
+    string path;
+    ArchiveEntryKind kind;
+    u64? size;
+};
+
+dictionary ArchiveSessionListResult {
+    string session_id;
+    sequence<ArchiveSessionEntry> entries;
+};
+
+dictionary ArchiveSessionExtractRequest {
+    string session_id;
+    u64 entry_id;
+    string destination_root;
+    ExtractionCollisionPolicy collision_policy;
+};
+
+dictionary ArchiveSessionExtractResult {
+    string session_id;
+    u64 entry_id;
+    u64 written_bytes;
+    sequence<BridgeError> warnings;
+};
+
+dictionary ArchiveSessionCloseRequest {
+    string session_id;
+};
+
+dictionary ArchiveSessionCloseResult {
+    string session_id;
 };
 
 dictionary TestArchiveRequest {
