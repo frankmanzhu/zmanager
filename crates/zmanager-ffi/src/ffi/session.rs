@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use zmanager_core::engine::ArchiveError;
-use zmanager_core::engine::{ArchiveHandle, ArchiveListing, ArchiveSource, OpenOptions, create_default_engine};
+use zmanager_core::engine::{ArchiveError, ArchiveHandle, ArchiveListing, ArchiveSource, ErrorKind, OpenOptions, create_default_engine};
 
 const MAX_RETAINED_SESSIONS: usize = 64;
 
@@ -39,13 +38,16 @@ impl ArchiveSessionRegistry {
     /// - the session count ceiling is reached (`MAX_RETAINED_SESSIONS`),
     /// - engine construction fails, or
     /// - the underlying `open` call fails (e.g., unrecognised format or missing path).
-    pub fn open_session(&mut self, source: ArchiveSource, options: OpenOptions) -> Result<String, String> {
+    pub fn open_session(&mut self, source: ArchiveSource, options: OpenOptions) -> Result<String, ArchiveError> {
         if self.sessions.len() >= MAX_RETAINED_SESSIONS {
-            return Err(format!("Session limit reached: maximum {MAX_RETAINED_SESSIONS} active archive sessions allowed"));
+            return Err(ArchiveError::usable(
+                ErrorKind::ResourceLimitExceeded,
+                format!("Session limit reached: maximum {MAX_RETAINED_SESSIONS} active archive sessions allowed"),
+            ));
         }
 
-        let engine = create_default_engine().map_err(|e| e.to_string())?;
-        let handle = engine.open(source, options).map_err(|e| e.to_string())?;
+        let engine = create_default_engine()?;
+        let handle = engine.open(source, options)?;
 
         self.next_index = self.next_index.wrapping_add(1);
         let id = format!("session-{}", self.next_index);
@@ -58,9 +60,12 @@ impl ArchiveSessionRegistry {
     /// # Errors
     ///
     /// Returns an error string if the session ID is unknown or listing fails.
-    pub fn list_session(&mut self, session_id: &str) -> Result<ArchiveListing, String> {
-        let handle = self.sessions.get_mut(session_id).ok_or_else(|| format!("Unknown or closed archive session: '{session_id}'"))?;
-        handle.list().map_err(|e| e.to_string())
+    pub fn list_session(&mut self, session_id: &str) -> Result<ArchiveListing, ArchiveError> {
+        let handle = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Unknown or closed archive session: '{session_id}'")))?;
+        handle.list()
     }
 
     /// Explicitly closes and removes a session handle, releasing underlying resources.
@@ -68,9 +73,12 @@ impl ArchiveSessionRegistry {
     /// # Errors
     ///
     /// Returns an error string if the session ID is unknown or the close call fails.
-    pub fn close_session(&mut self, session_id: &str) -> Result<(), String> {
-        let handle = self.sessions.remove(session_id).ok_or_else(|| format!("Unknown or closed archive session: '{session_id}'"))?;
-        handle.close().map_err(|e: ArchiveError| e.to_string())
+    pub fn close_session(&mut self, session_id: &str) -> Result<(), ArchiveError> {
+        let handle = self
+            .sessions
+            .remove(session_id)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Unknown or closed archive session: '{session_id}'")))?;
+        handle.close()
     }
 
     /// Returns the number of currently active session handles.
@@ -120,7 +128,7 @@ mod tests {
         let result = reg.list_session("session-999");
         assert!(result.is_err());
         let msg = result.unwrap_err();
-        assert!(msg.contains("session-999"), "Error should mention the unknown session ID");
+        assert!(msg.message.contains("session-999"), "Error should mention the unknown session ID");
     }
 
     #[test]

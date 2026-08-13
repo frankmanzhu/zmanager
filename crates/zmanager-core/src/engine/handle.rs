@@ -27,6 +27,12 @@ impl ArchiveEngine {
         &self.registry
     }
 
+    /// Returns the immutable operation capability snapshot for this engine.
+    #[must_use]
+    pub fn capability_snapshot(&self) -> Vec<crate::engine::types::FormatCapabilities> {
+        self.registry.capability_snapshot()
+    }
+
     /// Opens an archive handle for the given source path or volume set (ARC-105).
     ///
     /// # Errors

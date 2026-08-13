@@ -600,6 +600,11 @@ fn print_formats_contract() {
 }
 
 fn print_formats_capabilities_json(include_runtime: bool) {
+    let engine_snapshot = if include_runtime {
+        zmanager_core::engine::create_default_engine().ok().map_or_else(Vec::new, |engine| engine.capability_snapshot())
+    } else {
+        Vec::new()
+    };
     print!("[");
     for (index, capability) in FORMAT_CAPABILITIES.iter().enumerate() {
         if index > 0 {
@@ -610,9 +615,31 @@ fn print_formats_capabilities_json(include_runtime: bool) {
         print!("{}", crate::cli::usage::json_string_array(capability.extensions));
         if include_runtime {
             let status = format_status(capability.kind);
-            let available = status == BackendStatus::Available;
+            let engine_capability = zmanager_core::engine::FormatId::from_archive_format_kind(capability.kind)
+                .and_then(|format| engine_snapshot.iter().find(|snapshot| snapshot.format == format));
+            let platform_available = engine_capability.is_some_and(|snapshot| snapshot.platform_available);
+            let recognized = !matches!(capability.kind, ArchiveFormatKind::Unknown);
+            let can_list = engine_capability.is_some_and(|snapshot| snapshot.operations.contains(&zmanager_core::engine::ArchiveOperation::List));
+            let available = status == BackendStatus::Available && platform_available;
             let can_create = cli_can_create(capability.kind) && available;
-            print!(",\"status\":\"{}\",\"can_list\":{available},\"can_extract\":{available},\"can_create\":{can_create}", backend_status_string(status));
+            let unavailable_reason = engine_capability.and_then(|snapshot| snapshot.unavailable_reason.as_deref()).unwrap_or("");
+            let source_access = engine_capability.and_then(|snapshot| snapshot.source_access).map_or("", |source_access| match source_access {
+                zmanager_core::engine::SourceAccess::Seekable => "seekable",
+                zmanager_core::engine::SourceAccess::SequentialOnly => "sequential_only",
+                zmanager_core::engine::SourceAccess::MultiVolumeSet => "multi_volume_set",
+            });
+            let encryption_supported = engine_capability.is_some_and(|snapshot| snapshot.encryption_supported);
+            print!(
+                ",\"status\":\"{}\",\"recognized\":{recognized},\"platform_available\":{platform_available},\"can_list\":{},\"can_extract\":{available},\"can_create\":{can_create},\"source_access\":\"{}\",\"encryption_supported\":{encryption_supported}",
+                backend_status_string(status),
+                can_list && available,
+                source_access,
+            );
+            if unavailable_reason.is_empty() {
+                print!(",\"unavailable_reason\":null");
+            } else {
+                print!(",\"unavailable_reason\":\"{}\"", json_escape(unavailable_reason));
+            }
         }
         print!("}}");
     }

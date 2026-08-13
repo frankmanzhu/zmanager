@@ -259,7 +259,7 @@ RustBuffer uniffi_zmanager_ffi_fn_func_canceljob(RustBuffer request, RustCallSta
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CLEARSENSITIVESTATE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CLEARSENSITIVESTATE
 RustBuffer uniffi_zmanager_ffi_fn_func_clearsensitivestate(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CREATETZAPSELFSIGNEDIDENTITY
@@ -275,7 +275,7 @@ RustBuffer uniffi_zmanager_ffi_fn_func_detectarchive(RustBuffer request, RustCal
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_HEALTHCHECK
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_HEALTHCHECK
 RustBuffer uniffi_zmanager_ffi_fn_func_healthcheck(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_INSPECTTZAPX509PUBLICNOKEYSIGNER
@@ -291,6 +291,12 @@ RustBuffer uniffi_zmanager_ffi_fn_func_inspecttzapx509signer(RustBuffer archive_
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTARCHIVE
 RustBuffer uniffi_zmanager_ffi_fn_func_listarchive(RustBuffer request, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTFORMATS
+#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTFORMATS
+RustBuffer uniffi_zmanager_ffi_fn_func_listformats(RustCallStatus *_Nonnull out_status
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_MATERIALIZEPREVIEW
@@ -726,235 +732,241 @@ void ffi_zmanager_ffi_rust_future_complete_void(uint64_t handle, RustCallStatus 
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CANCELJOB
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CANCELJOB
 uint16_t uniffi_zmanager_ffi_checksum_func_canceljob(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CLEARSENSITIVESTATE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CLEARSENSITIVESTATE
 uint16_t uniffi_zmanager_ffi_checksum_func_clearsensitivestate(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CREATETZAPSELFSIGNEDIDENTITY
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CREATETZAPSELFSIGNEDIDENTITY
 uint16_t uniffi_zmanager_ffi_checksum_func_createtzapselfsignedidentity(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_DETECTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_DETECTARCHIVE
 uint16_t uniffi_zmanager_ffi_checksum_func_detectarchive(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_HEALTHCHECK
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_HEALTHCHECK
 uint16_t uniffi_zmanager_ffi_checksum_func_healthcheck(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_INSPECTTZAPX509PUBLICNOKEYSIGNER
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_INSPECTTZAPX509PUBLICNOKEYSIGNER
 uint16_t uniffi_zmanager_ffi_checksum_func_inspecttzapx509publicnokeysigner(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_INSPECTTZAPX509SIGNER
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_INSPECTTZAPX509SIGNER
 uint16_t uniffi_zmanager_ffi_checksum_func_inspecttzapx509signer(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTARCHIVE
 uint16_t uniffi_zmanager_ffi_checksum_func_listarchive(void
-    
+
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTFORMATS
+#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTFORMATS
+uint16_t uniffi_zmanager_ffi_checksum_func_listformats(void
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_MATERIALIZEPREVIEW
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_MATERIALIZEPREVIEW
 uint16_t uniffi_zmanager_ffi_checksum_func_materializepreview(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANCREATE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANCREATE
 uint16_t uniffi_zmanager_ffi_checksum_func_plancreate(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANEXTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANEXTRACT
 uint16_t uniffi_zmanager_ffi_checksum_func_planextract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_POLLJOBEVENTS
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_POLLJOBEVENTS
 uint16_t uniffi_zmanager_ffi_checksum_func_polljobevents(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTCREATE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTCREATE
 uint16_t uniffi_zmanager_ffi_checksum_func_startcreate(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTEXTRACT
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTEXTRACT
 uint16_t uniffi_zmanager_ffi_checksum_func_startextract(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TESTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TESTARCHIVE
 uint16_t uniffi_zmanager_ffi_checksum_func_testarchive(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAPPUBLICMETADATADISPLAYSUMMARY
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAPPUBLICMETADATADISPLAYSUMMARY
 uint16_t uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAPPUBLICMETADATASUMMARY
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAPPUBLICMETADATASUMMARY
 uint16_t uniffi_zmanager_ffi_checksum_func_tzappublicmetadatasummary(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_ACCOUNT_URL_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_ACCOUNT_URL_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_auth_account_url_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_CALLBACK_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_CALLBACK_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_auth_callback_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_FORGET_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_FORGET_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_auth_forget_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_LOGIN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_LOGIN_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_auth_login_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_STATUS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_AUTH_STATUS_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_auth_status_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERT_ENROLL_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERT_ENROLL_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_cert_enroll_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERT_RENEW_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERT_RENEW_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_cert_renew_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERT_REVOKE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERT_REVOKE_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_cert_revoke_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERTIFICATE_INVENTORY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CERTIFICATE_INVENTORY_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_certificate_inventory_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_EXPORT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_EXPORT_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_contact_export_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_IMPORT_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_IMPORT_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_contact_import_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_LIST_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_LIST_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_contact_list_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_REMOVE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_CONTACT_REMOVE_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_contact_remove_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_DEVICE_RETIRE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_DEVICE_RETIRE_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_device_retire_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_DOCUMENT_SIGN_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_DOCUMENT_SIGN_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_document_sign_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_DOCUMENT_VERIFY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_DOCUMENT_VERIFY_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_document_verify_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_RECIPIENT_KEY_GENERATE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_RECIPIENT_KEY_GENERATE_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_recipient_key_generate_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_RECIPIENT_KEY_REMOVE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_RECIPIENT_KEY_REMOVE_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_recipient_key_remove_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_SHARE_CREATE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TZAP_SHARE_CREATE_JSON
 uint16_t uniffi_zmanager_ffi_checksum_func_tzap_share_create_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_VERIFYTZAPX509
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_VERIFYTZAPX509
 uint16_t uniffi_zmanager_ffi_checksum_func_verifytzapx509(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_VERIFYTZAPX509PUBLICNOKEY
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_VERIFYTZAPX509PUBLICNOKEY
 uint16_t uniffi_zmanager_ffi_checksum_func_verifytzapx509publicnokey(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_ZMANAGER_FFI_UNIFFI_CONTRACT_VERSION
 #define UNIFFI_FFIDEF_FFI_ZMANAGER_FFI_UNIFFI_CONTRACT_VERSION
 uint32_t ffi_zmanager_ffi_uniffi_contract_version(void
-    
+
 );
 #endif
 

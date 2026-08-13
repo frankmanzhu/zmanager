@@ -2,7 +2,7 @@
 
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities, OpenOptions};
+use crate::engine::types::{ArchiveError, ArchiveOperation, DetectedArchive, ErrorKind, FormatCapabilities, HandleCapabilities, OpenOptions};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -72,6 +72,33 @@ impl AdapterRegistry {
         }
 
         if found { Some(HandleCapabilities { format, source_access, operations: ops, encryption_supported: encryption }) } else { None }
+    }
+
+    /// Returns one capability row for every canonical recognized format.
+    #[must_use]
+    pub fn capability_snapshot(&self) -> Vec<FormatCapabilities> {
+        crate::archive_format::FORMAT_CAPABILITIES
+            .iter()
+            .filter_map(|capability| {
+                let format = FormatId::from_archive_format_kind(capability.kind)?;
+                let registered = self.capabilities_for_format(format);
+                let (platform_available, unavailable_reason) = match crate::archive_format::format_status(capability.kind) {
+                    crate::archive_format::BackendStatus::Available => (registered.is_some(), None),
+                    crate::archive_format::BackendStatus::UnsupportedPlatform => (false, Some("unsupported platform".to_owned())),
+                    crate::archive_format::BackendStatus::Unavailable { reason } => (false, Some(reason.to_owned())),
+                };
+                let unavailable_reason = unavailable_reason.or_else(|| (!platform_available).then(|| "no registered operation adapter".to_owned()));
+                Some(FormatCapabilities {
+                    format,
+                    recognized: true,
+                    platform_available,
+                    unavailable_reason,
+                    operations: registered.as_ref().map_or_else(Vec::new, |value| value.operations.clone()),
+                    source_access: registered.as_ref().map(|value| value.source_access),
+                    encryption_supported: registered.is_some_and(|value| value.encryption_supported),
+                })
+            })
+            .collect()
     }
 }
 

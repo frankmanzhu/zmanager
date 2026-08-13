@@ -87,11 +87,16 @@ fn list_formats_returns_full_registry() {
     let zip = by_kind.get("Zip").expect("Zip row");
     assert!(zip.extensions.contains(&".zip".to_string()));
     assert!(zip.can_list && zip.can_extract && zip.can_create);
+    assert!(zip.recognized && zip.platform_available);
+    assert_eq!(zip.source_access.as_deref(), Some("seekable"));
+    assert!(zip.encryption_supported);
+    assert!(zip.unavailable_reason.is_none());
 
     // Predicate-detected kinds carry no extension list.
     for kind in ["SplitZip", "Tzap", "Unknown"] {
         assert_eq!(by_kind.get(kind).expect(kind).extensions, Vec::<String>::new(), "{kind} extensions");
     }
+    assert!(!by_kind.get("Unknown").expect("Unknown row").recognized);
     // RawStream is recognized by suffixes (not predicates).
     assert!(by_kind.get("RawStream").expect("RawStream row").extensions.contains(&".zst".to_string()));
 

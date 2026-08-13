@@ -39,6 +39,24 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
 }
 
 #[test]
+fn capability_snapshot_reports_registration_and_platform_state() {
+    let engine = create_default_engine().unwrap();
+    let snapshot = engine.capability_snapshot();
+
+    let zip = snapshot.iter().find(|capability| capability.format == FormatId::ZIP).expect("ZIP capability should be present");
+    assert!(zip.recognized);
+    assert!(zip.platform_available);
+    assert!(zip.unavailable_reason.is_none());
+    assert!(zip.operations.contains(&ArchiveOperation::List));
+    assert_eq!(zip.source_access, Some(SourceAccess::Seekable));
+    assert!(zip.encryption_supported);
+
+    let apple_archive = snapshot.iter().find(|capability| capability.format == FormatId::APPLE_ARCHIVE).expect("Apple Archive capability should be present");
+    assert!(apple_archive.recognized);
+    assert!(apple_archive.platform_available);
+}
+
+#[test]
 fn engine_lists_native_zip_fixture() {
     let temp = TestDir::new("engine-conformance-zip");
     let zip_path = temp.path("test.zip");

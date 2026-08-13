@@ -53,6 +53,48 @@ impl FormatId {
     pub const UDF: FormatId = FormatId("udf");
     pub const RAW_STREAM: FormatId = FormatId("raw_stream");
 
+    /// Converts a canonical archive-format kind into its engine identity.
+    #[must_use]
+    pub const fn from_archive_format_kind(kind: ArchiveFormatKind) -> Option<Self> {
+        match kind {
+            ArchiveFormatKind::Unknown => None,
+            ArchiveFormatKind::Zip => Some(Self::ZIP),
+            ArchiveFormatKind::SplitZip => Some(Self::SPLIT_ZIP),
+            ArchiveFormatKind::SevenZ => Some(Self::SEVEN_Z),
+            ArchiveFormatKind::TarZst => Some(Self::TAR_ZST),
+            ArchiveFormatKind::TarGz => Some(Self::TAR_GZ),
+            ArchiveFormatKind::Tar => Some(Self::TAR),
+            ArchiveFormatKind::TarBz2 => Some(Self::TAR_BZ2),
+            ArchiveFormatKind::TarXz => Some(Self::TAR_XZ),
+            ArchiveFormatKind::TarLzma => Some(Self::TAR_LZMA),
+            ArchiveFormatKind::TarLz => Some(Self::TAR_LZ),
+            ArchiveFormatKind::TarLzo => Some(Self::TAR_LZO),
+            ArchiveFormatKind::TarCompress => Some(Self::TAR_COMPRESS),
+            ArchiveFormatKind::TarLz4 => Some(Self::TAR_LZ4),
+            ArchiveFormatKind::TarLrz => Some(Self::TAR_LRZ),
+            ArchiveFormatKind::Iso => Some(Self::ISO),
+            ArchiveFormatKind::Cab => Some(Self::CAB),
+            ArchiveFormatKind::Cpio => Some(Self::CPIO),
+            ArchiveFormatKind::Rpm => Some(Self::RPM),
+            ArchiveFormatKind::Xar => Some(Self::XAR),
+            ArchiveFormatKind::Pkg => Some(Self::PKG),
+            ArchiveFormatKind::Dmg => Some(Self::DMG),
+            ArchiveFormatKind::Lha => Some(Self::LHA),
+            ArchiveFormatKind::Ar => Some(Self::AR),
+            ArchiveFormatKind::Warc => Some(Self::WARC),
+            ArchiveFormatKind::Mtree => Some(Self::MTREE),
+            ArchiveFormatKind::Tzap => Some(Self::TZAP),
+            ArchiveFormatKind::Rar => Some(Self::RAR),
+            ArchiveFormatKind::AppleArchive => Some(Self::APPLE_ARCHIVE),
+            ArchiveFormatKind::Deb => Some(Self::DEB),
+            ArchiveFormatKind::Msi => Some(Self::MSI),
+            ArchiveFormatKind::Vhd => Some(Self::VHD),
+            ArchiveFormatKind::Vmdk => Some(Self::VMDK),
+            ArchiveFormatKind::Udf => Some(Self::UDF),
+            ArchiveFormatKind::RawStream => Some(Self::RAW_STREAM),
+        }
+    }
+
     /// Returns the underlying str representation.
     #[must_use]
     pub const fn as_str(self) -> &'static str {

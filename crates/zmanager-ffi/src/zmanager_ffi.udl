@@ -82,6 +82,11 @@ dictionary FormatDescriptor {
     boolean can_list;
     boolean can_extract;
     boolean can_create;
+    boolean recognized;
+    boolean platform_available;
+    string? unavailable_reason;
+    string? source_access;
+    boolean encryption_supported;
 };
 
 dictionary ListFormatsResult {

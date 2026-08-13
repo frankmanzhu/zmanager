@@ -252,3 +252,22 @@ pub struct HandleCapabilities {
     /// Whether header or payload encryption is supported.
     pub encryption_supported: bool,
 }
+
+/// One immutable capability row for a canonical format registry snapshot.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct FormatCapabilities {
+    /// Canonical engine format identity.
+    pub format: FormatId,
+    /// Whether the canonical detector recognizes this format.
+    pub recognized: bool,
+    /// Whether the current build can execute a registered operation.
+    pub platform_available: bool,
+    /// Stable reason when the format is recognized but unavailable.
+    pub unavailable_reason: Option<String>,
+    /// Registered operations for this format.
+    pub operations: Vec<ArchiveOperation>,
+    /// Source access required by the registered adapters.
+    pub source_access: Option<SourceAccess>,
+    /// Whether any registered adapter supports encryption.
+    pub encryption_supported: bool,
+}

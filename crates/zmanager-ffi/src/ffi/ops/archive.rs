@@ -11,6 +11,7 @@ use sha2::{Digest as _, Sha256};
 
 use zmanager_core::apple_archive_backend;
 use zmanager_core::archive_browser::{self, BrowserExtractOptions, BrowserListOptions};
+use zmanager_core::engine::{ArchiveOperation, ArchiveSource, OpenOptions, create_default_engine};
 use zmanager_core::jobs::CancellationToken;
 use zmanager_core::libarchive_backend;
 use zmanager_core::manifest;
@@ -30,6 +31,7 @@ use crate::ffi::ops::jobs::{
     CreateJobInput, ExtractJobInput, PlanEntryOutcome, RegistryJobEventSink, TestArchiveReport, create_plan_options, create_verify_supported, job_registry,
     map_collision_policy, map_manifest_file_type, mobile_create_job_kind, mobile_extract_job_kind, plan_browser_entry, run_create_job, run_extract_job,
 };
+use crate::ffi::session::session_registry;
 use crate::ffi::types::{
     ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelJobRequest, CancelJobResult, ClearSensitiveStateResult, CreatePlanEntry,
     DetectArchiveRequest, DetectArchiveResult, ExtractionCollisionPolicy, ExtractionPlanEntryStatus, FormatDescriptor, HealthcheckResult, ListArchiveRequest,
@@ -178,21 +180,43 @@ pub fn healthcheck() -> HealthcheckResult {
 /// or platform predicates.
 #[allow(non_snake_case)]
 pub fn listFormats() -> ListFormatsResult {
+    let engine_snapshot = create_default_engine().ok().map(|engine| engine.capability_snapshot()).unwrap_or_default();
     let formats = zmanager_core::archive_format::FORMAT_CAPABILITIES
         .iter()
         .map(|capability| {
             let (can_list, can_extract, can_create) = format_capabilities_for_kind(capability.kind);
+            let engine_capability = zmanager_core::engine::FormatId::from_archive_format_kind(capability.kind)
+                .and_then(|format| engine_snapshot.iter().find(|snapshot| snapshot.format == format));
+            let recognized = !matches!(capability.kind, zmanager_core::archive_format::ArchiveFormatKind::Unknown);
+            let platform_available = engine_capability.is_some_and(|snapshot| snapshot.platform_available);
+            let unavailable_reason = engine_capability.and_then(|snapshot| snapshot.unavailable_reason.clone());
+            let source_access = engine_capability.and_then(|snapshot| snapshot.source_access.map(source_access_label));
+            let encryption_supported = engine_capability.is_some_and(|snapshot| snapshot.encryption_supported);
             FormatDescriptor {
                 kind: format!("{:?}", capability.kind),
                 label: kind_label(capability.kind).to_string(),
                 extensions: capability.extensions.iter().map(|suffix| suffix.to_string()).collect(),
-                can_list,
+                can_list: engine_capability.is_some_and(|snapshot| snapshot.operations.contains(&ArchiveOperation::List)) && can_list,
                 can_extract,
                 can_create,
+                recognized,
+                platform_available,
+                unavailable_reason,
+                source_access,
+                encryption_supported,
             }
         })
         .collect();
     ListFormatsResult { formats }
+}
+
+fn source_access_label(source_access: zmanager_core::engine::SourceAccess) -> String {
+    match source_access {
+        zmanager_core::engine::SourceAccess::Seekable => "seekable",
+        zmanager_core::engine::SourceAccess::SequentialOnly => "sequential_only",
+        zmanager_core::engine::SourceAccess::MultiVolumeSet => "multi_volume_set",
+    }
+    .to_owned()
 }
 
 #[allow(non_snake_case)]
@@ -227,7 +251,15 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
 
-    let listing = archive_browser::list_entries_with_options(path, BrowserListOptions { password, recipient_key: None }).map_err(map_archive_browser_error)?;
+    let listing = {
+        let mut sessions = session_registry().lock().unwrap_or_else(|error| error.into_inner());
+        let session_id = sessions
+            .open_session(ArchiveSource::from_path_autodetect(path), OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: None })
+            .map_err(crate::ffi::error::map_archive_engine_error)?;
+        let listing = sessions.list_session(&session_id).map_err(crate::ffi::error::map_archive_engine_error)?;
+        sessions.close_session(&session_id).map_err(crate::ffi::error::map_archive_engine_error)?;
+        listing
+    };
 
     let mut total_size = 0u64;
     let mut has_size = false;

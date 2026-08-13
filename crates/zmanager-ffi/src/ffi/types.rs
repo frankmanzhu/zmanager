@@ -58,6 +58,16 @@ pub struct FormatDescriptor {
     pub can_extract: bool,
     /// Whether this build can create the format.
     pub can_create: bool,
+    /// Whether the canonical detector recognizes this format.
+    pub recognized: bool,
+    /// Whether the current build has a registered operation adapter.
+    pub platform_available: bool,
+    /// Stable explanation when the format is unavailable.
+    pub unavailable_reason: Option<String>,
+    /// Source access required by the registered adapter.
+    pub source_access: Option<String>,
+    /// Whether the registered adapter supports encrypted archives.
+    pub encryption_supported: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

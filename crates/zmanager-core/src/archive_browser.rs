@@ -333,11 +333,35 @@ pub fn supports_on_demand_directories(path: impl AsRef<Path>) -> bool {
 /// If `dir_path` is empty, lists the root directory.
 pub fn list_directory_with_options(path: impl AsRef<Path>, dir_path: &str, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let path = path.as_ref();
-    if is_tzap_archive_path(path) {
-        list_tzap_directory(path, dir_path, options.password)
-    } else {
-        Err(ArchiveBrowserError::UnsupportedOperation("Archive format does not support on-demand directory listing.".to_string()))
+    if !is_tzap_archive_path(path) {
+        return Err(ArchiveBrowserError::UnsupportedOperation("Archive format does not support on-demand directory listing.".to_string()));
     }
+
+    let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let source = crate::engine::ArchiveSource::from_path_autodetect(path);
+    let open_options =
+        crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: options.recipient_key.map(Path::to_path_buf) };
+    let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    list_directory_from_engine_handle(&mut handle, dir_path)
+}
+
+/// Lists immediate children from a retained engine handle.
+pub fn list_directory_from_engine_handle(handle: &mut crate::engine::ArchiveHandle, dir_path: &str) -> Result<BrowserListing, ArchiveBrowserError> {
+    let listing = list_entries_from_engine_handle(handle)?;
+    let parent = dir_path.replace('\\', "/").trim_matches('/').to_owned();
+    let prefix = if parent.is_empty() { String::new() } else { format!("{parent}/") };
+    let entries = listing
+        .entries
+        .into_iter()
+        .filter(|entry| {
+            let normalized = entry.path.replace('\\', "/");
+            let Some(relative) = normalized.strip_prefix(&prefix) else {
+                return false;
+            };
+            !relative.is_empty() && !relative.contains('/')
+        })
+        .collect();
+    Ok(BrowserListing { entries })
 }
 
 /// Visits archive entries without requiring the caller to retain a complete listing.
@@ -355,28 +379,6 @@ pub fn visit_entries_with_options(
     options: BrowserListOptions<'_>,
     mut visitor: impl FnMut(BrowserEntry) -> bool,
 ) -> Result<usize, ArchiveBrowserError> {
-    let path = path.as_ref();
-    if is_zip_family_archive(path) {
-        return visit_zip_entries(path, visitor);
-    }
-    if is_tzap_archive_path(path) {
-        let mut listing = match options.recipient_key {
-            Some(recipient_key) => crate::tzap_backend::list_tzap_index_with_recipient_key(path, recipient_key)?,
-            None => crate::tzap_backend::list_tzap_index_with_optional_password(path, options.password)?,
-        };
-        listing.entries.sort_by_key(|entry| entry.path.matches('/').count());
-
-        let mut visited = 0;
-        for entry in &listing.entries {
-            let browser_entry = tzap_browser_entry(&listing, entry);
-            if !visitor(browser_entry) {
-                return Err(ArchiveBrowserError::Cancelled);
-            }
-            visited += 1;
-        }
-        return Ok(visited);
-    }
-
     let listing = list_entries_with_options(path, options)?;
     let mut visited = 0;
     for entry in listing.entries {
@@ -506,6 +508,11 @@ fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Resu
     let open_options =
         crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: options.recipient_key.map(Path::to_path_buf) };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    list_entries_from_engine_handle(&mut handle)
+}
+
+/// Maps a retained engine handle listing into the browser-facing entry model.
+pub fn list_entries_from_engine_handle(handle: &mut crate::engine::ArchiveHandle) -> Result<BrowserListing, ArchiveBrowserError> {
     let format = handle.detected().format;
     let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
 
@@ -770,12 +777,6 @@ fn list_rar_entries(path: &Path, password: Option<&str>) -> Result<BrowserListin
 #[allow(dead_code)]
 fn list_tzap_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, password)?;
-    let entries = listing.entries.iter().map(|entry| tzap_browser_entry(&listing, entry)).collect();
-    Ok(BrowserListing { entries })
-}
-
-fn list_tzap_directory(path: &Path, dir_path: &str, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
-    let listing = crate::tzap_backend::list_tzap_directory_with_optional_password(path, dir_path, password)?;
     let entries = listing.entries.iter().map(|entry| tzap_browser_entry(&listing, entry)).collect();
     Ok(BrowserListing { entries })
 }
