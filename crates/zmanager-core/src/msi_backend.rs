@@ -303,6 +303,11 @@ pub fn extract_msi_with_overwrite_resolver(
     extract_msi_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
 }
 
+/// Extracts an `.msi` archive without job progress callbacks.
+pub fn extract_msi(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<MsiExtractReport, MsiBackendError> {
+    extract_msi_inner(archive_path, destination, policy, None, None)
+}
+
 /// Extracts an `.msi` archive with context.
 pub fn extract_msi_with_context(
     archive_path: impl AsRef<Path>,

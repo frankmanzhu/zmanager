@@ -86,7 +86,10 @@ fn lzma_high_memory_exhaustion_is_rejected() {
     writer.push_archive_entry(ArchiveEntry::new_file("bomb.bin"), Some(&payload[..])).unwrap();
     writer.finish().unwrap();
 
-    let policy = ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: Some(10), max_entry_expansion_ratio: None }, ..ExtractionPolicy::default() };
+    let policy = ExtractionPolicy {
+        limits: ExtractionLimits { max_expanded_bytes: Some(10), max_entry_expansion_ratio: None, max_entries: None },
+        ..ExtractionPolicy::default()
+    };
 
     let error = extract_7z(&archive, temp.path("out"), None, policy).unwrap_err();
 
@@ -163,7 +166,10 @@ fn zip_extraction_rejects_entries_above_expansion_ratio_limit() {
     writer.start_file("bomb.bin", SimpleFileOptions::default().compression_method(CompressionMethod::Deflated)).unwrap();
     writer.write_all(&repeated).unwrap();
     writer.finish().unwrap();
-    let policy = ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: None, max_entry_expansion_ratio: Some(10) }, ..ExtractionPolicy::default() };
+    let policy = ExtractionPolicy {
+        limits: ExtractionLimits { max_expanded_bytes: None, max_entry_expansion_ratio: Some(10), max_entries: None },
+        ..ExtractionPolicy::default()
+    };
 
     let error = extract_zip_default(&archive, temp.path("out"), policy).unwrap_err();
 

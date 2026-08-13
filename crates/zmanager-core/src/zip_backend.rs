@@ -445,6 +445,16 @@ pub fn extract_zip_with_context_and_password(
     extract_zip_inner(archive_path, destination, policy, password, Some(context), None)
 }
 
+/// Extracts a ZIP archive without job progress callbacks.
+pub fn extract_zip_with_password(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    password: Option<&str>,
+) -> Result<ZipExtractReport, ZipBackendError> {
+    extract_zip_inner(archive_path, destination, policy, password, None, None)
+}
+
 /// Extracts a ZIP archive with an overwrite resolver and optional password.
 ///
 /// # Errors

@@ -300,6 +300,15 @@ pub fn extract_udf_with_overwrite_resolver(
     extract_virtual_disk_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
 }
 
+/// Extracts a virtual disk without job progress callbacks.
+pub fn extract_virtual_disk(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_virtual_disk_inner(archive_path, destination, policy, None, None)
+}
+
 /// Extracts a `.vhd` archive into `destination`, reporting progress and
 /// cancellation through `context`.
 pub fn extract_vhd_with_context(

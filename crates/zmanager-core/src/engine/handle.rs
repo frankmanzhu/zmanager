@@ -7,7 +7,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterRegistry, ReadAdapterFactory};
 use crate::engine::source::ArchiveSource;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities, OpenOptions, SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, ExtractOptions, ExtractReport, HandleCapabilities, OpenOptions,
+    SessionDisposition, TestOptions, TestReport,
 };
 
 /// The stateful archive engine instance.
@@ -63,6 +64,7 @@ impl ArchiveEngine {
             options,
             cached_session: None,
             cached_test_session: None,
+            cached_extract_session: None,
             disposition: SessionDisposition::Usable,
         })
     }
@@ -75,6 +77,7 @@ pub struct ArchiveHandle {
     options: OpenOptions,
     cached_session: Option<Arc<dyn ReadAdapterFactory>>,
     cached_test_session: Option<Arc<dyn ReadAdapterFactory>>,
+    cached_extract_session: Option<Arc<dyn ReadAdapterFactory>>,
     disposition: SessionDisposition,
 }
 
@@ -164,6 +167,49 @@ impl ArchiveHandle {
         }
     }
 
+    /// Extracts the complete archive using the adapter bound to this session.
+    pub fn extract<'a>(&mut self, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        if self.disposition == SessionDisposition::Unusable {
+            return Err(ArchiveError::unusable(ErrorKind::CorruptData, "Archive handle session is unusable; close and reopen the archive"));
+        }
+        if options.destination.as_os_str().is_empty() {
+            return Err(ArchiveError::usable(ErrorKind::Io, "Extraction destination must not be empty"));
+        }
+        if options.is_cancelled() {
+            return Err(ArchiveError::usable(ErrorKind::Cancelled, "Archive extraction was cancelled"));
+        }
+
+        // Keep credentials bound to the opened session available to the
+        // normalized extraction request without borrowing the handle while an
+        // overwrite resolver is active.
+        if options.recipient_key.is_none() {
+            options.recipient_key.clone_from(&self.options.recipient_key);
+        }
+        if options.tzap_password.is_none() {
+            options.tzap_password.clone_from(&self.options.password);
+        }
+
+        let factory = if let Some(factory) = &self.cached_extract_session {
+            factory.clone()
+        } else {
+            let factory = self.engine_registry.resolve(self.detected.format, ArchiveOperation::Extract).ok_or_else(|| {
+                ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("No extraction adapter registered for format '{}'", self.detected.format))
+            })?;
+            self.cached_extract_session = Some(factory.clone());
+            factory
+        };
+
+        match factory.extract(&self.detected, &self.options, options) {
+            Ok(report) => Ok(report),
+            Err(error) => {
+                if error.disposition == SessionDisposition::Unusable {
+                    self.disposition = SessionDisposition::Unusable;
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Consumes the handle and explicitly closes the archive session (ARC-105).
     ///
     /// # Errors
@@ -172,6 +218,7 @@ impl ArchiveHandle {
     pub fn close(mut self) -> Result<(), ArchiveError> {
         self.cached_session = None;
         self.cached_test_session = None;
+        self.cached_extract_session = None;
         Ok(())
     }
 }

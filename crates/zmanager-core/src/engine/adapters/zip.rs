@@ -7,7 +7,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
+    SessionDisposition, TestOptions, TestReport,
 };
 use crate::zip_backend::ZipBackendError;
 use crate::zip_split::open_zip_reader;
@@ -15,7 +16,7 @@ use crate::zip_split::open_zip_reader;
 static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_zip_lister",
     format: FormatId::ZIP,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -23,7 +24,7 @@ static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 static SPLIT_ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_split_zip_lister",
     format: FormatId::SPLIT_ZIP,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::MultiVolumeSet,
     supports_encryption: true,
 };
@@ -138,5 +139,38 @@ impl ReadAdapterFactory for ZipListAdapter {
             tested_bytes: report.tested_bytes,
             warnings: Vec::new(),
         })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            crate::zip_backend::extract_zip_with_overwrite_resolver_and_password(
+                path,
+                &options.destination,
+                options.policy.clone(),
+                open_options.password.as_deref(),
+                resolver,
+            )
+        } else {
+            crate::zip_backend::extract_zip_with_password(path, &options.destination, options.policy.clone(), open_options.password.as_deref())
+        }
+        .map_err(|error| {
+            let kind = match error {
+                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
+                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
+                ZipBackendError::Cancelled => ErrorKind::Cancelled,
+                ZipBackendError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
+                ZipBackendError::Io { .. } => ErrorKind::Io,
+                ZipBackendError::UnsupportedSplitZip { .. } => ErrorKind::UnsupportedOperation,
+                _ => ErrorKind::CorruptData,
+            };
+            ArchiveError {
+                kind,
+                message: error.to_string(),
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 }

@@ -102,6 +102,11 @@ pub fn extract_pkg_with_overwrite_resolver(
     extract_pkg_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
 }
 
+/// Extracts a `.pkg` archive without job progress callbacks.
+pub fn extract_pkg(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<PkgExtractReport, PkgBackendError> {
+    extract_pkg_inner(archive_path, destination, policy, None, None)
+}
+
 /// Extracts a `.pkg` archive with context.
 pub fn extract_pkg_with_context(
     archive_path: impl AsRef<Path>,

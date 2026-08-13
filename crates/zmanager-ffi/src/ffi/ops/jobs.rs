@@ -19,10 +19,9 @@ use zmanager_core::tar_zst_backend::TarZstdCreateOptions;
 use zmanager_core::tzap_backend::{self, TzapCreateOptions, TzapKeySource, TzapX509SigningOptions};
 use zmanager_core::zip_backend::{self, ZipCreateOptions};
 
-use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
     ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error, hint, map_7z_error,
-    map_archive_browser_error, map_libarchive_error, map_rar_error, map_raw_stream_error, map_tar_zst_error, map_tzap_error, map_zip_error,
+    map_archive_browser_error, map_archive_engine_error, map_tar_zst_error, map_tzap_error, map_zip_error,
 };
 use crate::ffi::event::{cancelled_event, completed_event_from_summary, failed_event, mobile_event_from_core_event};
 use crate::ffi::ops::archive::{selected_path_matches, testArchive};
@@ -375,68 +374,47 @@ pub(crate) fn run_extract_job(
     if input.selected_paths.is_empty() { run_full_extract_job(input, token, sink) } else { run_selected_extract_job(input, token, sink) }
 }
 
-fn maybe_run_apple_extract_job(
-    format: ArchiveFormat,
-    archive_path: &Path,
-    destination_root: &Path,
-    policy: &ExtractionPolicy,
-    token: &CancellationToken,
-    sink: &mut dyn jobs::JobEventSink,
-) -> Option<Result<JobTerminalSummary, ZmanagerGuiError>> {
-    if !matches!(format, ArchiveFormat::AppleArchive) {
-        return None;
-    }
-    Some(
-        jobs::run_apple_archive_extract_job_with_policy(archive_path, destination_root, policy.clone(), token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_apple_archive_error)
-            .map(JobTerminalSummary::from),
-    )
-}
-
 fn run_full_extract_job(input: ExtractJobInput, token: &CancellationToken, sink: &mut dyn jobs::JobEventSink) -> Result<JobTerminalSummary, ZmanagerGuiError> {
     let archive_path = Path::new(&input.archive_path);
     let destination_root = Path::new(&input.destination_root);
-    let password = input.password.as_deref();
     let policy = extraction_policy_for_request(input.collision_policy, input.strip_components);
-
-    if matches!(input.format, ArchiveFormat::Zip) {
-        jobs::run_zip_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_zip_error)
-            .map(JobTerminalSummary::from)
-    } else if matches!(input.format, ArchiveFormat::TarZst) {
-        jobs::run_tar_zst_extract_job_with_policy(archive_path, destination_root, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_tar_zst_error)
-            .map(JobTerminalSummary::from)
-    } else if matches!(input.format, ArchiveFormat::SevenZ) {
-        jobs::run_7z_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_7z_error)
-            .map(JobTerminalSummary::from)
-    } else if matches!(input.format, ArchiveFormat::Rar | ArchiveFormat::MultipartRar) {
-        jobs::run_rar_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_rar_error)
-            .map(JobTerminalSummary::from)
-    } else if matches!(input.format, ArchiveFormat::Tzap) {
-        jobs::run_tzap_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_tzap_error)
-            .map(JobTerminalSummary::from)
-    } else if let Some(result) = maybe_run_apple_extract_job(input.format, archive_path, destination_root, &policy, token, sink) {
-        result
-    } else if let Some(raw_format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
-        jobs::run_raw_stream_extract_job_with_policy(archive_path, raw_format, destination_root, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_raw_stream_error)
-            .map(JobTerminalSummary::from)
-    } else {
-        jobs::run_libarchive_extract_job_with_password_and_policy(archive_path, destination_root, password, policy, token, sink)
-            .map(ArchiveJobReport::from)
-            .map_err(map_libarchive_error)
-            .map(JobTerminalSummary::from)
+    if token.is_cancelled() {
+        sink.emit(CoreJobEvent::Cancelled { message: "job cancelled".to_owned() });
+        return Err(cancelled_bridge_error("Extraction job was cancelled."));
+    }
+    sink.emit(CoreJobEvent::Started { kind: core_extract_job_kind(archive_path, input.format), total_bytes: None });
+    let mut options =
+        zmanager_core::engine::ExtractOptions { destination: destination_root.to_path_buf(), policy, cancellation: Some(token.clone()), ..Default::default() };
+    let result = zmanager_core::engine::extract_with_default_engine(
+        zmanager_core::engine::ArchiveSource::from_path_autodetect(archive_path),
+        zmanager_core::engine::OpenOptions { password: input.password, recipient_key: None },
+        &mut options,
+    );
+    match result {
+        Ok(report) => {
+            sink.emit(CoreJobEvent::Completed { entries: usize::try_from(report.written_entries).unwrap_or(usize::MAX), bytes: report.written_bytes });
+            Ok(JobTerminalSummary {
+                written_entries: report.written_entries,
+                skipped_entries: Some(report.skipped_entries),
+                written_bytes: report.written_bytes,
+                encrypted: None,
+                volume_size: None,
+                volume_count: None,
+                output_paths: Vec::new(),
+                verified: None,
+                verified_entries: None,
+                verified_bytes: None,
+                warnings: report.warnings.into_iter().map(bridge_warning).collect(),
+            })
+        }
+        Err(error) => {
+            if error.kind == zmanager_core::engine::ErrorKind::Cancelled {
+                sink.emit(CoreJobEvent::Cancelled { message: error.message.clone() });
+            } else {
+                sink.emit(CoreJobEvent::Failed { message: error.message.clone() });
+            }
+            Err(map_archive_engine_error(error))
+        }
     }
 }
 
@@ -704,6 +682,7 @@ fn safety_error_destination_path(error: &ExtractionSafetyError) -> Option<PathBu
         | ExtractionSafetyError::LinkTargetEscapes { .. }
         | ExtractionSafetyError::ExpandedSizeLimitExceeded { .. }
         | ExtractionSafetyError::ExpansionRatioLimitExceeded { .. }
+        | ExtractionSafetyError::EntryCountLimitExceeded { .. }
         | ExtractionSafetyError::PathTooLong { .. }
         | ExtractionSafetyError::WindowsReservedName { .. } => None,
     }

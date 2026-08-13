@@ -1,5 +1,4 @@
 use crate::cli::app::{CreateOutcome, ExtractOutcome, GenericEntry};
-use crate::cli::format::FORMAT_RAW_STREAM;
 use crate::cli::options::GlobalOptions;
 use crate::output::{self, StyleRole};
 use std::collections::BTreeSet;
@@ -738,57 +737,6 @@ pub(crate) fn print_extract_summary_json(archive: &Path, destination: &Path, out
         outcome.written_bytes,
         outcome.warnings.len()
     );
-}
-
-pub(crate) fn print_raw_stream_extract_summary(
-    archive: &Path,
-    format: zmanager_core::raw_stream_backend::RawStreamFormat,
-    report: &zmanager_core::raw_stream_backend::RawStreamExtractReport,
-    global: &GlobalOptions,
-) {
-    if global.json {
-        print!(
-            "{{\"status\":\"ok\",\"operation\":\"extract\",\"archive\":\"{}\",\"format\":\"{}\",\"backend\":\"{}\",\"written_entries\":{},\"skipped_entries\":{},\"written_bytes\":{},\"warnings\":{},\"output_path\":",
-            json_escape(&archive.display().to_string()),
-            json_escape(format.name()),
-            FORMAT_RAW_STREAM,
-            u64::from(report.output_path.is_some()),
-            report.skipped_entries,
-            report.written_bytes,
-            report.warnings.len()
-        );
-        match &report.output_path {
-            Some(output_path) => print!("\"{}\"", json_escape(&output_path.display().to_string())),
-            None => print!("null"),
-        }
-        println!("}}");
-    } else if !global.quiet {
-        if let Some(output_path) = &report.output_path {
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "{} {} stream: {} bytes -> {}",
-                    output::styled(StyleRole::Success, format_args!("extracted")),
-                    format.name(),
-                    report.written_bytes,
-                    output::styled(StyleRole::Path, format_args!("{}", output_path.display()))
-                ),
-            );
-        } else {
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "{} {} stream: {} entries skipped",
-                    output::styled(StyleRole::Success, format_args!("extracted")),
-                    format.name(),
-                    report.skipped_entries
-                ),
-            );
-        }
-        for warning in &report.warnings {
-            print_warning_stdout(global, format_args!("warning\t{warning}"));
-        }
-    }
 }
 
 pub(crate) fn print_manifest(manifest: &zmanager_core::manifest::ArchiveManifest, global: &GlobalOptions) {

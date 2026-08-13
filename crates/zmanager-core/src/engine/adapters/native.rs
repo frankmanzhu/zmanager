@@ -1,5 +1,6 @@
 //! Native listing adapters for 7z, TAR.ZST, TZAP, RAR, `RawStreams`, Apple Archive, DMG, PKG, MSI, `VirtualDisks` (ARC-200).
 
+use flate2::read::GzDecoder;
 use std::fs::File;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::Archive as TarArchive;
@@ -12,7 +13,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions, SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
+    SessionDisposition, TestOptions, TestReport,
 };
 use crate::msi_backend;
 use crate::rar_backend;
@@ -20,6 +22,76 @@ use crate::raw_stream_backend;
 use crate::sevenz_backend;
 use crate::tzap_backend;
 use crate::virtual_disk_backend;
+
+// --- TAR.GZ ---
+static TAR_GZ_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_gz_adapter",
+    format: FormatId::TAR_GZ,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+/// Native TAR.GZ listing and extraction adapter.
+#[derive(Debug, Default)]
+pub struct TarGzListAdapter;
+
+impl ReadAdapterFactory for TarGzListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &TAR_GZ_LIST_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder = GzDecoder::new(file);
+        let mut tar_archive = TarArchive::new(decoder);
+        let raw_entries = tar_archive.entries().map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+        let mut entries = Vec::new();
+        for (index, entry) in raw_entries.enumerate() {
+            let entry = entry.map_err(|error| ArchiveError::unusable(ErrorKind::CorruptData, error.to_string()).with_path(path))?;
+            let entry_path =
+                entry.path().map_err(|error| ArchiveError::unusable(ErrorKind::CorruptData, error.to_string()).with_path(path))?.to_string_lossy().into_owned();
+            let header = entry.header();
+            let kind = if header.entry_type().is_dir() {
+                BrowserEntryKind::Directory
+            } else if header.entry_type().is_symlink() {
+                BrowserEntryKind::Symlink
+            } else if header.entry_type().is_hard_link() {
+                BrowserEntryKind::Hardlink
+            } else {
+                BrowserEntryKind::File
+            };
+            entries.push(EngineEntry {
+                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                path: entry_path,
+                kind,
+                size: header.size().ok(),
+                compressed_size: None,
+                modified: header.mtime().ok().map(|value| value.to_string()),
+                mode: header.mode().ok(),
+                encrypted: Some(false),
+                method: Some("gzip".to_owned()),
+                crc: None,
+                comment: None,
+                link_target: entry.link_name().ok().flatten().map(|value| value.to_string_lossy().into_owned()),
+                ..EngineEntry::default()
+            });
+        }
+        Ok(ArchiveListing { entries })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            crate::tar_gz_backend::extract_tar_gz_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
+        } else {
+            crate::tar_gz_backend::extract_tar_gz(path, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+}
 
 fn system_time_string(time: SystemTime) -> Option<String> {
     let duration = time.duration_since(UNIX_EPOCH).ok()?;
@@ -44,8 +116,11 @@ fn sevenz_archive_error(error: sevenz_backend::SevenZError, path: &std::path::Pa
         }
         sevenz_backend::SevenZError::InvalidPassword => ArchiveError::usable(ErrorKind::WrongPassword, "provided 7z password is incorrect").with_path(path),
         sevenz_backend::SevenZError::Io { path, source } => ArchiveError::usable(ErrorKind::Io, source.to_string()).with_path(path),
-        sevenz_backend::SevenZError::Safety(source) => ArchiveError::unusable(ErrorKind::SafetyViolation, source.to_string()).with_path(path),
-        sevenz_backend::SevenZError::Cancelled => ArchiveError::usable(ErrorKind::UnsupportedOperation, "7z listing was cancelled").with_path(path),
+        sevenz_backend::SevenZError::Safety(source) => {
+            let kind = crate::engine::adapters::safety_error_kind(&source);
+            ArchiveError::usable(kind, source.to_string()).with_path(path)
+        }
+        sevenz_backend::SevenZError::Cancelled => ArchiveError::usable(ErrorKind::Cancelled, "7z operation was cancelled").with_path(path),
         sevenz_backend::SevenZError::VolumeSizeTooSmall { size, minimum } => {
             ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("7z volume size {size} bytes is smaller than the minimum {minimum} bytes"))
                 .with_path(path)
@@ -59,7 +134,7 @@ fn sevenz_archive_error(error: sevenz_backend::SevenZError, path: &std::path::Pa
 static SEVEN_Z_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_7z_lister",
     format: FormatId::SEVEN_Z,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -116,13 +191,39 @@ impl ReadAdapterFactory for SevenZListAdapter {
             warnings: Vec::new(),
         })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            sevenz_backend::extract_7z_with_overwrite_resolver(path, &options.destination, open_options.password.as_deref(), options.policy.clone(), resolver)
+        } else {
+            sevenz_backend::extract_7z(path, &options.destination, open_options.password.as_deref(), options.policy.clone())
+        }
+        .map_err(|error| {
+            let kind = match error {
+                sevenz_backend::SevenZError::PasswordRequired => ErrorKind::PasswordRequired,
+                sevenz_backend::SevenZError::InvalidPassword => ErrorKind::WrongPassword,
+                sevenz_backend::SevenZError::Io { .. } => ErrorKind::Io,
+                sevenz_backend::SevenZError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
+                sevenz_backend::SevenZError::Cancelled => ErrorKind::Cancelled,
+                _ => ErrorKind::CorruptData,
+            };
+            ArchiveError {
+                kind,
+                message: error.to_string(),
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- TAR.ZST ---
 static TAR_ZST_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_tar_zst_lister",
     format: FormatId::TAR_ZST,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -204,13 +305,37 @@ impl ReadAdapterFactory for TarZstListAdapter {
             warnings: report.warnings,
         })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            crate::tar_zst_backend::extract_tar_zst_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
+        } else {
+            crate::tar_zst_backend::extract_tar_zst(path, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| {
+            let kind = match error {
+                crate::tar_zst_backend::TarZstdError::Io { .. } => ErrorKind::Io,
+                crate::tar_zst_backend::TarZstdError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
+                crate::tar_zst_backend::TarZstdError::Cancelled => ErrorKind::Cancelled,
+                _ => ErrorKind::CorruptData,
+            };
+            ArchiveError {
+                kind,
+                message: error.to_string(),
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- TZAP ---
 static TZAP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_tzap_lister",
     format: FormatId::TZAP,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -317,13 +442,53 @@ impl ReadAdapterFactory for TzapListAdapter {
             warnings,
         })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let key = if let Some(recipient_key_bytes) = options.recipient_key_bytes.as_deref() {
+            tzap_backend::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
+        } else if let Some(recipient_key) = options.recipient_key.as_deref() {
+            tzap_backend::TzapExtractKeySource::RecipientKeyPath(recipient_key)
+        } else if let Some(password) = options.tzap_password.as_deref() {
+            tzap_backend::TzapExtractKeySource::Password(password)
+        } else {
+            tzap_backend::TzapExtractKeySource::None
+        };
+        let report = tzap_backend::extract_tzap(
+            tzap_backend::TzapExtractRequest {
+                key,
+                policy: options.policy.clone(),
+                restore_options: options.tzap_restore_options.unwrap_or_default(),
+                overwrite_resolver: options.overwrite_resolver.as_deref_mut(),
+                context: None,
+                fast: false,
+            },
+            path,
+            &options.destination,
+        )
+        .map_err(|error| {
+            let kind = match error {
+                tzap_backend::TzapError::PasswordRequired | tzap_backend::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
+                tzap_backend::TzapError::Cancelled => ErrorKind::Cancelled,
+                tzap_backend::TzapError::Io { .. } => ErrorKind::Io,
+                _ => ErrorKind::CorruptData,
+            };
+            ArchiveError {
+                kind,
+                message: error.to_string(),
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- RAR ---
 static RAR_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_rar_lister",
     format: FormatId::RAR,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -407,13 +572,46 @@ impl ReadAdapterFactory for RarListAdapter {
             warnings: report.warnings,
         })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            rar_backend::extract_rar_with_overwrite_resolver_and_password(
+                path,
+                &options.destination,
+                options.policy.clone(),
+                open_options.password.as_deref(),
+                resolver,
+            )
+        } else {
+            rar_backend::extract_rar_with_password(path, &options.destination, options.policy.clone(), open_options.password.as_deref())
+        }
+        .map_err(|error| {
+            let message = error.to_string();
+            let lower = message.to_lowercase();
+            let kind = if lower.contains("password") {
+                ErrorKind::WrongPassword
+            } else if matches!(error, rar_backend::RarBackendError::Io { .. }) {
+                ErrorKind::Io
+            } else {
+                ErrorKind::CorruptData
+            };
+            ArchiveError {
+                kind,
+                message,
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- Raw Streams ---
 static RAW_STREAM_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_raw_stream_lister",
     format: FormatId::RAW_STREAM,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -473,13 +671,38 @@ impl ReadAdapterFactory for RawStreamListAdapter {
         })?;
         Ok(TestReport { tested_entries: 1, skipped_entries: 0, tested_bytes, warnings: Vec::new() })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let format = raw_stream_backend::detect_raw_stream_format(path)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(path))?;
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            raw_stream_backend::extract_raw_stream_with_overwrite_resolver(path, format, &options.destination, options.policy.clone(), resolver)
+        } else {
+            raw_stream_backend::extract_raw_stream(path, format, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| {
+            let kind = match error {
+                raw_stream_backend::RawStreamError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
+                raw_stream_backend::RawStreamError::Io { .. } => ErrorKind::Io,
+                _ => ErrorKind::CorruptData,
+            };
+            ArchiveError {
+                kind,
+                message: error.to_string(),
+                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+                path: Some(path.to_path_buf()),
+            }
+        })?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- Apple Archive ---
 static APPLE_ARCHIVE_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_apple_archive_lister",
     format: FormatId::APPLE_ARCHIVE,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -547,13 +770,30 @@ impl ReadAdapterFactory for AppleArchiveListAdapter {
             warnings: Vec::new(),
         })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            apple_archive_backend::extract_apple_archive_with_overwrite_resolver(
+                path,
+                &options.destination,
+                options.policy.clone(),
+                resolver,
+                open_options.password.as_deref(),
+            )
+        } else {
+            apple_archive_backend::extract_apple_archive(path, &options.destination, options.policy.clone(), open_options.password.as_deref())
+        }
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- DMG ---
 static DMG_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_dmg_lister",
     format: FormatId::DMG,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -594,13 +834,24 @@ impl ReadAdapterFactory for DmgListAdapter {
 
         Ok(ArchiveListing { entries })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            apple_dmg_backend::extract_dmg_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
+        } else {
+            apple_dmg_backend::extract_dmg(path, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- PKG ---
 static PKG_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_pkg_lister",
     format: FormatId::PKG,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -641,13 +892,24 @@ impl ReadAdapterFactory for PkgListAdapter {
 
         Ok(ArchiveListing { entries })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            apple_pkg_backend::extract_pkg_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
+        } else {
+            apple_pkg_backend::extract_pkg(path, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- MSI ---
 static MSI_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_msi_lister",
     format: FormatId::MSI,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -688,6 +950,17 @@ impl ReadAdapterFactory for MsiListAdapter {
 
         Ok(ArchiveListing { entries })
     }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            msi_backend::extract_msi_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
+        } else {
+            msi_backend::extract_msi(path, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
 }
 
 // --- Virtual Disks (VHD, VMDK, UDF) ---
@@ -710,7 +983,7 @@ impl ReadAdapterFactory for VirtualDiskListAdapter {
         Box::leak(Box::new(AdapterDescriptor {
             name: "native_virtual_disk_lister",
             format: self.format,
-            operations: &[ArchiveOperation::List],
+            operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
             required_source_access: SourceAccess::Seekable,
             supports_encryption: false,
         }))
@@ -747,5 +1020,21 @@ impl ReadAdapterFactory for VirtualDiskListAdapter {
             .collect();
 
         Ok(ArchiveListing { entries })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            match self.format {
+                FormatId::VHD => virtual_disk_backend::extract_vhd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::VMDK => virtual_disk_backend::extract_vmdk_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::UDF => virtual_disk_backend::extract_udf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
+            }
+        } else {
+            virtual_disk_backend::extract_virtual_disk(path, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 }

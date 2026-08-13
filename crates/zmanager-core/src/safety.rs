@@ -18,11 +18,13 @@ pub struct ExtractionLimits {
     /// Maximum per-entry uncompressed-to-compressed ratio. `None` disables the
     /// ratio guard when compressed size metadata is available.
     pub max_entry_expansion_ratio: Option<u64>,
+    /// Maximum number of selected archive entries that may be materialized.
+    pub max_entries: Option<u64>,
 }
 
 impl Default for ExtractionLimits {
     fn default() -> Self {
-        Self { max_expanded_bytes: Some(DEFAULT_MAX_EXTRACTED_BYTES), max_entry_expansion_ratio: Some(DEFAULT_MAX_ENTRY_EXPANSION_RATIO) }
+        Self { max_expanded_bytes: Some(DEFAULT_MAX_EXTRACTED_BYTES), max_entry_expansion_ratio: Some(DEFAULT_MAX_ENTRY_EXPANSION_RATIO), max_entries: None }
     }
 }
 
@@ -228,6 +230,7 @@ pub struct ExtractionSafetyPlanner<'a> {
     policy: ExtractionPolicy,
     seen_paths: HashMap<String, String>,
     planned_expanded_bytes: u64,
+    planned_entries: u64,
     overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
 }
 
@@ -287,7 +290,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
     ) -> Self {
         let destination_root = lexically_normalize(&destination_root.into());
 
-        Self { destination_root, policy, seen_paths: HashMap::new(), planned_expanded_bytes: 0, overwrite_resolver }
+        Self { destination_root, policy, seen_paths: HashMap::new(), planned_expanded_bytes: 0, planned_entries: 0, overwrite_resolver }
     }
 
     /// Validates one archive entry before extraction.
@@ -309,6 +312,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
             };
             normalized_archive_path = stripped;
         }
+        self.reserve_entry(&normalized_archive_path)?;
         let destination_path = self.destination_root.join(&normalized_archive_path);
         let destination_path = lexically_normalize(&destination_path);
         ensure_inside_destination(&self.destination_root, &destination_path, &entry.archive_path)?;
@@ -479,6 +483,21 @@ impl<'a> ExtractionSafetyPlanner<'a> {
         self.reserve_expanded_bytes(&entry.archive_path, uncompressed_size)
     }
 
+    fn reserve_entry(&mut self, archive_path: &str) -> Result<(), ExtractionSafetyError> {
+        if let Some(limit) = self.policy.limits.max_entries {
+            let attempted = self.planned_entries.saturating_add(1);
+            if attempted > limit {
+                return Err(ExtractionSafetyError::EntryCountLimitExceeded {
+                    archive_path: archive_path.to_owned(),
+                    attempted_entries: attempted,
+                    limit_entries: limit,
+                });
+            }
+            self.planned_entries = attempted;
+        }
+        Ok(())
+    }
+
     /// Reserves `bytes` against the expanded-size limit for an entry that is
     /// not planned as [`ExtractionEntryKind::File`].
     ///
@@ -586,6 +605,15 @@ pub enum ExtractionSafetyError {
         /// Configured ratio limit.
         ratio_limit: u64,
     },
+    /// The selected entry count exceeds the configured extraction policy.
+    EntryCountLimitExceeded {
+        /// Archive path that crossed the limit.
+        archive_path: String,
+        /// Number of selected entries that would be materialized.
+        attempted_entries: u64,
+        /// Configured entry limit.
+        limit_entries: u64,
+    },
 }
 
 impl fmt::Display for ExtractionSafetyError {
@@ -638,6 +666,9 @@ impl fmt::Display for ExtractionSafetyError {
             }
             Self::ExpansionRatioLimitExceeded { archive_path, uncompressed_size, compressed_size, ratio_limit } => {
                 write!(f, "archive path {archive_path} expands from {compressed_size} to {uncompressed_size} bytes, exceeding the {ratio_limit}:1 ratio limit")
+            }
+            Self::EntryCountLimitExceeded { archive_path, attempted_entries, limit_entries } => {
+                write!(f, "archive path {archive_path} would bring extraction to {attempted_entries} entries, exceeding the {limit_entries} entry limit")
             }
         }
     }
@@ -1233,8 +1264,10 @@ mod tests {
     #[test]
     fn rejects_extraction_when_total_expanded_size_exceeds_limit() {
         let temp = TestDir::new("rejects_extraction_when_total_expanded_size_exceeds_limit");
-        let policy =
-            ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: Some(5), max_entry_expansion_ratio: None }, ..ExtractionPolicy::default() };
+        let policy = ExtractionPolicy {
+            limits: ExtractionLimits { max_expanded_bytes: Some(5), max_entry_expansion_ratio: None, max_entries: None },
+            ..ExtractionPolicy::default()
+        };
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), policy);
 
         planner.validate_entry(&sized_file_entry("one.bin", 3, Some(3))).unwrap();
@@ -1246,8 +1279,10 @@ mod tests {
     #[test]
     fn rejects_entry_when_expansion_ratio_exceeds_limit() {
         let temp = TestDir::new("rejects_entry_when_expansion_ratio_exceeds_limit");
-        let policy =
-            ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: None, max_entry_expansion_ratio: Some(10) }, ..ExtractionPolicy::default() };
+        let policy = ExtractionPolicy {
+            limits: ExtractionLimits { max_expanded_bytes: None, max_entry_expansion_ratio: Some(10), max_entries: None },
+            ..ExtractionPolicy::default()
+        };
         let mut planner = ExtractionSafetyPlanner::new(temp.path("out"), policy);
 
         let error = planner.validate_entry(&sized_file_entry("bomb.bin", 100, Some(1))).unwrap_err();

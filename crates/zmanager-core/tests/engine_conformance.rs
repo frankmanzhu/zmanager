@@ -12,8 +12,8 @@ use std::sync::{
 
 use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{
-    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchiveSource, FormatId, OpenOptions, SourceAccess, create_default_engine,
-    is_split_zip_archive_path,
+    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchiveSource, ExtractOptions, FormatId, OpenOptions, SourceAccess,
+    create_default_engine, is_split_zip_archive_path,
 };
 
 #[test]
@@ -37,6 +37,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
     for (format, source_access) in expected {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::List), "{format} must claim listing");
+        assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
         assert_eq!(capabilities.source_access, source_access, "{format} advertised the wrong source access");
     }
     assert!(!zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&FormatId::RAR));
@@ -45,6 +46,20 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
     {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::Test), "{format} must claim data testing");
+    }
+    for format in [
+        FormatId::ZIP,
+        FormatId::SPLIT_ZIP,
+        FormatId::SEVEN_Z,
+        FormatId::TAR_ZST,
+        FormatId::TAR_GZ,
+        FormatId::TZAP,
+        FormatId::RAR,
+        FormatId::RAW_STREAM,
+        FormatId::APPLE_ARCHIVE,
+    ] {
+        let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
+        assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
     }
 }
 
@@ -110,6 +125,83 @@ fn engine_tests_native_zip_payload_and_honors_selection() {
     assert_eq!(report.tested_entries, 1);
     assert_eq!(report.skipped_entries, 1);
     assert_eq!(report.tested_bytes, 7);
+}
+
+#[test]
+fn engine_extracts_native_zip_with_normalized_report() {
+    let temp = TestDir::new("engine-conformance-extract-zip");
+    let zip_path = temp.path("test.zip");
+    let destination = temp.path("out");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("hello.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"Hello world!").unwrap();
+    zip.finish().unwrap();
+
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::from_path_autodetect(&zip_path), OpenOptions::default()).unwrap();
+    let mut options = ExtractOptions { destination: destination.clone(), ..Default::default() };
+    let report = handle.extract(&mut options).unwrap();
+    assert_eq!(report.written_entries, 1);
+    assert_eq!(report.written_bytes, 12);
+    assert_eq!(fs::read(destination.join("hello.txt")).unwrap(), b"Hello world!");
+}
+
+#[test]
+fn engine_extract_cancellation_is_reported_before_adapter_work() {
+    let temp = TestDir::new("engine-conformance-extract-cancelled");
+    let zip_path = temp.path("test.zip");
+    fs::write(&zip_path, b"not used").unwrap();
+    let cancellation = zmanager_core::jobs::CancellationToken::new();
+    cancellation.cancel();
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::Path(zip_path), OpenOptions::default()).unwrap();
+    let mut options = ExtractOptions { destination: temp.path("out"), cancellation: Some(cancellation), ..Default::default() };
+    let error = handle.extract(&mut options).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::Cancelled);
+}
+
+#[test]
+fn engine_extract_enforces_entry_count_budget() {
+    let temp = TestDir::new("engine-conformance-extract-entry-budget");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    for name in ["first.txt", "second.txt"] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"payload").unwrap();
+    }
+    zip.finish().unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&zip_path), OpenOptions::default()).unwrap();
+    let mut options = ExtractOptions {
+        destination: temp.path("out"),
+        policy: zmanager_core::safety::ExtractionPolicy {
+            limits: zmanager_core::safety::ExtractionLimits { max_entries: Some(1), ..zmanager_core::safety::ExtractionLimits::default() },
+            ..zmanager_core::safety::ExtractionPolicy::default()
+        },
+        ..Default::default()
+    };
+    let error = handle.extract(&mut options).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::ResourceLimitExceeded);
+}
+
+#[test]
+fn engine_extract_rejects_traversal_before_writing_outside_destination() {
+    let temp = TestDir::new("engine-conformance-extract-traversal");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("../outside.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"must not escape").unwrap();
+    zip.finish().unwrap();
+
+    let destination = temp.path("out");
+    let outside = temp.path("outside.txt");
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::from_path_autodetect(&zip_path), OpenOptions::default()).unwrap();
+    let mut options = ExtractOptions { destination, ..Default::default() };
+    let error = handle.extract(&mut options).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::SafetyViolation);
+    assert!(!outside.exists());
 }
 
 #[test]

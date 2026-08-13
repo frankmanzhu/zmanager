@@ -3,6 +3,8 @@
 use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::source::{ArchiveSource, SourceAccess};
+use crate::jobs::CancellationToken;
+use crate::safety::{ExtractionPolicy, OverwriteResolver};
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -164,6 +166,76 @@ pub struct TestReport {
     /// Number of decoded regular-file bytes consumed during verification.
     pub tested_bytes: u64,
     /// Non-fatal diagnostics produced by the adapter.
+    pub warnings: Vec<String>,
+}
+
+/// Request for a normalized full extraction operation.
+pub struct ExtractOptions<'a> {
+    /// Destination directory committed by the adapter.
+    pub destination: PathBuf,
+    /// Shared extraction safety and overwrite policy.
+    pub policy: ExtractionPolicy,
+    /// Optional private key used by recipient-encrypted formats.
+    pub recipient_key: Option<PathBuf>,
+    /// Optional in-memory private key used by recipient-encrypted formats.
+    pub recipient_key_bytes: Option<Vec<u8>>,
+    /// Optional TZAP metadata restoration policy for full extraction.
+    pub tzap_restore_options: Option<crate::tzap_backend::TzapRestoreOptions>,
+    /// Optional password for TZAP extraction, independent of the archive open password.
+    pub tzap_password: Option<String>,
+    /// Optional cancellation token owned by the consumer/job registry.
+    pub cancellation: Option<CancellationToken>,
+    /// Optional resolver used when the policy is `OverwritePolicy::Ask`.
+    pub overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
+}
+
+impl std::fmt::Debug for ExtractOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExtractOptions")
+            .field("destination", &self.destination)
+            .field("policy", &self.policy)
+            .field("recipient_key", &self.recipient_key)
+            .field("recipient_key_bytes", &self.recipient_key_bytes.as_ref().map(Vec::len))
+            .field("tzap_restore_options", &self.tzap_restore_options)
+            .field("cancellation", &self.cancellation)
+            .field("overwrite_resolver", &self.overwrite_resolver.is_some())
+            .finish()
+    }
+}
+
+impl Default for ExtractOptions<'_> {
+    fn default() -> Self {
+        Self {
+            destination: PathBuf::new(),
+            policy: ExtractionPolicy::default(),
+            recipient_key: None,
+            recipient_key_bytes: None,
+            tzap_restore_options: None,
+            tzap_password: None,
+            cancellation: None,
+            overwrite_resolver: None,
+        }
+    }
+}
+
+impl ExtractOptions<'_> {
+    /// Returns whether this request has been cancelled before or during work.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation.as_ref().is_some_and(CancellationToken::is_cancelled)
+    }
+}
+
+/// Normalized full extraction report.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct ExtractReport {
+    /// Number of entries committed to the destination.
+    pub written_entries: u64,
+    /// Number of entries skipped by policy or unsupported materialization.
+    pub skipped_entries: u64,
+    /// Regular-file bytes committed to the destination.
+    pub written_bytes: u64,
+    /// Non-fatal extraction warnings.
     pub warnings: Vec<String>,
 }
 

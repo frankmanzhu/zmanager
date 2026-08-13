@@ -814,8 +814,10 @@ mod tests {
         let mut encoder = zstd::stream::write::Encoder::new(file, 1).unwrap();
         encoder.write_all(b"0123456789abcdef").unwrap();
         encoder.finish().unwrap();
-        let policy =
-            ExtractionPolicy { limits: ExtractionLimits { max_expanded_bytes: Some(8), max_entry_expansion_ratio: None }, ..ExtractionPolicy::default() };
+        let policy = ExtractionPolicy {
+            limits: ExtractionLimits { max_expanded_bytes: Some(8), max_entry_expansion_ratio: None, max_entries: None },
+            ..ExtractionPolicy::default()
+        };
 
         let error = extract_raw_stream(&archive, RawStreamFormat::Zstd, temp.path("out"), policy).unwrap_err();
 

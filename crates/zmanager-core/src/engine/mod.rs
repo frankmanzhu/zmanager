@@ -16,8 +16,8 @@ pub use plugins::{ArchivePlugin, build_engine_with_plugins};
 pub use registry::{AdapterDescriptor, AdapterRegistry, ArchiveEngineBuilder, ReadAdapterFactory};
 pub use source::{ArchiveSource, SourceAccess, discover_split_zip_volumes, is_split_zip_archive_path};
 pub use types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, FormatCapabilities, HandleCapabilities, OpenOptions,
-    SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities,
+    HandleCapabilities, OpenOptions, SessionDisposition, TestOptions, TestReport,
 };
 
 /// Default compile-time plugin packaging for Phase 1 listing.
@@ -37,6 +37,7 @@ impl ArchivePlugin for DefaultArchivePlugin {
         // Native adapters for 7z, TAR.ZST, TZAP, RAR, RawStreams, Apple Archive, DMG, PKG, MSI, VirtualDisks
         builder.register_read_adapter(Arc::new(adapters::native::SevenZListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TarZstListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::TarGzListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TzapListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RarListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RawStreamListAdapter))?;
@@ -66,4 +67,16 @@ impl ArchivePlugin for DefaultArchivePlugin {
 /// Returns `ArchiveError` if plugin registration fails.
 pub fn create_default_engine() -> Result<ArchiveEngine, ArchiveError> {
     build_engine_with_plugins(&[&DefaultArchivePlugin])
+}
+
+/// Runs a complete extraction through the default engine and returns its
+/// normalized report.
+pub fn extract_with_default_engine<'a>(
+    source: ArchiveSource,
+    open_options: OpenOptions,
+    options: &'a mut ExtractOptions<'a>,
+) -> Result<ExtractReport, ArchiveError> {
+    let engine = create_default_engine()?;
+    let mut handle = engine.open(source, open_options)?;
+    handle.extract(options)
 }

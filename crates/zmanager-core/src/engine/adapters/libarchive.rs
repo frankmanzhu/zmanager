@@ -7,7 +7,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions, SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
+    SessionDisposition, TestOptions, TestReport,
 };
 use crate::libarchive_backend::{self, LibarchiveEntryKind};
 
@@ -18,8 +19,8 @@ fn system_time_string(time: SystemTime) -> Option<String> {
 
 /// Allow-list of formats accepted by the libarchive listing compatibility adapter.
 pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
+    FormatId::UNKNOWN,
     FormatId::TAR,
-    FormatId::TAR_GZ,
     FormatId::TAR_BZ2,
     FormatId::TAR_XZ,
     FormatId::TAR_LZMA,
@@ -72,7 +73,7 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
         Box::leak(Box::new(AdapterDescriptor {
             name: "libarchive_compatibility_lister",
             format: self.format,
-            operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+            operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
             required_source_access: SourceAccess::Seekable,
             supports_encryption: true,
         }))
@@ -146,5 +147,25 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
             tested_bytes: report.tested_bytes,
             warnings: Vec::new(),
         })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        if !LIBARCHIVE_ALLOW_LIST.contains(&archive.format) {
+            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Format '{}' is rejected prior to libarchive probing", archive.format)));
+        }
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            libarchive_backend::extract_archive_with_overwrite_resolver_and_password(
+                path,
+                &options.destination,
+                options.policy.clone(),
+                open_options.password.as_deref(),
+                resolver,
+            )
+        } else {
+            libarchive_backend::extract_archive_with_password(path, &options.destination, options.policy.clone(), open_options.password.as_deref())
+        }
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 }

@@ -3,7 +3,8 @@
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, FormatCapabilities, HandleCapabilities, OpenOptions, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities, HandleCapabilities,
+    OpenOptions, TestOptions, TestReport,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,6 +35,16 @@ pub trait ReadAdapterFactory: Send + Sync {
     /// Verifies selected entry payloads and integrity metadata.
     fn test(&self, _archive: &DetectedArchive, _open_options: &OpenOptions, _test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
         Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide data verification"))
+    }
+
+    /// Extracts the complete archive through the adapter's safety pipeline.
+    fn extract<'a>(
+        &self,
+        _archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        _options: &'a mut ExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide full extraction"))
     }
 }
 
