@@ -3,10 +3,17 @@ use crate::apple_archive_backend::{self, AppleArchiveError};
 use crate::engine::{CreateOptions, CreateReport, CreateRequest, FormatId, create_default_engine};
 use crate::manifest::{PlanOptions, plan_archives};
 use crate::safety::ExtractionPolicy;
+#[cfg(test)]
 use crate::sevenz_backend::{SevenZCreateOptions, SevenZCreateReport};
-use crate::tar_zst_backend::{self, TarZstdCreateOptions, TarZstdError, TarZstdExtractReport};
-use crate::tzap_backend::{self, TzapCreateOptions, TzapCreateReport, TzapError};
-use crate::zip_backend::{self, ZipBackendError, ZipCreateOptions, ZipCreateReport};
+use crate::tar_zst_backend::{self, TarZstdError, TarZstdExtractReport};
+#[cfg(test)]
+use crate::tar_zst_backend::{TarZstdCreateOptions, TarZstdCreateReport};
+use crate::tzap_backend::{self, TzapError};
+#[cfg(test)]
+use crate::tzap_backend::{TzapCreateOptions, TzapCreateReport};
+use crate::zip_backend::{self, ZipBackendError};
+#[cfg(test)]
+use crate::zip_backend::{ZipCreateOptions, ZipCreateReport};
 use crate::{
     libarchive_backend,
     libarchive_backend::LibarchiveError,
@@ -70,6 +77,9 @@ pub fn run_engine_create_job_from_sources(
     }
 }
 
+/// Legacy backend-shaped ZIP job retained for in-module compatibility tests.
+/// Application consumers use [`run_engine_create_job_from_sources`].
+#[cfg(test)]
 /// Runs a ZIP create job for multiple source roots with explicit planning
 /// options and emits lifecycle/progress events.
 ///
@@ -138,6 +148,8 @@ pub fn run_zip_extract_job_with_password_and_policy(
     finish_zip_extract_result(result, sink)
 }
 
+/// Legacy backend-shaped TAR.ZST job retained for in-module compatibility tests.
+#[cfg(test)]
 /// Runs a TAR.ZST create job for multiple source roots with explicit planning
 /// options and emits lifecycle/progress events.
 ///
@@ -180,6 +192,8 @@ pub fn run_tar_zst_create_job_from_sources_with_plan_options(
 ///
 /// Returns [`TarGzError`] when planning, TAR.GZ creation, filesystem I/O, or
 /// cancellation fails.
+/// Legacy backend-shaped 7z job retained for in-module compatibility tests.
+#[cfg(test)]
 /// Runs a 7z create job for multiple source roots with explicit planning
 /// options and emits lifecycle events.
 ///
@@ -268,8 +282,11 @@ macro_rules! finish_result_no_cancelled {
     };
 }
 
+#[cfg(test)]
 finish_result!(finish_7z_create_result, SevenZCreateReport, SevenZError, emit_warnings: false, cancelled: SevenZError::Cancelled);
 
+/// Legacy backend-shaped TZAP job retained for in-module compatibility tests.
+#[cfg(test)]
 /// Runs a TZAP create job for multiple source roots with explicit planning
 /// options and emits lifecycle/progress events.
 ///
@@ -586,8 +603,10 @@ fn pre_start_cancelled(token: &CancellationToken, sink: &mut dyn JobEventSink) -
     }
 }
 
+#[cfg(test)]
 finish_result!(finish_zip_create_result, ZipCreateReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);
 
+#[cfg(test)]
 finish_result!(finish_tzap_create_result, TzapCreateReport, TzapError, emit_warnings: false, cancelled: TzapError::Cancelled);
 
 finish_result!(finish_tzap_extract_result, tzap_backend::TzapExtractReport, TzapError, emit_warnings: false, cancelled: TzapError::Cancelled);
@@ -596,7 +615,8 @@ finish_result!(finish_apple_archive_extract_result, apple_archive_backend::Apple
 
 finish_result!(finish_zip_extract_result, zip_backend::ZipExtractReport, ZipBackendError, emit_warnings: false, cancelled: ZipBackendError::Cancelled);
 
-finish_result!(finish_tar_zst_create_result, tar_zst_backend::TarZstdCreateReport, TarZstdError, emit_warnings: false, cancelled: TarZstdError::Cancelled);
+#[cfg(test)]
+finish_result!(finish_tar_zst_create_result, TarZstdCreateReport, TarZstdError, emit_warnings: false, cancelled: TarZstdError::Cancelled);
 
 finish_result!(finish_tar_zst_extract_result, TarZstdExtractReport, TarZstdError, emit_warnings: false, cancelled: TarZstdError::Cancelled);
 

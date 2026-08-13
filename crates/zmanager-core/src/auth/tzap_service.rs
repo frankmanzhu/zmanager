@@ -1093,8 +1093,9 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
         let token = CancellationToken::new();
         let mut event_sink = |_event: JobEvent| {};
         let mut job_context = crate::jobs::JobContext::new_with_progress_total(&token, &mut event_sink, Some(manifest.total_bytes));
-        let report = crate::tzap_backend::create_tzap_from_manifest_with_context(&manifest, &destination, &options, &mut job_context)
-            .map_err(|error| error.to_string())?;
+        let request = crate::engine::CreateRequest::new(manifest, &destination, crate::engine::CreateOptions::Tzap(options));
+        let engine = crate::engine::create_default_engine().map_err(|error| error.to_string())?;
+        let report = engine.create(&request, &mut job_context).map_err(|error| error.to_string())?;
         job_context.flush_progress();
         let mut response = json!({
             "ok": true,
