@@ -39,6 +39,7 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::native::SevenZListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TarZstListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TarGzListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::TarListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TzapListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RarListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RawStreamListAdapter))?;

@@ -23,11 +23,19 @@ use crate::sevenz_backend;
 use crate::tzap_backend;
 use crate::virtual_disk_backend;
 
-// --- TAR.GZ ---
+// --- TAR.GZ and plain TAR ---
 static TAR_GZ_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_tar_gz_adapter",
     format: FormatId::TAR_GZ,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static TAR_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_adapter",
+    format: FormatId::TAR,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -45,51 +53,39 @@ impl ReadAdapterFactory for TarGzListAdapter {
         let path = archive.source.primary_path();
         let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
         let decoder = GzDecoder::new(file);
-        let mut tar_archive = TarArchive::new(decoder);
-        let raw_entries = tar_archive.entries().map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
-        let mut entries = Vec::new();
-        for (index, entry) in raw_entries.enumerate() {
-            let entry = entry.map_err(|error| ArchiveError::unusable(ErrorKind::CorruptData, error.to_string()).with_path(path))?;
-            let entry_path =
-                entry.path().map_err(|error| ArchiveError::unusable(ErrorKind::CorruptData, error.to_string()).with_path(path))?.to_string_lossy().into_owned();
-            let header = entry.header();
-            let kind = if header.entry_type().is_dir() {
-                BrowserEntryKind::Directory
-            } else if header.entry_type().is_symlink() {
-                BrowserEntryKind::Symlink
-            } else if header.entry_type().is_hard_link() {
-                BrowserEntryKind::Hardlink
-            } else {
-                BrowserEntryKind::File
-            };
-            entries.push(EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
-                path: entry_path,
-                kind,
-                size: header.size().ok(),
-                compressed_size: None,
-                modified: header.mtime().ok().map(|value| value.to_string()),
-                mode: header.mode().ok(),
-                encrypted: Some(false),
-                method: Some("gzip".to_owned()),
-                crc: None,
-                comment: None,
-                link_target: entry.link_name().ok().flatten().map(|value| value.to_string_lossy().into_owned()),
-                ..EngineEntry::default()
-            });
-        }
-        Ok(ArchiveListing { entries })
+        let entries = crate::tar_backend::list(decoder, path).map_err(|error| tar_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_tar_entries(entries, "gzip") })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder = GzDecoder::new(file);
+        let report = crate::tar_backend::test(decoder, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
+            .map_err(|error| tar_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
     }
 
     fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
-            crate::tar_gz_backend::extract_tar_gz_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
-        } else {
-            crate::tar_gz_backend::extract_tar_gz(path, &options.destination, options.policy.clone())
-        }
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
-        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder = GzDecoder::new(file);
+        let report = crate::tar_backend::extract(
+            decoder,
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            None,
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
     fn selected_extract<'a>(
@@ -100,15 +96,19 @@ impl ReadAdapterFactory for TarGzListAdapter {
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let report = crate::tar_gz_backend::extract_tar_gz_entry_by_index(
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder = GzDecoder::new(file);
+        let report = crate::tar_backend::extract(
+            decoder,
             path,
             &options.destination,
             options.policy.clone(),
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
             options.overwrite_resolver.as_deref_mut(),
+            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            options.cancellation.as_ref(),
         )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
-        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
     fn copy_to_writer(
@@ -119,13 +119,137 @@ impl ReadAdapterFactory for TarGzListAdapter {
         writer: &mut dyn std::io::Write,
     ) -> Result<CopyReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let written_bytes = crate::tar_gz_backend::copy_tar_gz_entry_by_index(
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder = GzDecoder::new(file);
+        let written_bytes = crate::tar_backend::copy(
+            decoder,
             path,
             usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
             writer,
         )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| tar_error(path, &error))?;
         Ok(CopyReport { written_bytes })
+    }
+}
+
+/// Native plain TAR adapter factory.
+#[derive(Debug, Default)]
+pub struct TarListAdapter;
+
+impl ReadAdapterFactory for TarListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &TAR_LIST_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let entries = crate::tar_backend::list(file, path).map_err(|error| tar_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_tar_entries(entries, "tar") })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let report = crate::tar_backend::test(file, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
+            .map_err(|error| tar_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let report = crate::tar_backend::extract(
+            file,
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            None,
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract<'a>(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let report = crate::tar_backend::extract(
+            file,
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let written_bytes = crate::tar_backend::copy(
+            file,
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn map_tar_entries(entries: Vec<crate::tar_backend::TarEntry>, method: &str) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| EngineEntry {
+            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            path: entry.path,
+            kind: entry.kind,
+            size: entry.size,
+            compressed_size: None,
+            modified: entry.modified,
+            mode: entry.mode,
+            encrypted: Some(false),
+            method: Some(method.to_owned()),
+            link_target: entry.link_target,
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn tar_error(path: &std::path::Path, error: &crate::tar_backend::TarError) -> ArchiveError {
+    let kind = match error {
+        crate::tar_backend::TarError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::tar_backend::TarError::Cancelled => ErrorKind::Cancelled,
+        crate::tar_backend::TarError::Io { .. } => ErrorKind::Io,
+        crate::tar_backend::TarError::MissingLinkTarget { .. } => ErrorKind::CorruptData,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
     }
 }
 

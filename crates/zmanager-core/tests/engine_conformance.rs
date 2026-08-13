@@ -175,6 +175,46 @@ fn engine_creation_adapters_round_trip_portable_formats() {
 }
 
 #[test]
+fn native_tar_family_uses_shared_reader_for_all_read_operations() {
+    let temp = TestDir::new("engine-conformance-shared-tar");
+    let source = temp.path("payload.txt");
+    fs::write(&source, b"shared tar payload").unwrap();
+
+    let plain_tar = temp.path("payload.tar");
+    let file = File::create(&plain_tar).unwrap();
+    let mut builder = tar::Builder::new(file);
+    builder.append_path_with_name(&source, "payload.txt").unwrap();
+    builder.finish().unwrap();
+
+    let gzip_tar = temp.path("payload.tar.gz");
+    zmanager_core::tar_gz_backend::create_tar_gz_from_path(&source, &gzip_tar, &zmanager_core::tar_gz_backend::TarGzCreateOptions::default()).unwrap();
+
+    let engine = create_default_engine().unwrap();
+    for archive in [&plain_tar, &gzip_tar] {
+        let mut handle = engine.open(ArchiveSource::from_path_autodetect(archive), OpenOptions::default()).unwrap();
+        let listing = handle.list().unwrap();
+        assert_eq!(listing.entries.len(), 1);
+        assert_eq!(listing.entries[0].path, "payload.txt");
+        let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+        assert_eq!(test.tested_entries, 1);
+        assert_eq!(test.tested_bytes, b"shared tar payload".len() as u64);
+        let mut copied = Vec::new();
+        let copy = handle.copy_entry(listing.entries[0].id, &mut copied).unwrap();
+        assert_eq!(copy.written_bytes, b"shared tar payload".len() as u64);
+        assert_eq!(copied, b"shared tar payload");
+        handle.close().unwrap();
+
+        let destination = temp.path(if archive.extension().and_then(|value| value.to_str()) == Some("gz") { "out-gzip" } else { "out-plain" });
+        let mut handle = engine.open(ArchiveSource::from_path_autodetect(archive), OpenOptions::default()).unwrap();
+        let mut options = ExtractOptions { destination: destination.clone(), ..ExtractOptions::default() };
+        let report = handle.extract(&mut options).unwrap();
+        assert_eq!(report.written_entries, 1);
+        assert_eq!(fs::read(destination.join("payload.txt")).unwrap(), b"shared tar payload");
+        handle.close().unwrap();
+    }
+}
+
+#[test]
 fn engine_creation_cancellation_does_not_commit_output() {
     let temp = TestDir::new("engine-conformance-create-cancel");
     let source = temp.path("source.txt");
