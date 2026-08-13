@@ -436,6 +436,7 @@ pub fn extract_entry_with_options(
 
     let detected_format = crate::archive_format::detect_archive_format(archive_path);
     let engine_selected = is_zip_family_archive(archive_path)
+        || detected_format == crate::archive_format::ArchiveFormatKind::SevenZ
         || is_tar_zst_archive(archive_path)
         || is_tzap_archive_path(archive_path)
         || is_apple_archive_path_browser(archive_path)
@@ -444,7 +445,19 @@ pub fn extract_entry_with_options(
         || crate::engine::format::FormatId::from_archive_format_kind(detected_format)
             .is_some_and(|format| crate::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&format));
     if engine_selected {
-        extract_entry_via_engine(archive_path, entry_path, &destination_root, &policy, options.password, None)
+        extract_entry_via_engine(
+            archive_path,
+            entry_path,
+            &destination_root,
+            &policy,
+            options.password,
+            None,
+            TzapRestoreOptions {
+                policy: options.tzap_restore_policy,
+                allow_degraded: options.tzap_allow_degraded,
+                allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
+            },
+        )
     } else {
         let report = libarchive_backend::extract_archive_entry_with_password(archive_path, entry_path, &destination_root, policy, options.password)?;
         let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
@@ -468,6 +481,7 @@ pub fn extract_selected_entries_with_options(
         crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let detected_format = crate::archive_format::detect_archive_format(archive_path);
     let engine_selected = is_zip_family_archive(archive_path)
+        || detected_format == crate::archive_format::ArchiveFormatKind::SevenZ
         || is_tar_zst_archive(archive_path)
         || is_tzap_archive_path(archive_path)
         || is_apple_archive_path_browser(archive_path)
@@ -589,6 +603,7 @@ fn extract_entry_via_engine(
     policy: &ExtractionPolicy,
     password: Option<&str>,
     recipient_key: Option<&Path>,
+    tzap_restore_options: TzapRestoreOptions,
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
@@ -614,8 +629,12 @@ fn extract_entry_via_engine(
     let mut written_bytes = 0_u64;
     let mut metadata_diagnostics = Vec::new();
     for entry in matching_entries {
-        let mut selected_options =
-            crate::engine::SelectedExtractOptions { destination: destination.to_path_buf(), policy: policy.clone(), ..Default::default() };
+        let mut selected_options = crate::engine::SelectedExtractOptions {
+            destination: destination.to_path_buf(),
+            policy: policy.clone(),
+            tzap_restore_options: Some(tzap_restore_options),
+            ..Default::default()
+        };
         let report = handle.extract_selected(entry.id, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
         written_bytes = written_bytes.saturating_add(report.written_bytes);
         metadata_diagnostics.extend(report.warnings);
@@ -647,14 +666,22 @@ pub fn copy_selected_entries_to_writer(
     let format = handle.detected().format;
     let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
     let mut report = SelectedCopyReport::default();
-
-    for entry in listing.entries {
-        if !matches!(entry.kind, BrowserEntryKind::File | BrowserEntryKind::FileCopy)
-            || !crate::safety::archive_pattern_matches_any(&entry.path, include_patterns, exclude_patterns)
-        {
-            report.skipped_entries = report.skipped_entries.saturating_add(1);
-            continue;
-        }
+    let selected_entries: Vec<_> = listing
+        .entries
+        .iter()
+        .filter(|entry| {
+            matches!(entry.kind, BrowserEntryKind::File | BrowserEntryKind::FileCopy)
+                && crate::safety::archive_pattern_matches_any(&entry.path, include_patterns, exclude_patterns)
+        })
+        .collect();
+    report.skipped_entries = listing.entries.len().saturating_sub(selected_entries.len());
+    if selected_entries.len() > 1 {
+        return Err(ArchiveBrowserError::UnsupportedOperation(format!(
+            "writer-copy requires exactly one selected regular file; selected {}",
+            selected_entries.len()
+        )));
+    }
+    for entry in selected_entries {
         let copied = handle.copy_entry(entry.id, writer).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
         report.copied_entries = report.copied_entries.saturating_add(1);
         report.written_bytes = report.written_bytes.saturating_add(copied.written_bytes);
@@ -1280,11 +1307,6 @@ fn is_zip_family_archive(path: &Path) -> bool {
 
 fn is_tar_zst_archive(path: &Path) -> bool {
     matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::TarZst)
-}
-
-#[allow(dead_code)]
-fn is_7z_archive(path: &Path) -> bool {
-    matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::SevenZ)
 }
 
 #[allow(dead_code)]

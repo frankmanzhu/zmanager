@@ -537,7 +537,13 @@ pub fn extract_7z_entry_by_index(
         source: io::Error::new(io::ErrorKind::NotFound, "retained 7z entry ID is not present in this archive"),
     })?;
     let occurrence = listing.entries[..entry_index].iter().filter(|candidate| candidate.name == entry.name).count();
-    extract_7z_inner(archive_path, destination, password, policy, overwrite_resolver, None, Some((entry.name.as_str(), occurrence)))
+    // The shared planner still receives the archive metadata needed for link
+    // validation, but only this retained path may reserve a destination.
+    // Without this narrowing, repeated retained-entry operations treat files
+    // selected by earlier calls as future collisions.
+    let mut selected_policy = policy;
+    selected_policy.include_patterns = vec![entry.name.clone()];
+    extract_7z_inner(archive_path, destination, password, selected_policy, overwrite_resolver, None, Some((entry.name.as_str(), occurrence)))
 }
 
 /// Extracts a `.7z` archive with an overwrite resolver.

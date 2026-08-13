@@ -40,8 +40,7 @@ use crate::ffi::util::{
 
 fn map_archive_session_error(error: zmanager_core::engine::ArchiveError) -> ZmanagerGuiError {
     if error.kind == zmanager_core::engine::ErrorKind::InvalidFormat && error.message.starts_with("Unknown or closed archive session") {
-        return bridge_error(ERROR_INVALID_REQUEST, error.message, hint("Open a new archive session before using this entry."), BridgeSeverity::Warning, false)
-            .into();
+        return bridge_error(ERROR_INVALID_REQUEST, error.message, hint("Open a new archive session before using this entry."), BridgeSeverity::Warning, false);
     }
     crate::ffi::error::map_archive_engine_error(error)
 }
