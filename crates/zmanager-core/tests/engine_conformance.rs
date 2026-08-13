@@ -118,6 +118,79 @@ fn engine_creates_zip_through_one_shot_contract_and_commits_before_returning() {
     handle.close().unwrap();
 }
 
+fn create_engine_fixture(
+    engine: &zmanager_core::engine::ArchiveEngine,
+    source: &std::path::Path,
+    destination: &std::path::Path,
+    options: CreateOptions,
+) -> zmanager_core::engine::CreateReport {
+    let manifest = zmanager_core::manifest::plan_archive(source, &zmanager_core::manifest::PlanOptions::default()).unwrap();
+    let request = CreateRequest::new(manifest, destination, options);
+    let token = zmanager_core::jobs::CancellationToken::new();
+    let mut sink = NoopSink;
+    let mut context = zmanager_core::jobs::JobContext::new(&token, &mut sink);
+    engine.create(&request, &mut context).unwrap()
+}
+
+#[test]
+fn engine_creation_adapters_round_trip_portable_formats() {
+    let temp = TestDir::new("engine-conformance-create-matrix");
+    let source = temp.path("project");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("file.txt"), b"portable create matrix").unwrap();
+    let engine = create_default_engine().unwrap();
+
+    let cases = [
+        ("created.tar.gz", CreateOptions::TarGz(zmanager_core::tar_gz_backend::TarGzCreateOptions::default())),
+        ("created.tar.zst", CreateOptions::TarZstd(zmanager_core::tar_zst_backend::TarZstdCreateOptions::default())),
+        ("created.7z", CreateOptions::SevenZ(zmanager_core::sevenz_backend::SevenZCreateOptions { encrypt_file_names: false, ..Default::default() })),
+        (
+            "created.tzap",
+            CreateOptions::Tzap(zmanager_core::tzap_backend::TzapCreateOptions {
+                key_source: zmanager_core::tzap_backend::TzapKeySource::NoPassword,
+                level: 1,
+                preserve_metadata: true,
+                replace_existing: false,
+                volume_size: None,
+                recovery_percentage: 0,
+                volume_loss_tolerance: 0,
+                x509_signing: None,
+            }),
+        ),
+    ];
+
+    for (name, options) in cases {
+        let archive = temp.path(name);
+        let report = create_engine_fixture(&engine, &source, &archive, options);
+        assert_eq!(report.written_entries, 2, "{name} should include the project directory and file");
+        assert!(archive.is_file(), "{name} should be committed before create returns");
+        let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+        let listing = handle.list().unwrap();
+        assert!(listing.entries.iter().any(|entry| entry.path == "project/file.txt"), "{name} should reopen through the engine");
+        let destination = temp.path(format!("out-{name}"));
+        let mut extract = ExtractOptions { destination, ..Default::default() };
+        assert_eq!(handle.extract(&mut extract).unwrap().written_bytes, b"portable create matrix".len() as u64);
+    }
+}
+
+#[test]
+fn engine_creation_cancellation_does_not_commit_output() {
+    let temp = TestDir::new("engine-conformance-create-cancel");
+    let source = temp.path("source.txt");
+    let archive = temp.path("cancelled.tar.zst");
+    fs::write(&source, b"cancelled create").unwrap();
+    let manifest = zmanager_core::manifest::plan_archive(&source, &zmanager_core::manifest::PlanOptions::default()).unwrap();
+    let request = CreateRequest::new(manifest, &archive, CreateOptions::TarZstd(zmanager_core::tar_zst_backend::TarZstdCreateOptions::default()));
+    let engine = create_default_engine().unwrap();
+    let token = zmanager_core::jobs::CancellationToken::new();
+    token.cancel();
+    let mut sink = NoopSink;
+    let mut context = zmanager_core::jobs::JobContext::new(&token, &mut sink);
+    let error = engine.create(&request, &mut context).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::Cancelled);
+    assert!(!archive.exists());
+}
+
 #[test]
 fn engine_lists_native_zip_fixture() {
     let temp = TestDir::new("engine-conformance-zip");
