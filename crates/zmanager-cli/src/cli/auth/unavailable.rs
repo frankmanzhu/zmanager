@@ -10,6 +10,10 @@ use crate::cli::usage::print_error_line;
 use std::process::ExitCode;
 
 pub(crate) fn auth_command(_args: &[String], _global: GlobalOptions) -> ExitCode {
+    hosted_command(&[], GlobalOptions::default())
+}
+
+pub(crate) fn hosted_command(_args: &[String], _global: GlobalOptions) -> ExitCode {
     #[cfg(unix)]
     let install_hint = "  curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh";
     #[cfg(windows)]

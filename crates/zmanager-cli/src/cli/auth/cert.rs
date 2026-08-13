@@ -1,18 +1,31 @@
+#[cfg(feature = "tzap-online")]
 use super::auth::auth_status_command;
-use super::hosted::{parse_cert_enroll_args, parse_hosted_cert_renew_args, run_hosted_cert_enroll, run_hosted_cert_renew};
+use super::hosted::{parse_cert_enroll_args, parse_hosted_cert_renew_args};
+#[cfg(feature = "tzap-online")]
+use super::hosted::{run_hosted_cert_enroll, run_hosted_cert_renew};
 use super::support::{parse_cert_id_operation_args, parse_tzap_context_args, print_stable_tzap_error, service_envelope, service_request};
 use crate::cli::options::GlobalOptions;
-use crate::cli::usage::{CERT_HELP, ME_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help};
+#[cfg(feature = "tzap-online")]
+use crate::cli::usage::ME_HELP;
+use crate::cli::usage::{CERT_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help};
 use serde_json::{Value, json};
 use std::process::ExitCode;
 use zmanager_core::tzap_service::{tzap_cert_enroll_json, tzap_cert_renew_json, tzap_cert_revoke_json, tzap_certificate_inventory_json};
 
+#[cfg(feature = "tzap-online")]
 pub(crate) fn me_command(args: &[String], global: GlobalOptions) -> ExitCode {
-    if wants_help(args) {
-        print_help_stdout(ME_HELP, &global);
-        return ExitCode::SUCCESS;
+    #[cfg(not(feature = "tzap-online"))]
+    {
+        return super::unavailable::hosted_command(args, global);
     }
-    auth_status_command(args, global)
+    #[cfg(feature = "tzap-online")]
+    {
+        if wants_help(args) {
+            print_help_stdout(ME_HELP, &global);
+            return ExitCode::SUCCESS;
+        }
+        auth_status_command(args, global)
+    }
 }
 pub(crate) fn cert_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) || args.is_empty() {
@@ -34,6 +47,9 @@ pub(super) fn cert_enroll_command(args: &[String], mut global: GlobalOptions) ->
         Err(code) => return code,
     };
     if options.service_base_url.is_some() {
+        #[cfg(not(feature = "tzap-online"))]
+        return super::unavailable::hosted_command(args, global);
+        #[cfg(feature = "tzap-online")]
         return run_hosted_cert_enroll(&options, &global);
     }
     let request = service_request(&options.context, json!({}));
@@ -46,6 +62,9 @@ pub(super) fn cert_renew_command(args: &[String], mut global: GlobalOptions) -> 
         Err(code) => return code,
     };
     if options.service_base_url.is_some() {
+        #[cfg(not(feature = "tzap-online"))]
+        return super::unavailable::hosted_command(args, global);
+        #[cfg(feature = "tzap-online")]
         return run_hosted_cert_renew(&options, &global);
     }
     let request = service_request(&options.context, json!({"certificate_id": options.certificate_id.unwrap_or_default()}));

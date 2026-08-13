@@ -1,12 +1,17 @@
-use super::support::{CliHttpJsonTransport, certificate_summary_value, current_unix_seconds, parse_tzap_context_option, print_stable_tzap_error};
+#![cfg_attr(not(feature = "tzap-online"), allow(dead_code, unused_imports))]
+
+#[cfg(feature = "tzap-online")]
+use super::support::CliHttpJsonTransport;
+use super::support::{certificate_summary_value, current_unix_seconds, parse_tzap_context_option, print_stable_tzap_error};
 use super::{DEFAULT_TZAP_CERT_VALIDITY_SECONDS, MISSING_TZAP_SESSION, STAGING_ENROLLMENT_KEY_LABEL, TzapCliContext};
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{command_usage_error, print_error_line, print_success_line};
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
+#[cfg(feature = "tzap-online")]
 use zmanager_core::auth_client::TzapSessionStore as _;
-use zmanager_core::local_identity_store::TzapLocalIdentityStore as _;
+use zmanager_core::local_identity_store::TzapLocalIdentityStore;
 
 #[derive(Debug)]
 
@@ -95,6 +100,7 @@ pub(super) enum HostedCertOperationError {
     Message(String),
 }
 
+#[cfg(feature = "tzap-online")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_hosted_cert_operation<F>(
     operation: &'static str,
@@ -159,6 +165,7 @@ where
     }
 }
 
+#[cfg(feature = "tzap-online")]
 pub(super) fn run_hosted_cert_enroll(options: &HostedCertOptions, global: &GlobalOptions) -> ExitCode {
     run_hosted_cert_operation(
         "cert_enroll",
@@ -191,6 +198,7 @@ pub(super) fn run_hosted_cert_enroll(options: &HostedCertOptions, global: &Globa
     )
 }
 
+#[cfg(feature = "tzap-online")]
 pub(super) fn run_hosted_cert_renew(options: &HostedCertOptions, global: &GlobalOptions) -> ExitCode {
     let certificate_id = options.certificate_id.as_deref().unwrap_or_default();
     run_hosted_cert_operation(

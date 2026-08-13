@@ -1,4 +1,8 @@
-use super::{AUTH_SESSION_EXCHANGE_PATH, TzapCliContext};
+#![cfg_attr(not(feature = "tzap-online"), allow(dead_code, unused_imports))]
+
+#[cfg(feature = "tzap-online")]
+use super::AUTH_SESSION_EXCHANGE_PATH;
+use super::TzapCliContext;
 use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{command_usage_error, json_escape, json_optional_string, print_error_line};
 use serde_json::{Value, json};
@@ -6,7 +10,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "tzap-online")]
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn parse_tzap_context_args(args: &[String], global: &mut GlobalOptions, command: &str) -> Result<TzapCliContext, ExitCode> {
     let mut context = TzapCliContext::default();
@@ -76,6 +82,7 @@ pub(super) fn parse_tzap_context_option(
     Ok(true)
 }
 
+#[cfg(feature = "tzap-online")]
 pub(super) fn parse_environment_option(
     args: &[String],
     index: &mut usize,
@@ -156,6 +163,7 @@ pub(super) fn write_json_file(path: &Path, value: &Value) -> io::Result<()> {
     fs::write(path, bytes)
 }
 
+#[cfg(feature = "tzap-online")]
 pub(super) fn callback_url_parameter(callback_url: &str, key: &str) -> Option<String> {
     let (_, query) = callback_url.split_once('?')?;
     let query = query.split_once('#').map_or(query, |(query, _)| query);
@@ -168,6 +176,7 @@ pub(super) fn callback_url_parameter(callback_url: &str, key: &str) -> Option<St
     None
 }
 
+#[cfg(feature = "tzap-online")]
 pub(super) fn exchange_handoff_code(
     auth_base_url: &str,
     client_id: &str,
@@ -212,6 +221,7 @@ pub(super) fn exchange_handoff_code(
     .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tzap-online")]
 pub(super) fn http_post_json(url: &str, body: &Value) -> Result<Value, String> {
     let response = http_json_request("POST", url, None, Some(body))?;
     if !(200..=299).contains(&response.status_code) {
@@ -220,9 +230,11 @@ pub(super) fn http_post_json(url: &str, body: &Value) -> Result<Value, String> {
     serde_json::from_slice(&response.body).map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tzap-online")]
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CliHttpJsonTransport;
 
+#[cfg(feature = "tzap-online")]
 impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
     fn send(
         &self,
@@ -237,6 +249,21 @@ impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport 
     }
 }
 
+#[cfg(not(feature = "tzap-online"))]
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CliHttpJsonTransport;
+
+#[cfg(not(feature = "tzap-online"))]
+impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
+    fn send(
+        &self,
+        _request: &zmanager_core::auth_client::TzapAuthHttpRequest,
+    ) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, zmanager_core::auth_client::TzapAuthError> {
+        Err(zmanager_core::auth_client::TzapAuthError::Transport { message: "tzap-online feature not enabled in this build".to_owned() })
+    }
+}
+
+#[cfg(feature = "tzap-online")]
 pub(super) fn http_json_request(
     method: &str,
     url: &str,
@@ -256,6 +283,7 @@ pub(super) fn http_json_request(
     Ok(zmanager_core::auth_client::TzapAuthHttpResponse { status_code, body: response_body })
 }
 
+#[cfg(feature = "tzap-online")]
 pub(crate) fn build_hosted_http_request(
     client: &reqwest::blocking::Client,
     method: &str,
@@ -397,6 +425,7 @@ pub(super) fn service_envelope(response: &str) -> Result<Value, String> {
 
 /// Renders the session summary from the service envelope (CR-113: the CLI
 /// keeps its output shape but the session content comes from the service).
+#[cfg(feature = "tzap-online")]
 pub(super) fn print_session_summary_json(session: &Value, global: &GlobalOptions) {
     let audience = session["audience"].as_str().unwrap_or_default();
     let expires_at_unix_seconds = session["expires_at_unix_seconds"].as_u64().unwrap_or(0);
