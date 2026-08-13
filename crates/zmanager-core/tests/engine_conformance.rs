@@ -363,6 +363,40 @@ fn native_cab_adapter_composes_shared_safety_and_atomic_output() {
 }
 
 #[test]
+fn native_xar_adapter_uses_standalone_reader_when_xar_available() {
+    let Some(xar) = std::env::var("PATH")
+        .ok()
+        .and_then(|path| path.split(':').map(std::path::PathBuf::from).map(|directory| directory.join("xar")).find(|candidate| candidate.is_file()))
+    else {
+        return;
+    };
+    let temp = TestDir::new("engine-conformance-xar");
+    let source = temp.path("project");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("file.txt"), b"xar engine payload\n").unwrap();
+    let archive = temp.path("payload.xar");
+    let create = std::process::Command::new(xar).current_dir(temp.root()).arg("-cf").arg(&archive).arg("project").output().unwrap();
+    assert!(create.status.success(), "xar failed: {}", String::from_utf8_lossy(&create.stderr));
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    let file_entry = listing.entries.iter().find(|entry| entry.path.ends_with("project/file.txt")).expect("XAR file should be listed");
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert!(test.tested_entries > 0);
+    let mut copied = Vec::new();
+    let copy = handle.copy_entry(file_entry.id, &mut copied).unwrap();
+    assert_eq!(copy.written_bytes, copied.len() as u64);
+    assert_eq!(copied, b"xar engine payload\n");
+    let destination = temp.path("out");
+    let mut options = ExtractOptions { destination: destination.clone(), ..ExtractOptions::default() };
+    let report = handle.extract(&mut options).unwrap();
+    assert!(report.written_entries > 0);
+    assert_eq!(fs::read(destination.join("project/file.txt")).unwrap(), b"xar engine payload\n");
+    handle.close().unwrap();
+}
+
+#[test]
 fn engine_creation_cancellation_does_not_commit_output() {
     let temp = TestDir::new("engine-conformance-create-cancel");
     let source = temp.path("source.txt");

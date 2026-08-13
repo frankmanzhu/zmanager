@@ -78,6 +78,7 @@ pub mod trust;
 pub mod tzap_backend;
 pub mod virtual_disk_backend;
 pub mod x509_format;
+pub mod xar_backend;
 pub mod zip_backend;
 
 // The online/identity surface is one gated unit: everything under `auth`

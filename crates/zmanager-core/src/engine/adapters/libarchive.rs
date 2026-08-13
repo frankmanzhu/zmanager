@@ -25,7 +25,6 @@ pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
     FormatId::TAR_LZ4,
     FormatId::TAR_LRZ,
     FormatId::ISO,
-    FormatId::XAR,
     FormatId::LHA,
     FormatId::WARC,
     FormatId::MTREE,

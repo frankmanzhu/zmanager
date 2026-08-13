@@ -293,6 +293,14 @@ static CAB_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static XAR_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_xar_adapter",
+    format: FormatId::XAR,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 /// Native Debian package adapter composing AR with the registered payload engines.
 #[derive(Debug, Default)]
 pub struct DebListAdapter;
@@ -546,6 +554,94 @@ fn cab_error(path: &std::path::Path, error: &crate::cab_backend::CabError) -> Ar
         crate::cab_backend::CabError::Invalid { .. } => ErrorKind::CorruptData,
         crate::cab_backend::CabError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::cab_backend::CabError::Cancelled => ErrorKind::Cancelled,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
+
+/// Native XAR adapter backed by the standalone `xara` reader.
+#[derive(Debug, Default)]
+pub struct XarListAdapter;
+
+impl ReadAdapterFactory for XarListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &XAR_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entries = crate::xar_backend::list(path).map_err(|error| xar_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_xar_entries(entries) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::xar_backend::test(path, test_options).map_err(|error| xar_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::xar_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| xar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let written_bytes = crate::xar_backend::copy(
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| xar_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn map_xar_entries(entries: Vec<crate::xar_backend::XarEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| EngineEntry {
+            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            path: entry.path,
+            kind: entry.kind,
+            size: Some(entry.size),
+            compressed_size: None,
+            encrypted: Some(false),
+            method: Some("xar".to_owned()),
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn xar_error(path: &std::path::Path, error: &crate::xar_backend::XarError) -> ArchiveError {
+    let kind = match error {
+        crate::xar_backend::XarError::Io { .. } => ErrorKind::Io,
+        crate::xar_backend::XarError::Parser { .. } => ErrorKind::CorruptData,
+        crate::xar_backend::XarError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::xar_backend::XarError::Cancelled => ErrorKind::Cancelled,
     };
     ArchiveError {
         kind,
