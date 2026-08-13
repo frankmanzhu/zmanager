@@ -12,8 +12,8 @@ use std::sync::{
 
 use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{
-    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchiveSource, CreateOptions, CreateRequest, ExtractOptions, FormatId, OpenOptions,
-    SourceAccess, create_default_engine, is_split_zip_archive_path,
+    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchivePluginRole, ArchiveSource, CreateOptions, CreateRequest, ExtractOptions,
+    FormatId, OpenOptions, SourceAccess, create_default_engine, is_split_zip_archive_path,
 };
 
 struct NoopSink;
@@ -81,12 +81,16 @@ fn capability_snapshot_reports_registration_and_platform_state() {
     assert!(zip.operations.contains(&ArchiveOperation::List));
     assert!(zip.operations.contains(&ArchiveOperation::Test));
     assert!(zip.operations.contains(&ArchiveOperation::Create));
+    assert_eq!(zip.role, Some(ArchivePluginRole::Both));
     assert_eq!(zip.source_access, Some(SourceAccess::Seekable));
     assert!(zip.encryption_supported);
 
     let apple_archive = snapshot.iter().find(|capability| capability.format == FormatId::APPLE_ARCHIVE).expect("Apple Archive capability should be present");
     assert!(apple_archive.recognized);
     assert!(apple_archive.platform_available);
+
+    let package = snapshot.iter().find(|capability| capability.format == FormatId::PKG).expect("PKG capability should be present");
+    assert_eq!(package.role, Some(ArchivePluginRole::Extraction));
 }
 
 #[test]

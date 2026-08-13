@@ -3,8 +3,8 @@
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, CreateReport, CreateRequest, DetectedArchive, EntryId, ErrorKind, ExtractOptions,
-    ExtractReport, FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, ArchivePluginRole, CopyReport, CreateReport, CreateRequest, DetectedArchive, EntryId, ErrorKind,
+    ExtractOptions, ExtractReport, FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, TestOptions, TestReport,
 };
 use crate::jobs::JobContext;
 use std::collections::HashMap;
@@ -79,6 +79,11 @@ pub trait CreateAdapterFactory: Send + Sync {
 
     /// Finalizes and atomically commits one creation request.
     fn create(&self, request: &CreateRequest, context: &mut JobContext<'_>) -> Result<CreateReport, ArchiveError>;
+
+    /// Streams one creation request to a caller-owned writer when supported.
+    fn create_to_writer(&self, _request: &CreateRequest, _writer: &mut dyn Write, _context: &mut JobContext<'_>) -> Result<CreateReport, ArchiveError> {
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive creator does not support writer output"))
+    }
 }
 
 /// Immutable registry mapping `(FormatId, ArchiveOperation)` to an adapter factory.
@@ -164,7 +169,16 @@ impl AdapterRegistry {
                     unavailable_reason,
                     operations: registered.as_ref().map_or_else(Vec::new, |value| value.operations.clone()),
                     source_access: registered.as_ref().map(|value| value.source_access),
-                    encryption_supported: registered.is_some_and(|value| value.encryption_supported),
+                    encryption_supported: registered.as_ref().is_some_and(|value| value.encryption_supported),
+                    role: registered.as_ref().map(|value| {
+                        let has_create = value.operations.contains(&ArchiveOperation::Create);
+                        let has_read = value.operations.iter().any(|operation| *operation != ArchiveOperation::Create);
+                        match (has_create, has_read) {
+                            (true, true) => ArchivePluginRole::Both,
+                            (true, false) => ArchivePluginRole::Archive,
+                            (false, true | false) => ArchivePluginRole::Extraction,
+                        }
+                    }),
                 })
             })
             .collect()

@@ -508,4 +508,17 @@ pub struct FormatCapabilities {
     pub source_access: Option<SourceAccess>,
     /// Whether any registered adapter supports encryption.
     pub encryption_supported: bool,
+    /// Product-facing role derived from registered operations.
+    pub role: Option<ArchivePluginRole>,
+}
+
+/// Product-facing capability role derived from operation registrations.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ArchivePluginRole {
+    /// The format can create archives but has no registered read operation.
+    Archive,
+    /// The format can read/extract archives but has no registered creator.
+    Extraction,
+    /// The format has both creation and read/extraction operations.
+    Both,
 }

@@ -497,8 +497,13 @@ fn create_stream(
         volume_size: None,
     };
     let stdout = io::stdout();
-    match zmanager_core::zip_backend::create_zip_stream_from_manifest(manifest, stdout.lock(), &options) {
-        Ok((_output, report)) => {
+    let mut output = stdout.lock();
+    let token = CancellationToken::new();
+    let mut sink = |_event: JobEvent| {};
+    let mut context = JobContext::new(&token, &mut sink);
+    let request = zmanager_core::engine::CreateRequest::new(manifest.clone(), PathBuf::from("-"), zmanager_core::engine::CreateOptions::Zip(options));
+    match zmanager_core::engine::create_default_engine().and_then(|engine| engine.create_to_writer(&request, &mut output, &mut context)) {
+        Ok(report) => {
             output::stderr_line(
                 global.color,
                 format_args!(
@@ -506,7 +511,7 @@ fn create_stream(
                     output::styled(StyleRole::Success, format_args!("created")),
                     report.written_entries,
                     report.written_bytes,
-                    report.warnings.len()
+                    report.warnings.len(),
                 ),
             );
             ExitCode::SUCCESS

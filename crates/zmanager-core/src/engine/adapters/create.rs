@@ -57,6 +57,28 @@ impl CreateAdapterFactory for ZipCreateAdapter {
             warnings: report.warnings,
         })
     }
+
+    fn create_to_writer(&self, request: &CreateRequest, writer: &mut dyn std::io::Write, context: &mut JobContext<'_>) -> Result<CreateReport, ArchiveError> {
+        let CreateOptions::Zip(options) = &request.options else {
+            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, "ZIP creator received non-ZIP options"));
+        };
+        context.check_cancelled().map_err(|_| ArchiveError::usable(ErrorKind::Cancelled, "ZIP creation was cancelled"))?;
+        if options.volume_size.is_some() {
+            return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "streaming ZIP output cannot be split"));
+        }
+        let (_, report) = crate::zip_backend::create_zip_stream_from_manifest(&request.manifest, writer, options)
+            .map_err(|error| creation_error(&request.destination, error))?;
+        Ok(CreateReport {
+            format: FormatId::ZIP,
+            written_entries: count(report.written_entries),
+            written_bytes: report.written_bytes,
+            encrypted: Some(report.encrypted),
+            solid: None,
+            volume_size: report.volume_size,
+            volume_count: count(report.volume_count),
+            warnings: report.warnings,
+        })
+    }
 }
 
 /// Native standard split-ZIP writer.

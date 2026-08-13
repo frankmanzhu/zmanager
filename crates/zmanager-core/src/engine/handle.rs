@@ -86,6 +86,19 @@ impl ArchiveEngine {
         })?;
         factory.create(request, context)
     }
+
+    /// Streams one creation request through the registered writer adapter.
+    pub fn create_to_writer(
+        &self,
+        request: &CreateRequest,
+        writer: &mut dyn Write,
+        context: &mut crate::jobs::JobContext<'_>,
+    ) -> Result<CreateReport, ArchiveError> {
+        let factory = self.registry.resolve_create(request.format()).ok_or_else(|| {
+            ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("No creation adapter registered for format '{}'", request.format()))
+        })?;
+        factory.create_to_writer(request, writer, context)
+    }
 }
 
 /// Stateful handle representing an opened archive session (ARC-105).
