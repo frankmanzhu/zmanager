@@ -122,11 +122,13 @@ impl AtomicOutputFile {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) struct TemporaryFile {
     path: PathBuf,
     file: File,
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl TemporaryFile {
     pub(crate) fn create(label: &str) -> io::Result<Self> {
         let parent = std::env::temp_dir();
@@ -153,6 +155,7 @@ impl TemporaryFile {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl Drop for TemporaryFile {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
