@@ -265,6 +265,26 @@ fn native_cpio_adapter_uses_bounded_operations_for_fixture() {
 }
 
 #[test]
+fn native_deb_adapter_composes_ar_and_shared_payload_readers() {
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.deb");
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    assert_eq!(listing.entries.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), ["debian-binary", "control.tar.gz", "data.tar.xz"]);
+
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert_eq!(test.tested_entries, 3);
+    assert!(test.tested_bytes > 0);
+
+    let destination = TestDir::new("engine-conformance-deb");
+    let mut options = ExtractOptions { destination: destination.path("out"), ..ExtractOptions::default() };
+    let report = handle.extract(&mut options).unwrap();
+    assert!(report.written_entries > 0);
+    assert_eq!(fs::read(destination.path("out/data/usr/share/zmanager-fixture/README.txt")).unwrap(), b"ZManager fixture payload\n");
+    handle.close().unwrap();
+}
+
+#[test]
 fn engine_creation_cancellation_does_not_commit_output() {
     let temp = TestDir::new("engine-conformance-create-cancel");
     let source = temp.path("source.txt");

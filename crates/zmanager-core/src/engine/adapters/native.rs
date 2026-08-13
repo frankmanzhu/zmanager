@@ -269,6 +269,103 @@ static CPIO_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static DEB_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_deb_adapter",
+    format: FormatId::DEB,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+/// Native Debian package adapter composing AR with the registered payload engines.
+#[derive(Debug, Default)]
+pub struct DebListAdapter;
+
+impl ReadAdapterFactory for DebListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &DEB_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entries = crate::ar_backend::list(path).map_err(|error| ar_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_ar_entries(entries) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::ar_backend::test(path, test_options).map_err(|error| ar_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            crate::deb_backend::extract_deb_nested_with_overwrite_resolver(path, &options.destination, &options.policy, resolver)
+        } else {
+            crate::deb_backend::extract_deb_nested(path, &options.destination, &options.policy)
+        }
+        .map_err(|error| deb_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let written_bytes = crate::ar_backend::copy(
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| ar_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn deb_error(path: &std::path::Path, error: &crate::deb_backend::DebError) -> ArchiveError {
+    let kind = match error {
+        crate::deb_backend::DebError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::deb_backend::DebError::Engine(source) => source.kind,
+        crate::deb_backend::DebError::Ar(source) => match source {
+            crate::ar_backend::ArError::Safety(safety) => crate::engine::adapters::safety_error_kind(safety),
+            crate::ar_backend::ArError::Cancelled => ErrorKind::Cancelled,
+            crate::ar_backend::ArError::Io { .. } => ErrorKind::Io,
+            crate::ar_backend::ArError::Invalid { .. } => ErrorKind::CorruptData,
+        },
+        crate::deb_backend::DebError::Tar(source) => match source {
+            crate::tar_backend::TarError::Safety(safety) => crate::engine::adapters::safety_error_kind(safety),
+            crate::tar_backend::TarError::Cancelled => ErrorKind::Cancelled,
+            crate::tar_backend::TarError::Io { .. } => ErrorKind::Io,
+            crate::tar_backend::TarError::MissingLinkTarget { .. } => ErrorKind::CorruptData,
+        },
+        crate::deb_backend::DebError::RawStream(source) => match source {
+            crate::raw_stream_backend::RawStreamError::Safety(safety) => crate::engine::adapters::safety_error_kind(safety),
+            crate::raw_stream_backend::RawStreamError::Io { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolUnavailable { .. } => ErrorKind::Io,
+            crate::raw_stream_backend::RawStreamError::MissingOutputName { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolFailed { .. } => {
+                ErrorKind::CorruptData
+            }
+        },
+        crate::deb_backend::DebError::Io { .. } => ErrorKind::Io,
+        crate::deb_backend::DebError::MissingMember { .. } => ErrorKind::CorruptData,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
+
 /// Native CPIO reader adapter.
 #[derive(Debug, Default)]
 pub struct CpioListAdapter;

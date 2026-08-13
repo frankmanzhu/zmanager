@@ -1,13 +1,14 @@
-use crate::libarchive_backend::{self, LibarchiveError};
+use crate::ar_backend;
+use crate::archive_format::{self, ArchiveFormatKind};
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver,
 };
-use crate::tar_zst_backend::{self, TarZstdError};
 use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
 use std::fmt;
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
 
 const DEB_TEMP_PREFIX: &str = "zmanager-deb";
 const DEBIAN_BINARY_MEMBER: &str = "debian-binary";
@@ -36,10 +37,14 @@ pub struct DebExtractReport {
 pub enum DebError {
     /// Filesystem I/O failed.
     Io { path: PathBuf, source: io::Error },
-    /// Top-level or payload extraction through libarchive failed.
-    Libarchive(LibarchiveError),
-    /// `.tar.zst` payload extraction failed.
-    TarZst(TarZstdError),
+    /// Native engine extraction failed.
+    Engine(crate::engine::ArchiveError),
+    /// Native AR parsing or member extraction failed.
+    Ar(ar_backend::ArError),
+    /// Shared TAR payload extraction failed.
+    Tar(crate::tar_backend::TarError),
+    /// Shared compression decoder failed.
+    RawStream(crate::raw_stream_backend::RawStreamError),
     /// Extraction safety rejected an entry.
     Safety(ExtractionSafetyError),
     /// A required `.deb` member was missing.
@@ -50,8 +55,10 @@ impl fmt::Display for DebError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io { path, source } => write!(f, "I/O failed for {}: {source}", path.display()),
-            Self::Libarchive(source) => write!(f, "libarchive extraction failed: {source}"),
-            Self::TarZst(source) => write!(f, "tar.zst payload extraction failed: {source}"),
+            Self::Engine(source) => write!(f, "nested archive engine extraction failed: {source}"),
+            Self::Ar(source) => write!(f, "deb AR container failed: {source}"),
+            Self::Tar(source) => write!(f, "deb TAR payload failed: {source}"),
+            Self::RawStream(source) => write!(f, "deb payload decoder failed: {source}"),
             Self::Safety(source) => write!(f, "extraction safety rejected entry: {source}"),
             Self::MissingMember { member } => write!(f, "deb package is missing {member}"),
         }
@@ -62,23 +69,37 @@ impl std::error::Error for DebError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io { source, .. } => Some(source),
-            Self::Libarchive(source) => Some(source),
-            Self::TarZst(source) => Some(source),
+            Self::Engine(source) => Some(source),
+            Self::Ar(source) => Some(source),
+            Self::Tar(source) => Some(source),
+            Self::RawStream(source) => Some(source),
             Self::Safety(source) => Some(source),
             Self::MissingMember { .. } => None,
         }
     }
 }
 
-impl From<LibarchiveError> for DebError {
-    fn from(source: LibarchiveError) -> Self {
-        Self::Libarchive(source)
+impl From<crate::engine::ArchiveError> for DebError {
+    fn from(source: crate::engine::ArchiveError) -> Self {
+        Self::Engine(source)
     }
 }
 
-impl From<TarZstdError> for DebError {
-    fn from(source: TarZstdError) -> Self {
-        Self::TarZst(source)
+impl From<ar_backend::ArError> for DebError {
+    fn from(source: ar_backend::ArError) -> Self {
+        Self::Ar(source)
+    }
+}
+
+impl From<crate::tar_backend::TarError> for DebError {
+    fn from(source: crate::tar_backend::TarError) -> Self {
+        Self::Tar(source)
+    }
+}
+
+impl From<crate::raw_stream_backend::RawStreamError> for DebError {
+    fn from(source: crate::raw_stream_backend::RawStreamError) -> Self {
+        Self::RawStream(source)
     }
 }
 
@@ -98,7 +119,7 @@ impl From<ExtractionSafetyError> for DebError {
 ///
 /// Returns [`DebError`] when the package is malformed, a payload archive cannot
 /// be read, a safety policy rejects an entry, or filesystem writes fail.
-pub fn extract_deb_nested(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<DebExtractReport, DebError> {
+pub fn extract_deb_nested(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: &ExtractionPolicy) -> Result<DebExtractReport, DebError> {
     extract_deb_nested_inner(archive_path, destination, policy, None)
 }
 
@@ -112,7 +133,7 @@ pub fn extract_deb_nested(archive_path: impl AsRef<Path>, destination: impl AsRe
 pub fn extract_deb_nested_with_overwrite_resolver(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
+    policy: &ExtractionPolicy,
     overwrite_resolver: &mut dyn OverwriteResolver,
 ) -> Result<DebExtractReport, DebError> {
     extract_deb_nested_inner(archive_path, destination, policy, Some(overwrite_resolver))
@@ -121,22 +142,22 @@ pub fn extract_deb_nested_with_overwrite_resolver(
 fn extract_deb_nested_inner(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
+    policy: &ExtractionPolicy,
     mut overwrite_resolver: Option<&mut dyn OverwriteResolver>,
 ) -> Result<DebExtractReport, DebError> {
     let destination = destination.as_ref();
     let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| DebError::Io { path: destination.to_path_buf(), source })?;
 
+    let archive_path = archive_path.as_ref();
     let temp = TemporaryDirectory::new(DEB_TEMP_PREFIX)?;
-    libarchive_backend::extract_archive(archive_path, temp.path(), ExtractionPolicy::default())?;
-
-    let debian_binary = temp.path().join(DEBIAN_BINARY_MEMBER);
-    let control_member = find_top_level_member(temp.path(), CONTROL_PAYLOAD_PREFIX).ok_or(DebError::MissingMember { member: CONTROL_PAYLOAD_GLOB })?;
-    let data_member = find_top_level_member(temp.path(), DATA_PAYLOAD_PREFIX).ok_or(DebError::MissingMember { member: DATA_PAYLOAD_GLOB })?;
+    let members = ar_backend::list(archive_path)?;
+    let debian_binary = materialize_member(archive_path, &members, DEBIAN_BINARY_MEMBER, temp.path())?;
+    let control_member = materialize_member_by_prefix(archive_path, &members, CONTROL_PAYLOAD_PREFIX, temp.path())?;
+    let data_member = materialize_member_by_prefix(archive_path, &members, DATA_PAYLOAD_PREFIX, temp.path())?;
 
     let mut report = DebExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
 
-    if debian_binary.is_file() {
+    if let Some(debian_binary) = debian_binary {
         match overwrite_resolver {
             Some(ref mut resolver) => {
                 copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), Some(&mut **resolver), &mut report)?;
@@ -147,18 +168,31 @@ fn extract_deb_nested_inner(
         report.warnings.push(format!("deb package did not include {DEBIAN_BINARY_MEMBER}"));
     }
 
+    let control_policy = policy_with_remaining_budget(policy, &report);
     let control_report = match overwrite_resolver {
-        Some(ref mut resolver) => extract_payload_archive(&control_member, &destination_root.join(CONTROL_OUTPUT_DIR), policy.clone(), Some(&mut **resolver))?,
-        None => extract_payload_archive(&control_member, &destination_root.join(CONTROL_OUTPUT_DIR), policy.clone(), None)?,
+        Some(ref mut resolver) => extract_payload_archive(&control_member, &destination_root.join(CONTROL_OUTPUT_DIR), control_policy, Some(&mut **resolver))?,
+        None => extract_payload_archive(&control_member, &destination_root.join(CONTROL_OUTPUT_DIR), control_policy, None)?,
     };
     absorb_archive_report(CONTROL_OUTPUT_DIR, control_report, &mut report);
+    let data_policy = policy_with_remaining_budget(policy, &report);
     let data_report = match overwrite_resolver {
-        Some(ref mut resolver) => extract_payload_archive(&data_member, &destination_root.join(DATA_OUTPUT_DIR), policy, Some(&mut **resolver))?,
-        None => extract_payload_archive(&data_member, &destination_root.join(DATA_OUTPUT_DIR), policy, None)?,
+        Some(ref mut resolver) => extract_payload_archive(&data_member, &destination_root.join(DATA_OUTPUT_DIR), data_policy, Some(&mut **resolver))?,
+        None => extract_payload_archive(&data_member, &destination_root.join(DATA_OUTPUT_DIR), data_policy, None)?,
     };
     absorb_archive_report(DATA_OUTPUT_DIR, data_report, &mut report);
 
     Ok(report)
+}
+
+fn policy_with_remaining_budget(policy: &ExtractionPolicy, report: &DebExtractReport) -> ExtractionPolicy {
+    let mut remaining = policy.clone();
+    if let Some(limit) = policy.limits.max_expanded_bytes {
+        remaining.limits.max_expanded_bytes = Some(limit.saturating_sub(report.written_bytes));
+    }
+    if let Some(limit) = policy.limits.max_entries {
+        remaining.limits.max_entries = Some(limit.saturating_sub(u64::try_from(report.written_entries).unwrap_or(u64::MAX)));
+    }
+    remaining
 }
 
 fn copy_synthetic_file(
@@ -221,21 +255,7 @@ fn extract_payload_archive(
     policy: ExtractionPolicy,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
 ) -> Result<ArchiveReport, DebError> {
-    if is_tar_zst_archive(archive_path) {
-        match overwrite_resolver {
-            Some(resolver) => tar_zst_backend::extract_tar_zst_with_overwrite_resolver(archive_path, destination, policy, resolver)
-                .map(ArchiveReport::from)
-                .map_err(DebError::from),
-            None => tar_zst_backend::extract_tar_zst(archive_path, destination, policy).map(ArchiveReport::from).map_err(DebError::from),
-        }
-    } else {
-        match overwrite_resolver {
-            Some(resolver) => libarchive_backend::extract_archive_with_overwrite_resolver_and_password(archive_path, destination, policy, None, resolver)
-                .map(ArchiveReport::from)
-                .map_err(DebError::from),
-            None => libarchive_backend::extract_archive(archive_path, destination, policy).map(ArchiveReport::from).map_err(DebError::from),
-        }
-    }
+    extract_payload_with_engine(archive_path, destination, policy, overwrite_resolver)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -246,26 +266,44 @@ struct ArchiveReport {
     warnings: Vec<String>,
 }
 
-impl From<libarchive_backend::LibarchiveExtractReport> for ArchiveReport {
-    fn from(report: libarchive_backend::LibarchiveExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
+fn extract_payload_with_engine(
+    archive_path: &Path,
+    destination: &Path,
+    policy: ExtractionPolicy,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<ArchiveReport, DebError> {
+    let report = match archive_format::detect_archive_format(archive_path) {
+        ArchiveFormatKind::Tar => {
+            let file = File::open(archive_path).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
+            crate::tar_backend::extract(file, archive_path, destination, policy, overwrite_resolver, None, None)?
         }
-    }
-}
-
-impl From<tar_zst_backend::TarZstdExtractReport> for ArchiveReport {
-    fn from(report: tar_zst_backend::TarZstdExtractReport) -> Self {
-        Self {
-            written_entries: report.written_entries,
-            skipped_entries: report.skipped_entries,
-            written_bytes: report.written_bytes,
-            warnings: report.warnings,
+        ArchiveFormatKind::TarGz => {
+            let file = File::open(archive_path).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
+            crate::tar_backend::extract(flate2::read::GzDecoder::new(file), archive_path, destination, policy, overwrite_resolver, None, None)?
         }
-    }
+        ArchiveFormatKind::TarZst => {
+            let file = File::open(archive_path).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
+            let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
+            crate::tar_backend::extract(decoder, archive_path, destination, policy, overwrite_resolver, None, None)?
+        }
+        ArchiveFormatKind::TarBz2 | ArchiveFormatKind::TarXz | ArchiveFormatKind::TarLzma => {
+            let format = match archive_format::detect_archive_format(archive_path) {
+                ArchiveFormatKind::TarBz2 => crate::raw_stream_backend::RawStreamFormat::Bzip2,
+                ArchiveFormatKind::TarXz => crate::raw_stream_backend::RawStreamFormat::Xz,
+                ArchiveFormatKind::TarLzma => crate::raw_stream_backend::RawStreamFormat::Lzma,
+                _ => unreachable!("outer match limits filtered TAR formats"),
+            };
+            let decoder = crate::raw_stream_backend::open_decoder(archive_path, format)?;
+            crate::tar_backend::extract(decoder, archive_path, destination, policy, overwrite_resolver, None, None)?
+        }
+        format => {
+            return Err(DebError::Engine(crate::engine::ArchiveError::usable(
+                crate::engine::ErrorKind::UnsupportedOperation,
+                format!("unsupported native DEB payload format: {format:?}"),
+            )));
+        }
+    };
+    Ok(ArchiveReport { written_entries: report.entries, skipped_entries: report.skipped_entries, written_bytes: report.bytes, warnings: report.warnings })
 }
 
 fn absorb_archive_report(prefix: &str, source: ArchiveReport, destination: &mut DebExtractReport) {
@@ -275,18 +313,44 @@ fn absorb_archive_report(prefix: &str, source: ArchiveReport, destination: &mut 
     destination.warnings.extend(source.warnings.into_iter().map(|warning| format!("{prefix}: {warning}")));
 }
 
-fn find_top_level_member(root: &Path, prefix: &str) -> Option<PathBuf> {
-    fs::read_dir(root)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(prefix)))
+fn materialize_member(archive_path: &Path, members: &[ar_backend::ArEntry], member_name: &str, destination: &Path) -> Result<Option<PathBuf>, DebError> {
+    let Some(member) = members.iter().find(|entry| entry.path == member_name) else {
+        return Ok(None);
+    };
+    let path = destination.join(member_name);
+    let mut output = File::create(&path).map_err(|source| DebError::Io { path: path.clone(), source })?;
+    ar_backend::copy(archive_path, member.index, &mut output)?;
+    apply_ar_metadata(&path, member)?;
+    Ok(Some(path))
 }
 
-fn is_tar_zst_archive(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| crate::strings::ends_with_ignore_ascii_case(name, ".tar.zst") || crate::strings::ends_with_ignore_ascii_case(name, ".tzst"))
+fn materialize_member_by_prefix(archive_path: &Path, members: &[ar_backend::ArEntry], prefix: &str, destination: &Path) -> Result<PathBuf, DebError> {
+    let member = members
+        .iter()
+        .find(|entry| entry.path.starts_with(prefix))
+        .ok_or(DebError::MissingMember { member: if prefix == CONTROL_PAYLOAD_PREFIX { CONTROL_PAYLOAD_GLOB } else { DATA_PAYLOAD_GLOB } })?;
+    if member.path.bytes().any(|byte| matches!(byte, b'/' | b'\\')) {
+        return Err(DebError::Ar(ar_backend::ArError::Invalid {
+            path: archive_path.to_path_buf(),
+            message: format!("DEB payload member name is not a top-level name: {}", member.path),
+        }));
+    }
+    let path = destination.join(&member.path);
+    let mut output = File::create(&path).map_err(|source| DebError::Io { path: path.clone(), source })?;
+    ar_backend::copy(archive_path, member.index, &mut output)?;
+    apply_ar_metadata(&path, member)?;
+    Ok(path)
+}
+
+fn apply_ar_metadata(path: &Path, member: &ar_backend::ArEntry) -> Result<(), DebError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path, fs::Permissions::from_mode(member.mode & 0o7777)).map_err(|source| DebError::Io { path: path.to_path_buf(), source })?;
+    }
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(UNIX_EPOCH + Duration::from_secs(member.modified)))
+        .map_err(|source| DebError::Io { path: path.to_path_buf(), source })?;
+    Ok(())
 }
 
 impl From<TempDirAllocError> for DebError {

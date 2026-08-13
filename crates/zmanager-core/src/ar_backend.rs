@@ -21,6 +21,10 @@ pub struct ArEntry {
     pub size: u64,
     /// Payload offset in the archive file.
     pub data_offset: u64,
+    /// Member modification time in seconds since the Unix epoch.
+    pub modified: u64,
+    /// Portable Unix mode bits from the AR header.
+    pub mode: u32,
 }
 
 /// Normalized AR operation report.
@@ -167,6 +171,8 @@ struct RawEntry {
     bsd_name: Option<String>,
     size: u64,
     data_offset: u64,
+    modified: u64,
+    mode: u32,
 }
 
 fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
@@ -189,6 +195,8 @@ fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
             return Err(ArError::Invalid { path: path.to_path_buf(), message: "member header has invalid trailer".to_owned() });
         }
         let token = field(&header[0..16]);
+        let modified = parse_number(path, &header[16..28])?;
+        let mode = parse_octal(path, &header[40..48])?;
         let size = parse_number(path, &header[48..58])?;
         let data_offset = file.stream_position().map_err(|source| io_error(path, source))?;
         let mut bsd_name = None;
@@ -225,7 +233,7 @@ fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
             skip(&mut file, 1, path)?;
         }
         if token != "//" && !token.starts_with('/') && !token.starts_with("__.SYMDEF") {
-            raw_entries.push(RawEntry { token, bsd_name, size: payload_size, data_offset: payload_offset });
+            raw_entries.push(RawEntry { token, bsd_name, size: payload_size, data_offset: payload_offset, modified, mode });
         }
     }
     raw_entries
@@ -237,7 +245,7 @@ fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
             if path_name.is_empty() {
                 return Err(ArError::Invalid { path: path.to_path_buf(), message: "AR member has an empty name".to_owned() });
             }
-            Ok(ArEntry { index, path: path_name, size: raw.size, data_offset: raw.data_offset })
+            Ok(ArEntry { index, path: path_name, size: raw.size, data_offset: raw.data_offset, modified: raw.modified, mode: raw.mode })
         })
         .collect()
 }
@@ -259,6 +267,13 @@ fn field(bytes: &[u8]) -> String {
 
 fn parse_number(path: &Path, bytes: &[u8]) -> Result<u64, ArError> {
     field(bytes).parse::<u64>().map_err(|_| ArError::Invalid { path: path.to_path_buf(), message: "AR numeric header field is invalid".to_owned() })
+}
+
+fn parse_octal(path: &Path, bytes: &[u8]) -> Result<u32, ArError> {
+    let value = field(bytes);
+    let value = value.trim_start_matches('0');
+    u32::from_str_radix(if value.is_empty() { "0" } else { value }, 8)
+        .map_err(|_| ArError::Invalid { path: path.to_path_buf(), message: "AR octal header field is invalid".to_owned() })
 }
 
 fn skip(file: &mut File, bytes: u64, path: &Path) -> Result<(), ArError> {

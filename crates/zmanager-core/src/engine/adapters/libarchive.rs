@@ -31,7 +31,6 @@ pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
     FormatId::LHA,
     FormatId::WARC,
     FormatId::MTREE,
-    FormatId::DEB,
 ];
 
 /// Libarchive listing compatibility adapter factory.

@@ -142,7 +142,7 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
             return usage_failure(global, format_args!("extract failed: --extract-nested is currently supported only for .deb packages"));
         }
         let destination = request.destination.unwrap_or_else(|| default_extract_destination(&request.archive));
-        return run_deb_nested_extract(&request.archive, &destination, policy, global);
+        return run_deb_nested_extract(&request.archive, &destination, &policy, global);
     }
     if zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() && request.password_stdin {
         return usage_failure(global, format_args!("extract failed: raw streams are not encrypted; remove --password-stdin"));
@@ -272,7 +272,7 @@ fn run_engine_extract(
         }
     }
 }
-fn run_deb_nested_extract(archive: &str, destination: &Path, policy: zmanager_core::safety::ExtractionPolicy, global: &GlobalOptions) -> ExitCode {
+fn run_deb_nested_extract(archive: &str, destination: &Path, policy: &zmanager_core::safety::ExtractionPolicy, global: &GlobalOptions) -> ExitCode {
     let result = if matches!(policy.overwrite, OverwritePolicy::Ask) {
         let stdin = io::stdin();
         let stderr = io::stderr();
