@@ -226,6 +226,37 @@ fn native_tar_family_uses_shared_reader_for_all_read_operations() {
 }
 
 #[test]
+fn native_cpio_adapter_uses_bounded_operations_for_fixture() {
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.cpio");
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    assert!(!listing.entries.is_empty());
+    assert!(listing.entries.iter().any(|entry| entry.path.ends_with("README.txt")));
+
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert_eq!(test.tested_entries, listing.entries.len() as u64);
+    assert!(test.tested_bytes > 0);
+
+    let file_entry = listing
+        .entries
+        .iter()
+        .find(|entry| entry.kind == BrowserEntryKind::File && entry.size == Some(12))
+        .unwrap_or_else(|| listing.entries.iter().find(|entry| entry.kind == BrowserEntryKind::File).expect("fixture should contain a regular file"));
+    let mut copied = Vec::new();
+    let copy = handle.copy_entry(file_entry.id, &mut copied).unwrap();
+    assert_eq!(copy.written_bytes, copied.len() as u64);
+    assert!(!copied.is_empty());
+
+    let destination = TestDir::new("engine-conformance-cpio");
+    let mut options = ExtractOptions { destination: destination.path("out"), ..ExtractOptions::default() };
+    let report = handle.extract(&mut options).unwrap();
+    assert!(report.written_entries > 0);
+    assert!(destination.path("out").join("payload/README.txt").is_file());
+    handle.close().unwrap();
+}
+
+#[test]
 fn engine_creation_cancellation_does_not_commit_output() {
     let temp = TestDir::new("engine-conformance-create-cancel");
     let source = temp.path("source.txt");

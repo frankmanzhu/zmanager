@@ -2,7 +2,7 @@
 
 use flate2::read::GzDecoder;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write as _};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::Archive as TarArchive;
 
@@ -261,6 +261,161 @@ static AR_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
+
+static CPIO_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_cpio_adapter",
+    format: FormatId::CPIO,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+/// Native CPIO reader adapter.
+#[derive(Debug, Default)]
+pub struct CpioListAdapter;
+
+impl ReadAdapterFactory for CpioListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &CPIO_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let (_temporary, source) = cpio_source(path)?;
+        let entries = crate::cpio_backend::list(&source).map_err(|error| cpio_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_cpio_entries(entries) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let (_temporary, source) = cpio_source(path)?;
+        let report = crate::cpio_backend::test(&source, test_options).map_err(|error| cpio_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let (_temporary, source) = cpio_source(path)?;
+        let report = crate::cpio_backend::extract(
+            &source,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            None,
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| cpio_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract<'a>(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let (_temporary, source) = cpio_source(path)?;
+        let report = crate::cpio_backend::extract(
+            &source,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| cpio_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let (_temporary, source) = cpio_source(path)?;
+        let written_bytes = crate::cpio_backend::copy(
+            &source,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| cpio_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn cpio_source(path: &std::path::Path) -> Result<(Option<crate::temp_names::TemporaryDirectory>, std::path::PathBuf), ArchiveError> {
+    let Some(format) = cpio_compression(path) else {
+        return Ok((None, path.to_path_buf()));
+    };
+    let temporary =
+        crate::temp_names::TemporaryDirectory::new("cpio-decode").map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    let decoded_path = temporary.path().join("payload.cpio");
+    let mut decoder =
+        raw_stream_backend::open_decoder(path, format).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+    let mut output = File::create(&decoded_path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    std::io::copy(&mut decoder, &mut output).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    output.flush().map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    Ok((Some(temporary), decoded_path))
+}
+
+fn cpio_compression(path: &std::path::Path) -> Option<raw_stream_backend::RawStreamFormat> {
+    let name = path.file_name()?.to_str()?;
+    if crate::strings::ends_with_ignore_ascii_case(name, ".cpgz") || crate::strings::ends_with_ignore_ascii_case(name, ".cpio.gz") {
+        Some(raw_stream_backend::RawStreamFormat::Gzip)
+    } else if crate::strings::ends_with_ignore_ascii_case(name, ".cpio.bz2") {
+        Some(raw_stream_backend::RawStreamFormat::Bzip2)
+    } else if crate::strings::ends_with_ignore_ascii_case(name, ".cpio.xz") {
+        Some(raw_stream_backend::RawStreamFormat::Xz)
+    } else if crate::strings::ends_with_ignore_ascii_case(name, ".cpio.lzma") {
+        Some(raw_stream_backend::RawStreamFormat::Lzma)
+    } else if crate::strings::ends_with_ignore_ascii_case(name, ".cpio.zst") {
+        Some(raw_stream_backend::RawStreamFormat::Zstd)
+    } else {
+        None
+    }
+}
+
+fn map_cpio_entries(entries: Vec<crate::cpio_backend::CpioEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| EngineEntry {
+            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            path: entry.path,
+            kind: entry.kind,
+            size: Some(entry.size),
+            mode: Some(entry.mode),
+            modified: entry.modified,
+            method: Some("cpio".to_owned()),
+            link_target: entry.link_target,
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn cpio_error(path: &std::path::Path, error: &crate::cpio_backend::CpioError) -> ArchiveError {
+    let kind = match error {
+        crate::cpio_backend::CpioError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::cpio_backend::CpioError::Cancelled => ErrorKind::Cancelled,
+        crate::cpio_backend::CpioError::Io { .. } => ErrorKind::Io,
+        crate::cpio_backend::CpioError::Invalid { .. } => ErrorKind::CorruptData,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
 
 /// Native AR reader adapter.
 #[derive(Debug, Default)]

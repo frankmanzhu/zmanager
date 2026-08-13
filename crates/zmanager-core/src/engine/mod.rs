@@ -56,6 +56,7 @@ impl ArchivePlugin for DefaultArchivePlugin {
             "lzma",
         )))?;
         builder.register_read_adapter(Arc::new(adapters::native::ArListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::CpioListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TzapListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RarListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RawStreamListAdapter))?;
