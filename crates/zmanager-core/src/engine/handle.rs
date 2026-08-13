@@ -8,8 +8,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterRegistry, ReadAdapterFactory};
 use crate::engine::source::ArchiveSource;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EntryId, ErrorKind, ExtractOptions, ExtractReport, HandleCapabilities,
-    OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, CreateReport, CreateRequest, DetectedArchive, EntryId, ErrorKind, ExtractOptions,
+    ExtractReport, HandleCapabilities, OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
 };
 
 /// The stateful archive engine instance.
@@ -70,6 +70,21 @@ impl ArchiveEngine {
             cached_copy_session: None,
             disposition: SessionDisposition::Usable,
         })
+    }
+
+    /// Creates and atomically commits one archive through a registered writer.
+    ///
+    /// Creation is deliberately one-shot and does not open a read session.
+    /// The returned report is produced only after the writer has finalized its
+    /// output and committed it to the requested destination.
+    pub fn create(&self, request: &CreateRequest, context: &mut crate::jobs::JobContext<'_>) -> Result<CreateReport, ArchiveError> {
+        if request.destination.as_os_str().is_empty() {
+            return Err(ArchiveError::usable(ErrorKind::Io, "Archive destination must not be empty"));
+        }
+        let factory = self.registry.resolve_create(request.format()).ok_or_else(|| {
+            ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("No creation adapter registered for format '{}'", request.format()))
+        })?;
+        factory.create(request, context)
     }
 }
 

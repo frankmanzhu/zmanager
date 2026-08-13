@@ -297,50 +297,11 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
     let token = CancellationToken::new();
     let create_destination = if split_output { destination.as_path() } else { temp.as_path() };
     let backend_replace_existing = split_output && request.force;
-
-    let outcome_result = match format {
-        ArchiveFormat::Zip => run_zip_create_backend(
-            request,
-            &manifest,
-            &temp,
-            create_destination,
-            password,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
-        ArchiveFormat::TarZst => run_tar_zst_create_backend(request, &manifest, &temp, split_output, &mut progress, &token, global),
-        ArchiveFormat::Tgz => run_tgz_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global),
-        ArchiveFormat::Tzap => run_tzap_create_backend(
-            request,
-            &manifest,
-            &temp,
-            create_destination,
-            password,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
-        ArchiveFormat::AppleArchive => {
-            run_apple_archive_create_backend(request, &manifest, &temp, backend_replace_existing, split_output, &mut progress, &token, global)
-        }
-        ArchiveFormat::SevenZ => run_seven_z_create_backend(
-            request,
-            &manifest,
-            &temp,
-            create_destination,
-            password,
-            backend_replace_existing,
-            split_output,
-            &mut progress,
-            &token,
-            global,
-        ),
+    let options = match build_engine_create_options(format, request, password, backend_replace_existing, global) {
+        Ok(options) => options,
+        Err(code) => return code,
     };
+    let outcome_result = run_engine_create_backend(&manifest, create_destination, options, &temp, split_output, &mut progress, &token, global);
     let outcome = match outcome_result {
         Ok(outcome) => outcome,
         Err(code) => return code,
@@ -361,330 +322,140 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
     ExitCode::SUCCESS
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_zip_create_backend(
+fn build_engine_create_options(
+    format: ArchiveFormat,
     request: &CreateRequest,
-    manifest: &zmanager_core::manifest::ArchiveManifest,
-    temp: &Path,
-    create_destination: &Path,
     password: Option<SecretString>,
-    backend_replace_existing: bool,
-    split_output: bool,
-    progress: &mut ProgressReporter,
-    token: &CancellationToken,
+    replace_existing: bool,
     global: &GlobalOptions,
-) -> Result<CreateOutcome, ExitCode> {
-    let (compression, level) = match zip_compression_options(request) {
-        Ok(options) => options,
-        Err(error) => {
-            print_error_line(global, format_args!("{error}"));
-            return Err(ExitCode::from(2));
-        }
-    };
-    let options = zmanager_core::zip_backend::ZipCreateOptions {
-        compression,
-        level,
-        preserve_metadata: !request.no_metadata,
-        replace_existing: backend_replace_existing,
-        password,
-        volume_size: request.volume_size,
-    };
-    run_create_backend(
-        manifest,
-        progress,
-        token,
-        |context| {
-            zmanager_core::zip_backend::create_zip_from_manifest_with_context(manifest, create_destination, &options, context)
-                .map_err(|error| error.to_string())
-        },
-        |report| CreateOutcome {
-            summary: format!(
-                "created zip: {} entries, {} bytes, encrypted {}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                report.encrypted,
-                report.warnings.len()
-            ),
-            format: FORMAT_ZIP,
-            backend: FORMAT_ZIP,
-            entries: report.written_entries,
-            bytes: report.written_bytes,
-            warnings: report.warnings.len(),
-            encrypted: Some(report.encrypted),
-            solid: None,
-            volume_size: report.volume_size,
-            volume_count: report.volume_count,
-        },
-    )
-    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_tar_zst_create_backend(
-    request: &CreateRequest,
-    manifest: &zmanager_core::manifest::ArchiveManifest,
-    temp: &Path,
-    split_output: bool,
-    progress: &mut ProgressReporter,
-    token: &CancellationToken,
-    global: &GlobalOptions,
-) -> Result<CreateOutcome, ExitCode> {
-    let options = zmanager_core::tar_zst_backend::TarZstdCreateOptions {
-        level: request.level.unwrap_or_else(|| zmanager_core::tar_zst_backend::TarZstdCreateOptions::default().level),
-        preserve_metadata: !request.no_metadata,
-        ..zmanager_core::tar_zst_backend::TarZstdCreateOptions::default()
-    };
-    run_create_backend(
-        manifest,
-        progress,
-        token,
-        |context| {
-            zmanager_core::tar_zst_backend::create_tar_zst_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string())
-        },
-        |report| CreateOutcome {
-            summary: format!(
-                "created tar.zst: {} entries, {} bytes, level {}, threads {:?}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                report.level,
-                report.threads,
-                report.warnings.len()
-            ),
-            format: FORMAT_TAR_ZST,
-            backend: FORMAT_TAR_ZST,
-            entries: report.written_entries,
-            bytes: report.written_bytes,
-            warnings: report.warnings.len(),
-            encrypted: None,
-            solid: None,
-            volume_size: None,
-            volume_count: 1,
-        },
-    )
-    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_tgz_create_backend(
-    request: &CreateRequest,
-    manifest: &zmanager_core::manifest::ArchiveManifest,
-    temp: &Path,
-    backend_replace_existing: bool,
-    split_output: bool,
-    progress: &mut ProgressReporter,
-    token: &CancellationToken,
-    global: &GlobalOptions,
-) -> Result<CreateOutcome, ExitCode> {
-    let options = zmanager_core::tar_gz_backend::TarGzCreateOptions {
-        level: request.level.unwrap_or_else(|| zmanager_core::tar_gz_backend::TarGzCreateOptions::default().level),
-        preserve_metadata: !request.no_metadata,
-        replace_existing: backend_replace_existing,
-    };
-    run_create_backend(
-        manifest,
-        progress,
-        token,
-        |context| zmanager_core::tar_gz_backend::create_tar_gz_from_manifest_with_context(manifest, temp, &options, context).map_err(|error| error.to_string()),
-        |report| CreateOutcome {
-            summary: format!(
-                "created tar.gz: {} entries, {} bytes, level {}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                report.level,
-                report.warnings.len()
-            ),
-            format: FORMAT_TGZ,
-            backend: FORMAT_TGZ,
-            entries: report.written_entries,
-            bytes: report.written_bytes,
-            warnings: report.warnings.len(),
-            encrypted: None,
-            solid: None,
-            volume_size: None,
-            volume_count: 1,
-        },
-    )
-    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_tzap_create_backend(
-    request: &CreateRequest,
-    manifest: &zmanager_core::manifest::ArchiveManifest,
-    temp: &Path,
-    create_destination: &Path,
-    password: Option<SecretString>,
-    backend_replace_existing: bool,
-    split_output: bool,
-    progress: &mut ProgressReporter,
-    token: &CancellationToken,
-    global: &GlobalOptions,
-) -> Result<CreateOutcome, ExitCode> {
-    let uses_secret_key = password.is_some() || request.tzap_recipient_cert.is_some();
-    let key_source = if let Some(recipient_certificate) = &request.tzap_recipient_cert {
-        zmanager_core::tzap_backend::TzapKeySource::RecipientCertificate(recipient_certificate.clone())
-    } else {
-        password.map_or(zmanager_core::tzap_backend::TzapKeySource::NoPassword, zmanager_core::tzap_backend::TzapKeySource::Passphrase)
-    };
-    let x509_signing = match &request.tzap_signing_cert {
-        Some(certificate) => {
-            let Some(private_key) = &request.tzap_signing_private_key else {
-                print_error_line(global, format_args!("create failed: --signing-cert and --signing-private-key must be used together"));
-                return Err(ExitCode::from(2));
-            };
-            Some(zmanager_core::tzap_backend::TzapX509SigningOptions::CertificateAndKey {
-                signing_certificate: certificate.clone(),
-                signing_private_key: private_key.clone(),
-                signing_chain: request.tzap_signing_chain.clone(),
+) -> Result<zmanager_core::engine::CreateOptions, ExitCode> {
+    let options = match format {
+        ArchiveFormat::Zip => {
+            let (compression, level) = zip_compression_options(request).map_err(|error| {
+                print_error_line(global, format_args!("{error}"));
+                ExitCode::from(2)
+            })?;
+            zmanager_core::engine::CreateOptions::Zip(zmanager_core::zip_backend::ZipCreateOptions {
+                compression,
+                level,
+                preserve_metadata: !request.no_metadata,
+                replace_existing,
+                password,
+                volume_size: request.volume_size,
             })
         }
-        None => None,
-    };
-    let options = zmanager_core::tzap_backend::TzapCreateOptions {
-        key_source,
-        level: request.level.unwrap_or(3),
-        preserve_metadata: !request.no_metadata,
-        replace_existing: backend_replace_existing,
-        volume_size: request.volume_size,
-        recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
-        volume_loss_tolerance: tzap_default_volume_loss_tolerance(request.volume_size),
-        x509_signing,
-    };
-    run_create_backend(
-        manifest,
-        progress,
-        token,
-        |context| {
-            zmanager_core::tzap_backend::create_tzap_from_manifest_with_context(manifest, create_destination, &options, context)
-                .map_err(|error| error.to_string())
-        },
-        |report| CreateOutcome {
-            summary: format!(
-                "created tzap: {} entries, {} bytes, encrypted {}, level {}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                uses_secret_key,
-                report.level,
-                report.warnings.len()
-            ),
-            format: FORMAT_TZAP,
-            backend: FORMAT_TZAP,
-            entries: report.written_entries,
-            bytes: report.written_bytes,
-            warnings: report.warnings.len(),
-            encrypted: Some(uses_secret_key),
-            solid: None,
-            volume_size: report.volume_size,
-            volume_count: report.volume_count,
-        },
-    )
-    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_apple_archive_create_backend(
-    request: &CreateRequest,
-    manifest: &zmanager_core::manifest::ArchiveManifest,
-    temp: &Path,
-    backend_replace_existing: bool,
-    split_output: bool,
-    progress: &mut ProgressReporter,
-    token: &CancellationToken,
-    global: &GlobalOptions,
-) -> Result<CreateOutcome, ExitCode> {
-    let compression = match apple_archive_compression(request) {
-        Ok(compression) => compression,
-        Err(error) => {
-            print_error_line(global, format_args!("{error}"));
-            return Err(ExitCode::from(2));
+        ArchiveFormat::TarZst => zmanager_core::engine::CreateOptions::TarZstd(zmanager_core::tar_zst_backend::TarZstdCreateOptions {
+            level: request.level.unwrap_or_else(|| zmanager_core::tar_zst_backend::TarZstdCreateOptions::default().level),
+            preserve_metadata: !request.no_metadata,
+            replace_existing,
+            ..zmanager_core::tar_zst_backend::TarZstdCreateOptions::default()
+        }),
+        ArchiveFormat::Tgz => zmanager_core::engine::CreateOptions::TarGz(zmanager_core::tar_gz_backend::TarGzCreateOptions {
+            level: request.level.unwrap_or_else(|| zmanager_core::tar_gz_backend::TarGzCreateOptions::default().level),
+            preserve_metadata: !request.no_metadata,
+            replace_existing,
+        }),
+        ArchiveFormat::Tzap => {
+            let key_source = if let Some(recipient_certificate) = &request.tzap_recipient_cert {
+                zmanager_core::tzap_backend::TzapKeySource::RecipientCertificate(recipient_certificate.clone())
+            } else {
+                password.map_or(zmanager_core::tzap_backend::TzapKeySource::NoPassword, zmanager_core::tzap_backend::TzapKeySource::Passphrase)
+            };
+            let x509_signing = match &request.tzap_signing_cert {
+                Some(certificate) => {
+                    let Some(private_key) = &request.tzap_signing_private_key else {
+                        print_error_line(global, format_args!("create failed: --signing-cert and --signing-private-key must be used together"));
+                        return Err(ExitCode::from(2));
+                    };
+                    Some(zmanager_core::tzap_backend::TzapX509SigningOptions::CertificateAndKey {
+                        signing_certificate: certificate.clone(),
+                        signing_private_key: private_key.clone(),
+                        signing_chain: request.tzap_signing_chain.clone(),
+                    })
+                }
+                None => None,
+            };
+            zmanager_core::engine::CreateOptions::Tzap(zmanager_core::tzap_backend::TzapCreateOptions {
+                key_source,
+                level: request.level.unwrap_or(3),
+                preserve_metadata: !request.no_metadata,
+                replace_existing,
+                volume_size: request.volume_size,
+                recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
+                volume_loss_tolerance: tzap_default_volume_loss_tolerance(request.volume_size),
+                x509_signing,
+            })
         }
+        ArchiveFormat::AppleArchive => {
+            let compression = apple_archive_compression(request).map_err(|error| {
+                print_error_line(global, format_args!("{error}"));
+                ExitCode::from(2)
+            })?;
+            zmanager_core::engine::CreateOptions::AppleArchive(zmanager_core::apple_archive_backend::AppleArchiveCreateOptions {
+                compression,
+                preserve_metadata: !request.no_metadata,
+                replace_existing,
+                ..zmanager_core::apple_archive_backend::AppleArchiveCreateOptions::default()
+            })
+        }
+        ArchiveFormat::SevenZ => zmanager_core::engine::CreateOptions::SevenZ(zmanager_core::sevenz_backend::SevenZCreateOptions {
+            solid: request.solid,
+            level: sevenz_level(request),
+            preserve_metadata: !request.no_metadata,
+            password,
+            encrypt_file_names: true,
+            replace_existing,
+            volume_size: request.volume_size,
+            ..zmanager_core::sevenz_backend::SevenZCreateOptions::default()
+        }),
     };
-    let options = zmanager_core::apple_archive_backend::AppleArchiveCreateOptions {
-        compression,
-        preserve_metadata: !request.no_metadata,
-        replace_existing: backend_replace_existing,
-        ..zmanager_core::apple_archive_backend::AppleArchiveCreateOptions::default()
-    };
-    run_create_backend(
-        manifest,
-        progress,
-        token,
-        |context| {
-            zmanager_core::apple_archive_backend::create_apple_archive_from_manifest_with_context(manifest, temp, &options, context)
-                .map_err(|error| error.to_string())
-        },
-        |report| CreateOutcome {
-            summary: format!(
-                "created aar: {} entries, {} bytes, compression {:?}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                options.compression,
-                report.warnings.len()
-            ),
-            format: FORMAT_APPLE_ARCHIVE,
-            backend: FORMAT_APPLE_ARCHIVE,
-            entries: report.written_entries,
-            bytes: report.written_bytes,
-            warnings: report.warnings.len(),
-            encrypted: None,
-            solid: None,
-            volume_size: None,
-            volume_count: 1,
-        },
-    )
-    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
+    Ok(options)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_seven_z_create_backend(
-    request: &CreateRequest,
+fn run_engine_create_backend(
     manifest: &zmanager_core::manifest::ArchiveManifest,
+    destination: &Path,
+    options: zmanager_core::engine::CreateOptions,
     temp: &Path,
-    create_destination: &Path,
-    password: Option<SecretString>,
-    backend_replace_existing: bool,
     split_output: bool,
     progress: &mut ProgressReporter,
     token: &CancellationToken,
     global: &GlobalOptions,
 ) -> Result<CreateOutcome, ExitCode> {
-    let options = zmanager_core::sevenz_backend::SevenZCreateOptions {
-        solid: request.solid,
-        level: sevenz_level(request),
-        preserve_metadata: !request.no_metadata,
-        password,
-        encrypt_file_names: true,
-        replace_existing: backend_replace_existing,
-        volume_size: request.volume_size,
-        ..zmanager_core::sevenz_backend::SevenZCreateOptions::default()
+    let request = zmanager_core::engine::CreateRequest::new(manifest.clone(), destination, options);
+    let result = {
+        let mut sink = |event| progress.emit(event);
+        let mut context = JobContext::new_with_progress_total(token, &mut sink, Some(manifest.total_bytes));
+        let result = zmanager_core::engine::create_default_engine().and_then(|engine| engine.create(&request, &mut context));
+        context.flush_progress();
+        result
     };
-    run_create_backend(
-        manifest,
-        progress,
-        token,
-        |_context| zmanager_core::sevenz_backend::create_7z_from_manifest(manifest, create_destination, &options).map_err(|error| error.to_string()),
-        |report| CreateOutcome {
-            summary: format!(
-                "created 7z: {} entries, {} bytes, solid {}, threads {:?}, encrypted {}, {} warnings",
-                report.written_entries,
-                report.written_bytes,
-                report.solid,
-                report.threads,
-                report.encrypted,
-                report.warnings.len()
-            ),
-            format: FORMAT_SEVEN_Z,
-            backend: FORMAT_SEVEN_Z,
-            entries: report.written_entries,
-            bytes: report.written_bytes,
-            warnings: report.warnings.len(),
-            encrypted: Some(report.encrypted),
-            solid: Some(report.solid),
-            volume_size: report.volume_size,
-            volume_count: report.volume_count,
-        },
-    )
-    .map_err(|error| fail_create(progress, global, temp, split_output, &error))
+    let report = match result {
+        Ok(report) => report,
+        Err(error) => return Err(fail_create(progress, global, temp, split_output, &error.to_string())),
+    };
+    let format = match report.format {
+        zmanager_core::engine::FormatId::ZIP | zmanager_core::engine::FormatId::SPLIT_ZIP => FORMAT_ZIP,
+        zmanager_core::engine::FormatId::SEVEN_Z => FORMAT_SEVEN_Z,
+        zmanager_core::engine::FormatId::TAR_ZST => FORMAT_TAR_ZST,
+        zmanager_core::engine::FormatId::TAR_GZ => FORMAT_TGZ,
+        zmanager_core::engine::FormatId::TZAP => FORMAT_TZAP,
+        zmanager_core::engine::FormatId::APPLE_ARCHIVE => FORMAT_APPLE_ARCHIVE,
+        _ => "unknown",
+    };
+    Ok(CreateOutcome {
+        summary: format!("created {format}: {} entries, {} bytes, {} warnings", report.written_entries, report.written_bytes, report.warnings.len()),
+        format,
+        backend: format,
+        entries: usize::try_from(report.written_entries).unwrap_or(usize::MAX),
+        bytes: report.written_bytes,
+        warnings: report.warnings.len(),
+        encrypted: report.encrypted,
+        solid: report.solid,
+        volume_size: report.volume_size,
+        volume_count: usize::try_from(report.volume_count).unwrap_or(usize::MAX),
+    })
 }
 
 /// Shared create-failure path: cleans up the temp archive and reports the
@@ -696,23 +467,6 @@ fn fail_create(progress: &mut ProgressReporter, global: &GlobalOptions, temp: &P
     progress.emit(JobEvent::Failed { message: error.to_string() });
     print_error_line(global, format_args!("create failed: {error}"));
     ExitCode::FAILURE
-}
-
-fn run_create_backend<R>(
-    manifest: &zmanager_core::manifest::ArchiveManifest,
-    progress: &mut ProgressReporter,
-    token: &CancellationToken,
-    run: impl FnOnce(&mut JobContext<'_>) -> Result<R, String>,
-    map_outcome: impl FnOnce(R) -> CreateOutcome,
-) -> Result<CreateOutcome, String> {
-    let result = {
-        let mut sink = |event| progress.emit(event);
-        let mut context = JobContext::new_with_progress_total(token, &mut sink, Some(manifest.total_bytes));
-        let result = run(&mut context);
-        context.flush_progress();
-        result
-    };
-    result.map(map_outcome)
 }
 
 fn create_stream(

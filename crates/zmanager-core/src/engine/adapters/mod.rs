@@ -43,6 +43,7 @@ pub(crate) fn safety_error_kind(error: &ExtractionSafetyError) -> ErrorKind {
     }
 }
 
+pub mod create;
 pub mod libarchive;
 pub mod native;
 pub mod zip;

@@ -12,9 +12,15 @@ use std::sync::{
 
 use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{
-    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchiveSource, ExtractOptions, FormatId, OpenOptions, SourceAccess,
-    create_default_engine, is_split_zip_archive_path,
+    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchiveSource, CreateOptions, CreateRequest, ExtractOptions, FormatId, OpenOptions,
+    SourceAccess, create_default_engine, is_split_zip_archive_path,
 };
+
+struct NoopSink;
+
+impl zmanager_core::jobs::JobEventSink for NoopSink {
+    fn emit(&mut self, _event: zmanager_core::jobs::JobEvent) {}
+}
 
 #[test]
 fn default_engine_registers_every_phase_two_native_listing_adapter() {
@@ -74,12 +80,38 @@ fn capability_snapshot_reports_registration_and_platform_state() {
     assert!(zip.unavailable_reason.is_none());
     assert!(zip.operations.contains(&ArchiveOperation::List));
     assert!(zip.operations.contains(&ArchiveOperation::Test));
+    assert!(zip.operations.contains(&ArchiveOperation::Create));
     assert_eq!(zip.source_access, Some(SourceAccess::Seekable));
     assert!(zip.encryption_supported);
 
     let apple_archive = snapshot.iter().find(|capability| capability.format == FormatId::APPLE_ARCHIVE).expect("Apple Archive capability should be present");
     assert!(apple_archive.recognized);
     assert!(apple_archive.platform_available);
+}
+
+#[test]
+fn engine_creates_zip_through_one_shot_contract_and_commits_before_returning() {
+    let temp = TestDir::new("engine-conformance-create-zip");
+    let source = temp.path("source.txt");
+    let archive = temp.path("created.zip");
+    fs::write(&source, b"created through engine").unwrap();
+    let manifest = zmanager_core::manifest::plan_archive(&source, &zmanager_core::manifest::PlanOptions::default()).unwrap();
+    let request = CreateRequest::new(manifest, &archive, CreateOptions::Zip(zmanager_core::zip_backend::ZipCreateOptions::default()));
+    let engine = create_default_engine().unwrap();
+    let token = zmanager_core::jobs::CancellationToken::new();
+    let mut sink = NoopSink;
+    let mut context = zmanager_core::jobs::JobContext::new(&token, &mut sink);
+
+    let report = engine.create(&request, &mut context).unwrap();
+    assert_eq!(report.format, FormatId::ZIP);
+    assert_eq!(report.written_entries, 1);
+    assert_eq!(report.written_bytes, b"created through engine".len() as u64);
+    assert!(archive.is_file());
+    assert!(!temp.path("created.zip.tmp").exists());
+
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    assert_eq!(handle.list().unwrap().entries.len(), 1);
+    handle.close().unwrap();
 }
 
 #[test]

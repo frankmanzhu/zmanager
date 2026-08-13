@@ -13,11 +13,11 @@ use std::sync::Arc;
 pub use format::FormatId;
 pub use handle::{ArchiveEngine, ArchiveHandle};
 pub use plugins::{ArchivePlugin, build_engine_with_plugins};
-pub use registry::{AdapterDescriptor, AdapterRegistry, ArchiveEngineBuilder, ReadAdapterFactory};
+pub use registry::{AdapterDescriptor, AdapterRegistry, ArchiveEngineBuilder, CreateAdapterFactory, ReadAdapterFactory};
 pub use source::{ArchiveSource, SourceAccess, discover_split_zip_volumes, is_split_zip_archive_path};
 pub use types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport,
-    FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, CreateOptions, CreateReport, CreateRequest, DetectedArchive, EngineEntry, EntryId, ErrorKind,
+    ExtractOptions, ExtractReport, FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
 };
 
 /// Default compile-time plugin packaging for Phase 1 listing.
@@ -48,6 +48,15 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VHD)))?;
         builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VMDK)))?;
         builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::UDF)))?;
+
+        // Native one-shot creation adapters.
+        builder.register_create_adapter(Arc::new(adapters::create::ZipCreateAdapter))?;
+        builder.register_create_adapter(Arc::new(adapters::create::SplitZipCreateAdapter))?;
+        builder.register_create_adapter(Arc::new(adapters::create::SevenZCreateAdapter))?;
+        builder.register_create_adapter(Arc::new(adapters::create::TarZstdCreateAdapter))?;
+        builder.register_create_adapter(Arc::new(adapters::create::TarGzCreateAdapter))?;
+        builder.register_create_adapter(Arc::new(adapters::create::TzapCreateAdapter))?;
+        builder.register_create_adapter(Arc::new(adapters::create::AppleArchiveCreateAdapter))?;
 
         // Libarchive compatibility listing adapters for allow-listed formats
         for &format in adapters::libarchive::LIBARCHIVE_ALLOW_LIST {

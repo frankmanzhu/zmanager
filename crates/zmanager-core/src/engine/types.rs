@@ -4,6 +4,7 @@ use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::source::{ArchiveSource, SourceAccess};
 use crate::jobs::CancellationToken;
+use crate::manifest::ArchiveManifest;
 use crate::safety::{ExtractionPolicy, OverwriteResolver};
 use std::fmt;
 use std::io;
@@ -276,6 +277,88 @@ impl Default for SelectedExtractOptions<'_> {
 pub struct CopyReport {
     /// Decoded regular-file bytes written to the caller's writer.
     pub written_bytes: u64,
+}
+
+/// Typed format-specific options for one-shot archive creation.
+#[derive(Debug, Clone)]
+pub enum CreateOptions {
+    /// Native seekable or split ZIP creation.
+    Zip(crate::zip_backend::ZipCreateOptions),
+    /// Native 7z creation.
+    SevenZ(crate::sevenz_backend::SevenZCreateOptions),
+    /// Native TAR.ZST creation.
+    TarZstd(crate::tar_zst_backend::TarZstdCreateOptions),
+    /// Native TAR.GZ creation.
+    TarGz(crate::tar_gz_backend::TarGzCreateOptions),
+    /// Native TZAP creation.
+    Tzap(crate::tzap_backend::TzapCreateOptions),
+    /// Native Apple Archive creation.
+    AppleArchive(crate::apple_archive_backend::AppleArchiveCreateOptions),
+}
+
+impl CreateOptions {
+    /// Returns the canonical format selected by these typed options.
+    #[must_use]
+    pub const fn format(&self) -> FormatId {
+        match self {
+            Self::Zip(options) => match options.volume_size {
+                Some(_) => FormatId::SPLIT_ZIP,
+                None => FormatId::ZIP,
+            },
+            Self::SevenZ(_) => FormatId::SEVEN_Z,
+            Self::TarZstd(_) => FormatId::TAR_ZST,
+            Self::TarGz(_) => FormatId::TAR_GZ,
+            Self::Tzap(_) => FormatId::TZAP,
+            Self::AppleArchive(_) => FormatId::APPLE_ARCHIVE,
+        }
+    }
+}
+
+/// One-shot archive creation request.
+#[derive(Debug, Clone)]
+pub struct CreateRequest {
+    /// Fully planned archive contents.
+    pub manifest: ArchiveManifest,
+    /// Final archive path. Adapters commit atomically to this path.
+    pub destination: PathBuf,
+    /// Typed options for the selected writer.
+    pub options: CreateOptions,
+}
+
+impl CreateRequest {
+    /// Creates a request and binds its format to the typed options.
+    #[must_use]
+    pub fn new(manifest: ArchiveManifest, destination: impl Into<PathBuf>, options: CreateOptions) -> Self {
+        Self { manifest, destination: destination.into(), options }
+    }
+
+    /// Returns the format selected by this request.
+    #[must_use]
+    pub const fn format(&self) -> FormatId {
+        self.options.format()
+    }
+}
+
+/// Normalized result returned only after an archive has been finalized and
+/// atomically committed.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct CreateReport {
+    /// Format written by the adapter.
+    pub format: FormatId,
+    /// Number of archive entries written.
+    pub written_entries: u64,
+    /// Number of source bytes copied into regular-file entries.
+    pub written_bytes: u64,
+    /// Whether encryption was enabled, when the format exposes this state.
+    pub encrypted: Option<bool>,
+    /// Whether solid compression was enabled, when applicable.
+    pub solid: Option<bool>,
+    /// Requested split volume size, when applicable.
+    pub volume_size: Option<u64>,
+    /// Number of output files created.
+    pub volume_count: u64,
+    /// Non-fatal diagnostics produced by the adapter.
+    pub warnings: Vec<String>,
 }
 
 /// Archive operation supported by the engine seam.

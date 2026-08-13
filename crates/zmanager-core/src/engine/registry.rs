@@ -3,9 +3,10 @@
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EntryId, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities,
-    HandleCapabilities, OpenOptions, SelectedExtractOptions, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, CreateReport, CreateRequest, DetectedArchive, EntryId, ErrorKind, ExtractOptions,
+    ExtractReport, FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, TestOptions, TestReport,
 };
+use crate::jobs::JobContext;
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Arc;
@@ -71,15 +72,28 @@ pub trait ReadAdapterFactory: Send + Sync {
     }
 }
 
+/// Abstract factory trait implemented by one-shot archive writers.
+pub trait CreateAdapterFactory: Send + Sync {
+    /// Returns static metadata descriptor for this writer.
+    fn descriptor(&self) -> &'static AdapterDescriptor;
+
+    /// Finalizes and atomically commits one creation request.
+    fn create(&self, request: &CreateRequest, context: &mut JobContext<'_>) -> Result<CreateReport, ArchiveError>;
+}
+
 /// Immutable registry mapping `(FormatId, ArchiveOperation)` to an adapter factory.
 #[derive(Clone)]
 pub struct AdapterRegistry {
     registrations: HashMap<(FormatId, ArchiveOperation), Arc<dyn ReadAdapterFactory>>,
+    create_registrations: HashMap<FormatId, Arc<dyn CreateAdapterFactory>>,
 }
 
 impl fmt::Debug for AdapterRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AdapterRegistry").field("registration_count", &self.registrations.len()).finish()
+        f.debug_struct("AdapterRegistry")
+            .field("read_registration_count", &self.registrations.len())
+            .field("create_registration_count", &self.create_registrations.len())
+            .finish()
     }
 }
 
@@ -90,6 +104,12 @@ impl AdapterRegistry {
     #[must_use]
     pub fn resolve(&self, format: FormatId, operation: ArchiveOperation) -> Option<Arc<dyn ReadAdapterFactory>> {
         self.registrations.get(&(format, operation)).cloned()
+    }
+
+    /// Resolves a one-shot writer for a format.
+    #[must_use]
+    pub fn resolve_create(&self, format: FormatId) -> Option<Arc<dyn CreateAdapterFactory>> {
+        self.create_registrations.get(&format).cloned()
     }
 
     /// Derives capabilities for a given format from registered adapters.
@@ -109,6 +129,14 @@ impl AdapterRegistry {
                 if desc.supports_encryption {
                     encryption = true;
                 }
+            }
+        }
+
+        if let Some(factory) = self.create_registrations.get(&format) {
+            found = true;
+            ops.push(ArchiveOperation::Create);
+            if factory.descriptor().supports_encryption {
+                encryption = true;
             }
         }
 
@@ -147,6 +175,7 @@ impl AdapterRegistry {
 #[derive(Default)]
 pub struct ArchiveEngineBuilder {
     registrations: HashMap<(FormatId, ArchiveOperation), Arc<dyn ReadAdapterFactory>>,
+    create_registrations: HashMap<FormatId, Arc<dyn CreateAdapterFactory>>,
 }
 
 impl ArchiveEngineBuilder {
@@ -177,9 +206,25 @@ impl ArchiveEngineBuilder {
         Ok(())
     }
 
+    /// Registers a one-shot writer for the format declared by its descriptor.
+    pub fn register_create_adapter(&mut self, factory: Arc<dyn CreateAdapterFactory>) -> Result<(), ArchiveError> {
+        let desc = factory.descriptor();
+        if !desc.operations.contains(&ArchiveOperation::Create) {
+            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Creation adapter '{}' does not claim the Create operation", desc.name)));
+        }
+        if self.create_registrations.contains_key(&desc.format) {
+            return Err(ArchiveError::usable(
+                ErrorKind::InvalidFormat,
+                format!("Ambiguous registration: creation for format '{}' is already claimed", desc.format),
+            ));
+        }
+        self.create_registrations.insert(desc.format, factory);
+        Ok(())
+    }
+
     /// Builds the immutable `AdapterRegistry`.
     #[must_use]
     pub fn build(self) -> AdapterRegistry {
-        AdapterRegistry { registrations: self.registrations }
+        AdapterRegistry { registrations: self.registrations, create_registrations: self.create_registrations }
     }
 }
