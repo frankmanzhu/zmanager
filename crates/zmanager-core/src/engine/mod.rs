@@ -59,7 +59,8 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_create_adapter(Arc::new(adapters::create::TzapCreateAdapter))?;
         builder.register_create_adapter(Arc::new(adapters::create::AppleArchiveCreateAdapter))?;
 
-        // Libarchive compatibility listing adapters for allow-listed formats
+        // Libarchive compatibility listing adapters for allow-listed formats.
+        #[cfg(feature = "libarchive-fallback")]
         for &format in adapters::libarchive::LIBARCHIVE_ALLOW_LIST {
             if let Ok(adapter) = adapters::libarchive::LibarchiveListAdapter::new(format) {
                 builder.register_read_adapter(Arc::new(adapter))?;

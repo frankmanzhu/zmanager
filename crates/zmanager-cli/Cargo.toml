@@ -18,8 +18,9 @@ name = "zm"
 path = "src/bin/zm.rs"
 
 [features]
-default = ["auth"]
+default = ["auth", "libarchive-fallback"]
 auth = ["zmanager-core/auth"]
+libarchive-fallback = ["zmanager-core/libarchive-fallback"]
 
 [dependencies]
 anstream = "1.0.0"

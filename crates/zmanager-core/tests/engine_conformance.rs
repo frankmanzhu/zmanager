@@ -46,6 +46,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
         assert_eq!(capabilities.source_access, source_access, "{format} advertised the wrong source access");
     }
+    #[cfg(feature = "libarchive-fallback")]
     assert!(!zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&FormatId::RAR));
     for format in
         [FormatId::ZIP, FormatId::SPLIT_ZIP, FormatId::SEVEN_Z, FormatId::TAR_ZST, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM, FormatId::APPLE_ARCHIVE]

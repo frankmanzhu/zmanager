@@ -44,6 +44,7 @@ pub(crate) fn safety_error_kind(error: &ExtractionSafetyError) -> ErrorKind {
 }
 
 pub mod create;
+#[cfg(feature = "libarchive-fallback")]
 pub mod libarchive;
 pub mod native;
 pub mod zip;

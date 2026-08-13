@@ -21,8 +21,9 @@ uniffi = { version = "0.29", features = ["cli"] }
 zmanager-core = { workspace = true }
 
 [features]
-default = ["auth"]
+default = ["auth", "libarchive-fallback"]
 auth = ["zmanager-core/auth"]
+libarchive-fallback = ["zmanager-core/libarchive-fallback"]
 
 [build-dependencies]
 uniffi = { version = "0.29", features = ["build"] }
