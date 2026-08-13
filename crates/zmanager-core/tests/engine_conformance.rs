@@ -40,6 +40,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         (FormatId::UDF, SourceAccess::Seekable),
         (FormatId::ISO, SourceAccess::Seekable),
         (FormatId::LHA, SourceAccess::Seekable),
+        (FormatId::WARC, SourceAccess::Seekable),
     ];
 
     for (format, source_access) in expected {
@@ -430,6 +431,49 @@ fn native_lha_adapter_uses_delharc_when_lha_available() {
     let report = handle.extract(&mut options).unwrap();
     assert!(report.written_entries > 0);
     assert_eq!(fs::read(destination.join("project/file.txt")).unwrap(), b"lha engine payload\n");
+    handle.close().unwrap();
+}
+
+#[test]
+fn native_warc_adapter_materializes_record_bodies_when_bsdtar_available() {
+    let Some(bsdtar) = std::env::var("PATH")
+        .ok()
+        .and_then(|path| path.split(':').map(std::path::PathBuf::from).map(|directory| directory.join("bsdtar")).find(|candidate| candidate.is_file()))
+    else {
+        return;
+    };
+    let temp = TestDir::new("engine-conformance-warc");
+    let source = temp.path("project");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("file.txt"), b"warc engine payload\n").unwrap();
+    let archive = temp.path("payload.warc");
+    let create = std::process::Command::new(bsdtar)
+        .current_dir(temp.root())
+        .arg("--format")
+        .arg("warc")
+        .arg("-cf")
+        .arg(&archive)
+        .arg("project/file.txt")
+        .output()
+        .unwrap();
+    assert!(create.status.success(), "bsdtar failed: {}", String::from_utf8_lossy(&create.stderr));
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    let file_entry = listing.entries.iter().find(|entry| entry.path == "project/file.txt").expect("WARC target URI should become the entry path");
+    assert!(listing.entries.iter().any(|entry| entry.path.starts_with("records/")), "WARC info record should retain a stable record path");
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert_eq!(test.tested_entries, listing.entries.len() as u64);
+    let mut copied = Vec::new();
+    let copy = handle.copy_entry(file_entry.id, &mut copied).unwrap();
+    assert_eq!(copy.written_bytes, copied.len() as u64);
+    assert_eq!(copied, b"warc engine payload\n");
+    let destination = temp.path("out");
+    let mut options = ExtractOptions { destination: destination.clone(), ..ExtractOptions::default() };
+    let report = handle.extract(&mut options).unwrap();
+    assert_eq!(report.written_entries, listing.entries.len() as u64);
+    assert_eq!(fs::read(destination.join("project/file.txt")).unwrap(), b"warc engine payload\n");
     handle.close().unwrap();
 }
 

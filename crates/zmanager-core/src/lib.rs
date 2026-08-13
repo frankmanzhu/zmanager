@@ -78,6 +78,7 @@ pub mod tar_zst_backend;
 pub mod trust;
 pub mod tzap_backend;
 pub mod virtual_disk_backend;
+pub mod warc_backend;
 pub mod x509_format;
 pub mod xar_backend;
 pub mod zip_backend;
