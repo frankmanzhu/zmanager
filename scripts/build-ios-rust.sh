@@ -12,6 +12,20 @@ LIB_NAME="libzmanager_ffi.a"
 SIM_LIB="$IOS_BUILD_DIR/libzmanager_ffi_sim.a"
 PROFILE_DIR="debug"
 CARGO_PROFILE_ARGS=()
+TZAP_PROFILE_ARGS=()
+
+case "${ZMANAGER_TZAP_PROFILE:-full}" in
+  full)
+    TZAP_PROFILE_ARGS=(--no-default-features --features tzap-online)
+    ;;
+  offline)
+    TZAP_PROFILE_ARGS=(--no-default-features)
+    ;;
+  *)
+    echo "ZMANAGER_TZAP_PROFILE must be full or offline" >&2
+    exit 2
+    ;;
+esac
 
 if [[ "${CONFIGURATION:-Debug}" == "Release" ]]; then
   PROFILE_DIR="release"
@@ -48,6 +62,7 @@ cargo_rustc_simulator_staticlib() {
     cargo rustc \
       --manifest-path "$ROOT/Cargo.toml" \
       -p zmanager-ffi \
+      "${TZAP_PROFILE_ARGS[@]}" \
       --target "$target" \
       "${CARGO_PROFILE_ARGS[@]}" \
       --lib \

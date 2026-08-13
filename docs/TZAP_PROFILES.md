@@ -34,6 +34,13 @@ cargo test -p zmanager-ffi --no-default-features
 bash scripts/verify-artifact-profiles.sh
 ```
 
+Native consumer builds select the same profile through `ZMANAGER_TZAP_PROFILE`.
+The root iOS script accepts `full` or `offline` (default `full`); the mobile
+Android and pinned iOS wrappers default to `offline`. The desktop macOS
+inspection-extension build also defaults to `offline`, while the desktop main
+application keeps the explicit `tzap-online` feature as its default because
+its account UI uses hosted authentication.
+
 Adding a hosted operation requires an explicit `tzap-online` product-boundary
 decision. It must not be added to archive-engine selection or to the stable
 FFI type contract.
