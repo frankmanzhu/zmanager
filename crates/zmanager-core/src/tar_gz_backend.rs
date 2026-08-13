@@ -190,7 +190,44 @@ fn create_tar_gz_from_manifest_inner(
 /// Extracts a `.tar.gz` archive through the native Rust `flate2` and `tar`
 /// readers and the shared extraction safety policy.
 pub fn extract_tar_gz(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<TarGzExtractReport, TarGzError> {
-    extract_tar_gz_inner(archive_path, destination, policy, None, None)
+    extract_tar_gz_inner(archive_path, destination, policy, None, None, None)
+}
+
+/// Extracts exactly one `.tar.gz` entry by its archive-order index.
+pub fn extract_tar_gz_entry_by_index(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    entry_index: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<TarGzExtractReport, TarGzError> {
+    extract_tar_gz_inner(archive_path, destination, policy, None, overwrite_resolver, Some(entry_index))
+}
+
+/// Copies exactly one regular `.tar.gz` entry by archive-order index.
+pub fn copy_tar_gz_entry_by_index<W: io::Write + ?Sized>(archive_path: impl AsRef<Path>, entry_index: usize, output: &mut W) -> Result<u64, TarGzError> {
+    let archive_path = archive_path.as_ref();
+    let file = File::open(archive_path).map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?;
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    let mut entry = archive
+        .entries()
+        .map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?
+        .nth(entry_index)
+        .ok_or_else(|| TarGzError::Io {
+            path: archive_path.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::NotFound, "retained TAR.GZ entry ID is not present"),
+        })?
+        .map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?;
+    let entry_path = entry.path().map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?.to_string_lossy().into_owned();
+    let kind = tar_gz_entry_kind(&mut entry, &entry_path)?;
+    if !matches!(kind, ExtractionEntryKind::File) {
+        return Err(TarGzError::Io {
+            path: PathBuf::from(entry_path),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "retained TAR.GZ entry is not a regular file"),
+        });
+    }
+    io::copy(&mut entry, output).map_err(|source| TarGzError::Io { path: PathBuf::from(entry_path), source })
 }
 
 pub fn extract_tar_gz_with_context(
@@ -199,7 +236,7 @@ pub fn extract_tar_gz_with_context(
     policy: ExtractionPolicy,
     context: &mut JobContext<'_>,
 ) -> Result<TarGzExtractReport, TarGzError> {
-    extract_tar_gz_inner(archive_path, destination, policy, Some(context), None)
+    extract_tar_gz_inner(archive_path, destination, policy, Some(context), None, None)
 }
 
 pub fn extract_tar_gz_with_overwrite_resolver(
@@ -208,7 +245,7 @@ pub fn extract_tar_gz_with_overwrite_resolver(
     policy: ExtractionPolicy,
     resolver: &mut dyn OverwriteResolver,
 ) -> Result<TarGzExtractReport, TarGzError> {
-    extract_tar_gz_inner(archive_path, destination, policy, None, Some(resolver))
+    extract_tar_gz_inner(archive_path, destination, policy, None, Some(resolver), None)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -218,6 +255,7 @@ fn extract_tar_gz_inner(
     policy: ExtractionPolicy,
     mut context: Option<&mut JobContext<'_>>,
     resolver: Option<&mut dyn OverwriteResolver>,
+    selected_index: Option<usize>,
 ) -> Result<TarGzExtractReport, TarGzError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
@@ -230,8 +268,12 @@ fn extract_tar_gz_inner(
     let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
     let mut deferred_directories = Vec::new();
     let mut deferred_hardlinks = Vec::new();
-    for item in archive.entries().map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })? {
+    for (index, item) in archive.entries().map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?.enumerate() {
         let mut entry = item.map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?;
+        if selected_index.is_some_and(|selected| selected != index) {
+            report.skipped_entries += 1;
+            continue;
+        }
         let name = entry.path().map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?.to_string_lossy().into_owned();
         let kind = tar_gz_entry_kind(&mut entry, &name)?;
         let size = entry.header().size().unwrap_or(0);

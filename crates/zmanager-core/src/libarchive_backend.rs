@@ -231,7 +231,7 @@ pub fn extract_archive_with_password(
     policy: ExtractionPolicy,
     password: Option<&str>,
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
-    extract_archive_inner(archive_path, destination, policy, password, None, None, None)
+    extract_archive_inner(archive_path, destination, policy, password, None, None, None, None)
 }
 
 /// Extracts an archive through the shared extraction safety policy, optionally
@@ -248,7 +248,7 @@ pub fn extract_archive_with_password_and_context(
     password: Option<&str>,
     context: &mut JobContext<'_>,
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
-    extract_archive_inner(archive_path, destination, policy, password, None, None, Some(context))
+    extract_archive_inner(archive_path, destination, policy, password, None, None, None, Some(context))
 }
 
 /// Extracts an archive with an overwrite resolver and optional password.
@@ -264,7 +264,7 @@ pub fn extract_archive_with_overwrite_resolver_and_password(
     password: Option<&str>,
     overwrite_resolver: &mut dyn OverwriteResolver,
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
-    extract_archive_inner(archive_path, destination, policy, password, None, Some(overwrite_resolver), None)
+    extract_archive_inner(archive_path, destination, policy, password, None, None, Some(overwrite_resolver), None)
 }
 
 /// Extracts one selected archive entry through the shared extraction safety
@@ -298,7 +298,19 @@ pub fn extract_archive_entry_with_password(
     policy: ExtractionPolicy,
     password: Option<&str>,
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
-    extract_archive_inner(archive_path, destination, policy, password, Some(entry_path), None, None)
+    extract_archive_inner(archive_path, destination, policy, password, Some(entry_path), None, None, None)
+}
+
+/// Extracts exactly one archive entry by its archive-order index.
+pub fn extract_archive_entry_by_index(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    password: Option<&str>,
+    entry_index: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<LibarchiveExtractReport, LibarchiveError> {
+    extract_archive_inner(archive_path, destination, policy, password, None, Some(entry_index), overwrite_resolver, None)
 }
 
 /// Copies the one selected regular file entry to a writer.
@@ -353,6 +365,32 @@ pub fn copy_archive_files_to_writer<W: Write>(
     Ok(report)
 }
 
+/// Copies exactly one regular archive entry by archive-order index.
+pub fn copy_archive_entry_by_index<W: Write + ?Sized>(
+    archive_path: impl AsRef<Path>,
+    password: Option<&str>,
+    entry_index: usize,
+    output: &mut W,
+) -> Result<u64, LibarchiveError> {
+    let archive_path = archive_path.as_ref();
+    let mut archive = open_archive(archive_path, password)?;
+    let mut index = 0_usize;
+    while let Some(entry) = archive.next_entry()? {
+        let owned_entry = OwnedEntry::from_entry(&entry)?;
+        if index != entry_index {
+            index = index.saturating_add(1);
+            archive.skip_data()?;
+            continue;
+        }
+        if !matches!(owned_entry.extraction_kind, ExtractionEntryKind::File) {
+            archive.skip_data()?;
+            return Err(LibarchiveError::StdoutSelectionNotSingleFile { selected_files: 0 });
+        }
+        return copy_file_entry_to_writer(&mut archive, output, &owned_entry.path);
+    }
+    Err(LibarchiveError::EntryNotFound { path: format!("entry index {entry_index}") })
+}
+
 /// Reads selected archive entries to validate libarchive-backed data streams.
 ///
 /// # Errors
@@ -388,12 +426,14 @@ pub fn test_archive_with_password_filter(
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn extract_archive_inner(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,
     policy: ExtractionPolicy,
     password: Option<&str>,
     selected_entry: Option<&str>,
+    selected_index: Option<usize>,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
     mut context: Option<&mut JobContext<'_>>,
 ) -> Result<LibarchiveExtractReport, LibarchiveError> {
@@ -404,13 +444,20 @@ fn extract_archive_inner(
     let mut archive = open_archive(archive_path.as_ref(), password)?;
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report = LibarchiveExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
-    let mut found_selected_entry = selected_entry.is_none();
+    let mut found_selected_entry = selected_entry.is_none() && selected_index.is_none();
     let mut deferred_directories = Vec::new();
     let mut deferred_hardlinks = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
+    let mut entry_index = 0_usize;
     while let Some(entry) = archive.next_entry()? {
         let owned_entry = OwnedEntry::from_entry(&entry)?;
+        let is_selected_index = selected_index.is_none_or(|selected| selected == entry_index);
+        entry_index = entry_index.saturating_add(1);
+        if !is_selected_index {
+            archive.skip_data()?;
+            continue;
+        }
         if let Some(selected_entry) = selected_entry
             && !crate::safety::archive_entry_matches_selected(&owned_entry.path, selected_entry)
         {
@@ -447,8 +494,13 @@ fn extract_archive_inner(
         })?;
     }
 
-    if !found_selected_entry && let Some(path) = selected_entry {
-        return Err(LibarchiveError::EntryNotFound { path: path.to_owned() });
+    if !found_selected_entry {
+        if let Some(path) = selected_entry {
+            return Err(LibarchiveError::EntryNotFound { path: path.to_owned() });
+        }
+        if let Some(index) = selected_index {
+            return Err(LibarchiveError::EntryNotFound { path: format!("entry index {index}") });
+        }
     }
 
     materialize_deferred_hardlinks(&deferred_hardlinks, &mut report)?;
@@ -726,7 +778,7 @@ fn apply_symlink_mtime(path: &Path, modified: Option<SystemTime>) -> Result<(), 
         .map_err(|source| LibarchiveError::Io { path: path.to_path_buf(), source })
 }
 
-fn copy_file_entry_to_writer<W: Write>(archive: &mut ReadArchive, output: &mut W, entry_path: &str) -> Result<u64, LibarchiveError> {
+fn copy_file_entry_to_writer<W: Write + ?Sized>(archive: &mut ReadArchive, output: &mut W, entry_path: &str) -> Result<u64, LibarchiveError> {
     let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
     let mut written_bytes = 0_u64;
 

@@ -180,7 +180,18 @@ fn create_tar_zst_from_manifest_inner(
 /// Returns [`TarZstdError`] when the archive cannot be read, an entry is unsafe,
 /// or filesystem writes fail.
 pub fn extract_tar_zst(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<TarZstdExtractReport, TarZstdError> {
-    extract_tar_zst_inner(archive_path, destination, policy, None, None)
+    extract_tar_zst_inner(archive_path, destination, policy, None, None, None)
+}
+
+/// Extracts exactly one `.tar.zst` entry by its archive-order index.
+pub fn extract_tar_zst_entry_by_index(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    entry_index: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<TarZstdExtractReport, TarZstdError> {
+    extract_tar_zst_inner(archive_path, destination, policy, None, overwrite_resolver, Some(entry_index))
 }
 
 /// Estimates the uncompressed byte size of a `.tar.zst` archive by summing
@@ -242,6 +253,32 @@ pub fn copy_tar_zst_files_to_writer<W: io::Write>(
     Ok(report)
 }
 
+/// Copies exactly one regular `.tar.zst` entry by archive-order index.
+pub fn copy_tar_zst_entry_by_index<W: io::Write + ?Sized>(archive_path: impl AsRef<Path>, entry_index: usize, output: &mut W) -> Result<u64, TarZstdError> {
+    let archive_path = archive_path.as_ref();
+    let file = File::open(archive_path).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let mut archive = Archive::new(decoder);
+    let mut entry = archive
+        .entries()
+        .map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?
+        .nth(entry_index)
+        .ok_or_else(|| TarZstdError::Io {
+            path: archive_path.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::NotFound, "retained TAR.ZST entry ID is not present"),
+        })?
+        .map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+    let entry_path = entry_path_string(&entry)?;
+    let kind = extraction_kind(&mut entry, &entry_path)?;
+    if !matches!(kind, ExtractionEntryKind::File) {
+        return Err(TarZstdError::Io {
+            path: PathBuf::from(entry_path),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "retained TAR.ZST entry is not a regular file"),
+        });
+    }
+    io::copy(&mut entry, output).map_err(|source| TarZstdError::Io { path: PathBuf::from(entry_path), source })
+}
+
 /// Extracts a `.tar.zst` archive through the shared extraction safety policy
 /// while emitting job events.
 ///
@@ -255,7 +292,7 @@ pub fn extract_tar_zst_with_context(
     policy: ExtractionPolicy,
     context: &mut JobContext<'_>,
 ) -> Result<TarZstdExtractReport, TarZstdError> {
-    extract_tar_zst_inner(archive_path, destination, policy, Some(context), None)
+    extract_tar_zst_inner(archive_path, destination, policy, Some(context), None, None)
 }
 
 /// Extracts a `.tar.zst` archive with an overwrite resolver.
@@ -270,7 +307,7 @@ pub fn extract_tar_zst_with_overwrite_resolver(
     policy: ExtractionPolicy,
     overwrite_resolver: &mut dyn OverwriteResolver,
 ) -> Result<TarZstdExtractReport, TarZstdError> {
-    extract_tar_zst_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+    extract_tar_zst_inner(archive_path, destination, policy, None, Some(overwrite_resolver), None)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -280,6 +317,7 @@ fn extract_tar_zst_inner(
     policy: ExtractionPolicy,
     mut context: Option<&mut JobContext<'_>>,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+    selected_index: Option<usize>,
 ) -> Result<TarZstdExtractReport, TarZstdError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
@@ -295,8 +333,12 @@ fn extract_tar_zst_inner(
     let mut deferred_hardlinks = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
-    for entry in archive.entries().map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })? {
+    for (index, entry) in archive.entries().map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?.enumerate() {
         let mut entry = entry.map_err(|source| TarZstdError::Io { path: archive_path.to_path_buf(), source })?;
+        if selected_index.is_some_and(|selected| selected != index) {
+            report.skipped_entries += 1;
+            continue;
+        }
         let archive_entry_path = entry_path_string(&entry)?;
         let entry_size = entry.header().size().unwrap_or(0);
         let kind = extraction_kind(&mut entry, &archive_entry_path)?;

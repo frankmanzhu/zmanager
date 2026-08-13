@@ -335,11 +335,11 @@ fn extract_raw_stream_inner(
 ///
 /// Returns [`RawStreamError`] when the input cannot be decoded or the output
 /// writer fails.
-pub fn copy_raw_stream_to_writer<W: Write>(archive_path: impl AsRef<Path>, format: RawStreamFormat, output: &mut W) -> Result<u64, RawStreamError> {
+pub fn copy_raw_stream_to_writer<W: Write + ?Sized>(archive_path: impl AsRef<Path>, format: RawStreamFormat, output: &mut W) -> Result<u64, RawStreamError> {
     copy_raw_stream_to_writer_with_progress(archive_path, format, output, None, false)
 }
 
-pub fn copy_raw_stream_to_writer_with_progress<W: Write>(
+pub fn copy_raw_stream_to_writer_with_progress<W: Write + ?Sized>(
     archive_path: impl AsRef<Path>,
     format: RawStreamFormat,
     output: &mut W,
@@ -418,7 +418,7 @@ fn open_decoder_from_reader<'a, R: Read + 'a>(reader: R, format: RawStreamFormat
     }
 }
 
-fn copy_reader_to_writer_with_progress<R: Read, W: Write>(
+fn copy_reader_to_writer_with_progress<R: Read, W: Write + ?Sized>(
     reader: &mut R,
     output: &mut W,
     path: &Path,
@@ -430,7 +430,7 @@ fn copy_reader_to_writer_with_progress<R: Read, W: Write>(
 /// Shared byte-copy loop with an optional byte-count progress callback, used
 /// by both the decoder-reader path and the external-tool stdout path so the
 /// progress accounting cannot drift between them.
-fn copy_bytes_with_progress<R: Read, W: Write>(reader: &mut R, output: &mut W, mut on_progress: ProgressCallback<'_>) -> io::Result<u64> {
+fn copy_bytes_with_progress<R: Read, W: Write + ?Sized>(reader: &mut R, output: &mut W, mut on_progress: ProgressCallback<'_>) -> io::Result<u64> {
     let mut total_written = 0_u64;
     let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
@@ -560,7 +560,7 @@ struct ExternalStreamTool {
     args: &'static [&'static str],
 }
 
-fn copy_external_tool_to_writer<W: Write>(
+fn copy_external_tool_to_writer<W: Write + ?Sized>(
     tool: ExternalStreamTool,
     archive_path: &Path,
     output: &mut W,
@@ -595,7 +595,7 @@ fn copy_external_tool_to_writer<W: Write>(
     Ok(written_bytes)
 }
 
-fn copy_lrzip_to_writer<W: Write>(archive_path: &Path, output: &mut W, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
+fn copy_lrzip_to_writer<W: Write + ?Sized>(archive_path: &Path, output: &mut W, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
     let temp_dir = TemporaryDirectory::new("lrzip")?;
     let temp_path = temp_dir.path().join("decoded");
     let process_output = Command::new("lrzip")
@@ -631,7 +631,7 @@ fn copy_lrzip_to_writer<W: Write>(archive_path: &Path, output: &mut W, on_progre
     Ok(written_bytes)
 }
 
-fn copy_unix_compress_to_writer<W: Write>(archive_path: &Path, output: &mut W, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
+fn copy_unix_compress_to_writer<W: Write + ?Sized>(archive_path: &Path, output: &mut W, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
     let temp_dir = TemporaryDirectory::new("compress")?;
     let temp_input = temp_dir.path().join(format!("input.{RAW_STREAM_TEMP_EXTENSION}"));
     let temp_output = temp_input.with_extension("");

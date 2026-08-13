@@ -518,7 +518,26 @@ pub fn extract_7z(
     password: Option<&str>,
     policy: ExtractionPolicy,
 ) -> Result<SevenZExtractReport, SevenZError> {
-    extract_7z_inner(archive_path, destination, password, policy, None, None)
+    extract_7z_inner(archive_path, destination, password, policy, None, None, None)
+}
+
+/// Extracts exactly one `.7z` entry by its archive-order index.
+pub fn extract_7z_entry_by_index(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    password: Option<&str>,
+    policy: ExtractionPolicy,
+    entry_index: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<SevenZExtractReport, SevenZError> {
+    let archive_path = archive_path.as_ref();
+    let listing = list_7z(archive_path, password)?;
+    let entry = listing.entries.get(entry_index).ok_or_else(|| SevenZError::Io {
+        path: archive_path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::NotFound, "retained 7z entry ID is not present in this archive"),
+    })?;
+    let occurrence = listing.entries[..entry_index].iter().filter(|candidate| candidate.name == entry.name).count();
+    extract_7z_inner(archive_path, destination, password, policy, overwrite_resolver, None, Some((entry.name.as_str(), occurrence)))
 }
 
 /// Extracts a `.7z` archive with an overwrite resolver.
@@ -535,7 +554,7 @@ pub fn extract_7z_with_overwrite_resolver(
     policy: ExtractionPolicy,
     overwrite_resolver: &mut dyn OverwriteResolver,
 ) -> Result<SevenZExtractReport, SevenZError> {
-    extract_7z_inner(archive_path, destination, password, policy, Some(overwrite_resolver), None)
+    extract_7z_inner(archive_path, destination, password, policy, Some(overwrite_resolver), None, None)
 }
 
 /// Extracts a `.7z` archive through the shared extraction safety policy with a
@@ -552,7 +571,7 @@ pub fn extract_7z_with_context(
     policy: ExtractionPolicy,
     context: &mut JobContext<'_>,
 ) -> Result<SevenZExtractReport, SevenZError> {
-    extract_7z_inner(archive_path, destination, password, policy, None, Some(context))
+    extract_7z_inner(archive_path, destination, password, policy, None, Some(context), None)
 }
 
 fn extract_7z_inner(
@@ -562,6 +581,7 @@ fn extract_7z_inner(
     policy: ExtractionPolicy,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
     mut context: Option<&mut JobContext<'_>>,
+    selected_entry: Option<(&str, usize)>,
 ) -> Result<SevenZExtractReport, SevenZError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
@@ -577,8 +597,19 @@ fn extract_7z_inner(
     let mut deferred_directories: Vec<(PathBuf, Option<u32>, Option<std::time::SystemTime>)> = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
+    let mut entry_occurrences = std::collections::HashMap::<String, usize>::new();
     let result = reader.for_each_entries(|entry, entry_reader| {
         let path = entry.name().to_owned();
+        let occurrence = entry_occurrences.entry(path.clone()).or_insert(0);
+        let is_selected = selected_entry.is_none_or(|(selected_path, selected_occurrence)| selected_path == path && selected_occurrence == *occurrence);
+        *occurrence = occurrence.saturating_add(1);
+        if !is_selected {
+            if let Err(error) = drain_reader(entry_reader, &path) {
+                return Err(callback_failed_with(&mut callback_error, error));
+            }
+            report.skipped_entries += 1;
+            return Ok(true);
+        }
         if entry.is_anti_item() {
             if let Err(error) = drain_reader(entry_reader, &path) {
                 return Err(callback_failed_with(&mut callback_error, error));
@@ -673,6 +704,62 @@ pub fn copy_7z_files_to_writer<W: Write>(
     result?;
 
     Ok(report)
+}
+
+/// Copies exactly one regular `.7z` entry by archive-order index.
+pub fn copy_7z_entry_by_index<W: Write + ?Sized>(
+    archive_path: impl AsRef<Path>,
+    password: Option<&str>,
+    entry_index: usize,
+    output: &mut W,
+) -> Result<u64, SevenZError> {
+    let archive_path = archive_path.as_ref();
+    let listing = list_7z(archive_path, password)?;
+    let target = listing.entries.get(entry_index).ok_or_else(|| SevenZError::Io {
+        path: archive_path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::NotFound, "retained 7z entry ID is not present in this archive"),
+    })?;
+    let target_occurrence = listing.entries[..entry_index].iter().filter(|candidate| candidate.name == target.name).count();
+    let target_name = target.name.clone();
+    let password = archive_password(password);
+    let source = open_7z_reader(archive_path)?;
+    let mut reader = ArchiveReader::new(source, password)?;
+
+    let mut occurrences = std::collections::HashMap::<String, usize>::new();
+    let mut copied = None;
+    let mut callback_error = None;
+    let result = reader.for_each_entries(|entry, entry_reader| {
+        let occurrence = occurrences.entry(entry.name().to_owned()).or_insert(0);
+        let selected = entry.name() == target_name && *occurrence == target_occurrence;
+        *occurrence = occurrence.saturating_add(1);
+        if !selected {
+            drain_reader(entry_reader, entry.name()).map_err(|error| callback_failed_with(&mut callback_error, error))?;
+            return Ok(true);
+        }
+        if entry.is_directory() || entry.is_anti_item() {
+            drain_reader(entry_reader, entry.name()).map_err(|error| callback_failed_with(&mut callback_error, error))?;
+            return Err(callback_failed_with(
+                &mut callback_error,
+                SevenZError::Io {
+                    path: PathBuf::from(entry.name()),
+                    source: io::Error::new(io::ErrorKind::InvalidInput, "retained 7z entry is not a regular file"),
+                },
+            ));
+        }
+        copied = Some(
+            io::copy(entry_reader, output)
+                .map_err(|source| callback_failed_with(&mut callback_error, SevenZError::Io { path: PathBuf::from(entry.name()), source }))?,
+        );
+        Ok(false)
+    });
+    if let Some(error) = callback_error {
+        return Err(error);
+    }
+    result?;
+    copied.ok_or_else(|| SevenZError::Io {
+        path: archive_path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::NotFound, "retained 7z entry ID is not present in this archive"),
+    })
 }
 
 fn configure_content_methods<W: io::Write + io::Seek>(writer: &mut ArchiveWriter<W>, options: &SevenZCreateOptions) -> bool {

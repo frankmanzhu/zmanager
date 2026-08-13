@@ -420,38 +420,22 @@ pub fn extract_entry_with_options(
         crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
 
-    if is_zip_family_archive(archive_path) {
-        extract_zip_entry_via_engine(archive_path, entry_path, &destination_root, &policy, options.password)
-    } else if is_tar_zst_archive(archive_path) {
-        extract_tar_zst_entry(archive_path, entry_path, &destination_root, &policy)
-    } else if is_tzap_archive_path(archive_path) {
-        extract_tzap_entry(
-            archive_path,
-            entry_path,
-            &destination_root,
-            &policy,
-            options.password,
-            TzapRestoreOptions {
-                policy: options.tzap_restore_policy,
-                allow_degraded: options.tzap_allow_degraded,
-                allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
-            },
-        )
+    let detected_format = crate::archive_format::detect_archive_format(archive_path);
+    let engine_selected = is_zip_family_archive(archive_path)
+        || is_tar_zst_archive(archive_path)
+        || is_tzap_archive_path(archive_path)
+        || is_apple_archive_path_browser(archive_path)
+        || raw_stream_backend::detect_raw_stream_format(archive_path).is_some()
+        || is_rar_archive(archive_path)
+        || crate::engine::format::FormatId::from_archive_format_kind(detected_format)
+            .is_some_and(|format| crate::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&format));
+    if engine_selected {
+        extract_entry_via_engine(archive_path, entry_path, &destination_root, &policy, options.password, None)
     } else {
-        // Apple Archive runs after TZAP and before raw streams, matching the
-        // old always-present chain; off-Apple the backend reports
-        // `AppleArchiveError::Unsupported`.
-        if is_apple_archive_path_browser(archive_path) {
-            return extract_apple_archive_entry_browser(archive_path, entry_path, &destination_root, destination, &policy, options.password);
-        }
-        if let Some(format) = raw_stream_backend::detect_raw_stream_format(archive_path) {
-            extract_raw_stream_entry(archive_path, format, entry_path, &destination_root, &policy)
-        } else {
-            let report = libarchive_backend::extract_archive_entry_with_password(archive_path, entry_path, &destination_root, policy, options.password)?;
-            let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
-            let destination_path = if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) };
-            Ok(EntryExtractReport { destination_path, written_bytes: report.written_bytes, metadata_diagnostics: Vec::new() })
-        }
+        let report = libarchive_backend::extract_archive_entry_with_password(archive_path, entry_path, &destination_root, policy, options.password)?;
+        let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
+        let destination_path = if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) };
+        Ok(EntryExtractReport { destination_path, written_bytes: report.written_bytes, metadata_diagnostics: Vec::new() })
     }
 }
 
@@ -511,22 +495,29 @@ fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Resu
     list_entries_from_engine_handle(&mut handle)
 }
 
-fn extract_zip_entry_via_engine(
+fn extract_entry_via_engine(
     archive_path: &Path,
     entry_path: &str,
     destination: &Path,
     policy: &ExtractionPolicy,
     password: Option<&str>,
+    recipient_key: Option<&Path>,
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
-    let open_options = crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: None };
+    let open_options = crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: recipient_key.map(Path::to_path_buf) };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let format = handle.detected().format;
     let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
-    let matching_entries: Vec<_> = listing.entries.into_iter().filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, entry_path)).collect();
+    let mut matching_entries: Vec<_> =
+        listing.entries.into_iter().filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, entry_path)).collect();
     if matching_entries.is_empty() {
         return Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() });
+    }
+    // The native Apple Archive operation preserves the historical behavior of
+    // extracting a selected directory and its descendants in one call.
+    if format == crate::engine::FormatId::APPLE_ARCHIVE {
+        matching_entries.truncate(1);
     }
 
     // Browser selection preserves the historical folder semantics: a selected
@@ -840,6 +831,7 @@ fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<Bro
     Ok(BrowserListing { entries })
 }
 
+#[allow(dead_code)]
 fn extract_apple_archive_entry_browser(
     archive_path: &Path,
     entry_path: &str,
@@ -852,6 +844,7 @@ fn extract_apple_archive_entry_browser(
     Ok(EntryExtractReport { destination_path: destination.join(entry_path), written_bytes: report.written_bytes, metadata_diagnostics: Vec::new() })
 }
 
+#[allow(dead_code)]
 fn extract_tzap_entry(
     archive_path: &Path,
     entry_path: &str,
@@ -914,6 +907,7 @@ fn extract_tzap_entry(
     Ok(EntryExtractReport { destination_path, written_bytes: total_written_bytes, metadata_diagnostics: all_diagnostics })
 }
 
+#[allow(dead_code)]
 fn extract_tar_zst_entry(
     archive_path: &Path,
     entry_path: &str,
@@ -948,6 +942,7 @@ fn extract_tar_zst_entry(
     Err(ArchiveBrowserError::EntryNotFound { path: entry_path.to_owned() })
 }
 
+#[allow(dead_code)]
 fn extract_raw_stream_entry(
     archive_path: &Path,
     format: RawStreamFormat,
@@ -974,6 +969,7 @@ fn extract_raw_stream_entry(
     Ok(EntryExtractReport { destination_path: write_plan.destination_path, written_bytes, metadata_diagnostics: Vec::new() })
 }
 
+#[allow(dead_code)]
 fn write_selected_entry<R: Read>(reader: &mut R, entry: &ExtractionEntry, write_plan: &SelectedEntryWritePlan) -> Result<u64, ArchiveBrowserError> {
     let destination_path = &write_plan.destination_path;
     match &entry.kind {
@@ -995,11 +991,13 @@ fn write_selected_entry<R: Read>(reader: &mut R, entry: &ExtractionEntry, write_
     }
 }
 
+#[allow(dead_code)]
 struct SelectedEntryWritePlan {
     destination_path: PathBuf,
     replace_existing: bool,
 }
 
+#[allow(dead_code)]
 fn decision_write_plan(decision: ExtractionDecision, archive_path: &str, overwrite: OverwritePolicy) -> Result<SelectedEntryWritePlan, ArchiveBrowserError> {
     match decision {
         ExtractionDecision::Write { destination_path, replace_existing, .. } => {
@@ -1041,6 +1039,7 @@ fn tar_entry_kind(entry_type: EntryType) -> BrowserEntryKind {
     }
 }
 
+#[allow(dead_code)]
 fn tar_extraction_kind<R: Read>(entry: &tar::Entry<'_, R>) -> Result<ExtractionEntryKind, ArchiveBrowserError> {
     let entry_type = entry.header().entry_type();
     if entry_type.is_dir() {
@@ -1095,6 +1094,7 @@ fn rar_entry_kind(kind: RarListEntryKind) -> BrowserEntryKind {
     }
 }
 
+#[allow(dead_code)]
 fn tzap_entry_kind(kind: TzapEntryKind) -> BrowserEntryKind {
     match kind {
         TzapEntryKind::File => BrowserEntryKind::File,
@@ -1115,6 +1115,7 @@ fn apple_archive_entry_kind(kind: AppleArchiveEntryKind) -> BrowserEntryKind {
     }
 }
 
+#[allow(dead_code)]
 fn tzap_extraction_kind(kind: TzapEntryKind, path: &str) -> Result<ExtractionEntryKind, ArchiveBrowserError> {
     match kind {
         TzapEntryKind::File => Ok(ExtractionEntryKind::File),

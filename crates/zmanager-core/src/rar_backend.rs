@@ -295,6 +295,55 @@ pub fn extract_rar_with_overwrite_resolver_and_password(
     )
 }
 
+/// Extracts exactly one RAR entry by its archive-order index.
+pub fn extract_rar_entry_by_index(
+    archive: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    password: Option<&str>,
+    entry_index: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<RarExtractReport, RarBackendError> {
+    let archive = archive.as_ref();
+    let entries = zmanager_unrar::list_archive(archive, password)?;
+    let entry = entries.into_iter().nth(entry_index).ok_or_else(|| RarBackendError::Io {
+        path: archive.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::NotFound, "retained RAR entry ID is not present in this archive"),
+    })?;
+    reject_large_dictionary(&entry)?;
+    extract_rar_with_options(archive, destination.as_ref(), policy, RarExtractOptions { password, overwrite_resolver, context: None, entries: vec![entry] })
+}
+
+/// Copies exactly one regular RAR entry by its archive-order index.
+pub fn copy_rar_entry_by_index(
+    archive: impl AsRef<Path>,
+    password: Option<&str>,
+    entry_index: usize,
+    output: &mut dyn io::Write,
+) -> Result<u64, RarBackendError> {
+    let archive = archive.as_ref();
+    let entries = zmanager_unrar::list_archive(archive, password)?;
+    let entry = entries.into_iter().nth(entry_index).ok_or_else(|| RarBackendError::Io {
+        path: archive.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::NotFound, "retained RAR entry ID is not present in this archive"),
+    })?;
+    reject_large_dictionary(&entry)?;
+    if !matches!(entry.kind, RarEntryKind::File) {
+        return Err(RarBackendError::Io {
+            path: PathBuf::from(&entry.path),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "retained RAR entry is not a regular file"),
+        });
+    }
+
+    let temporary = crate::temp_names::TemporaryDirectory::new("rar-copy").map_err(|error| RarBackendError::Io { path: error.path, source: error.source })?;
+    let temporary_path = temporary.path().join("payload");
+    let mut selections = BTreeMap::new();
+    selections.insert(entry.path.clone(), temporary_path.clone());
+    zmanager_unrar::extract_selected(archive, password, &selections)?;
+    let mut decoded = fs::File::open(&temporary_path).map_err(|source| RarBackendError::Io { path: temporary_path.clone(), source })?;
+    io::copy(&mut decoded, output).map_err(|source| RarBackendError::Io { path: temporary_path, source })
+}
+
 /// Extracts a RAR archive through bundled `UnRAR` and the shared safety
 /// planner, with progress reporting.
 ///

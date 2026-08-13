@@ -7,8 +7,8 @@ use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
-    SessionDisposition, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
+    SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
 };
 use crate::libarchive_backend::{self, LibarchiveEntryKind};
 
@@ -19,6 +19,9 @@ fn system_time_string(time: SystemTime) -> Option<String> {
 
 /// Allow-list of formats accepted by the libarchive listing compatibility adapter.
 pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
+    // Extensionless/container-shaped compatibility inputs (for example a
+    // ZIP SFX executable or gzip-compressed CPIO) retain an explicit
+    // compatibility claim until format sniffing can assign them a stable ID.
     FormatId::UNKNOWN,
     FormatId::TAR,
     FormatId::TAR_BZ2,
@@ -73,7 +76,13 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
         Box::leak(Box::new(AdapterDescriptor {
             name: "libarchive_compatibility_lister",
             format: self.format,
-            operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
+            operations: &[
+                ArchiveOperation::List,
+                ArchiveOperation::Test,
+                ArchiveOperation::Extract,
+                ArchiveOperation::SelectedExtract,
+                ArchiveOperation::CopyToWriter,
+            ],
             required_source_access: SourceAccess::Seekable,
             supports_encryption: true,
         }))
@@ -167,5 +176,49 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
         }
         .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn selected_extract<'a>(
+        &self,
+        archive: &DetectedArchive,
+        open_options: &OpenOptions,
+        entry_id: EntryId,
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        if !LIBARCHIVE_ALLOW_LIST.contains(&archive.format) {
+            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Format '{}' is rejected prior to libarchive probing", archive.format)));
+        }
+        let path = archive.source.primary_path();
+        let report = libarchive_backend::extract_archive_entry_by_index(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            open_options.password.as_deref(),
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            options.overwrite_resolver.as_deref_mut(),
+        )
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        if !LIBARCHIVE_ALLOW_LIST.contains(&archive.format) {
+            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Format '{}' is rejected prior to libarchive probing", archive.format)));
+        }
+        let path = archive.source.primary_path();
+        let written_bytes = libarchive_backend::copy_archive_entry_by_index(
+            path,
+            open_options.password.as_deref(),
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        Ok(CopyReport { written_bytes })
     }
 }

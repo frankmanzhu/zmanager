@@ -462,7 +462,7 @@ mod imp {
         /// Returns [`AppleArchiveError`] when the archive cannot be read, the
         /// selection does not resolve to exactly one regular file, or output writing
         /// fails.
-        pub(crate) fn copy_apple_archive_files_to_writer<W: Write>(
+        pub(crate) fn copy_apple_archive_files_to_writer<W: Write + ?Sized>(
             archive_path: impl AsRef<Path>,
             mut selected: impl FnMut(&str) -> bool,
             output: &mut W,
@@ -941,7 +941,7 @@ mod imp {
             Err(AppleArchiveError::Unsupported)
         }
 
-        pub(crate) fn copy_apple_archive_files_to_writer<W: Write>(
+        pub(crate) fn copy_apple_archive_files_to_writer<W: Write + ?Sized>(
             archive_path: impl AsRef<Path>,
             selected: impl FnMut(&str) -> bool,
             output: &mut W,
@@ -1101,7 +1101,7 @@ pub fn extract_apple_archive_entry(
 /// selection does not resolve to exactly one regular file, or output writing
 /// fails. On platforms without native `AppleArchive` support this returns
 /// [`AppleArchiveError::Unsupported`].
-pub fn copy_apple_archive_files_to_writer<W: Write>(
+pub fn copy_apple_archive_files_to_writer<W: Write + ?Sized>(
     archive_path: impl AsRef<Path>,
     selected: impl FnMut(&str) -> bool,
     output: &mut W,
