@@ -796,11 +796,18 @@ fn ensure_inside_destination(destination_root: &Path, destination_path: &Path, a
     })
 }
 
-fn archive_path_selected(path: &str, includes: &[String], excludes: &[String]) -> bool {
+/// Returns whether an archive path is included and not excluded by the
+/// caller's pattern lists.
+#[must_use]
+pub fn archive_pattern_matches_any(path: &str, includes: &[String], excludes: &[String]) -> bool {
     let matches_include = includes.is_empty() || includes.iter().any(|pattern| archive_pattern_matches(pattern, path));
     let matches_exclude = excludes.iter().any(|pattern| archive_pattern_matches(pattern, path));
 
     matches_include && !matches_exclude
+}
+
+fn archive_path_selected(path: &str, includes: &[String], excludes: &[String]) -> bool {
+    archive_pattern_matches_any(path, includes, excludes)
 }
 
 #[must_use]

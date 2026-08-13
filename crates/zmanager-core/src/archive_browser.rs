@@ -14,7 +14,7 @@ use crate::tzap_backend::{TzapEntryKind, TzapError, TzapRestoreOptions, TzapRest
 use crate::zip_backend::ZipBackendError;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::EntryType;
@@ -125,6 +125,20 @@ pub struct PreviewExtractReport {
     pub preview_path: PathBuf,
     /// Number of regular file bytes written.
     pub written_bytes: u64,
+}
+
+/// Report for copying the regular files selected by CLI-style include and
+/// exclude patterns through one retained engine handle.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct SelectedCopyReport {
+    /// Number of regular-file entries copied to the writer.
+    pub copied_entries: usize,
+    /// Number of listed entries skipped by the selection or entry kind.
+    pub skipped_entries: usize,
+    /// Decoded bytes written to the writer.
+    pub written_bytes: u64,
+    /// Non-fatal diagnostics returned by the adapters.
+    pub warnings: Vec<String>,
 }
 
 /// Options for browser-driven extraction.
@@ -535,6 +549,44 @@ fn extract_entry_via_engine(
 
     let destination_path = destination.join(entry_path.replace('\\', "/").trim_matches('/'));
     Ok(EntryExtractReport { destination_path, written_bytes, metadata_diagnostics })
+}
+
+/// Copies selected regular-file entries through one retained engine handle.
+///
+/// Selection remains a caller-facing batch concern, while physical entries
+/// are addressed by the IDs returned from the same retained listing. This
+/// keeps duplicate archive paths independently addressable and prevents a
+/// second backend-specific path scan from reselecting the payload.
+pub fn copy_selected_entries_to_writer(
+    archive_path: impl AsRef<Path>,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+    password: Option<&str>,
+    recipient_key: Option<&Path>,
+    writer: &mut dyn Write,
+) -> Result<SelectedCopyReport, ArchiveBrowserError> {
+    let archive_path = archive_path.as_ref();
+    let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
+    let open_options = crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: recipient_key.map(Path::to_path_buf) };
+    let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let format = handle.detected().format;
+    let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+    let mut report = SelectedCopyReport::default();
+
+    for entry in listing.entries {
+        if !matches!(entry.kind, BrowserEntryKind::File | BrowserEntryKind::FileCopy)
+            || !crate::safety::archive_pattern_matches_any(&entry.path, include_patterns, exclude_patterns)
+        {
+            report.skipped_entries = report.skipped_entries.saturating_add(1);
+            continue;
+        }
+        let copied = handle.copy_entry(entry.id, writer).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+        report.copied_entries = report.copied_entries.saturating_add(1);
+        report.written_bytes = report.written_bytes.saturating_add(copied.written_bytes);
+    }
+
+    Ok(report)
 }
 
 /// Maps a retained engine handle listing into the browser-facing entry model.

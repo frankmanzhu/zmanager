@@ -1,9 +1,7 @@
 use crate::cli::app::{
     ExtractOutcome, ExtractRequest, InteractiveOverwriteResolver, default_extract_destination, default_raw_stream_destination, expand_short_options,
 };
-use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{BACKEND_DEB_NESTED, FORMAT_DEB, is_deb_archive};
-use crate::cli::open::entry_selected;
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_usize, read_optional_password_stdin, take_value, validate_recipient_key_open_option};
 use crate::cli::usage::{
     EXTRACT_HELP, command_usage_error, print_error_line, print_extract_summary, print_help_stdout, retry_password_required, usage_failure, wants_help,
@@ -319,141 +317,28 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
         return ExitCode::from(2);
     }
 
-    // Raw streams are handled before the format dispatch, mirroring
-    // `run_extract_request`.
-    if let Some(format) = zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive) {
-        if request.password_stdin {
-            print_error_line(global, format_args!("extract to stdout failed: raw streams are not encrypted; remove --password-stdin"));
-            return ExitCode::from(2);
-        }
-        let Some(output_name) = zmanager_core::raw_stream_backend::output_name_for_raw_stream(&request.archive, format) else {
-            print_error_line(global, format_args!("extract to stdout failed: could not derive raw stream output name"));
-            return ExitCode::FAILURE;
-        };
-        if !entry_selected(&output_name, &request.include, &request.exclude) {
-            print_extract_stdout_ok(global, "extract", "0 entries", 1, 0);
-            return ExitCode::SUCCESS;
-        }
-        let mut stdout = io::stdout().lock();
-        match zmanager_core::raw_stream_backend::copy_raw_stream_to_writer(&request.archive, format, &mut stdout) {
-            Ok(written_bytes) => {
-                print_extract_stdout_ok(global, "extract", "1 entry", 0, written_bytes);
-                ExitCode::SUCCESS
-            }
-            Err(error) => {
-                print_error_line(global, format_args!("extract to stdout failed: {error}"));
-                ExitCode::FAILURE
-            }
-        }
-    } else {
-        let password = match read_optional_password_stdin(request.password_stdin, global) {
-            Ok(password) => password,
-            Err(code) => return code,
-        };
-        match detect_archive_format(&request.archive) {
-            // Raw streams are handled before the format dispatch.
-            ArchiveFormatKind::RawStream => unreachable!("raw streams handled before format dispatch"),
-            ArchiveFormatKind::Zip | ArchiveFormatKind::SplitZip => copy_zip_archive_to_stdout(request, password.as_deref(), global),
-            ArchiveFormatKind::SevenZ => copy_7z_archive_to_stdout(request, password.as_deref(), global),
-            ArchiveFormatKind::TarZst => copy_tar_zst_archive_to_stdout(request, global),
-            ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
-            ArchiveFormatKind::AppleArchive => extract_apple_archive_stdout(&request.archive, &request.include, &request.exclude, password.as_deref(), global),
-            ArchiveFormatKind::Dmg
-            | ArchiveFormatKind::Pkg
-            | ArchiveFormatKind::Msi
-            | ArchiveFormatKind::Vhd
-            | ArchiveFormatKind::Vmdk
-            | ArchiveFormatKind::Udf => {
-                print_error_line(
-                    global,
-                    format_args!("extract to stdout failed: DMG, PKG, MSI, VHD, VMDK, and UDF formats do not currently support extracting to stdout"),
-                );
-                ExitCode::FAILURE
-            }
-            // TAR.GZ stdout and the remaining formats are still read through
-            // libarchive until native stream-to-stdout adapters are added.
-            ArchiveFormatKind::TarGz
-            | ArchiveFormatKind::Deb
-            | ArchiveFormatKind::Rar
-            | ArchiveFormatKind::Tar
-            | ArchiveFormatKind::TarBz2
-            | ArchiveFormatKind::TarXz
-            | ArchiveFormatKind::TarLzma
-            | ArchiveFormatKind::TarLz
-            | ArchiveFormatKind::TarLzo
-            | ArchiveFormatKind::TarCompress
-            | ArchiveFormatKind::TarLz4
-            | ArchiveFormatKind::TarLrz
-            | ArchiveFormatKind::Iso
-            | ArchiveFormatKind::Cab
-            | ArchiveFormatKind::Cpio
-            | ArchiveFormatKind::Rpm
-            | ArchiveFormatKind::Xar
-            | ArchiveFormatKind::Lha
-            | ArchiveFormatKind::Ar
-            | ArchiveFormatKind::Warc
-            | ArchiveFormatKind::Mtree
-            | ArchiveFormatKind::Unknown => {
-                copy_archive_to_stdout(&request.include, &request.exclude, password.as_deref(), "extract", global, None, |password, selected, stdout| {
-                    zmanager_core::libarchive_backend::copy_archive_files_to_writer(&request.archive, password, selected, stdout)
-                        .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-                        .map_err(|error| StdoutCopyError::Message(error.to_string()))
-                })
-            }
-        }
+    if zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() && request.password_stdin {
+        print_error_line(global, format_args!("extract to stdout failed: raw streams are not encrypted; remove --password-stdin"));
+        return ExitCode::from(2);
     }
-}
-
-fn copy_zip_archive_to_stdout(request: &ExtractRequest, password: Option<&str>, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(&request.include, &request.exclude, password, "extract", global, Some("ZIP password: "), |password, selected, stdout| {
-        zmanager_core::zip_backend::copy_zip_files_to_writer(&request.archive, password, selected, stdout)
-            .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-            .map_err(|error| match error {
-                zmanager_core::zip_backend::ZipBackendError::PasswordRequired => StdoutCopyError::PasswordRequired(error.to_string()),
-                error => StdoutCopyError::Message(error.to_string()),
-            })
-    })
-}
-
-fn copy_7z_archive_to_stdout(request: &ExtractRequest, password: Option<&str>, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(&request.include, &request.exclude, password, "extract", global, Some("7z password: "), |password, selected, stdout| {
-        zmanager_core::sevenz_backend::copy_7z_files_to_writer(&request.archive, password, selected, stdout)
-            .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-            .map_err(|error| match error {
-                zmanager_core::sevenz_backend::SevenZError::PasswordRequired => StdoutCopyError::PasswordRequired(error.to_string()),
-                error => StdoutCopyError::Message(error.to_string()),
-            })
-    })
-}
-
-fn copy_tar_zst_archive_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(&request.include, &request.exclude, None, "extract", global, None, |_password, selected, stdout| {
-        zmanager_core::tar_zst_backend::copy_tar_zst_files_to_writer(&request.archive, selected, stdout)
-            .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-            .map_err(|error| StdoutCopyError::Message(error.to_string()))
-    })
-}
-
-fn copy_tzap_archive_to_stdout(request: &ExtractRequest, password: Option<&str>, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(&request.include, &request.exclude, password, "extract", global, None, |password, _selected, stdout| {
-        zmanager_core::tzap_backend::copy_tzap_files_to_writer(
-            &request.archive,
-            tzap_extract_key(request.recipient_key.as_deref(), password),
-            |name| entry_selected(name, &request.include, &request.exclude),
-            stdout,
-        )
-        .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-        .map_err(|error| StdoutCopyError::Message(error.to_string()))
-    })
-}
-
-fn tzap_extract_key<'a>(recipient_key: Option<&'a Path>, password: Option<&'a str>) -> zmanager_core::tzap_backend::TzapExtractKeySource<'a> {
-    match recipient_key {
-        Some(recipient_key) => zmanager_core::tzap_backend::TzapExtractKeySource::RecipientKeyPath(recipient_key),
-        None => match password {
-            Some(password) => zmanager_core::tzap_backend::TzapExtractKeySource::Password(password),
-            None => zmanager_core::tzap_backend::TzapExtractKeySource::None,
-        },
+    let password = match read_optional_password_stdin(request.password_stdin, global) {
+        Ok(password) => password,
+        Err(code) => return code,
+    };
+    match detect_archive_format(&request.archive) {
+        ArchiveFormatKind::Dmg
+        | ArchiveFormatKind::Pkg
+        | ArchiveFormatKind::Msi
+        | ArchiveFormatKind::Vhd
+        | ArchiveFormatKind::Vmdk
+        | ArchiveFormatKind::Udf => {
+            print_error_line(
+                global,
+                format_args!("extract to stdout failed: DMG, PKG, MSI, VHD, VMDK, and UDF formats do not currently support extracting to stdout"),
+            );
+            ExitCode::FAILURE
+        }
+        _ => copy_archive_to_stdout_via_engine(request, password.as_deref(), global),
     }
 }
 
@@ -466,43 +351,22 @@ fn print_extract_stdout_ok(global: &GlobalOptions, label: &str, entries_label: &
     }
 }
 
-enum StdoutCopyError {
-    PasswordRequired(String),
-    Message(String),
-}
-
-#[allow(clippy::too_many_arguments)]
-fn copy_archive_to_stdout(
-    include: &[String],
-    exclude: &[String],
-    password: Option<&str>,
-    label: &str,
-    global: &GlobalOptions,
-    password_prompt: Option<&str>,
-    mut copy: impl FnMut(Option<&str>, &mut dyn Fn(&str) -> bool, &mut io::StdoutLock<'_>) -> Result<(usize, usize, u64), StdoutCopyError>,
-) -> ExitCode {
+fn copy_archive_to_stdout_via_engine(request: &ExtractRequest, password: Option<&str>, global: &GlobalOptions) -> ExitCode {
     let mut stdout = io::stdout().lock();
-    let selected = |name: &str| entry_selected(name, include, exclude);
-    match copy(password, &mut &selected, &mut stdout) {
-        Ok((entries, skipped, bytes)) => {
-            print_extract_stdout_ok(global, label, &format!("{entries} entries"), skipped, bytes);
+    match zmanager_core::archive_browser::copy_selected_entries_to_writer(
+        &request.archive,
+        &request.include,
+        &request.exclude,
+        password,
+        request.recipient_key.as_deref(),
+        &mut stdout,
+    ) {
+        Ok(report) => {
+            print_extract_stdout_ok(global, "extract", &format!("{} entries", report.copied_entries), report.skipped_entries, report.written_bytes);
             ExitCode::SUCCESS
         }
-        Err(StdoutCopyError::PasswordRequired(_)) if password.is_none() => retry_password_required(
-            global,
-            "extract to stdout failed: ",
-            password_prompt,
-            |message| print_error_line(global, format_args!("{message}")),
-            |prompted| match copy(Some(prompted.expose_secret()), &mut &selected, &mut stdout) {
-                Ok(_) => ExitCode::SUCCESS,
-                Err(StdoutCopyError::PasswordRequired(message) | StdoutCopyError::Message(message)) => {
-                    print_error_line(global, format_args!("extract to stdout failed: {message}"));
-                    ExitCode::FAILURE
-                }
-            },
-        ),
-        Err(StdoutCopyError::PasswordRequired(message) | StdoutCopyError::Message(message)) => {
-            print_error_line(global, format_args!("extract to stdout failed: {message}"));
+        Err(error) => {
+            print_error_line(global, format_args!("extract to stdout failed: {error}"));
             ExitCode::FAILURE
         }
     }
@@ -533,12 +397,5 @@ fn extraction_policy(request: &ExtractRequest) -> Result<zmanager_core::safety::
         exclude_patterns: request.exclude.clone(),
         strip_components: request.strip_components,
         ..zmanager_core::safety::ExtractionPolicy::default()
-    })
-}
-fn extract_apple_archive_stdout(archive: &str, include: &[String], exclude: &[String], password: Option<&str>, global: &GlobalOptions) -> ExitCode {
-    copy_archive_to_stdout(include, exclude, password, FORMAT_APPLE_ARCHIVE, global, None, |password, selected, stdout| {
-        zmanager_core::apple_archive_backend::copy_apple_archive_files_to_writer(archive, selected, stdout, password)
-            .map(|report| (report.written_entries, report.skipped_entries, report.written_bytes))
-            .map_err(|error| StdoutCopyError::Message(error.to_string()))
     })
 }
