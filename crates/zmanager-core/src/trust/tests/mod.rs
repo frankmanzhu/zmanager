@@ -305,7 +305,7 @@ fn certificate_profile_rejects_leaf_eku_for_tls_client_code_and_anyeku() {
 fn certificate_profile_rejects_leaf_key_usage_and_san_profile_errors() {
     for config in [
         ChainConfig { leaf_key_usage_extra_key_encipherment: true, ..ChainConfig::default() },
-        ChainConfig { leaf_validity_days: 181, ..ChainConfig::default() },
+        ChainConfig { leaf_validity_days: 1096, ..ChainConfig::default() },
         ChainConfig { leaf_san: Some(LeafSanMode::Dns), ..ChainConfig::default() },
         ChainConfig { leaf_san: Some(LeafSanMode::Ip), ..ChainConfig::default() },
     ] {

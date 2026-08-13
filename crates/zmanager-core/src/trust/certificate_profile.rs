@@ -7,8 +7,8 @@
 //! constants; the public items are re-exported from [`crate::trust`].
 
 use crate::trust::{
-    TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TzapIdentityAssurance, TzapRootPinSet,
-    TzapTrustAnchorType, format_certificate_sha256, is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id,
+    TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TZAP_OID_ORGANIZATION_POLICY, TzapIdentityAssurance,
+    TzapRootPinSet, TzapTrustAnchorType, format_certificate_sha256, is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id,
 };
 use openssl::asn1::Asn1Object;
 use openssl::nid::Nid;
@@ -31,7 +31,7 @@ pub(crate) const PLATFORM_LEAF_ONLY_PATH_LEN: u32 = 0;
 pub(crate) const ORG_INTERMEDIATE_PATH_LEN: u32 = 0;
 const MIN_TZAP_CHAIN_LEN: usize = 3;
 const MAX_TZAP_CHAIN_LEN: usize = 4;
-const MAX_TZAP_LEAF_VALIDITY_DAYS: i64 = 180;
+const MAX_TZAP_LEAF_VALIDITY_DAYS: i64 = 1095;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TzapOfficialRootPinKind {
     Current,
@@ -61,7 +61,7 @@ pub struct TzapCertificateProfileOptions {
 impl Default for TzapCertificateProfileOptions {
     fn default() -> Self {
         Self {
-            approved_org_intermediate_policy_oids: Vec::new(),
+            approved_org_intermediate_policy_oids: vec![TZAP_OID_ORGANIZATION_POLICY.to_owned()],
             approved_leaf_policy_oids: vec![TZAP_OID_LEAF_POLICY.to_owned()],
             validation_time_unix_seconds: None,
         }
