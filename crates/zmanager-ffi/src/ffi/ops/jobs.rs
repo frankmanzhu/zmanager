@@ -446,6 +446,7 @@ fn run_selected_extract_job(
     });
     sink.emit(CoreJobEvent::Started { kind: core_extract_job_kind(archive_path, input.format), total_bytes: total_bytes.0.then_some(total_bytes.1) });
 
+    let selected_entry_paths: Vec<String> = entries.iter().map(|entry| entry.path.clone()).collect();
     let mut written_entries = 0usize;
     let mut written_bytes = 0u64;
     let options = BrowserExtractOptions {
@@ -455,15 +456,17 @@ fn run_selected_extract_job(
         ..Default::default()
     };
 
-    for entry in entries {
+    let extracted = archive_browser::extract_selected_entries_with_options(archive_path, &selected_entry_paths, destination_root, options)
+        .map_err(map_archive_browser_error)?;
+
+    for (entry_path, report) in extracted {
         if token.is_cancelled() {
             sink.emit(CoreJobEvent::Cancelled { message: "job cancelled".to_string() });
             return Err(cancelled_bridge_error("Extraction job was cancelled."));
         }
 
-        let entry_path = entry.path;
-        sink.emit(CoreJobEvent::EntryStarted { path: entry_path.clone(), bytes: entry.size });
-        let report = archive_browser::extract_entry_with_options(archive_path, &entry_path, destination_root, options).map_err(map_archive_browser_error)?;
+        let entry_size = entries.iter().find(|entry| entry.path == entry_path).and_then(|entry| entry.size);
+        sink.emit(CoreJobEvent::EntryStarted { path: entry_path.clone(), bytes: entry_size });
         written_entries = written_entries.saturating_add(1);
         written_bytes = written_bytes.saturating_add(report.written_bytes);
         sink.emit(CoreJobEvent::EntryFinished { path: entry_path, bytes: report.written_bytes });

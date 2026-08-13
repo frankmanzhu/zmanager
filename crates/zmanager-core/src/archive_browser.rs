@@ -453,6 +453,71 @@ pub fn extract_entry_with_options(
     }
 }
 
+/// Extracts a batch of selected paths through one retained engine handle when
+/// the format has a retained selected-extraction binding. The returned
+/// reports preserve listing order and physical duplicate entries.
+pub fn extract_selected_entries_with_options(
+    archive_path: impl AsRef<Path>,
+    entry_paths: &[String],
+    destination: impl AsRef<Path>,
+    options: BrowserExtractOptions<'_>,
+) -> Result<Vec<(String, EntryExtractReport)>, ArchiveBrowserError> {
+    let archive_path = archive_path.as_ref();
+    let destination = destination.as_ref();
+    let destination_root =
+        crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
+    let detected_format = crate::archive_format::detect_archive_format(archive_path);
+    let engine_selected = is_zip_family_archive(archive_path)
+        || is_tar_zst_archive(archive_path)
+        || is_tzap_archive_path(archive_path)
+        || is_apple_archive_path_browser(archive_path)
+        || raw_stream_backend::detect_raw_stream_format(archive_path).is_some()
+        || is_rar_archive(archive_path)
+        || crate::engine::format::FormatId::from_archive_format_kind(detected_format)
+            .is_some_and(|format| crate::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&format));
+
+    if !engine_selected {
+        return entry_paths
+            .iter()
+            .map(|entry_path| {
+                extract_entry_with_options(archive_path, entry_path, destination_root.clone(), options).map(|report| (entry_path.clone(), report))
+            })
+            .collect();
+    }
+
+    let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
+    let mut handle = engine
+        .open(source, crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: None })
+        .map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    let format = handle.detected().format;
+    let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+    let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
+    let mut reports = Vec::new();
+    for requested_path in entry_paths {
+        let matching_entries: Vec<_> =
+            listing.entries.iter().filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, requested_path)).collect();
+        if matching_entries.is_empty() {
+            return Err(ArchiveBrowserError::EntryNotFound { path: requested_path.clone() });
+        }
+        for entry in matching_entries {
+            let mut selected_options =
+                crate::engine::SelectedExtractOptions { destination: destination_root.clone(), policy: policy.clone(), ..Default::default() };
+            let report =
+                handle.extract_selected(entry.id, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+            reports.push((
+                entry.path.clone(),
+                EntryExtractReport {
+                    destination_path: destination_root.join(&entry.path),
+                    written_bytes: report.written_bytes,
+                    metadata_diagnostics: report.warnings,
+                },
+            ));
+        }
+    }
+    Ok(reports)
+}
+
 /// Extracts one selected entry into a controlled temporary preview root.
 ///
 /// The caller owns the returned `cleanup_root` and should remove it when the
