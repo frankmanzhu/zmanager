@@ -657,7 +657,7 @@ pub(crate) fn plan_browser_entry(planner: &mut ExtractionSafetyPlanner<'_>, entr
     let kind = map_browser_entry_kind(entry.kind);
 
     let extraction_kind = match entry.kind {
-        BrowserEntryKind::File => ExtractionEntryKind::File,
+        BrowserEntryKind::File | BrowserEntryKind::FileCopy => ExtractionEntryKind::File,
         BrowserEntryKind::Directory => ExtractionEntryKind::Directory,
         BrowserEntryKind::Symlink | BrowserEntryKind::Hardlink => {
             let reason = "Link target metadata is required before mobile can safely plan this entry.";

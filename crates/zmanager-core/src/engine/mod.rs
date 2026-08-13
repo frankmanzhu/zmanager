@@ -31,6 +31,20 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::zip::ZipListAdapter::single_volume()))?;
         builder.register_read_adapter(Arc::new(adapters::zip::ZipListAdapter::split_volume()))?;
 
+        // Native adapters for 7z, TAR.ZST, TZAP, RAR, RawStreams, Apple Archive, DMG, PKG, MSI, VirtualDisks
+        builder.register_read_adapter(Arc::new(adapters::native::SevenZListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::TarZstListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::TzapListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::RarListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::RawStreamListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::AppleArchiveListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::DmgListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::PkgListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::MsiListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VHD)))?;
+        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VMDK)))?;
+        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::UDF)))?;
+
         // Libarchive compatibility listing adapters for allow-listed formats
         for &format in adapters::libarchive::LIBARCHIVE_ALLOW_LIST {
             if let Ok(adapter) = adapters::libarchive::LibarchiveListAdapter::new(format) {

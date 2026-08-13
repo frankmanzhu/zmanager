@@ -8,6 +8,7 @@
 mod error;
 mod event;
 mod ops;
+pub mod session;
 mod types;
 mod util;
 

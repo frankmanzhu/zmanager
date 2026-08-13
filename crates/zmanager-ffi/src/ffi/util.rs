@@ -403,7 +403,7 @@ fn is_rar_sidecar_extension(extension: &str) -> bool {
 
 pub(crate) fn map_browser_entry_kind(entry: BrowserEntryKind) -> ArchiveEntryKind {
     match entry {
-        BrowserEntryKind::File => ArchiveEntryKind::File,
+        BrowserEntryKind::File | BrowserEntryKind::FileCopy => ArchiveEntryKind::File,
         BrowserEntryKind::Directory => ArchiveEntryKind::Directory,
         BrowserEntryKind::Symlink => ArchiveEntryKind::Symlink,
         BrowserEntryKind::Hardlink => ArchiveEntryKind::Hardlink,

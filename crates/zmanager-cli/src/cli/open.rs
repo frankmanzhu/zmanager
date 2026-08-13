@@ -2,8 +2,7 @@ use crate::cli::app::{GenericEntry, ListRequest, PlanRequest, TestRequest, expan
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
     FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_ZIP, TZAP_SINGLE_VOLUME_LOSS_TOLERANCE, TZAP_SPLIT_VOLUME_LOSS_TOLERANCE, is_7z_archive,
-    is_apple_archive, is_dmg_archive, is_msi_archive, is_pkg_archive, is_rar_archive, is_split_zip_archive_path, is_tar_zst_archive, is_tzap_archive,
-    is_udf_archive, is_vhd_archive, is_vmdk_archive, is_zip_family_archive,
+    is_apple_archive, is_split_zip_archive_path, is_tar_zst_archive, is_tzap_archive, is_zip_family_archive,
 };
 use crate::cli::options::{
     GlobalOptions, parse_archive_format, parse_global_option, read_optional_password_stdin, resolve_input_path, take_value, validate_recipient_key_open_option,
@@ -14,7 +13,6 @@ use crate::cli::usage::{
     print_manifest, print_success_line, print_warning_stderr, retry_password_required, tzap_timestamp_string, usage_failure, wants_help,
 };
 use crate::output::{self, StyleRole};
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -704,72 +702,58 @@ fn run_plan_request(request: &PlanRequest, global: &GlobalOptions) -> ExitCode {
     }
 }
 fn list_entries_with_password(archive: &str, password: Option<&str>, recipient_key: Option<&Path>) -> Result<Vec<GenericEntry>, String> {
-    if is_zip_family_archive(archive) && !is_split_zip_archive_path(archive) {
-        zmanager_core::zip_backend::list_zip(archive)
-            .map(|listing| map_generic_entries(listing.entries, zip_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else if is_7z_archive(archive) {
-        zmanager_core::sevenz_backend::list_7z(archive, password)
-            .map(|listing| map_generic_entries(listing.entries, seven_z_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else if let Some(format) = zmanager_core::raw_stream_backend::detect_raw_stream_format(archive) {
-        let name = zmanager_core::raw_stream_backend::output_name_for_raw_stream(archive, format)
-            .ok_or_else(|| "could not derive raw stream output name".to_owned())?;
-        let size = zmanager_core::raw_stream_backend::test_raw_stream(archive, format).map_err(|error| error.to_string())?;
-        let compressed_size = fs::metadata(archive).ok().map(|metadata| metadata.len());
-
-        Ok(vec![GenericEntry { kind: "file".to_owned(), name, size, compressed_size, ..GenericEntry::default() }])
-    } else if is_tzap_archive(archive) {
-        let listing = if let Some(recipient_key) = recipient_key {
-            zmanager_core::tzap_backend::list_tzap_index_with_recipient_key(archive, recipient_key)
-        } else {
-            zmanager_core::tzap_backend::list_tzap_index_with_optional_password(archive, password)
-        };
-        listing
-            .map(|listing| {
-                let encrypted = listing.encrypted;
-                map_generic_entries(listing.entries, |entry| tzap_index_entry_to_generic(entry, encrypted))
-            })
-            .map_err(|error| error.to_string())
-    } else if is_apple_archive(archive) {
-        list_apple_archive_cli(archive, password)
-    } else if is_rar_archive(archive) && password.is_some() {
-        zmanager_core::rar_backend::list_rar_with_password(archive, password)
-            .map(|listing| map_generic_entries(listing.entries, rar_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else if is_dmg_archive(archive) {
-        zmanager_core::apple_dmg_backend::list_dmg(archive)
-            .map(|entries| map_generic_entries(entries, dmg_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else if is_pkg_archive(archive) {
-        zmanager_core::apple_pkg_backend::list_pkg(archive)
-            .map(|entries| map_generic_entries(entries, pkg_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else if is_msi_archive(archive) {
-        zmanager_core::msi_backend::list_msi(archive).map(|entries| map_generic_entries(entries, msi_list_entry_to_generic)).map_err(|error| error.to_string())
-    } else if is_vhd_archive(archive) {
-        zmanager_core::virtual_disk_backend::list_vhd(archive)
-            .map(|entries| map_generic_entries(entries, virtual_disk_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else if is_vmdk_archive(archive) {
-        zmanager_core::virtual_disk_backend::list_vmdk(archive)
-            .map(|entries| map_generic_entries(entries, virtual_disk_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else if is_udf_archive(archive) {
-        zmanager_core::virtual_disk_backend::list_udf(archive)
-            .map(|entries| map_generic_entries(entries, virtual_disk_list_entry_to_generic))
-            .map_err(|error| error.to_string())
-    } else {
-        zmanager_core::libarchive_backend::list_archive_with_password(archive, password)
-            .map(|listing| map_generic_entries(listing.entries, libarchive_list_entry_to_generic))
-            .map_err(|error| error.to_string())
+    if is_tzap_archive(archive)
+        && let Some(recipient_key) = recipient_key
+    {
+        let listing = zmanager_core::tzap_backend::list_tzap_index_with_recipient_key(archive, recipient_key).map_err(|error| error.to_string())?;
+        let encrypted = listing.encrypted;
+        return Ok(map_generic_entries(listing.entries, |entry| tzap_index_entry_to_generic(entry, encrypted)));
     }
+
+    let options = zmanager_core::archive_browser::BrowserListOptions { password };
+    let listing = zmanager_core::archive_browser::list_entries_with_options(archive, options).map_err(|error| error.to_string())?;
+
+    let generic_entries = listing
+        .entries
+        .into_iter()
+        .map(|entry| GenericEntry {
+            kind: match entry.kind {
+                zmanager_core::archive_browser::BrowserEntryKind::File => "file",
+                zmanager_core::archive_browser::BrowserEntryKind::Directory => "directory",
+                zmanager_core::archive_browser::BrowserEntryKind::Symlink => "symlink",
+                zmanager_core::archive_browser::BrowserEntryKind::Hardlink => "hardlink",
+                zmanager_core::archive_browser::BrowserEntryKind::FileCopy => "filecopy",
+                zmanager_core::archive_browser::BrowserEntryKind::Special => "special",
+            }
+            .to_owned(),
+            name: entry.path,
+            size: entry.size.unwrap_or(0),
+            compressed_size: entry.compressed_size,
+            mode: entry.mode,
+            modified: entry.modified,
+            created: entry.created,
+            accessed: entry.accessed,
+            encrypted: entry.encrypted,
+            method: entry.method,
+            solid: entry.solid,
+            link_target: entry.link_target,
+            attributes: entry.attributes,
+            uid: entry.uid,
+            gid: entry.gid,
+            owner: entry.owner,
+            group: entry.group,
+            metadata_diagnostics: entry.metadata_diagnostics,
+        })
+        .collect();
+
+    Ok(generic_entries)
 }
 
 fn map_generic_entries<Entry>(entries: impl IntoIterator<Item = Entry>, map: impl Fn(Entry) -> GenericEntry) -> Vec<GenericEntry> {
     entries.into_iter().map(map).collect()
 }
 
+#[allow(dead_code)]
 fn zip_list_entry_to_generic(entry: zmanager_core::zip_backend::ZipListEntry) -> GenericEntry {
     GenericEntry {
         kind: match entry.kind {
@@ -785,6 +769,7 @@ fn zip_list_entry_to_generic(entry: zmanager_core::zip_backend::ZipListEntry) ->
     }
 }
 
+#[allow(dead_code)]
 fn seven_z_list_entry_to_generic(entry: zmanager_core::sevenz_backend::SevenZListEntry) -> GenericEntry {
     GenericEntry {
         kind: match entry.kind {
@@ -832,27 +817,33 @@ fn tzap_index_entry_to_generic(entry: zmanager_core::tzap_backend::TzapIndexEntr
     }
 }
 
+#[allow(dead_code)]
 fn rar_list_entry_to_generic(entry: zmanager_core::rar_backend::RarListEntry) -> GenericEntry {
     GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
 }
 
+#[allow(dead_code)]
 fn dmg_list_entry_to_generic(entry: zmanager_core::apple_dmg_backend::DmgListEntry) -> GenericEntry {
     GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
 }
 
+#[allow(dead_code)]
 fn pkg_list_entry_to_generic(entry: zmanager_core::apple_pkg_backend::PkgListEntry) -> GenericEntry {
     GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
 }
 
+#[allow(dead_code)]
 fn virtual_disk_list_entry_to_generic(entry: zmanager_core::virtual_disk_backend::VirtualDiskListEntry) -> GenericEntry {
     GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
 }
 
+#[allow(dead_code)]
 fn msi_list_entry_to_generic(entry: zmanager_core::msi_backend::MsiListEntry) -> GenericEntry {
     // The MSI database has only regular files; no directory or symlink entries.
     GenericEntry { kind: "file".to_owned(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
 }
 
+#[allow(dead_code)]
 fn libarchive_list_entry_to_generic(entry: zmanager_core::libarchive_backend::LibarchiveListEntry) -> GenericEntry {
     GenericEntry {
         kind: format!("{:?}", entry.kind).to_lowercase(),
@@ -873,12 +864,14 @@ pub(crate) fn entry_selected(path: &str, includes: &[String], excludes: &[String
 
     matches_include && !matches_exclude
 }
+#[allow(dead_code)]
 fn list_apple_archive_cli(archive: &str, password: Option<&str>) -> Result<Vec<GenericEntry>, String> {
     zmanager_core::apple_archive_backend::list_apple_archive(archive, password)
         .map(|listing| map_generic_entries(listing.entries, apple_archive_list_entry_to_generic))
         .map_err(|error| error.to_string())
 }
 
+#[allow(dead_code)]
 fn apple_archive_list_entry_to_generic(entry: zmanager_core::apple_archive_backend::AppleArchiveListEntry) -> GenericEntry {
     GenericEntry {
         kind: match entry.kind {

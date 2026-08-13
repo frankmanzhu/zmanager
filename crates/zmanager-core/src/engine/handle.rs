@@ -69,10 +69,7 @@ pub struct ArchiveHandle {
 
 impl std::fmt::Debug for ArchiveHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArchiveHandle")
-            .field("detected", &self.detected)
-            .field("disposition", &self.disposition)
-            .finish_non_exhaustive()
+        f.debug_struct("ArchiveHandle").field("detected", &self.detected).field("disposition", &self.disposition).finish_non_exhaustive()
     }
 }
 

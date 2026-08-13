@@ -22,6 +22,8 @@ const PREVIEW_TEMP_PREFIX: &str = "zmanager-preview";
 // Suffixes that identify a solid-compressed tar stream when listing through
 // libarchive. The path is lowercased before matching, so these are
 // effectively case-insensitive.
+// Legacy: retained for reference only — all listing now routes through the engine adapters (ARC-207).
+#[allow(dead_code)]
 const SOLID_TAR_SUFFIXES: &[&str] = &[".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.br"];
 
 /// Portable archive entry type for the browser UI.
@@ -35,6 +37,8 @@ pub enum BrowserEntryKind {
     Symlink,
     /// Hard link.
     Hardlink,
+    /// RAR file-copy redirection.
+    FileCopy,
     /// Other special entry.
     Special,
 }
@@ -307,25 +311,7 @@ pub fn list_entries(path: impl AsRef<Path>) -> Result<BrowserListing, ArchiveBro
 /// Returns [`ArchiveBrowserError`] when the archive cannot be read.
 pub fn list_entries_with_options(path: impl AsRef<Path>, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let path = path.as_ref();
-    if is_zip_family_archive(path) || path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("tar")) {
-        list_entries_via_engine(path, options)
-    } else if is_tar_zst_archive(path) {
-        list_tar_zst_entries(path)
-    } else if is_rar_archive(path) {
-        list_rar_entries(path, options.password)
-    } else if is_7z_archive(path) {
-        list_7z_entries(path, options.password)
-    } else if is_tzap_archive_path(path) {
-        list_tzap_entries(path, options.password)
-    } else {
-        // Apple Archive runs after TZAP and before raw streams, matching the
-        // old always-present chain; off-Apple the backend reports
-        // `AppleArchiveError::Unsupported`.
-        if is_apple_archive_path_browser(path) {
-            return list_apple_archive_entries(path, options.password);
-        }
-        if let Some(format) = raw_stream_backend::detect_raw_stream_format(path) { list_raw_stream_entry(path, format) } else { list_libarchive_entries(path) }
-    }
+    list_entries_via_engine(path, options)
 }
 
 /// Returns true if the archive format supports on-demand directory listing.
@@ -510,9 +496,7 @@ fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Resu
     let mut handle = engine
         .open(source, open_options)
         .map_err(|err| ArchiveBrowserError::Io { path: path.to_path_buf(), source: std::io::Error::other(err.to_string()) })?;
-    let listing = handle
-        .list()
-        .map_err(|err| ArchiveBrowserError::Io { path: path.to_path_buf(), source: std::io::Error::other(err.to_string()) })?;
+    let listing = handle.list().map_err(|err| ArchiveBrowserError::Io { path: path.to_path_buf(), source: std::io::Error::other(err.to_string()) })?;
 
     let entries = listing
         .entries
@@ -591,6 +575,7 @@ fn visit_zip_entries(path: &Path, mut visitor: impl FnMut(BrowserEntry) -> bool)
     Ok(entry_count)
 }
 
+#[allow(dead_code)]
 fn list_tar_zst_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
     let file = File::open(path).map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
     let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
@@ -630,6 +615,7 @@ fn list_tar_zst_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserErr
     Ok(BrowserListing { entries })
 }
 
+#[allow(dead_code)]
 fn list_libarchive_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = libarchive_backend::list_archive(path)?;
     let path_str = path.to_string_lossy().to_lowercase();
@@ -670,6 +656,7 @@ fn list_libarchive_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowser
     Ok(BrowserListing { entries })
 }
 
+#[allow(dead_code)]
 fn list_raw_stream_entry(path: &Path, format: RawStreamFormat) -> Result<BrowserListing, ArchiveBrowserError> {
     let entry_name =
         raw_stream_backend::output_name_for_raw_stream(path, format).ok_or_else(|| RawStreamError::MissingOutputName { archive_path: path.to_path_buf() })?;
@@ -700,6 +687,7 @@ fn list_raw_stream_entry(path: &Path, format: RawStreamFormat) -> Result<Browser
     })
 }
 
+#[allow(dead_code)]
 fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::sevenz_backend::list_7z(path, password)?;
     let entries = listing
@@ -736,6 +724,7 @@ fn list_7z_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing
     Ok(BrowserListing { entries })
 }
 
+#[allow(dead_code)]
 fn list_rar_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = rar_backend::list_rar_with_password(path, password)?;
     let entries = listing
@@ -767,6 +756,7 @@ fn list_rar_entries(path: &Path, password: Option<&str>) -> Result<BrowserListin
     Ok(BrowserListing { entries })
 }
 
+#[allow(dead_code)]
 fn list_tzap_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = crate::tzap_backend::list_tzap_index_with_optional_password(path, password)?;
     let entries = listing.entries.iter().map(|entry| tzap_browser_entry(&listing, entry)).collect();
@@ -821,6 +811,7 @@ fn is_apple_archive_path_browser(path: &Path) -> bool {
     apple_archive_backend::is_apple_archive_path(path)
 }
 
+#[allow(dead_code)]
 fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = apple_archive_backend::list_apple_archive(path, password)?;
     // The Apple Archive listing does not expose an encryption flag (the
@@ -1096,6 +1087,7 @@ fn zip_extraction_kind<R: Read>(file: &mut zip::read::ZipFile<'_, R>) -> Result<
     Ok(ExtractionEntryKind::File)
 }
 
+#[allow(dead_code)]
 fn tar_entry_kind(entry_type: EntryType) -> BrowserEntryKind {
     if entry_type.is_dir() {
         BrowserEntryKind::Directory
@@ -1133,6 +1125,7 @@ fn tar_extraction_kind<R: Read>(entry: &tar::Entry<'_, R>) -> Result<ExtractionE
     }
 }
 
+#[allow(dead_code)]
 fn libarchive_entry_kind(kind: LibarchiveEntryKind) -> BrowserEntryKind {
     match kind {
         LibarchiveEntryKind::File => BrowserEntryKind::File,
@@ -1218,10 +1211,12 @@ fn is_tar_zst_archive(path: &Path) -> bool {
     matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::TarZst)
 }
 
+#[allow(dead_code)]
 fn is_7z_archive(path: &Path) -> bool {
     matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::SevenZ)
 }
 
+#[allow(dead_code)]
 fn is_rar_archive(path: &Path) -> bool {
     matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::Rar)
 }
