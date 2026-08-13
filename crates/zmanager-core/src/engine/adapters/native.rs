@@ -277,6 +277,14 @@ static DEB_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static RPM_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_rpm_adapter",
+    format: FormatId::RPM,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 /// Native Debian package adapter composing AR with the registered payload engines.
 #[derive(Debug, Default)]
 pub struct DebListAdapter;
@@ -357,6 +365,89 @@ fn deb_error(path: &std::path::Path, error: &crate::deb_backend::DebError) -> Ar
         },
         crate::deb_backend::DebError::Io { .. } => ErrorKind::Io,
         crate::deb_backend::DebError::MissingMember { .. } => ErrorKind::CorruptData,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
+
+/// Native RPM container adapter composing the bounded RPM reader with CPIO.
+#[derive(Debug, Default)]
+pub struct RpmListAdapter;
+
+impl ReadAdapterFactory for RpmListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &RPM_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entries = crate::rpm_backend::list(path).map_err(|error| rpm_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_cpio_entries(entries) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::rpm_backend::test(path, test_options).map_err(|error| rpm_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::rpm_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| rpm_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let written_bytes = crate::rpm_backend::copy(
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| rpm_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn rpm_error(path: &std::path::Path, error: &crate::rpm_backend::RpmError) -> ArchiveError {
+    let kind = match error {
+        crate::rpm_backend::RpmError::Io { .. } => ErrorKind::Io,
+        crate::rpm_backend::RpmError::Invalid { .. } => ErrorKind::CorruptData,
+        crate::rpm_backend::RpmError::Cpio(source) => match source {
+            crate::cpio_backend::CpioError::Safety(safety) => crate::engine::adapters::safety_error_kind(safety),
+            crate::cpio_backend::CpioError::Cancelled => ErrorKind::Cancelled,
+            crate::cpio_backend::CpioError::Io { .. } => ErrorKind::Io,
+            crate::cpio_backend::CpioError::Invalid { .. } => ErrorKind::CorruptData,
+        },
+        crate::rpm_backend::RpmError::RawStream(source) => match source {
+            crate::raw_stream_backend::RawStreamError::Safety(safety) => crate::engine::adapters::safety_error_kind(safety),
+            crate::raw_stream_backend::RawStreamError::Io { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolUnavailable { .. } => ErrorKind::Io,
+            crate::raw_stream_backend::RawStreamError::MissingOutputName { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolFailed { .. } => {
+                ErrorKind::CorruptData
+            }
+        },
     };
     ArchiveError {
         kind,

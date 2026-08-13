@@ -285,6 +285,57 @@ fn native_deb_adapter_composes_ar_and_shared_payload_readers() {
 }
 
 #[test]
+fn native_rpm_adapter_composes_header_and_cpio_when_rpmbuild_available() {
+    let Some(rpmbuild) = std::env::var("PATH")
+        .ok()
+        .and_then(|path| path.split(':').map(std::path::PathBuf::from).map(|directory| directory.join("rpmbuild")).find(|candidate| candidate.is_file()))
+    else {
+        return;
+    };
+    let temp = TestDir::new("engine-conformance-rpm");
+    let topdir = temp.path("rpmbuild");
+    for directory in ["BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"] {
+        fs::create_dir_all(topdir.join(directory)).unwrap();
+    }
+    let spec = topdir.join("SPECS/zmanager-engine.spec");
+    fs::write(
+        &spec,
+        "Name: zmanager-engine\nVersion: 1.0\nRelease: 1\nSummary: ZManager engine fixture\nLicense: Apache-2.0\nBuildArch: noarch\n\n%description\nZManager engine fixture\n\n%install\nmkdir -p %{buildroot}/usr/share/zmanager-engine\nprintf 'rpm engine payload\\n' > %{buildroot}/usr/share/zmanager-engine/file.txt\n\n%files\n/usr/share/zmanager-engine/file.txt\n",
+    )
+    .unwrap();
+    let build = std::process::Command::new(rpmbuild)
+        .arg("--define")
+        .arg(format!("_topdir {}", topdir.display()))
+        .arg("--define")
+        .arg("_build_id_links none")
+        .arg("-bb")
+        .arg(&spec)
+        .output()
+        .unwrap();
+    assert!(build.status.success(), "rpmbuild failed: {}", String::from_utf8_lossy(&build.stderr));
+    let archive = topdir.join("RPMS/noarch/zmanager-engine-1.0-1.noarch.rpm");
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    let file_entry =
+        listing.entries.iter().find(|entry| entry.path.ends_with("usr/share/zmanager-engine/file.txt")).expect("RPM payload file should be listed");
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert!(test.tested_entries > 0);
+    let mut copied = Vec::new();
+    let copy = handle.copy_entry(file_entry.id, &mut copied).unwrap();
+    assert_eq!(copy.written_bytes, copied.len() as u64);
+    assert_eq!(copied, b"rpm engine payload\n");
+
+    let destination = temp.path("out");
+    let mut options = ExtractOptions { destination: destination.clone(), ..ExtractOptions::default() };
+    let report = handle.extract(&mut options).unwrap();
+    assert!(report.written_entries > 0);
+    assert_eq!(fs::read(destination.join("usr/share/zmanager-engine/file.txt")).unwrap(), b"rpm engine payload\n");
+    handle.close().unwrap();
+}
+
+#[test]
 fn engine_creation_cancellation_does_not_commit_output() {
     let temp = TestDir::new("engine-conformance-create-cancel");
     let source = temp.path("source.txt");

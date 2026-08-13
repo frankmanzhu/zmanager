@@ -67,6 +67,7 @@ pub mod manifest;
 pub mod msi_backend;
 pub mod rar_backend;
 pub mod raw_stream_backend;
+pub mod rpm_backend;
 pub mod safety;
 pub mod secrets;
 pub mod sevenz_backend;
