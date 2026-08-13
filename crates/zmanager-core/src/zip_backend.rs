@@ -14,7 +14,7 @@ use crate::jobs::JobContext;
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
 use crate::secrets::SecretString;
-use crate::zip_split::{MIN_ZIP_VOLUME_SIZE_BYTES, split_zip_temp_archive};
+use crate::zip_split::{MIN_ZIP_VOLUME_SIZE_BYTES, open_zip_reader, split_zip_temp_archive};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, Write};
@@ -325,8 +325,8 @@ fn validate_zip_volume_size(volume_size: Option<u64>) -> Result<(), ZipBackendEr
 /// Returns [`ZipBackendError`] when the archive cannot be opened or parsed.
 pub fn list_zip(path: impl AsRef<Path>) -> Result<ZipListing, ZipBackendError> {
     let path = path.as_ref();
-    let file = File::open(path).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })?;
-    let mut archive = ZipArchive::new(file)?;
+    let reader = open_zip_reader(path)?;
+    let mut archive = ZipArchive::new(reader)?;
     let mut entries = Vec::with_capacity(archive.len());
 
     for index in 0..archive.len() {
@@ -357,8 +357,8 @@ pub fn test_zip_with_password_filter(
     mut selected: impl FnMut(&str) -> bool,
 ) -> Result<ZipTestReport, ZipBackendError> {
     let path = path.as_ref();
-    let file = File::open(path).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })?;
-    let mut archive = ZipArchive::new(file)?;
+    let reader = open_zip_reader(path)?;
+    let mut archive = ZipArchive::new(reader)?;
     let mut tested_entries = 0;
     let mut skipped_entries = 0;
     let mut tested_bytes = 0;
@@ -399,8 +399,8 @@ pub fn copy_zip_files_to_writer<W: Write>(
     output: &mut W,
 ) -> Result<ZipExtractReport, ZipBackendError> {
     let archive_path = archive_path.as_ref();
-    let file = File::open(archive_path).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
-    let mut archive = ZipArchive::new(file)?;
+    let reader = open_zip_reader(archive_path)?;
+    let mut archive = ZipArchive::new(reader)?;
     let password = password_bytes(password);
     let mut report = ZipExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
 
@@ -475,8 +475,8 @@ fn extract_zip_inner(
     let destination_root =
         crate::safety::prepare_destination_root(destination).map_err(|source| ZipBackendError::Io { path: destination.to_path_buf(), source })?;
 
-    let file = File::open(archive_path).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
-    let mut archive = ZipArchive::new(file)?;
+    let reader = open_zip_reader(archive_path)?;
+    let mut archive = ZipArchive::new(reader)?;
     let password = password_bytes(password);
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report = ZipExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };

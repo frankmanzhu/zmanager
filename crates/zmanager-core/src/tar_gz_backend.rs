@@ -1,17 +1,14 @@
-//! `.tar.gz` / `.tgz` archive creation.
-//!
-//! This backend is create-only by design: `.tar.gz` extraction is handled by
-//! [`crate::libarchive_backend`] (which also serves `.tar`, `.tgz`, and the
-//! other tar variants), so there is no `extract_*` entry point here. Tests
-//! exercise extraction through the libarchive backend.
+//! Native `.tar.gz` / `.tgz` archive creation and extraction.
 
+use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::{JobCancelled, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
+use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use std::fmt;
-use std::fs::File;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use tar::{Builder, EntryType, Header};
 
@@ -45,15 +42,32 @@ pub struct TarGzCreateReport {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TarGzExtractReport {
+    pub written_entries: usize,
+    pub skipped_entries: usize,
+    pub written_bytes: u64,
+    pub warnings: Vec<String>,
+}
+
 /// Error returned by the `.tar.gz` / `.tgz` creator.
 #[derive(Debug)]
 pub enum TarGzError {
     /// Archive planning failed.
     Plan(PlanError),
     /// Gzip compression level is outside the supported 0-9 range.
-    InvalidLevel { level: i32 },
+    InvalidLevel {
+        level: i32,
+    },
     /// Filesystem or stream I/O failed.
-    Io { path: PathBuf, source: io::Error },
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Safety(ExtractionSafetyError),
+    MissingLinkTarget {
+        archive_path: String,
+    },
     /// The job was cancelled.
     Cancelled,
 }
@@ -66,6 +80,8 @@ impl fmt::Display for TarGzError {
             Self::Io { path, source } => {
                 write!(f, "I/O failed for {}: {source}", path.display())
             }
+            Self::Safety(source) => write!(f, "extraction safety rejected entry: {source}"),
+            Self::MissingLinkTarget { archive_path } => write!(f, "tar link entry has no target: {archive_path}"),
             Self::Cancelled => write!(f, "job cancelled"),
         }
     }
@@ -76,7 +92,8 @@ impl std::error::Error for TarGzError {
         match self {
             Self::Plan(err) => Some(err),
             Self::Io { source, .. } => Some(source),
-            Self::Cancelled | Self::InvalidLevel { .. } => None,
+            Self::Safety(source) => Some(source),
+            Self::Cancelled | Self::InvalidLevel { .. } | Self::MissingLinkTarget { .. } => None,
         }
     }
 }
@@ -90,6 +107,12 @@ impl From<PlanError> for TarGzError {
 impl From<JobCancelled> for TarGzError {
     fn from(_value: JobCancelled) -> Self {
         Self::Cancelled
+    }
+}
+
+impl From<ExtractionSafetyError> for TarGzError {
+    fn from(source: ExtractionSafetyError) -> Self {
+        Self::Safety(source)
     }
 }
 
@@ -162,6 +185,189 @@ fn create_tar_gz_from_manifest_inner(
     output.commit_with_file_replace(options.replace_existing).map_err(|source| TarGzError::Io { path: destination.to_path_buf(), source })?;
 
     Ok(report)
+}
+
+/// Extracts a `.tar.gz` archive through the native Rust `flate2` and `tar`
+/// readers and the shared extraction safety policy.
+pub fn extract_tar_gz(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<TarGzExtractReport, TarGzError> {
+    extract_tar_gz_inner(archive_path, destination, policy, None, None)
+}
+
+pub fn extract_tar_gz_with_context(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    context: &mut JobContext<'_>,
+) -> Result<TarGzExtractReport, TarGzError> {
+    extract_tar_gz_inner(archive_path, destination, policy, Some(context), None)
+}
+
+pub fn extract_tar_gz_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    resolver: &mut dyn OverwriteResolver,
+) -> Result<TarGzExtractReport, TarGzError> {
+    extract_tar_gz_inner(archive_path, destination, policy, None, Some(resolver))
+}
+
+#[allow(clippy::too_many_lines)]
+fn extract_tar_gz_inner(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    mut context: Option<&mut JobContext<'_>>,
+    resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<TarGzExtractReport, TarGzError> {
+    let archive_path = archive_path.as_ref();
+    let destination = destination.as_ref();
+    let root = crate::safety::prepare_destination_root(destination).map_err(|source| TarGzError::Io { path: destination.to_path_buf(), source })?;
+    let file = File::open(archive_path).map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?;
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&root, policy, resolver);
+    let mut report = TarGzExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
+    let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
+    let mut deferred_directories = Vec::new();
+    let mut deferred_hardlinks = Vec::new();
+    for item in archive.entries().map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })? {
+        let mut entry = item.map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?;
+        let name = entry.path().map_err(|source| TarGzError::Io { path: archive_path.to_path_buf(), source })?.to_string_lossy().into_owned();
+        let kind = tar_gz_entry_kind(&mut entry, &name)?;
+        let size = entry.header().size().unwrap_or(0);
+        let safety_entry = ExtractionEntry { archive_path: name.clone(), kind, uncompressed_size: Some(size), compressed_size: None };
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, context| {
+            match action {
+                crate::extract_loop::EntryAction::Skip => Ok::<u64, TarGzError>(0),
+                crate::extract_loop::EntryAction::Write(decision) => {
+                    if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
+                        crate::extract_loop::skip_entry(report, context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
+                        return Ok(0);
+                    }
+                    let metadata = tar_gz_entry_metadata(&mut entry, &safety_entry.archive_path)?;
+                    if decision.replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
+                        crate::safety::remove_destination_for_replace(decision.destination_path)
+                            .map_err(|source| TarGzError::Io { path: decision.destination_path.to_path_buf(), source })?;
+                    }
+                    match &safety_entry.kind {
+                        ExtractionEntryKind::Directory => {
+                            fs::create_dir_all(decision.destination_path)
+                                .map_err(|source| TarGzError::Io { path: decision.destination_path.to_path_buf(), source })?;
+                            deferred_directories.push((decision.destination_path.to_path_buf(), metadata));
+                            report.written_entries += 1;
+                            Ok(0)
+                        }
+                        ExtractionEntryKind::File => {
+                            let copied = crate::extract_loop::copy_file_entry(
+                                decision.destination_path,
+                                decision.replace_existing,
+                                Some(&safety_entry.archive_path),
+                                context,
+                                &mut buffer,
+                                |buf| entry.read(buf).map_err(|source| TarGzError::Io { path: decision.destination_path.to_path_buf(), source }),
+                                |source, path| TarGzError::Io { path: path.to_path_buf(), source },
+                            )?;
+                            apply_tar_gz_metadata(decision.destination_path, metadata)?;
+                            report.written_entries += 1;
+                            report.written_bytes += copied;
+                            Ok(copied)
+                        }
+                        ExtractionEntryKind::Symlink { target } => {
+                            crate::extract_materialize::write_symlink(target, decision.destination_path)
+                                .map_err(|source| TarGzError::Io { path: decision.destination_path.to_path_buf(), source })?;
+                            apply_tar_gz_symlink_mtime(decision.destination_path, metadata.mtime)?;
+                            report.written_entries += 1;
+                            Ok(0)
+                        }
+                        ExtractionEntryKind::Hardlink { .. } => {
+                            let source =
+                                decision.link_target_path.ok_or_else(|| TarGzError::MissingLinkTarget { archive_path: safety_entry.archive_path.clone() })?;
+                            deferred_hardlinks
+                                .push(DeferredHardlink { source_path: source.to_path_buf(), destination_path: decision.destination_path.to_path_buf() });
+                            Ok(0)
+                        }
+                        ExtractionEntryKind::Device | ExtractionEntryKind::Special => Err(TarGzError::Io {
+                            path: decision.destination_path.to_path_buf(),
+                            source: io::Error::new(io::ErrorKind::Unsupported, "special tar entry reached materialization after safety planning"),
+                        }),
+                    }
+                }
+            }
+        })?;
+    }
+    crate::extract_materialize::materialize_deferred_hardlinks(&deferred_hardlinks)
+        .map_err(|source| TarGzError::Io { path: deferred_hardlinks.first().map_or_else(PathBuf::new, |link| link.destination_path.clone()), source })?;
+    for (path, metadata) in deferred_directories {
+        apply_tar_gz_metadata(&path, metadata)?;
+    }
+    report.written_entries += deferred_hardlinks.len();
+    Ok(report)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TarGzEntryMetadata {
+    mode: Option<u32>,
+    mtime: Option<crate::tar_metadata::TarTimestamp>,
+}
+
+fn tar_gz_entry_metadata<R: Read>(entry: &mut tar::Entry<'_, R>, archive_path: &str) -> Result<TarGzEntryMetadata, TarGzError> {
+    let mut metadata = TarGzEntryMetadata {
+        mode: entry.header().mode().ok(),
+        mtime: entry
+            .header()
+            .mtime()
+            .ok()
+            .and_then(|seconds| i64::try_from(seconds).ok())
+            .map(|seconds| crate::tar_metadata::TarTimestamp { seconds, nanoseconds: 0 }),
+    };
+    if let Some(extensions) = entry.pax_extensions().map_err(|source| TarGzError::Io { path: PathBuf::from(archive_path), source })? {
+        for extension in extensions {
+            let extension = extension.map_err(|source| TarGzError::Io { path: PathBuf::from(archive_path), source })?;
+            if extension.key_bytes() == b"mtime" {
+                metadata.mtime = Some(crate::tar_metadata::parse_pax_mtime(extension.value_bytes()).ok_or_else(|| TarGzError::Io {
+                    path: PathBuf::from(archive_path),
+                    source: io::Error::new(io::ErrorKind::InvalidData, "invalid PAX modification time"),
+                })?);
+            }
+        }
+    }
+    Ok(metadata)
+}
+
+fn apply_tar_gz_metadata(path: &Path, metadata: TarGzEntryMetadata) -> Result<(), TarGzError> {
+    crate::extract_materialize::apply_metadata(
+        path,
+        metadata.mode,
+        metadata.mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)),
+    )
+    .map_err(|source| TarGzError::Io { path: path.to_path_buf(), source })
+}
+
+fn apply_tar_gz_symlink_mtime(path: &Path, mtime: Option<crate::tar_metadata::TarTimestamp>) -> Result<(), TarGzError> {
+    crate::extract_materialize::apply_symlink_mtime(path, mtime.map(|mtime| filetime::FileTime::from_unix_time(mtime.seconds, mtime.nanoseconds)))
+        .map_err(|source| TarGzError::Io { path: path.to_path_buf(), source })
+}
+
+fn tar_gz_entry_kind<R: Read>(entry: &mut tar::Entry<'_, R>, name: &str) -> Result<ExtractionEntryKind, TarGzError> {
+    let entry_type = entry.header().entry_type();
+    if entry_type.is_dir() {
+        return Ok(ExtractionEntryKind::Directory);
+    }
+    if entry_type.is_symlink() {
+        let target = entry
+            .link_name()
+            .map_err(|source| TarGzError::Io { path: PathBuf::from(name), source })?
+            .ok_or_else(|| TarGzError::MissingLinkTarget { archive_path: name.to_owned() })?;
+        return Ok(ExtractionEntryKind::Symlink { target: target.into_owned() });
+    }
+    if entry_type.is_hard_link() {
+        let target = entry
+            .link_name()
+            .map_err(|source| TarGzError::Io { path: PathBuf::from(name), source })?
+            .ok_or_else(|| TarGzError::MissingLinkTarget { archive_path: name.to_owned() })?;
+        return Ok(ExtractionEntryKind::Hardlink { target: target.into_owned() });
+    }
+    if entry_type.is_file() { Ok(ExtractionEntryKind::File) } else { Ok(ExtractionEntryKind::Special) }
 }
 
 fn append_manifest_entry<W: io::Write>(
@@ -278,8 +484,7 @@ fn append_symlink<W: io::Write>(builder: &mut Builder<W>, entry: &ManifestEntry,
 
 #[cfg(test)]
 mod tests {
-    use super::{TarGzCreateOptions, create_tar_gz_from_path};
-    use crate::libarchive_backend::extract_archive;
+    use super::{TarGzCreateOptions, create_tar_gz_from_path, extract_tar_gz};
     use crate::safety::ExtractionPolicy;
     use crate::test_support::TestDir;
     use std::fs::{self, File};
@@ -295,7 +500,7 @@ mod tests {
 
         let create_report = create_tar_gz_from_path(temp.path("project"), &archive, &TarGzCreateOptions::default()).unwrap();
 
-        let extract_report = extract_archive(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+        let extract_report = extract_tar_gz(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
 
         assert_eq!(create_report.level, 6);
         assert_eq!(create_report.written_entries, 5);
@@ -345,7 +550,7 @@ mod tests {
         }
         assert!(found_file);
 
-        extract_archive(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+        extract_tar_gz(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;

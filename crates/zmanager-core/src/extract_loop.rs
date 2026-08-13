@@ -47,6 +47,7 @@ extract_report_impl!(crate::libarchive_backend::LibarchiveExtractReport);
 extract_report_impl!(crate::sevenz_backend::SevenZExtractReport);
 extract_report_impl!(crate::tar_zst_backend::TarZstdExtractReport);
 extract_report_impl!(crate::zip_backend::ZipExtractReport);
+extract_report_impl!(crate::tar_gz_backend::TarGzExtractReport);
 
 /// A planned write decision, destructured from [`ExtractionDecision::Write`]
 /// so backend materialization code never touches the planner's internals.

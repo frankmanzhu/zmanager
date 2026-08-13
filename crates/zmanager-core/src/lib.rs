@@ -37,6 +37,7 @@ mod extract_loop;
 mod extract_materialize;
 mod gitignore;
 mod multi_volume;
+mod segmented_reader;
 mod sevenz_volume;
 mod strings;
 mod tar_metadata;

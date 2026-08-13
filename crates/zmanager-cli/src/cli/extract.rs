@@ -4,8 +4,8 @@ use crate::cli::app::{
 };
 use crate::cli::format::FORMAT_APPLE_ARCHIVE;
 use crate::cli::format::{
-    BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_MSI, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TZAP, FORMAT_UDF,
-    FORMAT_VHD, FORMAT_VMDK, FORMAT_ZIP, is_deb_archive,
+    BACKEND_DEB_NESTED, FORMAT_DEB, FORMAT_DMG, FORMAT_LIBARCHIVE, FORMAT_MSI, FORMAT_PKG, FORMAT_RAR, FORMAT_SEVEN_Z, FORMAT_TAR_ZST, FORMAT_TGZ, FORMAT_TZAP,
+    FORMAT_UDF, FORMAT_VHD, FORMAT_VMDK, FORMAT_ZIP, is_deb_archive,
 };
 use crate::cli::open::entry_selected;
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_usize, read_optional_password_stdin, take_value, validate_recipient_key_open_option};
@@ -167,12 +167,11 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
     match detect_archive_format(&request.archive) {
         // Raw streams are handled before the policy match above.
         ArchiveFormatKind::RawStream => unreachable!("raw streams handled before format dispatch"),
-        ArchiveFormatKind::Zip => run_zip_extract_with_policy(request.archive, destination, password.as_deref(), policy, global),
+        ArchiveFormatKind::Zip | ArchiveFormatKind::SplitZip => run_zip_extract_with_policy(request.archive, destination, password.as_deref(), policy, global),
         ArchiveFormatKind::SevenZ => run_7z_extract_with_policy(request.archive, destination, password.as_deref(), policy, global),
-        // RAR needs a password; without --password-stdin it falls through to
-        // the libarchive backend, which can read unencrypted RAR.
-        ArchiveFormatKind::Rar if request.password_stdin => run_rar_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
+        ArchiveFormatKind::Rar => run_rar_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::TarZst => run_tar_zst_extract_with_policy(request.archive, destination, policy, global),
+        ArchiveFormatKind::TarGz => run_tar_gz_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::AppleArchive => run_apple_archive_extract_with_policy(request.archive, destination, policy, password.as_deref(), global),
         ArchiveFormatKind::Dmg => run_apple_dmg_extract_with_policy(request.archive, destination, policy, global),
         ArchiveFormatKind::Pkg => run_apple_pkg_extract_with_policy(request.archive, destination, policy, global),
@@ -193,13 +192,10 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
             },
             global,
         ),
-        // Split ZIP volume sets and the remaining formats are read through
-        // libarchive, matching the pre-CR-114 fallthrough behavior.
-        ArchiveFormatKind::SplitZip
-        | ArchiveFormatKind::TarGz
-        | ArchiveFormatKind::Deb
+        // The remaining formats are read through libarchive while their
+        // dedicated native adapters are migrated.
+        ArchiveFormatKind::Deb
         | ArchiveFormatKind::Unknown
-        | ArchiveFormatKind::Rar
         | ArchiveFormatKind::Tar
         | ArchiveFormatKind::TarBz2
         | ArchiveFormatKind::TarXz
@@ -320,7 +316,7 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
         match detect_archive_format(&request.archive) {
             // Raw streams are handled before the format dispatch.
             ArchiveFormatKind::RawStream => unreachable!("raw streams handled before format dispatch"),
-            ArchiveFormatKind::Zip => copy_zip_archive_to_stdout(request, password.as_deref(), global),
+            ArchiveFormatKind::Zip | ArchiveFormatKind::SplitZip => copy_zip_archive_to_stdout(request, password.as_deref(), global),
             ArchiveFormatKind::SevenZ => copy_7z_archive_to_stdout(request, password.as_deref(), global),
             ArchiveFormatKind::TarZst => copy_tar_zst_archive_to_stdout(request, global),
             ArchiveFormatKind::Tzap => copy_tzap_archive_to_stdout(request, password.as_deref(), global),
@@ -337,11 +333,9 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
                 );
                 ExitCode::FAILURE
             }
-            // Split ZIP volume sets, tgz, .deb, RAR, and unrecognized formats
-            // are read through libarchive, matching the pre-CR-114
-            // fallthrough behavior.
-            ArchiveFormatKind::SplitZip
-            | ArchiveFormatKind::TarGz
+            // TAR.GZ stdout and the remaining formats are still read through
+            // libarchive until native stream-to-stdout adapters are added.
+            ArchiveFormatKind::TarGz
             | ArchiveFormatKind::Deb
             | ArchiveFormatKind::Rar
             | ArchiveFormatKind::Tar
@@ -527,6 +521,17 @@ impl From<zmanager_core::zip_backend::ZipExtractReport> for CliExtractReport {
 
 impl From<zmanager_core::tar_zst_backend::TarZstdExtractReport> for CliExtractReport {
     fn from(report: zmanager_core::tar_zst_backend::TarZstdExtractReport) -> Self {
+        Self {
+            written_entries: report.written_entries,
+            skipped_entries: report.skipped_entries,
+            written_bytes: report.written_bytes,
+            warnings: report.warnings,
+        }
+    }
+}
+
+impl From<zmanager_core::tar_gz_backend::TarGzExtractReport> for CliExtractReport {
+    fn from(report: zmanager_core::tar_gz_backend::TarGzExtractReport) -> Self {
         Self {
             written_entries: report.written_entries,
             skipped_entries: report.skipped_entries,
@@ -787,6 +792,38 @@ fn run_tar_zst_extract_with_policy(
             },
             plain: &|archive_path, destination_path, policy, _password, context| {
                 zmanager_core::tar_zst_backend::extract_tar_zst_with_context(archive_path, destination_path, policy, context)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+        },
+    )
+}
+
+fn run_tar_gz_extract_with_policy(
+    archive: impl AsRef<std::path::Path>,
+    destination: impl AsRef<std::path::Path>,
+    policy: zmanager_core::safety::ExtractionPolicy,
+    global: &GlobalOptions,
+) -> ExitCode {
+    run_extract_with_policy(
+        archive,
+        destination,
+        policy,
+        None,
+        global,
+        ExtractBackendSpec {
+            label: FORMAT_TGZ,
+            kind: JobKind::ArchiveExtract,
+            error_prefix: "tar.gz extract failed: ",
+            password_prompt: None,
+            progress: true,
+            ask: &|archive_path, destination_path, policy, _password, resolver| {
+                zmanager_core::tar_gz_backend::extract_tar_gz_with_overwrite_resolver(archive_path, destination_path, policy, resolver)
+                    .map(CliExtractReport::from)
+                    .map_err(|error| CliExtractError::Message(error.to_string()))
+            },
+            plain: &|archive_path, destination_path, policy, _password, context| {
+                zmanager_core::tar_gz_backend::extract_tar_gz_with_context(archive_path, destination_path, policy, context)
                     .map(CliExtractReport::from)
                     .map_err(|error| CliExtractError::Message(error.to_string()))
             },

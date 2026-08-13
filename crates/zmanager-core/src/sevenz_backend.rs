@@ -384,7 +384,8 @@ pub fn is_7z_volume_path(path: &Path) -> bool {
 fn open_7z_reader(path: &Path) -> Result<SevenZReadSource, SevenZError> {
     let volume_paths = discover_7z_read_volume_paths(path)?;
     if volume_paths.len() > 1 {
-        MultiVolumeReader::open(volume_paths).map(SevenZReadSource::Multi)
+        let error_path = volume_paths.first().cloned().unwrap_or_else(|| path.to_path_buf());
+        MultiVolumeReader::open(volume_paths).map(SevenZReadSource::Multi).map_err(|source| SevenZError::Io { path: error_path, source })
     } else {
         let read_path = volume_paths.first().map_or(path, PathBuf::as_path);
         File::open(read_path).map(SevenZReadSource::File).map_err(|source| SevenZError::Io { path: read_path.to_path_buf(), source })

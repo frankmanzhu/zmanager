@@ -6,10 +6,11 @@
 //! from any part's path and exposing them as one contiguous
 //! [`Read`] + [`Seek`] stream.
 
+use crate::segmented_reader::SegmentedReader;
 use crate::sevenz_backend::SevenZError;
 use std::collections::BTreeMap;
 use std::fs::{self, File};
-use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub(crate) const MIN_VOLUME_SIZE_BYTES: u64 = 1_048_576;
@@ -163,89 +164,7 @@ pub(crate) fn discover_7z_read_volume_paths(path: &Path) -> Result<Vec<PathBuf>,
     Ok(parts.into_values().collect())
 }
 
-pub(crate) struct MultiVolumeReader {
-    parts: Vec<MultiVolumePart>,
-    total_len: u64,
-    position: u64,
-}
-
-struct MultiVolumePart {
-    path: PathBuf,
-    file: File,
-    file_position: u64,
-    start: u64,
-    len: u64,
-}
-
-impl MultiVolumeReader {
-    pub(crate) fn open(paths: Vec<PathBuf>) -> Result<Self, SevenZError> {
-        let mut parts = Vec::with_capacity(paths.len());
-        let mut total_len = 0u64;
-        for path in paths {
-            let file = File::open(&path).map_err(|source| SevenZError::Io { path: path.clone(), source })?;
-            let len = file.metadata().map_err(|source| SevenZError::Io { path: path.clone(), source })?.len();
-            parts.push(MultiVolumePart { path, file, file_position: 0, start: total_len, len });
-            total_len =
-                total_len.checked_add(len).ok_or_else(|| io_error(Path::new("archive.7z.001"), io::ErrorKind::InvalidInput, "7z volume set is too large"))?;
-        }
-        Ok(Self { parts, total_len, position: 0 })
-    }
-
-    fn current_part_index(&self) -> Option<usize> {
-        let index = self.parts.partition_point(|part| part.start <= self.position).checked_sub(1)?;
-        let part = self.parts.get(index)?;
-        (self.position < part.start.saturating_add(part.len)).then_some(index)
-    }
-}
-
-impl Read for MultiVolumeReader {
-    fn read(&mut self, mut buffer: &mut [u8]) -> io::Result<usize> {
-        if self.position >= self.total_len || buffer.is_empty() {
-            return Ok(0);
-        }
-
-        let mut copied = 0usize;
-        while !buffer.is_empty() && self.position < self.total_len {
-            let Some(index) = self.current_part_index() else {
-                break;
-            };
-            let part = &mut self.parts[index];
-            let offset = self.position.saturating_sub(part.start);
-            let remaining_in_part = usize::try_from(part.len.saturating_sub(offset)).unwrap_or(usize::MAX).min(buffer.len());
-            if part.file_position != offset {
-                part.file.seek(SeekFrom::Start(offset))?;
-                part.file_position = offset;
-            }
-            let read = part.file.read(&mut buffer[..remaining_in_part])?;
-            if read == 0 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, format!("unexpected EOF in {}", part.path.display())));
-            }
-            let read = u64::try_from(read).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
-            self.position = self.position.checked_add(read).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume position overflow"))?;
-            part.file_position =
-                part.file_position.checked_add(read).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "7z volume file position overflow"))?;
-            let read = usize::try_from(read).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume read size overflow"))?;
-            copied += read;
-            buffer = &mut buffer[read..];
-        }
-        Ok(copied)
-    }
-}
-
-impl Seek for MultiVolumeReader {
-    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
-        let target = match position {
-            SeekFrom::Start(position) => i128::from(position),
-            SeekFrom::End(offset) => i128::from(self.total_len) + i128::from(offset),
-            SeekFrom::Current(offset) => i128::from(self.position) + i128::from(offset),
-        };
-        if target < 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot seek before start of 7z volume set"));
-        }
-        self.position = u64::try_from(target).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "7z volume seek target overflow"))?;
-        Ok(self.position)
-    }
-}
+pub(crate) type MultiVolumeReader = SegmentedReader;
 
 fn copy_exact_volume_bytes<R: Read, W: Write>(reader: &mut R, writer: &mut W, bytes_to_copy: u64, volume_path: &Path) -> Result<(), SevenZError> {
     let mut limited = reader.take(bytes_to_copy);

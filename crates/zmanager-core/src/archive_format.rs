@@ -68,7 +68,7 @@ pub enum ArchiveFormatKind {
     SevenZ,
     /// `.tar.zst` / `.tzst`.
     TarZst,
-    /// `.tgz` / `.tar.gz` — handled by the libarchive backend.
+    /// `.tgz` / `.tar.gz` — handled by the native Rust TAR.GZ backend.
     TarGz,
     /// Uncompressed `.tar`.
     Tar,

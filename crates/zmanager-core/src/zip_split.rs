@@ -5,9 +5,10 @@
 //! archive: byte-splitting the file, rewriting central-directory disk fields,
 //! and synthesizing a multi-disk EOCD. All of that lives here.
 
+use crate::segmented_reader::SegmentedReader;
 use crate::zip_backend::ZipBackendError;
 use std::fs::{self, File};
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub(crate) const ZIP_SPLIT_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x07, 0x08];
@@ -56,6 +57,217 @@ pub(crate) fn split_zip_temp_archive(archive_path: &Path, destination: &Path, vo
     writer.finish(destination, &existing_volume_paths, replace_existing)?;
 
     Ok(volume_count)
+}
+
+/// A seekable ZIP input. Split ZIP volumes are exposed as one logical stream
+/// with the multi-disk fields normalized to a single-disk archive so the
+/// `zip` crate can perform all metadata, decompression, encryption, and CRC
+/// handling. The volume payload is read on demand; it is never concatenated
+/// into memory or a temporary file.
+pub(crate) trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+pub(crate) fn open_zip_reader(path: &Path) -> Result<Box<dyn ReadSeek>, ZipBackendError> {
+    if !crate::multi_volume::is_split_zip_path(path) {
+        return File::open(path).map(|file| Box::new(file) as Box<dyn ReadSeek>).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source });
+    }
+    let paths = crate::multi_volume::discover_multi_volume_paths(path);
+    if paths.len() <= 1 {
+        return Err(unsupported_split_zip("split ZIP volume set is incomplete"));
+    }
+    Ok(Box::new(SplitZipReader::open(&paths)?))
+}
+
+struct SplitZipReader {
+    source: SegmentedReader,
+    lengths: Vec<u64>,
+    starts: Vec<u64>,
+    len: u64,
+    position: u64,
+    patches: Vec<(u64, Vec<u8>)>,
+}
+
+impl SplitZipReader {
+    fn open(paths: &[PathBuf]) -> Result<Self, ZipBackendError> {
+        let source = SegmentedReader::open(paths.to_vec())
+            .map_err(|source| ZipBackendError::Io { path: paths.first().cloned().unwrap_or_else(|| PathBuf::from("<split ZIP>")), source })?;
+        let layout = source.part_layout();
+        if layout.first().map_or(0, |(_, length)| *length) < 4 {
+            return Err(unsupported_split_zip("first ZIP volume is missing the split signature"));
+        }
+        let mut signature = [0_u8; 4];
+        let mut source = source;
+        source.read_exact(&mut signature).map_err(|source| ZipBackendError::Io { path: paths[0].clone(), source })?;
+        if signature != ZIP_SPLIT_SIGNATURE {
+            return Err(unsupported_split_zip("first ZIP volume has an invalid split signature"));
+        }
+
+        let len = source.total_len().checked_sub(4).ok_or_else(|| unsupported_split_zip("ZIP volume size underflow"))?;
+        let (starts, lengths): (Vec<_>, Vec<_>) = layout.into_iter().unzip();
+        let mut reader = Self { source, lengths, starts, len, position: 0, patches: Vec::new() };
+        reader.build_normalization_patches()?;
+        Ok(reader)
+    }
+
+    fn build_normalization_patches(&mut self) -> Result<(), ZipBackendError> {
+        let tail_size = self.len.min((ZIP_EOCD_MIN_SIZE as u64) + ZIP_EOCD_MAX_COMMENT_SIZE);
+        if tail_size < ZIP_EOCD_MIN_SIZE as u64 {
+            return Err(unsupported_split_zip("ZIP end record is missing"));
+        }
+        let tail_start = self.len - tail_size;
+        let mut tail = vec![0_u8; usize::try_from(tail_size).map_err(|_| unsupported_split_zip("ZIP end record tail is too large"))?];
+        self.read_raw_at(tail_start, &mut tail)?;
+        let mut eocd_offset = None;
+        let mut eocd_bytes = None;
+        for offset in (0..=tail.len() - ZIP_EOCD_MIN_SIZE).rev() {
+            if read_u32(&tail[offset..offset + 4]) != ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE {
+                continue;
+            }
+            let comment_len = usize::from(read_u16(&tail[offset + 20..offset + 22]));
+            let end = offset.checked_add(ZIP_EOCD_MIN_SIZE).and_then(|end| end.checked_add(comment_len));
+            if end == Some(tail.len()) {
+                eocd_offset = Some(tail_start + u64::try_from(offset).unwrap_or(0));
+                eocd_bytes = Some(tail[offset..end.unwrap_or(offset)].to_vec());
+                break;
+            }
+        }
+        let eocd_offset = eocd_offset.ok_or_else(|| unsupported_split_zip("ZIP end record is missing"))?;
+        let mut eocd = eocd_bytes.ok_or_else(|| unsupported_split_zip("ZIP end record is missing"))?;
+        if eocd.len() < ZIP_EOCD_MIN_SIZE {
+            return Err(unsupported_split_zip("ZIP end record is truncated"));
+        }
+        if read_u16(&eocd[4..6]) == u16::MAX || read_u16(&eocd[6..8]) == u16::MAX || read_u32(&eocd[12..16]) == u32::MAX || read_u32(&eocd[16..20]) == u32::MAX
+        {
+            return Err(unsupported_split_zip("ZIP64 split metadata is not implemented"));
+        }
+        let cd_disk = read_u16(&eocd[6..8]);
+        let cd_offset_on_disk = u64::from(read_u32(&eocd[16..20]));
+        let cd_size = u64::from(read_u32(&eocd[12..16]));
+        let total_entries = read_u16(&eocd[10..12]);
+        let cd_start = self.disk_offset(cd_disk, cd_offset_on_disk)?;
+        let cd_end = cd_start.checked_add(cd_size).ok_or_else(|| unsupported_split_zip("central directory range overflow"))?;
+        if cd_end > self.len || cd_end > eocd_offset {
+            return Err(unsupported_split_zip("central directory lies outside the ZIP stream"));
+        }
+
+        let mut central = vec![0_u8; usize::try_from(cd_size).map_err(|_| unsupported_split_zip("central directory is too large"))?];
+        self.read_raw_at(cd_start, &mut central)?;
+        let mut offset = 0usize;
+        let mut entries = 0_u16;
+        while offset < central.len() {
+            if offset + 46 > central.len() || read_u32(&central[offset..offset + 4]) != ZIP_CENTRAL_DIRECTORY_SIGNATURE {
+                return Err(unsupported_split_zip("central directory is malformed"));
+            }
+            let name_len = usize::from(read_u16(&central[offset + 28..offset + 30]));
+            let extra_len = usize::from(read_u16(&central[offset + 30..offset + 32]));
+            let comment_len = usize::from(read_u16(&central[offset + 32..offset + 34]));
+            let disk_start = read_u16(&central[offset + 34..offset + 36]);
+            let local_offset = u64::from(read_u32(&central[offset + 42..offset + 46]));
+            let local_absolute = self.disk_offset(disk_start, local_offset)?;
+            let local_absolute_u32 = u32::try_from(local_absolute).map_err(|_| unsupported_split_zip("logical ZIP offset exceeds ZIP32"))?;
+            central[offset + 34..offset + 36].copy_from_slice(&0_u16.to_le_bytes());
+            central[offset + 42..offset + 46].copy_from_slice(&local_absolute_u32.to_le_bytes());
+            let next = offset
+                .checked_add(46)
+                .and_then(|value| value.checked_add(name_len))
+                .and_then(|value| value.checked_add(extra_len))
+                .and_then(|value| value.checked_add(comment_len))
+                .ok_or_else(|| unsupported_split_zip("central directory entry overflow"))?;
+            if next > central.len() {
+                return Err(unsupported_split_zip("central directory entry is truncated"));
+            }
+            offset = next;
+            entries = entries.checked_add(1).ok_or_else(|| unsupported_split_zip("too many ZIP entries"))?;
+        }
+        if entries != total_entries {
+            return Err(unsupported_split_zip("central directory entry count is inconsistent"));
+        }
+        self.patches.push((cd_start, central));
+
+        let eocd_virtual = eocd_offset;
+        eocd[4..6].copy_from_slice(&0_u16.to_le_bytes());
+        eocd[6..8].copy_from_slice(&0_u16.to_le_bytes());
+        eocd[8..10].copy_from_slice(&total_entries.to_le_bytes());
+        eocd[10..12].copy_from_slice(&total_entries.to_le_bytes());
+        eocd[12..16].copy_from_slice(&u32::try_from(cd_size).map_err(|_| unsupported_split_zip("central directory exceeds ZIP32"))?.to_le_bytes());
+        eocd[16..20].copy_from_slice(&u32::try_from(cd_start).map_err(|_| unsupported_split_zip("central directory offset exceeds ZIP32"))?.to_le_bytes());
+        self.patches.push((eocd_virtual, eocd));
+        Ok(())
+    }
+
+    fn disk_offset(&self, disk: u16, offset: u64) -> Result<u64, ZipBackendError> {
+        let disk = usize::from(disk);
+        if disk >= self.lengths.len() {
+            return Err(unsupported_split_zip("ZIP entry references a missing volume"));
+        }
+        if disk == 0 {
+            if offset < 4 || offset >= self.lengths[0] {
+                return Err(unsupported_split_zip("ZIP disk-relative offset is outside volume 0"));
+            }
+            Ok(offset - 4)
+        } else if offset >= self.lengths[disk] {
+            Err(unsupported_split_zip("ZIP disk-relative offset is outside its volume"))
+        } else {
+            Ok(self.starts[disk] - 4 + offset)
+        }
+    }
+
+    fn read_raw_at(&mut self, position: u64, output: &mut [u8]) -> Result<(), ZipBackendError> {
+        let mut copied = 0usize;
+        while copied < output.len() {
+            let physical = position.checked_add(u64::try_from(copied).unwrap_or(0)).ok_or_else(|| unsupported_split_zip("ZIP read offset overflow"))? + 4;
+            let disk = self.starts.partition_point(|start| *start <= physical).saturating_sub(1);
+            let within = physical - self.starts[disk];
+            let available = usize::try_from(self.lengths[disk] - within).unwrap_or(usize::MAX);
+            let count = available.min(output.len() - copied);
+            self.source.seek(SeekFrom::Start(physical)).map_err(|source| ZipBackendError::Io { path: PathBuf::from("<split ZIP>"), source })?;
+            self.source.read_exact(&mut output[copied..copied + count]).map_err(|source| ZipBackendError::Io { path: PathBuf::from("<split ZIP>"), source })?;
+            copied += count;
+        }
+        Ok(())
+    }
+}
+
+impl Read for SplitZipReader {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        if self.position >= self.len || output.is_empty() {
+            return Ok(0);
+        }
+        let count = output.len().min(usize::try_from(self.len - self.position).unwrap_or(usize::MAX));
+        self.read_raw_at(self.position, &mut output[..count]).map_err(|error| match error {
+            ZipBackendError::Io { source, .. } => source,
+            other => io::Error::new(io::ErrorKind::InvalidData, other.to_string()),
+        })?;
+        for (patch_start, patch) in &self.patches {
+            let patch_end = patch_start.saturating_add(u64::try_from(patch.len()).unwrap_or(u64::MAX));
+            let read_end = self.position + u64::try_from(count).unwrap_or(0);
+            if *patch_start < read_end && patch_end > self.position {
+                let start = (*patch_start).max(self.position);
+                let end = patch_end.min(read_end);
+                let output_start = usize::try_from(start - self.position).unwrap_or(0);
+                let patch_start_index = usize::try_from(start - *patch_start).unwrap_or(0);
+                let patch_end_index = patch_start_index + usize::try_from(end - start).unwrap_or(0);
+                output[output_start..output_start + (patch_end_index - patch_start_index)].copy_from_slice(&patch[patch_start_index..patch_end_index]);
+            }
+        }
+        self.position += u64::try_from(count).unwrap_or(0);
+        Ok(count)
+    }
+}
+
+impl Seek for SplitZipReader {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        let next = match position {
+            SeekFrom::Start(value) => i128::from(value),
+            SeekFrom::Current(value) => i128::from(self.position) + i128::from(value),
+            SeekFrom::End(value) => i128::from(self.len) + i128::from(value),
+        };
+        if !(0..=i128::from(self.len)).contains(&next) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "ZIP seek outside logical stream"));
+        }
+        self.position = u64::try_from(next).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ZIP seek overflow"))?;
+        Ok(self.position)
+    }
 }
 
 #[derive(Debug)]
@@ -436,6 +648,16 @@ mod tests {
 
         assert_eq!(extract_report.written_bytes, payload.len() as u64);
         assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), payload);
+
+        let native_listing = crate::zip_backend::list_zip(&archive).unwrap();
+        assert!(native_listing.entries.iter().any(|entry| entry.name == "project/blob.bin"));
+        crate::zip_backend::test_zip_with_password_filter(&archive, None, |_| true).unwrap();
+        let native_out = temp.path("native-out");
+        let token = crate::jobs::CancellationToken::new();
+        let mut sink = |_event: crate::jobs::JobEvent| {};
+        let mut context = crate::jobs::JobContext::new(&token, &mut sink);
+        crate::zip_backend::extract_zip_with_context_and_password(&archive, &native_out, ExtractionPolicy::default(), None, &mut context).unwrap();
+        assert_eq!(fs::read(native_out.join("project/blob.bin")).unwrap(), payload);
     }
 
     /// Split ZIP round-trip through libarchive across the compression range.
@@ -501,7 +723,20 @@ mod tests {
 
         crate::libarchive_backend::extract_archive_with_password(&archive, temp.path("out"), ExtractionPolicy::default(), Some("correct horse")).unwrap();
 
+        let token = crate::jobs::CancellationToken::new();
+        let mut sink = |_event: crate::jobs::JobEvent| {};
+        let mut context = crate::jobs::JobContext::new(&token, &mut sink);
+        crate::zip_backend::extract_zip_with_context_and_password(
+            &archive,
+            temp.path("native-out"),
+            ExtractionPolicy::default(),
+            Some("correct horse"),
+            &mut context,
+        )
+        .unwrap();
+
         assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), payload);
+        assert_eq!(fs::read(temp.path("native-out/project/blob.bin")).unwrap(), payload);
     }
 
     #[test]

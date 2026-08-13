@@ -9,6 +9,7 @@ use crate::sevenz_backend::{SevenZEntryKind, SevenZError};
 use crate::tar_zst_backend::TarZstdError;
 use crate::tzap_backend::{TzapEntryKind, TzapError, TzapRestoreOptions, TzapRestorePolicy, is_tzap_archive_path};
 use crate::zip_backend::ZipBackendError;
+use crate::zip_split::open_zip_reader;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -306,7 +307,7 @@ pub fn list_entries(path: impl AsRef<Path>) -> Result<BrowserListing, ArchiveBro
 /// Returns [`ArchiveBrowserError`] when the archive cannot be read.
 pub fn list_entries_with_options(path: impl AsRef<Path>, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let path = path.as_ref();
-    if is_zip_family_archive(path) && !libarchive_backend::is_split_zip_path(path) {
+    if is_zip_family_archive(path) {
         list_zip_entries(path)
     } else if is_tar_zst_archive(path) {
         list_tar_zst_entries(path)
@@ -361,7 +362,7 @@ pub fn visit_entries_with_options(
     mut visitor: impl FnMut(BrowserEntry) -> bool,
 ) -> Result<usize, ArchiveBrowserError> {
     let path = path.as_ref();
-    if is_zip_family_archive(path) && !libarchive_backend::is_split_zip_path(path) {
+    if is_zip_family_archive(path) {
         return visit_zip_entries(path, visitor);
     }
     if is_tzap_archive_path(path) {
@@ -420,7 +421,7 @@ pub fn extract_entry_with_options(
         crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
 
-    if is_zip_family_archive(archive_path) && !libarchive_backend::is_split_zip_path(archive_path) {
+    if is_zip_family_archive(archive_path) {
         extract_zip_entry(archive_path, entry_path, &destination_root, &policy, options.password)
     } else if is_tar_zst_archive(archive_path) {
         extract_tar_zst_entry(archive_path, entry_path, &destination_root, &policy)
@@ -512,8 +513,8 @@ fn list_zip_entries(path: &Path) -> Result<BrowserListing, ArchiveBrowserError> 
 }
 
 fn visit_zip_entries(path: &Path, mut visitor: impl FnMut(BrowserEntry) -> bool) -> Result<usize, ArchiveBrowserError> {
-    let file = File::open(path).map_err(|source| ArchiveBrowserError::Io { path: path.to_path_buf(), source })?;
-    let mut archive = ZipArchive::new(file).map_err(ZipBackendError::from)?;
+    let reader = open_zip_reader(path).map_err(ArchiveBrowserError::from)?;
+    let mut archive = ZipArchive::new(reader).map_err(ZipBackendError::from)?;
     let entry_count = archive.len();
 
     for index in 0..entry_count {
@@ -895,8 +896,8 @@ fn extract_zip_entry(
     policy: &ExtractionPolicy,
     password: Option<&str>,
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
-    let file = File::open(archive_path).map_err(|source| ArchiveBrowserError::Io { path: archive_path.to_path_buf(), source })?;
-    let mut archive = ZipArchive::new(file).map_err(ZipBackendError::from)?;
+    let reader = open_zip_reader(archive_path).map_err(ArchiveBrowserError::from)?;
+    let mut archive = ZipArchive::new(reader).map_err(ZipBackendError::from)?;
     let password = password_bytes(password);
     let mut matched_any = false;
     let mut written_bytes = 0u64;
