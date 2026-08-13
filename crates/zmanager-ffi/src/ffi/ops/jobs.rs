@@ -20,8 +20,8 @@ use zmanager_core::tzap_backend::{self, TzapCreateOptions, TzapKeySource, TzapX5
 use zmanager_core::zip_backend::{self, ZipCreateOptions};
 
 use crate::ffi::error::{
-    ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error, hint, map_7z_error,
-    map_archive_browser_error, map_archive_engine_error, map_tar_zst_error, map_tzap_error, map_zip_error,
+    ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error, hint, map_archive_browser_error,
+    map_archive_engine_error,
 };
 use crate::ffi::event::{cancelled_event, completed_event_from_summary, failed_event, mobile_event_from_core_event};
 use crate::ffi::ops::archive::{selected_path_matches, testArchive};
@@ -313,8 +313,15 @@ pub(crate) fn run_create_job(
                 volume_size,
                 ..ZipCreateOptions::default()
             };
-            let report = jobs::run_zip_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink)
-                .map_err(map_zip_error)?;
+            let report = jobs::run_engine_create_job_from_sources(
+                &input.source_paths,
+                destination,
+                &zmanager_core::engine::CreateOptions::Zip(options),
+                &plan_options,
+                token,
+                sink,
+            )
+            .map_err(map_archive_engine_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
         CreateArchiveFormat::SevenZ => {
@@ -327,8 +334,15 @@ pub(crate) fn run_create_job(
                 volume_size,
                 ..SevenZCreateOptions::default()
             };
-            let report = jobs::run_7z_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink)
-                .map_err(map_7z_error)?;
+            let report = jobs::run_engine_create_job_from_sources(
+                &input.source_paths,
+                destination,
+                &zmanager_core::engine::CreateOptions::SevenZ(options),
+                &plan_options,
+                token,
+                sink,
+            )
+            .map_err(map_archive_engine_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
         CreateArchiveFormat::TarZst => {
@@ -338,8 +352,15 @@ pub(crate) fn run_create_job(
                 level: i32::try_from(level).unwrap_or(0),
                 ..TarZstdCreateOptions::default()
             };
-            let report = jobs::run_tar_zst_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink)
-                .map_err(map_tar_zst_error)?;
+            let report = jobs::run_engine_create_job_from_sources(
+                &input.source_paths,
+                destination,
+                &zmanager_core::engine::CreateOptions::TarZstd(options),
+                &plan_options,
+                token,
+                sink,
+            )
+            .map_err(map_archive_engine_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
         CreateArchiveFormat::Tzap => {
@@ -353,8 +374,15 @@ pub(crate) fn run_create_job(
                 volume_loss_tolerance,
                 x509_signing,
             };
-            let report = jobs::run_tzap_create_job_from_sources_with_plan_options(&input.source_paths, destination, &options, &plan_options, token, sink)
-                .map_err(map_tzap_error)?;
+            let report = jobs::run_engine_create_job_from_sources(
+                &input.source_paths,
+                destination,
+                &zmanager_core::engine::CreateOptions::Tzap(options),
+                &plan_options,
+                token,
+                sink,
+            )
+            .map_err(map_archive_engine_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
     };
@@ -504,6 +532,21 @@ impl ArchiveJobReport {
     fn with_output_path(mut self, path: &Path) -> Self {
         self.output_paths.push(path.to_string_lossy().to_string());
         self
+    }
+}
+
+impl From<zmanager_core::engine::CreateReport> for ArchiveJobReport {
+    fn from(report: zmanager_core::engine::CreateReport) -> Self {
+        Self {
+            written_entries: usize::try_from(report.written_entries).unwrap_or(usize::MAX),
+            skipped_entries: 0,
+            written_bytes: report.written_bytes,
+            encrypted: report.encrypted,
+            volume_size: report.volume_size,
+            volume_count: Some(usize::try_from(report.volume_count).unwrap_or(usize::MAX)),
+            output_paths: Vec::new(),
+            warnings: report.warnings,
+        }
     }
 }
 
