@@ -10,8 +10,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-#[cfg(feature = "tzap-online")]
-use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn parse_tzap_context_args(args: &[String], global: &mut GlobalOptions, command: &str) -> Result<TzapCliContext, ExitCode> {
@@ -223,7 +221,7 @@ pub(super) fn exchange_handoff_code(
 
 #[cfg(feature = "tzap-online")]
 pub(super) fn http_post_json(url: &str, body: &Value) -> Result<Value, String> {
-    let response = http_json_request("POST", url, None, Some(body))?;
+    let response = http_json_request("POST", url, None, Some(body), &zmanager_core::auth_client::TzapAuthRequestOptions::default())?;
     if !(200..=299).contains(&response.status_code) {
         return Err(format!("hosted auth exchange failed with HTTP {}", response.status_code));
     }
@@ -244,8 +242,14 @@ impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport 
             zmanager_core::auth_client::TzapAuthHttpMethod::Get => "GET",
             zmanager_core::auth_client::TzapAuthHttpMethod::Post => "POST",
         };
-        http_json_request(method, &request.url, request.bearer_token.as_ref().map(zmanager_core::auth_client::TzapBearerToken::expose), request.body.as_ref())
-            .map_err(|message| zmanager_core::auth_client::TzapAuthError::Transport { message })
+        http_json_request(
+            method,
+            &request.url,
+            request.bearer_token.as_ref().map(zmanager_core::auth_client::TzapBearerToken::expose),
+            request.body.as_ref(),
+            &request.options,
+        )
+        .map_err(|message| zmanager_core::auth_client::TzapAuthError::Transport { message })
     }
 }
 
@@ -269,15 +273,22 @@ pub(super) fn http_json_request(
     url: &str,
     bearer_token: Option<&str>,
     body: Option<&Value>,
+    options: &zmanager_core::auth_client::TzapAuthRequestOptions,
 ) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, String> {
+    if options.cancellation.as_ref().is_some_and(zmanager_core::auth_client::TzapAuthCancellation::is_cancelled) {
+        return Err("hosted HTTPS request was cancelled".to_owned());
+    }
     let client = reqwest::blocking::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
+        .connect_timeout(options.connect_timeout)
+        .timeout(options.request_timeout)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| format!("could not initialize hosted HTTPS client: {error}"))?;
     let request = build_hosted_http_request(&client, method, url, bearer_token, body)?;
     let response = client.execute(request).map_err(|error| format!("hosted HTTPS request failed: {error}"))?;
+    if options.cancellation.as_ref().is_some_and(zmanager_core::auth_client::TzapAuthCancellation::is_cancelled) {
+        return Err("hosted HTTPS request was cancelled".to_owned());
+    }
     let status_code = response.status().as_u16();
     let response_body = response.bytes().map_err(|error| format!("could not read hosted HTTPS response: {error}"))?.to_vec();
     Ok(zmanager_core::auth_client::TzapAuthHttpResponse { status_code, body: response_body })

@@ -16,6 +16,8 @@ hosted account behavior. Network transport is supplied by the full CLI
 profile; the FFI bridge keeps its UniFFI/JSON function set unchanged and
 returns a structured unavailable result only for hosted auth launch, callback,
 status, forget, and account-URL operations in reduced builds.
+The hosted transport policy and validation boundary are described in
+[`TZAP_HOSTED_TRANSPORT.md`](TZAP_HOSTED_TRANSPORT.md).
 
 The reduced FFI profile keeps these operations real:
 

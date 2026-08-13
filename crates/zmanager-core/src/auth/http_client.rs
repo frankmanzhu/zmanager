@@ -1,6 +1,9 @@
 //! Shared HTTP client plumbing for TZAP client modules.
 
-use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken};
+use crate::auth_client::{
+    TzapAuthCancellation, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapAuthRequestOptions,
+    TzapBearerToken,
+};
 use serde_json::Value;
 
 /// Sends a JSON-capable TZAP HTTP request and returns the raw response.
@@ -12,21 +15,45 @@ pub(crate) fn send_json_request<T: TzapAuthHttpTransport>(
     bearer_token: Option<TzapBearerToken>,
     body: Option<Value>,
 ) -> Result<TzapAuthHttpResponse, TzapAuthError> {
-    let request = TzapAuthHttpRequest { method, url: format!("{}{}", trim_trailing_slash(base_url), path), bearer_token, body };
-    let mut attempts = 0;
-    let max_attempts = 3;
+    send_json_request_with_options(transport, method, base_url, path, bearer_token, body, TzapAuthRequestOptions::default())
+}
+
+pub(crate) fn send_json_request_with_options<T: TzapAuthHttpTransport>(
+    transport: &T,
+    method: TzapAuthHttpMethod,
+    base_url: &str,
+    path: &str,
+    bearer_token: Option<TzapBearerToken>,
+    body: Option<Value>,
+    options: TzapAuthRequestOptions,
+) -> Result<TzapAuthHttpResponse, TzapAuthError> {
+    let request = TzapAuthHttpRequest { method, url: format!("{}{}", trim_trailing_slash(base_url), path), bearer_token, body, options };
+    let mut attempts = 0_u8;
     loop {
-        attempts += 1;
+        if request.options.cancellation.as_ref().is_some_and(TzapAuthCancellation::is_cancelled) {
+            return Err(TzapAuthError::Cancelled);
+        }
+        attempts = attempts.saturating_add(1);
         match transport.send(&request) {
             Ok(response) => {
-                if attempts < max_attempts && (response.status_code == 429 || (500..=599).contains(&response.status_code)) {
-                    // Backoff omitted for tests/simplicity, but normally this would sleep.
+                if request.options.cancellation.as_ref().is_some_and(TzapAuthCancellation::is_cancelled) {
+                    return Err(TzapAuthError::Cancelled);
+                }
+                if attempts < request.options.max_attempts.max(1) && request.options.should_retry(method, response.status_code) {
+                    std::thread::sleep(request.options.retry_backoff);
                     continue;
                 }
                 return Ok(response);
             }
             Err(error) => {
-                if attempts < max_attempts && matches!(error, TzapAuthError::Transport { .. }) {
+                if request.options.cancellation.as_ref().is_some_and(TzapAuthCancellation::is_cancelled) {
+                    return Err(TzapAuthError::Cancelled);
+                }
+                if attempts < request.options.max_attempts.max(1)
+                    && matches!(error, TzapAuthError::Transport { .. })
+                    && matches!(method, TzapAuthHttpMethod::Get)
+                {
+                    std::thread::sleep(request.options.retry_backoff);
                     continue;
                 }
                 return Err(error);

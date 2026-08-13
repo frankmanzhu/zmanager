@@ -8,6 +8,11 @@ use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::Duration;
 
 pub const LOGIN_TZAP_BASE_URL: &str = "https://login.tzap.org";
 pub const SIGN_TZAP_BASE_URL: &str = "https://sign.tzap.org";
@@ -374,12 +379,76 @@ pub enum TzapAuthHttpMethod {
     Post,
 }
 
+/// Cooperative cancellation shared by a hosted request and its caller.
+#[derive(Clone, Default)]
+pub struct TzapAuthCancellation(Arc<AtomicBool>);
+
+impl TzapAuthCancellation {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+impl fmt::Debug for TzapAuthCancellation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TzapAuthCancellation").field("cancelled", &self.is_cancelled()).finish()
+    }
+}
+
+impl PartialEq for TzapAuthCancellation {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for TzapAuthCancellation {}
+
+/// Transport policy carried with every hosted request.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TzapAuthRequestOptions {
+    pub connect_timeout: Duration,
+    pub request_timeout: Duration,
+    pub max_attempts: u8,
+    pub retry_backoff: Duration,
+    pub cancellation: Option<TzapAuthCancellation>,
+}
+
+impl Default for TzapAuthRequestOptions {
+    fn default() -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(10),
+            request_timeout: Duration::from_secs(30),
+            max_attempts: 3,
+            retry_backoff: Duration::from_millis(50),
+            cancellation: None,
+        }
+    }
+}
+
+impl TzapAuthRequestOptions {
+    #[must_use]
+    pub fn should_retry(&self, method: TzapAuthHttpMethod, status_code: u16) -> bool {
+        matches!(method, TzapAuthHttpMethod::Get) && self.max_attempts > 1 && (status_code == 429 || (500..=599).contains(&status_code))
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TzapAuthHttpRequest {
     pub method: TzapAuthHttpMethod,
     pub url: String,
     pub bearer_token: Option<TzapBearerToken>,
     pub body: Option<Value>,
+    pub options: TzapAuthRequestOptions,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -488,6 +557,7 @@ pub enum TzapAuthError {
     SessionTokenInCallbackUrl,
     RawProviderMaterial,
     EmptyToken,
+    Cancelled,
     InvalidAssuranceLevel { value: String },
     AudienceMismatch { expected: String, actual: String },
     Transport { message: String },
@@ -545,6 +615,7 @@ impl fmt::Display for TzapAuthError {
             Self::SessionTokenInCallbackUrl => write!(f, "hosted auth callback URL must not contain session tokens"),
             Self::RawProviderMaterial => write!(f, "hosted auth handoff must not contain raw provider material"),
             Self::EmptyToken => write!(f, "session token is empty"),
+            Self::Cancelled => write!(f, "hosted auth request was cancelled"),
             Self::InvalidAssuranceLevel { value } => {
                 write!(f, "identity assurance level is invalid: {value}")
             }
@@ -744,10 +815,11 @@ fn is_pkce_unreserved(byte: u8) -> bool {
 mod tests {
     use super::{
         AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, LOGIN_TZAP_BASE_URL, PKCE_METHOD_S256, SESSION_AUDIENCE_SIGN_TZAP, SIGN_TZAP_BASE_URL,
-        TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken, TzapHostedAuthCallback,
-        TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig, TzapOAuthStateTracker, TzapPendingAuthState, TzapPkcePair, TzapSessionRecord, TzapSessionStore,
-        complete_hosted_auth_handoff, fetch_current_user, pkce_s256_challenge, validate_pkce_verifier,
+        TzapAuthCancellation, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapAuthRequestOptions,
+        TzapBearerToken, TzapHostedAuthCallback, TzapHostedAuthEnvironment, TzapHostedAuthLaunchConfig, TzapOAuthStateTracker, TzapPendingAuthState,
+        TzapPkcePair, TzapSessionRecord, TzapSessionStore, complete_hosted_auth_handoff, fetch_current_user, pkce_s256_challenge, validate_pkce_verifier,
     };
+    use crate::http_client::send_json_request_with_options;
     use crate::trust;
     use serde_json::json;
 
@@ -1146,5 +1218,23 @@ mod tests {
         let result = fetch_current_user(&transport, SIGN_TZAP_BASE_URL, &session);
         assert!(matches!(result, Err(TzapAuthError::Transport { .. })));
         assert_eq!(transport.attempts.get(), 3); // Exhausts retries
+    }
+
+    #[test]
+    fn cancelled_auth_request_does_not_reach_transport() {
+        let cancellation = TzapAuthCancellation::new();
+        cancellation.cancel();
+        let transport = RetryFakeTransport {
+            response: TzapAuthHttpResponse { status_code: 200, body: Vec::new() },
+            attempts: std::cell::Cell::new(0),
+            fail_count: 0,
+            is_offline: false,
+        };
+        let options = TzapAuthRequestOptions { cancellation: Some(cancellation), ..TzapAuthRequestOptions::default() };
+
+        let result = send_json_request_with_options(&transport, TzapAuthHttpMethod::Get, SIGN_TZAP_BASE_URL, "/v1/me", None, None, options);
+
+        assert!(matches!(result, Err(TzapAuthError::Cancelled)));
+        assert_eq!(transport.attempts.get(), 0);
     }
 }
