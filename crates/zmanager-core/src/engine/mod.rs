@@ -71,6 +71,7 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VHD)))?;
         builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VMDK)))?;
         builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::UDF)))?;
+        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::ISO)))?;
 
         // Native one-shot creation adapters.
         builder.register_create_adapter(Arc::new(adapters::create::ZipCreateAdapter))?;

@@ -2155,7 +2155,16 @@ impl ReadAdapterFactory for MsiListAdapter {
     }
 }
 
-// --- Virtual Disks (VHD, VMDK, UDF) ---
+// --- Virtual Disks and optical filesystems (VHD, VMDK, UDF, ISO) ---
+
+static ISO_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_iso_adapter",
+    format: FormatId::ISO,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 /// Native Virtual Disk listing adapter factory.
 #[derive(Debug)]
 pub struct VirtualDiskListAdapter {
@@ -2163,7 +2172,7 @@ pub struct VirtualDiskListAdapter {
 }
 
 impl VirtualDiskListAdapter {
-    /// Creates a virtual disk listing adapter for VHD, VMDK, or UDF.
+    /// Creates a virtual disk or optical filesystem adapter for VHD, VMDK, UDF, or ISO.
     #[must_use]
     pub const fn new(format: FormatId) -> Self {
         Self { format }
@@ -2172,61 +2181,123 @@ impl VirtualDiskListAdapter {
 
 impl ReadAdapterFactory for VirtualDiskListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
-        Box::leak(Box::new(AdapterDescriptor {
-            name: "native_virtual_disk_lister",
-            format: self.format,
-            operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
-            required_source_access: SourceAccess::Seekable,
-            supports_encryption: false,
-        }))
+        match self.format {
+            FormatId::ISO => &ISO_DESCRIPTOR,
+            _ => Box::leak(Box::new(AdapterDescriptor {
+                name: "native_virtual_disk_lister",
+                format: self.format,
+                operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+                required_source_access: SourceAccess::Seekable,
+                supports_encryption: false,
+            })),
+        }
     }
 
     fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.source.primary_path();
+        if self.format == FormatId::ISO {
+            let raw_entries = virtual_disk_backend::list_iso(primary_path).map_err(|error| virtual_disk_error(primary_path, &error))?;
+            return Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) });
+        }
         let raw_entries = match self.format {
             FormatId::VHD => virtual_disk_backend::list_vhd(primary_path).map_err(|err| err.to_string()),
             FormatId::VMDK => virtual_disk_backend::list_vmdk(primary_path).map_err(|err| err.to_string()),
             FormatId::UDF => virtual_disk_backend::list_udf(primary_path).map_err(|err| err.to_string()),
+            FormatId::ISO => virtual_disk_backend::list_iso(primary_path).map_err(|err| err.to_string()),
             _ => Err(format!("Unsupported virtual disk format '{}'", self.format)),
         }
         .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err).with_path(primary_path))?;
 
-        let entries = raw_entries
-            .into_iter()
-            .enumerate()
-            .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
-                path: entry.path,
-                kind: BrowserEntryKind::File,
-                size: Some(entry.size),
-                compressed_size: None,
-                modified: None,
-                mode: None,
-                encrypted: Some(false),
-                method: None,
-                crc: None,
-                comment: None,
-                link_target: None,
-                ..EngineEntry::default()
-            })
-            .collect();
-
-        Ok(ArchiveListing { entries })
+        Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) })
     }
 
     fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
-            match self.format {
-                FormatId::VHD => virtual_disk_backend::extract_vhd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::VMDK => virtual_disk_backend::extract_vmdk_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::UDF => virtual_disk_backend::extract_udf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
+        let report =
+            if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+                match self.format {
+                    FormatId::VHD => virtual_disk_backend::extract_vhd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                    FormatId::VMDK => virtual_disk_backend::extract_vmdk_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                    FormatId::UDF => virtual_disk_backend::extract_udf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                    FormatId::ISO => virtual_disk_backend::extract_iso_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                    _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
+                }
+            } else {
+                virtual_disk_backend::extract_virtual_disk(path, &options.destination, options.policy.clone())
             }
-        } else {
-            virtual_disk_backend::extract_virtual_disk(path, &options.destination, options.policy.clone())
-        }
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+            .map_err(|error| {
+                if self.format == FormatId::ISO { virtual_disk_error(path, &error) } else { crate::engine::adapters::extract_error(path, error) }
+            })?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        if self.format != FormatId::ISO {
+            return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk test format '{}'", self.format)));
+        }
+        let path = archive.source.primary_path();
+        virtual_disk_backend::test_iso(path, options).map_err(|error| virtual_disk_error(path, &error))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        if self.format != FormatId::ISO {
+            return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk copy format '{}'", self.format)));
+        }
+        let path = archive.source.primary_path();
+        let written_bytes = virtual_disk_backend::copy_iso(
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| virtual_disk_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn map_virtual_disk_entries(entries: Vec<virtual_disk_backend::VirtualDiskListEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| EngineEntry {
+            id: EntryId(u64::try_from(index).unwrap_or(0)),
+            path: entry.path,
+            kind: match entry.kind {
+                virtual_disk_backend::VirtualDiskEntryKind::File => BrowserEntryKind::File,
+                virtual_disk_backend::VirtualDiskEntryKind::Directory => BrowserEntryKind::Directory,
+                virtual_disk_backend::VirtualDiskEntryKind::Symlink => BrowserEntryKind::Symlink,
+            },
+            size: Some(entry.size),
+            compressed_size: None,
+            modified: None,
+            mode: None,
+            encrypted: Some(false),
+            method: None,
+            crc: None,
+            comment: None,
+            link_target: None,
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn virtual_disk_error(path: &std::path::Path, error: &virtual_disk_backend::VirtualDiskBackendError) -> ArchiveError {
+    let kind = match error {
+        virtual_disk_backend::VirtualDiskBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        virtual_disk_backend::VirtualDiskBackendError::Cancelled => ErrorKind::Cancelled,
+        virtual_disk_backend::VirtualDiskBackendError::Io { .. } => ErrorKind::Io,
+        virtual_disk_backend::VirtualDiskBackendError::Plan(_) => ErrorKind::InvalidFormat,
+        virtual_disk_backend::VirtualDiskBackendError::Vfs(_) | virtual_disk_backend::VirtualDiskBackendError::NotDiskImage(_) => ErrorKind::CorruptData,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
     }
 }

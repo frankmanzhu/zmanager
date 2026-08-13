@@ -18,17 +18,8 @@ fn system_time_string(time: SystemTime) -> Option<String> {
 }
 
 /// Allow-list of formats accepted by the libarchive listing compatibility adapter.
-pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
-    FormatId::TAR_LZ,
-    FormatId::TAR_LZO,
-    FormatId::TAR_COMPRESS,
-    FormatId::TAR_LZ4,
-    FormatId::TAR_LRZ,
-    FormatId::ISO,
-    FormatId::LHA,
-    FormatId::WARC,
-    FormatId::MTREE,
-];
+pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] =
+    &[FormatId::TAR_LZ, FormatId::TAR_LZO, FormatId::TAR_COMPRESS, FormatId::TAR_LZ4, FormatId::TAR_LRZ, FormatId::LHA, FormatId::WARC, FormatId::MTREE];
 
 /// Libarchive listing compatibility adapter factory.
 #[derive(Debug)]

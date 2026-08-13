@@ -34,10 +34,12 @@
 //!   extraction into labeled directories is a future option via the engine's
 //!   `open_all`.
 
+use crate::engine::types::{TestOptions, TestReport};
 use crate::jobs::JobContext;
 use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
 use forensic_vfs::{Allocation, FsKind, Layer, NodeKind, StreamId};
 use forensic_vfs_engine::{Evidence, Vfs};
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -201,15 +203,20 @@ fn map_entry_kind(fs: &forensic_vfs::DynFs, id: forensic_vfs::FileId, kind: Node
 /// message for each filtered entry when extraction runs (listing drops them
 /// silently, mirroring `list_dmg`). The engine's `FileId` is carried alongside
 /// each entry so file bytes can be streamed without re-walking the tree.
-fn collect_entries(
+fn collect_entries_with_path_map(
     fs: &forensic_vfs::DynFs,
-    mut skip_warning: Option<&mut dyn FnMut(String)>,
+    skip_warning: &mut Option<&mut dyn FnMut(String)>,
+    path_map: Option<&HashMap<u32, String>>,
 ) -> Result<Vec<(ExtractionEntry, forensic_vfs::FileId)>, VirtualDiskBackendError> {
     let walked = forensic_vfs_engine::walk(fs.as_ref()).map_err(|error| VirtualDiskBackendError::Vfs(error.to_string()))?;
 
     let mut entries = Vec::with_capacity(walked.len());
     for entry in walked {
-        let path = entry.path.iter().map(|component| String::from_utf8_lossy(component).into_owned()).collect::<Vec<_>>().join("/");
+        let fallback_path = entry.path.iter().map(|component| String::from_utf8_lossy(component).into_owned()).collect::<Vec<_>>().join("/");
+        let path = match (path_map, entry.id) {
+            (Some(map), forensic_vfs::FileId::IsoExtent { block }) => map.get(&block).cloned().unwrap_or(fallback_path),
+            _ => fallback_path,
+        };
         if path.is_empty() {
             continue;
         }
@@ -238,6 +245,17 @@ fn collect_entries(
     Ok(entries)
 }
 
+fn iso_path_map(archive_path: &Path) -> Result<HashMap<u32, String>, VirtualDiskBackendError> {
+    let file = std::fs::File::open(archive_path).map_err(|source| VirtualDiskBackendError::Io { path: archive_path.to_path_buf(), source })?;
+    let mut reader = iso::IsoReader::open(file).map_err(|error| VirtualDiskBackendError::Vfs(format!("open ISO9660 reader: {error}")))?;
+    let walked = reader.walk().map_err(|error| VirtualDiskBackendError::Vfs(format!("walk ISO9660 reader: {error}")))?;
+    Ok(walked.into_iter().map(|entry| (entry.record.lba, entry.path)).collect())
+}
+
+fn path_map_for_filesystem(fs: &forensic_vfs::DynFs, archive_path: &Path) -> Result<Option<HashMap<u32, String>>, VirtualDiskBackendError> {
+    if fs.kind().as_str() == "iso9660" { Ok(Some(iso_path_map(archive_path)?)) } else { Ok(None) }
+}
+
 /// Lists the entries of a `.vhd` archive without extracting them.
 pub fn list_vhd(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
     list_virtual_disk_inner(archive_path)
@@ -253,9 +271,64 @@ pub fn list_udf(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEnt
     list_virtual_disk_inner(archive_path)
 }
 
+/// Lists the entries of an ISO 9660 image without extracting them.
+pub fn list_iso(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_virtual_disk_inner(archive_path)
+}
+
+/// Verifies selected ISO 9660 file payloads through the forensic VFS reader.
+pub fn test_iso(archive_path: impl AsRef<Path>, options: &TestOptions) -> Result<TestReport, VirtualDiskBackendError> {
+    let archive_path = archive_path.as_ref();
+    let (fs, _) = mount_disk(archive_path)?;
+    let path_map = path_map_for_filesystem(&fs, archive_path)?;
+    let mut no_warning = None;
+    let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
+    let mut report = TestReport::default();
+    for (entry, file_id) in entries {
+        if options.is_cancelled() {
+            return Err(VirtualDiskBackendError::Cancelled);
+        }
+        if !options.selects(&entry.archive_path) {
+            report.skipped_entries = report.skipped_entries.saturating_add(1);
+            continue;
+        }
+        if matches!(entry.kind, ExtractionEntryKind::File) {
+            let mut sink = io::sink();
+            let bytes = stream_file(&fs, file_id, &entry.archive_path, &mut sink)?;
+            if Some(bytes) != entry.uncompressed_size {
+                return Err(VirtualDiskBackendError::Vfs(format!(
+                    "test {}: filesystem declares {} bytes but yielded {bytes}",
+                    entry.archive_path,
+                    entry.uncompressed_size.unwrap_or(0)
+                )));
+            }
+            report.tested_bytes = report.tested_bytes.saturating_add(bytes);
+        }
+        report.tested_entries = report.tested_entries.saturating_add(1);
+    }
+    Ok(report)
+}
+
+/// Copies one retained ISO 9660 regular file to a caller-owned writer.
+pub fn copy_iso(archive_path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Write) -> Result<u64, VirtualDiskBackendError> {
+    let archive_path = archive_path.as_ref();
+    let (fs, _) = mount_disk(archive_path)?;
+    let path_map = path_map_for_filesystem(&fs, archive_path)?;
+    let mut no_warning = None;
+    let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
+    let (entry, file_id) = entries.get(entry_index).ok_or_else(|| VirtualDiskBackendError::Vfs("retained ISO entry ID is not present".to_owned()))?;
+    if !matches!(entry.kind, ExtractionEntryKind::File) {
+        return Err(VirtualDiskBackendError::Vfs("retained ISO entry is not a regular file".to_owned()));
+    }
+    stream_file(&fs, *file_id, &entry.archive_path, writer)
+}
+
 fn list_virtual_disk_inner(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
-    let (fs, _) = mount_disk(archive_path.as_ref())?;
-    let entries = collect_entries(&fs, None)?;
+    let archive_path = archive_path.as_ref();
+    let (fs, _) = mount_disk(archive_path)?;
+    let path_map = path_map_for_filesystem(&fs, archive_path)?;
+    let mut no_warning = None;
+    let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
     Ok(entries
         .into_iter()
         .map(|(entry, _)| VirtualDiskListEntry {
@@ -292,6 +365,16 @@ pub fn extract_vmdk_with_overwrite_resolver(
 
 /// Extracts a `.udf` archive into `destination`.
 pub fn extract_udf_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_virtual_disk_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts an ISO 9660 image into `destination` with caller-controlled overwrites.
+pub fn extract_iso_with_overwrite_resolver(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,
     policy: ExtractionPolicy,
@@ -382,7 +465,10 @@ fn extract_virtual_disk_inner(
     let (fs, _) = mount_disk(archive_path)?;
 
     let mut warnings = Vec::new();
-    let entries = collect_entries(&fs, Some(&mut |warning| warnings.push(warning)))?;
+    let path_map = path_map_for_filesystem(&fs, archive_path)?;
+    let mut warning_sink = |warning| warnings.push(warning);
+    let mut warning_callback: Option<&mut dyn FnMut(String)> = Some(&mut warning_sink);
+    let entries = collect_entries_with_path_map(&fs, &mut warning_callback, path_map.as_ref())?;
 
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&destination_root, policy, overwrite_resolver);
     let mut report = VirtualDiskExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings };
@@ -483,7 +569,7 @@ fn extract_virtual_disk_inner(
 
 /// Streams one file's bytes from the engine into `writer` via chunked
 /// `read_at` calls on the walked `FileId`.
-fn stream_file<W: io::Write>(
+fn stream_file<W: io::Write + ?Sized>(
     fs: &forensic_vfs::DynFs,
     file_id: forensic_vfs::FileId,
     archive_path: &str,

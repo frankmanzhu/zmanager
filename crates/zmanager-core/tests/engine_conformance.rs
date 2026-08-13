@@ -38,6 +38,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         (FormatId::VHD, SourceAccess::Seekable),
         (FormatId::VMDK, SourceAccess::Seekable),
         (FormatId::UDF, SourceAccess::Seekable),
+        (FormatId::ISO, SourceAccess::Seekable),
     ];
 
     for (format, source_access) in expected {
@@ -64,6 +65,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         FormatId::RAR,
         FormatId::RAW_STREAM,
         FormatId::APPLE_ARCHIVE,
+        FormatId::ISO,
     ] {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
@@ -394,6 +396,45 @@ fn native_xar_adapter_uses_standalone_reader_when_xar_available() {
     assert!(report.written_entries > 0);
     assert_eq!(fs::read(destination.join("project/file.txt")).unwrap(), b"xar engine payload\n");
     handle.close().unwrap();
+}
+
+#[test]
+fn native_iso_adapter_uses_forensic_vfs_for_list_test_copy_and_extract() {
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.iso");
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    let file_entry = listing.entries.iter().find(|entry| entry.path == "README.TXT").expect("ISO fixture file should be listed");
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert_eq!(test.tested_entries, listing.entries.len() as u64);
+    assert!(test.tested_bytes > 0);
+    let mut copied = Vec::new();
+    let copy = handle.copy_entry(file_entry.id, &mut copied).unwrap();
+    assert_eq!(copy.written_bytes, copied.len() as u64);
+    assert_eq!(copied, b"ZManager fixture payload\n");
+    let destination = TestDir::new("engine-conformance-iso");
+    let mut options = ExtractOptions { destination: destination.path("out"), ..ExtractOptions::default() };
+    let report = handle.extract(&mut options).unwrap();
+    assert!(report.written_entries > 0);
+    assert_eq!(fs::read(destination.path("out/README.TXT")).unwrap(), b"ZManager fixture payload\n");
+    handle.close().unwrap();
+}
+
+#[test]
+fn native_iso_adapter_marks_corrupt_images_terminal() {
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.iso");
+    let bytes = fs::read(&source).unwrap();
+    let temp = TestDir::new("engine-conformance-corrupt-iso");
+    let archive = temp.path("corrupt.iso");
+    fs::write(&archive, &bytes[..24 * 2048]).unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let error = handle.list().unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::CorruptData);
+    assert_eq!(error.disposition, zmanager_core::engine::SessionDisposition::Unusable);
+    let second = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap_err();
+    assert_eq!(second.kind, zmanager_core::engine::ErrorKind::CorruptData);
 }
 
 #[test]

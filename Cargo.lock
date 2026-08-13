@@ -4942,6 +4942,7 @@ dependencies = [
  "forensic-vfs",
  "forensic-vfs-engine",
  "hex",
+ "iso9660-forensic",
  "libc",
  "lz4_flex 0.14.0",
  "lzma-rust2 0.16.5",
