@@ -196,8 +196,20 @@ fn native_tar_family_uses_shared_reader_for_all_read_operations() {
     builder.append_path_with_name(&source, "payload.txt").unwrap();
     builder.into_inner().unwrap().finish().unwrap();
 
+    let mut archives = vec![plain_tar, gzip_tar, bzip_tar];
+    for (tool, suffix) in [("xz", "xz"), ("lzma", "lzma")] {
+        let Ok(output) = std::process::Command::new(tool).arg("-c").arg(archives[0].as_path()).output() else {
+            continue;
+        };
+        if output.status.success() {
+            let archive = temp.path(format!("payload.tar.{suffix}"));
+            fs::write(&archive, output.stdout).unwrap();
+            archives.push(archive);
+        }
+    }
+
     let engine = create_default_engine().unwrap();
-    for archive in [&plain_tar, &gzip_tar, &bzip_tar] {
+    for (index, archive) in archives.iter().enumerate() {
         let mut handle = engine.open(ArchiveSource::from_path_autodetect(archive), OpenOptions::default()).unwrap();
         let listing = handle.list().unwrap();
         assert_eq!(listing.entries.len(), 1);
@@ -211,11 +223,7 @@ fn native_tar_family_uses_shared_reader_for_all_read_operations() {
         assert_eq!(copied, b"shared tar payload");
         handle.close().unwrap();
 
-        let destination = temp.path(match archive.extension().and_then(|value| value.to_str()) {
-            Some("gz") => "out-gzip",
-            Some("bz2") => "out-bzip2",
-            _ => "out-plain",
-        });
+        let destination = temp.path(format!("out-{index}"));
         let mut handle = engine.open(ArchiveSource::from_path_autodetect(archive), OpenOptions::default()).unwrap();
         let mut options = ExtractOptions { destination: destination.clone(), ..ExtractOptions::default() };
         let report = handle.extract(&mut options).unwrap();

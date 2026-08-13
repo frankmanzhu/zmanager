@@ -4,7 +4,6 @@ use flate2::read::GzDecoder;
 use std::fs::File;
 use std::io::{Read, Write as _};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tar::Archive as TarArchive;
 
 use crate::apple_archive_backend;
 use crate::apple_dmg_backend;
@@ -840,96 +839,45 @@ impl ReadAdapterFactory for TarZstListAdapter {
     }
 
     fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
-        let file = File::open(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::Io, err.to_string()).with_path(primary_path))?;
+        let path = archive.source.primary_path();
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
         let decoder =
-            zstd::stream::read::Decoder::new(file).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
-        let mut tar_archive = TarArchive::new(decoder);
-
-        let mut entries = Vec::new();
-        let raw_entries = tar_archive.entries().map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
-
-        for (index, entry) in raw_entries.enumerate() {
-            let entry = entry.map_err(|err| ArchiveError::unusable(ErrorKind::CorruptData, err.to_string()).with_path(primary_path))?;
-            let path = entry
-                .path()
-                .map_err(|err| ArchiveError::unusable(ErrorKind::CorruptData, err.to_string()).with_path(primary_path))?
-                .to_string_lossy()
-                .into_owned();
-
-            let header = entry.header();
-            let kind = if header.entry_type().is_dir() {
-                BrowserEntryKind::Directory
-            } else if header.entry_type().is_symlink() {
-                BrowserEntryKind::Symlink
-            } else if header.entry_type().is_hard_link() {
-                BrowserEntryKind::Hardlink
-            } else {
-                BrowserEntryKind::File
-            };
-
-            entries.push(EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
-                path,
-                kind,
-                size: header.size().ok(),
-                compressed_size: None,
-                modified: header.mtime().ok().map(|m| m.to_string()),
-                mode: header.mode().ok(),
-                encrypted: Some(false),
-                method: Some("zstd".to_owned()),
-                crc: None,
-                comment: None,
-                link_target: entry.link_name().ok().flatten().map(|p| p.to_string_lossy().into_owned()),
-                ..EngineEntry::default()
-            });
-        }
-
-        Ok(ArchiveListing { entries })
+            zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+        let entries = crate::tar_backend::list(decoder, path).map_err(|error| tar_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_tar_entries(entries, "zstd") })
     }
 
     fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let mut sink = std::io::sink();
-        let report = crate::tar_zst_backend::copy_tar_zst_files_to_writer(path, |entry_path| test_options.selects(entry_path), &mut sink).map_err(|error| {
-            let kind = match error {
-                crate::tar_zst_backend::TarZstdError::Io { .. } => ErrorKind::Io,
-                crate::tar_zst_backend::TarZstdError::Cancelled => ErrorKind::Cancelled,
-                _ => ErrorKind::CorruptData,
-            };
-            let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
-            ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
-        })?;
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder =
+            zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+        let report = crate::tar_backend::test(decoder, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
+            .map_err(|error| tar_error(path, &error))?;
         Ok(TestReport {
-            tested_entries: u64::try_from(report.written_entries).unwrap_or(u64::MAX),
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
             skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
-            tested_bytes: report.written_bytes,
+            tested_bytes: report.bytes,
             warnings: report.warnings,
         })
     }
 
     fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
-            crate::tar_zst_backend::extract_tar_zst_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
-        } else {
-            crate::tar_zst_backend::extract_tar_zst(path, &options.destination, options.policy.clone())
-        }
-        .map_err(|error| {
-            let kind = match error {
-                crate::tar_zst_backend::TarZstdError::Io { .. } => ErrorKind::Io,
-                crate::tar_zst_backend::TarZstdError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
-                crate::tar_zst_backend::TarZstdError::Cancelled => ErrorKind::Cancelled,
-                _ => ErrorKind::CorruptData,
-            };
-            ArchiveError {
-                kind,
-                message: error.to_string(),
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
-        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder =
+            zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+        let report = crate::tar_backend::extract(
+            decoder,
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            None,
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
     fn selected_extract<'a>(
@@ -940,15 +888,20 @@ impl ReadAdapterFactory for TarZstListAdapter {
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let report = crate::tar_zst_backend::extract_tar_zst_entry_by_index(
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder =
+            zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+        let report = crate::tar_backend::extract(
+            decoder,
             path,
             &options.destination,
             options.policy.clone(),
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
             options.overwrite_resolver.as_deref_mut(),
+            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            options.cancellation.as_ref(),
         )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
-        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
     fn copy_to_writer(
@@ -959,12 +912,16 @@ impl ReadAdapterFactory for TarZstListAdapter {
         writer: &mut dyn std::io::Write,
     ) -> Result<CopyReport, ArchiveError> {
         let path = archive.source.primary_path();
-        let written_bytes = crate::tar_zst_backend::copy_tar_zst_entry_by_index(
+        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let decoder =
+            zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+        let written_bytes = crate::tar_backend::copy(
+            decoder,
             path,
             usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
             writer,
         )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| tar_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
