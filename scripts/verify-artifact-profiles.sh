@@ -10,8 +10,12 @@ for package in zmanager-core zmanager-cli zmanager-ffi; do
             profile_args+=(--no-default-features)
         fi
         graph=$(cargo tree -e normal -p "$package" "${profile_args[@]}")
-        if grep -Eiq 'libarchive|bsdtar' <<<"$graph"; then
-            echo "$package $profile still contains a libarchive runtime dependency" >&2
+        forbidden='libarchive|bsdtar'
+        if [[ "$profile" == "no-default-features" && "$package" == "zmanager-cli" ]]; then
+            forbidden+='|reqwest'
+        fi
+        if grep -Eiq "$forbidden" <<<"$graph"; then
+            echo "$package $profile still contains a forbidden hosted/backend runtime dependency" >&2
             exit 1
         fi
     done
