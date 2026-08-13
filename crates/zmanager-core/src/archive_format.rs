@@ -10,6 +10,8 @@
 //! new format is one row in [`FORMAT_CAPABILITIES`]; platform-gated backends
 //! declare their status there instead of sprinkling `cfg` across consumers.
 
+use std::fs::File;
+use std::io::Read as _;
 use std::path::Path;
 
 /// Canonical extension lists for path-based format detection.
@@ -234,7 +236,33 @@ pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
             return capability.kind;
         }
     }
-    ArchiveFormatKind::Unknown
+    detect_content_format(path).unwrap_or(ArchiveFormatKind::Unknown)
+}
+
+/// Detects the two compatibility inputs that intentionally have no useful
+/// filename extension: ZIP self-extracting executables and gzip-wrapped CPIO.
+/// This keeps `UNKNOWN` out of the engine registry while preserving the
+/// compatibility fixtures covered by the explicit fallback allow-list.
+fn detect_content_format(path: &Path) -> Option<ArchiveFormatKind> {
+    let mut file = File::open(path).ok()?;
+    let mut prefix = Vec::new();
+    file.by_ref().take(1024 * 1024).read_to_end(&mut prefix).ok()?;
+    if prefix.windows(4).any(|window| window == b"PK\x03\x04" || window == b"PK\x05\x06" || window == b"PK\x07\x08") {
+        return Some(ArchiveFormatKind::Zip);
+    }
+    if prefix.len() >= 265 && (&prefix[257..263] == b"ustar\0" || &prefix[257..263] == b"ustar ") {
+        return Some(ArchiveFormatKind::Tar);
+    }
+    if prefix.starts_with(&[0x1f, 0x8b]) {
+        let file = File::open(path).ok()?;
+        let mut decoder = flate2::read::GzDecoder::new(file).take(6);
+        let mut cpio_magic = [0_u8; 6];
+        decoder.read_exact(&mut cpio_magic).ok()?;
+        if matches!(&cpio_magic, b"070701" | b"070702" | b"070707") {
+            return Some(ArchiveFormatKind::Cpio);
+        }
+    }
+    None
 }
 
 fn ends_with_any(path: &Path, suffixes: &[&str]) -> bool {
@@ -362,5 +390,35 @@ mod tests {
         fs::write(dir.path("multi.zip"), b"final").unwrap();
         assert_eq!(detect_archive_format(dir.path("multi.zip")), ArchiveFormatKind::SplitZip);
         assert_eq!(detect_archive_format(dir.path("multi.z01")), ArchiveFormatKind::Unknown);
+    }
+
+    #[test]
+    fn content_detection_recognizes_zip_self_extracting_input() {
+        let dir = TestDir::new("detect-zip-sfx");
+        let mut input = vec![0_u8; 37];
+        input.extend_from_slice(b"PK\x03\x04synthetic zip payload");
+        fs::write(dir.path("installer.bin"), input).unwrap();
+        assert_eq!(detect_archive_format(dir.path("installer.bin")), ArchiveFormatKind::Zip);
+    }
+
+    #[test]
+    fn content_detection_recognizes_extensionless_tar_input() {
+        let dir = TestDir::new("detect-tar-content");
+        let mut input = vec![0_u8; 265];
+        input[257..263].copy_from_slice(b"ustar\0");
+        fs::write(dir.path("payload.data"), input).unwrap();
+        assert_eq!(detect_archive_format(dir.path("payload.data")), ArchiveFormatKind::Tar);
+    }
+
+    #[test]
+    fn content_detection_recognizes_gzip_cpio_input() {
+        use flate2::{Compression, write::GzEncoder};
+        use std::io::Write as _;
+
+        let dir = TestDir::new("detect-cpio-content");
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(b"070701").unwrap();
+        fs::write(dir.path("package.data"), encoder.finish().unwrap()).unwrap();
+        assert_eq!(detect_archive_format(dir.path("package.data")), ArchiveFormatKind::Cpio);
     }
 }

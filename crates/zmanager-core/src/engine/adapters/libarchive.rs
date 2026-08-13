@@ -19,10 +19,6 @@ fn system_time_string(time: SystemTime) -> Option<String> {
 
 /// Allow-list of formats accepted by the libarchive listing compatibility adapter.
 pub const LIBARCHIVE_ALLOW_LIST: &[FormatId] = &[
-    // Extensionless/container-shaped compatibility inputs (for example a
-    // ZIP SFX executable or gzip-compressed CPIO) retain an explicit
-    // compatibility claim until format sniffing can assign them a stable ID.
-    FormatId::UNKNOWN,
     FormatId::TAR,
     FormatId::TAR_BZ2,
     FormatId::TAR_XZ,
