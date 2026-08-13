@@ -1,7 +1,7 @@
 use crate::cli::app::{
     ExtractOutcome, ExtractRequest, InteractiveOverwriteResolver, default_extract_destination, default_raw_stream_destination, expand_short_options,
 };
-use crate::cli::format::{BACKEND_DEB_NESTED, FORMAT_DEB, is_deb_archive};
+use crate::cli::format::is_deb_archive;
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_usize, read_optional_password_stdin, take_value, validate_recipient_key_open_option};
 use crate::cli::usage::{
     EXTRACT_HELP, command_usage_error, print_error_line, print_extract_summary, print_help_stdout, retry_password_required, usage_failure, wants_help,
@@ -142,7 +142,7 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
             return usage_failure(global, format_args!("extract failed: --extract-nested is currently supported only for .deb packages"));
         }
         let destination = request.destination.unwrap_or_else(|| default_extract_destination(&request.archive));
-        return run_deb_nested_extract(&request.archive, &destination, &policy, global);
+        return run_engine_extract(request.archive, destination, policy, None, None, zmanager_core::tzap_backend::TzapRestoreOptions::default(), global);
     }
     if zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() && request.password_stdin {
         return usage_failure(global, format_args!("extract failed: raw streams are not encrypted; remove --password-stdin"));
@@ -192,6 +192,7 @@ fn run_engine_extract(
         ArchiveFormatKind::Tzap => "tzap",
         ArchiveFormatKind::Rar => "rar",
         ArchiveFormatKind::RawStream => "raw-stream",
+        ArchiveFormatKind::Deb => "deb",
         ArchiveFormatKind::AppleArchive => "aar",
         ArchiveFormatKind::Dmg => "dmg",
         ArchiveFormatKind::Pkg => "pkg",
@@ -272,36 +273,6 @@ fn run_engine_extract(
         }
     }
 }
-fn run_deb_nested_extract(archive: &str, destination: &Path, policy: &zmanager_core::safety::ExtractionPolicy, global: &GlobalOptions) -> ExitCode {
-    let result = if matches!(policy.overwrite, OverwritePolicy::Ask) {
-        let stdin = io::stdin();
-        let stderr = io::stderr();
-        let mut overwrite_resolver = InteractiveOverwriteResolver::new(stdin.lock(), stderr.lock());
-        zmanager_core::deb_backend::extract_deb_nested_with_overwrite_resolver(archive, destination, policy, &mut overwrite_resolver)
-    } else {
-        zmanager_core::deb_backend::extract_deb_nested(archive, destination, policy)
-    };
-    match result {
-        Ok(report) => {
-            let outcome = ExtractOutcome {
-                label: "deb nested",
-                format: FORMAT_DEB,
-                backend: BACKEND_DEB_NESTED,
-                written_entries: report.written_entries,
-                skipped_entries: report.skipped_entries,
-                written_bytes: report.written_bytes,
-                warnings: report.warnings,
-            };
-            print_extract_summary(Path::new(archive), destination, &outcome, global);
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            print_error_line(global, format_args!("extract failed: {error}"));
-            ExitCode::FAILURE
-        }
-    }
-}
-
 #[allow(clippy::too_many_lines)]
 fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> ExitCode {
     if request.extract_nested {
