@@ -1,6 +1,6 @@
 use crate::apple_archive_backend::{self, AppleArchiveEntryKind, AppleArchiveError};
 use crate::engine::types::ArchiveError;
-use crate::libarchive_backend::{self, LibarchiveEntryKind, LibarchiveError};
+use crate::libarchive_backend::{LibarchiveEntryKind, LibarchiveError};
 #[cfg(test)]
 use crate::rar_backend;
 use crate::rar_backend::{RarBackendError, RarListEntryKind};
@@ -434,36 +434,19 @@ pub fn extract_entry_with_options(
         crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
 
-    let detected_format = crate::archive_format::detect_archive_format(archive_path);
-    let engine_selected = is_zip_family_archive(archive_path)
-        || detected_format == crate::archive_format::ArchiveFormatKind::SevenZ
-        || is_tar_zst_archive(archive_path)
-        || is_tzap_archive_path(archive_path)
-        || is_apple_archive_path_browser(archive_path)
-        || raw_stream_backend::detect_raw_stream_format(archive_path).is_some()
-        || is_rar_archive(archive_path)
-        || crate::engine::format::FormatId::from_archive_format_kind(detected_format)
-            .is_some_and(|format| crate::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&format));
-    if engine_selected {
-        extract_entry_via_engine(
-            archive_path,
-            entry_path,
-            &destination_root,
-            &policy,
-            options.password,
-            None,
-            TzapRestoreOptions {
-                policy: options.tzap_restore_policy,
-                allow_degraded: options.tzap_allow_degraded,
-                allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
-            },
-        )
-    } else {
-        let report = libarchive_backend::extract_archive_entry_with_password(archive_path, entry_path, &destination_root, policy, options.password)?;
-        let rel_dest = entry_path.replace('\\', "/").trim_matches('/').to_owned();
-        let destination_path = if rel_dest.is_empty() { destination.to_path_buf() } else { destination.join(rel_dest) };
-        Ok(EntryExtractReport { destination_path, written_bytes: report.written_bytes, metadata_diagnostics: Vec::new() })
-    }
+    extract_entry_via_engine(
+        archive_path,
+        entry_path,
+        &destination_root,
+        &policy,
+        options.password,
+        None,
+        TzapRestoreOptions {
+            policy: options.tzap_restore_policy,
+            allow_degraded: options.tzap_allow_degraded,
+            allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
+        },
+    )
 }
 
 /// Extracts a batch of selected paths through one retained engine handle when
@@ -479,26 +462,6 @@ pub fn extract_selected_entries_with_options(
     let destination = destination.as_ref();
     let destination_root =
         crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
-    let detected_format = crate::archive_format::detect_archive_format(archive_path);
-    let engine_selected = is_zip_family_archive(archive_path)
-        || detected_format == crate::archive_format::ArchiveFormatKind::SevenZ
-        || is_tar_zst_archive(archive_path)
-        || is_tzap_archive_path(archive_path)
-        || is_apple_archive_path_browser(archive_path)
-        || raw_stream_backend::detect_raw_stream_format(archive_path).is_some()
-        || is_rar_archive(archive_path)
-        || crate::engine::format::FormatId::from_archive_format_kind(detected_format)
-            .is_some_and(|format| crate::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&format));
-
-    if !engine_selected {
-        return entry_paths
-            .iter()
-            .map(|entry_path| {
-                extract_entry_with_options(archive_path, entry_path, destination_root.clone(), options).map(|report| (entry_path.clone(), report))
-            })
-            .collect();
-    }
-
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
     let mut handle = engine
@@ -942,10 +905,6 @@ fn tzap_browser_entry(listing: &crate::tzap_backend::TzapIndexListing, entry: &c
     }
 }
 
-fn is_apple_archive_path_browser(path: &Path) -> bool {
-    apple_archive_backend::is_apple_archive_path(path)
-}
-
 #[cfg(test)]
 #[allow(dead_code)]
 fn list_apple_archive_entries(path: &Path, password: Option<&str>) -> Result<BrowserListing, ArchiveBrowserError> {
@@ -1295,18 +1254,6 @@ fn tzap_modified_string(seconds: i64, nanoseconds: u32) -> Option<String> {
 #[allow(dead_code)]
 fn system_time_string(time: SystemTime) -> Option<String> {
     time.duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_secs().to_string())
-}
-
-// Path detection delegates to the canonical core detector (CR-114).
-fn is_zip_family_archive(path: &Path) -> bool {
-    matches!(
-        crate::archive_format::detect_archive_format(path),
-        crate::archive_format::ArchiveFormatKind::Zip | crate::archive_format::ArchiveFormatKind::SplitZip
-    )
-}
-
-fn is_tar_zst_archive(path: &Path) -> bool {
-    matches!(crate::archive_format::detect_archive_format(path), crate::archive_format::ArchiveFormatKind::TarZst)
 }
 
 #[allow(dead_code)]
