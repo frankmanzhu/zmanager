@@ -245,6 +245,8 @@ pub struct SelectedExtractOptions<'a> {
     pub destination: PathBuf,
     /// Shared safety and overwrite policy.
     pub policy: ExtractionPolicy,
+    /// Optional TZAP metadata restoration policy for selected extraction.
+    pub tzap_restore_options: Option<crate::tzap_backend::TzapRestoreOptions>,
     /// Optional cancellation token.
     pub cancellation: Option<CancellationToken>,
     /// Optional overwrite resolver for `Ask` policy.
@@ -256,6 +258,7 @@ impl std::fmt::Debug for SelectedExtractOptions<'_> {
         f.debug_struct("SelectedExtractOptions")
             .field("destination", &self.destination)
             .field("policy", &self.policy)
+            .field("tzap_restore_options", &self.tzap_restore_options)
             .field("cancellation", &self.cancellation)
             .field("overwrite_resolver", &self.overwrite_resolver.is_some())
             .finish()
@@ -264,7 +267,7 @@ impl std::fmt::Debug for SelectedExtractOptions<'_> {
 
 impl Default for SelectedExtractOptions<'_> {
     fn default() -> Self {
-        Self { destination: PathBuf::new(), policy: ExtractionPolicy::default(), cancellation: None, overwrite_resolver: None }
+        Self { destination: PathBuf::new(), policy: ExtractionPolicy::default(), tzap_restore_options: None, cancellation: None, overwrite_resolver: None }
     }
 }
 

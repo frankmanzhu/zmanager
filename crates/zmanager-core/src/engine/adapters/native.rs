@@ -632,7 +632,7 @@ impl ReadAdapterFactory for TzapListAdapter {
             &entry.path,
             &destination_path,
             options.policy.overwrite == crate::safety::OverwritePolicy::Replace,
-            tzap_backend::TzapRestoreOptions::default(),
+            options.tzap_restore_options.unwrap_or_default(),
         )
         .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         let Some(report) = report else {

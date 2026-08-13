@@ -501,8 +501,16 @@ pub fn extract_selected_entries_with_options(
             return Err(ArchiveBrowserError::EntryNotFound { path: requested_path.clone() });
         }
         for entry in matching_entries {
-            let mut selected_options =
-                crate::engine::SelectedExtractOptions { destination: destination_root.clone(), policy: policy.clone(), ..Default::default() };
+            let mut selected_options = crate::engine::SelectedExtractOptions {
+                destination: destination_root.clone(),
+                policy: policy.clone(),
+                tzap_restore_options: Some(TzapRestoreOptions {
+                    policy: options.tzap_restore_policy,
+                    allow_degraded: options.tzap_allow_degraded,
+                    allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
+                }),
+                ..Default::default()
+            };
             let report =
                 handle.extract_selected(entry.id, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
             reports.push((
@@ -606,8 +614,9 @@ fn extract_entry_via_engine(
     let mut written_bytes = 0_u64;
     let mut metadata_diagnostics = Vec::new();
     for entry in matching_entries {
-        let mut options = crate::engine::SelectedExtractOptions { destination: destination.to_path_buf(), policy: policy.clone(), ..Default::default() };
-        let report = handle.extract_selected(entry.id, &mut options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+        let mut selected_options =
+            crate::engine::SelectedExtractOptions { destination: destination.to_path_buf(), policy: policy.clone(), ..Default::default() };
+        let report = handle.extract_selected(entry.id, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
         written_bytes = written_bytes.saturating_add(report.written_bytes);
         metadata_diagnostics.extend(report.warnings);
     }
