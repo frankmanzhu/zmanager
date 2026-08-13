@@ -68,14 +68,24 @@ pub(crate) trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
 pub(crate) fn open_zip_reader(path: &Path) -> Result<Box<dyn ReadSeek>, ZipBackendError> {
-    if !crate::multi_volume::is_split_zip_path(path) {
-        return File::open(path).map(|file| Box::new(file) as Box<dyn ReadSeek>).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source });
-    }
     let paths = crate::multi_volume::discover_multi_volume_paths(path);
     if paths.len() <= 1 {
-        return Err(unsupported_split_zip("split ZIP volume set is incomplete"));
+        return File::open(path).map(|file| Box::new(file) as Box<dyn ReadSeek>).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source });
     }
-    Ok(Box::new(SplitZipReader::open(&paths)?))
+    let Some(first_path) = paths.first() else {
+        return Err(unsupported_split_zip("split ZIP volume set is incomplete"));
+    };
+    let mut header = [0_u8; ZIP_SPLIT_SIGNATURE.len()];
+    let mut first = File::open(first_path).map_err(|source| ZipBackendError::Io { path: first_path.clone(), source })?;
+    let read = first.read(&mut header).map_err(|source| ZipBackendError::Io { path: paths[0].clone(), source })?;
+    if read == header.len() && header == ZIP_SPLIT_SIGNATURE {
+        Ok(Box::new(SplitZipReader::open(&paths)?))
+    } else {
+        // 7-Zip's `-v` ZIP output is a raw contiguous stream split across
+        // numbered `.zip.001` volumes rather than a disk-spanned ZIP with
+        // PK\x07\x08 markers. Present the ordered segments directly.
+        Ok(Box::new(SegmentedReader::open(paths).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })?))
+    }
 }
 
 struct SplitZipReader {

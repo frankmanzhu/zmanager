@@ -64,8 +64,16 @@ pub fn is_split_zip_archive_path(path: &Path) -> bool {
         None => return false,
     };
 
+    if crate::multi_volume::is_split_zip_path(path) {
+        return true;
+    }
+
     // Case 1: sidecar volume like archive.z01, archive.z02
     if is_split_zip_sidecar_extension(&filename) {
+        return true;
+    }
+
+    if is_numbered_zip_volume_name(&filename) {
         return true;
     }
 
@@ -96,6 +104,13 @@ fn is_split_zip_sidecar_extension(filename: &str) -> bool {
 /// Discovers ordered volumes for a split-ZIP set ending in `.zip`.
 #[must_use]
 pub fn discover_split_zip_volumes(path: &Path) -> Option<Vec<PathBuf>> {
+    let discovered = crate::multi_volume::discover_multi_volume_paths(path);
+    if discovered.len() > 1
+        && discovered.iter().any(|volume| volume.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.to_ascii_lowercase().contains(".zip")))
+    {
+        return Some(discovered);
+    }
+
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
     let stem = path.file_stem()?.to_str()?;
 
@@ -123,4 +138,11 @@ pub fn discover_split_zip_volumes(path: &Path) -> Option<Vec<PathBuf>> {
     } else {
         None
     }
+}
+
+fn is_numbered_zip_volume_name(filename: &str) -> bool {
+    let Some((base, suffix)) = filename.rsplit_once('.') else {
+        return false;
+    };
+    base.to_ascii_lowercase().ends_with(".zip") && suffix.len() == 3 && suffix.bytes().all(|byte| byte.is_ascii_digit())
 }

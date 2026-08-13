@@ -217,6 +217,9 @@ pub fn format_status(kind: ArchiveFormatKind) -> BackendStatus {
 #[must_use]
 pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
     let path = path.as_ref();
+    if crate::engine::source::is_split_zip_archive_path(path) {
+        return ArchiveFormatKind::SplitZip;
+    }
     if crate::raw_stream_backend::detect_raw_stream_format(path).is_some() {
         return ArchiveFormatKind::RawStream;
     }
@@ -389,7 +392,7 @@ mod tests {
         fs::write(dir.path("multi.z01"), b"sidecar").unwrap();
         fs::write(dir.path("multi.zip"), b"final").unwrap();
         assert_eq!(detect_archive_format(dir.path("multi.zip")), ArchiveFormatKind::SplitZip);
-        assert_eq!(detect_archive_format(dir.path("multi.z01")), ArchiveFormatKind::Unknown);
+        assert_eq!(detect_archive_format(dir.path("multi.z01")), ArchiveFormatKind::SplitZip);
     }
 
     #[test]
