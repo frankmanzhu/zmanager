@@ -1188,6 +1188,46 @@ static TAR_LZMA_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static TAR_LZ_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_lz_adapter",
+    format: FormatId::TAR_LZ,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static TAR_LZO_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_lzo_adapter",
+    format: FormatId::TAR_LZO,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static TAR_COMPRESS_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_compress_adapter",
+    format: FormatId::TAR_COMPRESS,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static TAR_LZ4_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_lz4_adapter",
+    format: FormatId::TAR_LZ4,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static TAR_LRZ_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_lrz_adapter",
+    format: FormatId::TAR_LRZ,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 /// Native filtered-TAR adapter backed by the shared TAR reader.
 #[derive(Debug, Clone, Copy)]
 pub struct FilteredTarAdapter {
@@ -1204,7 +1244,33 @@ impl FilteredTarAdapter {
     }
 
     fn open_reader(&self, path: &std::path::Path) -> Result<Box<dyn Read>, ArchiveError> {
+        if matches!(
+            self.decoder,
+            raw_stream_backend::RawStreamFormat::Lzo | raw_stream_backend::RawStreamFormat::UnixCompress | raw_stream_backend::RawStreamFormat::Lrzip
+        ) {
+            let temporary = crate::temp_names::TemporaryDirectory::new("tar-filter")
+                .map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+            let decoded_path = temporary.path().join("decoded.tar");
+            let mut decoded = File::create(&decoded_path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+            raw_stream_backend::copy_raw_stream_to_writer(path, self.decoder, &mut decoded)
+                .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+            drop(decoded);
+            let reader = File::open(&decoded_path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+            return Ok(Box::new(TemporaryTarReader { _temporary: temporary, reader }));
+        }
+
         raw_stream_backend::open_decoder(path, self.decoder).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))
+    }
+}
+
+struct TemporaryTarReader {
+    _temporary: crate::temp_names::TemporaryDirectory,
+    reader: File,
+}
+
+impl Read for TemporaryTarReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(buffer)
     }
 }
 
@@ -1214,7 +1280,12 @@ impl ReadAdapterFactory for FilteredTarAdapter {
             FormatId::TAR_BZ2 => &TAR_BZ2_DESCRIPTOR,
             FormatId::TAR_XZ => &TAR_XZ_DESCRIPTOR,
             FormatId::TAR_LZMA => &TAR_LZMA_DESCRIPTOR,
-            _ => unreachable!("filtered TAR adapter format must be TAR.BZ2, TAR.XZ, or TAR.LZMA"),
+            FormatId::TAR_LZ => &TAR_LZ_DESCRIPTOR,
+            FormatId::TAR_LZO => &TAR_LZO_DESCRIPTOR,
+            FormatId::TAR_COMPRESS => &TAR_COMPRESS_DESCRIPTOR,
+            FormatId::TAR_LZ4 => &TAR_LZ4_DESCRIPTOR,
+            FormatId::TAR_LRZ => &TAR_LRZ_DESCRIPTOR,
+            _ => unreachable!("filtered TAR adapter format is not a supported native TAR filter"),
         }
     }
 

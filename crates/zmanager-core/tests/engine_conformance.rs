@@ -39,6 +39,11 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         (FormatId::VMDK, SourceAccess::Seekable),
         (FormatId::UDF, SourceAccess::Seekable),
         (FormatId::ISO, SourceAccess::Seekable),
+        (FormatId::TAR_LZ, SourceAccess::Seekable),
+        (FormatId::TAR_LZO, SourceAccess::Seekable),
+        (FormatId::TAR_COMPRESS, SourceAccess::Seekable),
+        (FormatId::TAR_LZ4, SourceAccess::Seekable),
+        (FormatId::TAR_LRZ, SourceAccess::Seekable),
         (FormatId::LHA, SourceAccess::Seekable),
         (FormatId::WARC, SourceAccess::Seekable),
     ];
@@ -54,7 +59,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
     assert!(mtree.operations.contains(&ArchiveOperation::Test));
     assert!(!mtree.operations.contains(&ArchiveOperation::Extract));
     #[cfg(feature = "libarchive-fallback")]
-    assert!(!zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&FormatId::RAR));
+    assert!(zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.is_empty());
     for format in
         [FormatId::ZIP, FormatId::SPLIT_ZIP, FormatId::SEVEN_Z, FormatId::TAR_ZST, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM, FormatId::APPLE_ARCHIVE]
     {
@@ -72,6 +77,11 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         FormatId::RAW_STREAM,
         FormatId::APPLE_ARCHIVE,
         FormatId::ISO,
+        FormatId::TAR_LZ,
+        FormatId::TAR_LZO,
+        FormatId::TAR_COMPRESS,
+        FormatId::TAR_LZ4,
+        FormatId::TAR_LRZ,
     ] {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");

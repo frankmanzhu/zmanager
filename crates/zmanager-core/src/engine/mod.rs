@@ -55,6 +55,31 @@ impl ArchivePlugin for DefaultArchivePlugin {
             crate::raw_stream_backend::RawStreamFormat::Lzma,
             "lzma",
         )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_LZ,
+            crate::raw_stream_backend::RawStreamFormat::Lzip,
+            "lzip",
+        )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_LZO,
+            crate::raw_stream_backend::RawStreamFormat::Lzo,
+            "lzop",
+        )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_COMPRESS,
+            crate::raw_stream_backend::RawStreamFormat::UnixCompress,
+            "compress",
+        )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_LZ4,
+            crate::raw_stream_backend::RawStreamFormat::Lz4,
+            "lz4",
+        )))?;
+        builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
+            FormatId::TAR_LRZ,
+            crate::raw_stream_backend::RawStreamFormat::Lrzip,
+            "lrzip",
+        )))?;
         builder.register_read_adapter(Arc::new(adapters::native::ArListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::CpioListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::DebListAdapter))?;
