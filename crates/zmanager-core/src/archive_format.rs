@@ -16,7 +16,7 @@ use std::path::Path;
 
 /// Canonical extension lists for path-based format detection.
 pub const ZIP_FAMILY_EXTENSIONS: &[&str] = &[".zip", ".zipx", ".jar", ".war", ".ipa", ".apk", ".appx", ".xpi", ".cbz", ".epub"];
-pub const SEVEN_Z_EXTENSIONS: &[&str] = &[".7z", ".cb7"];
+pub const SEVEN_Z_EXTENSIONS: &[&str] = &[".7z", ".cb7", ".sevenz"];
 pub const RAR_EXTENSIONS: &[&str] = &[".rar", ".cbr"];
 pub const TAR_EXTENSIONS: &[&str] = &[".tar", ".cbt", ".pax", ".ustar"];
 pub const TAR_BZ2_EXTENSIONS: &[&str] = &[".tar.bz2", ".tbz2", ".tbz"];
