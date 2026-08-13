@@ -1,5 +1,7 @@
 use crate::apple_archive_backend::{self, AppleArchiveEntryKind, AppleArchiveError};
 use crate::engine::types::ArchiveError;
+#[cfg(test)]
+use crate::libarchive_backend;
 use crate::libarchive_backend::{LibarchiveEntryKind, LibarchiveError};
 #[cfg(test)]
 use crate::rar_backend;
