@@ -573,79 +573,6 @@ fn list_entries_with_password(archive: &str, password: Option<&str>, recipient_k
     Ok(generic_entries)
 }
 
-fn map_generic_entries<Entry>(entries: impl IntoIterator<Item = Entry>, map: impl Fn(Entry) -> GenericEntry) -> Vec<GenericEntry> {
-    entries.into_iter().map(map).collect()
-}
-
-#[allow(dead_code)]
-fn zip_list_entry_to_generic(entry: zmanager_core::zip_backend::ZipListEntry) -> GenericEntry {
-    GenericEntry {
-        kind: match entry.kind {
-            zmanager_core::zip_backend::ZipEntryKind::File => "file",
-            zmanager_core::zip_backend::ZipEntryKind::Directory => "directory",
-            zmanager_core::zip_backend::ZipEntryKind::Symlink => "symlink",
-        }
-        .to_owned(),
-        name: entry.name,
-        size: entry.size,
-        compressed_size: Some(entry.compressed_size),
-        ..GenericEntry::default()
-    }
-}
-
-#[allow(dead_code)]
-fn seven_z_list_entry_to_generic(entry: zmanager_core::sevenz_backend::SevenZListEntry) -> GenericEntry {
-    GenericEntry {
-        kind: match entry.kind {
-            zmanager_core::sevenz_backend::SevenZEntryKind::File => "file",
-            zmanager_core::sevenz_backend::SevenZEntryKind::Directory => "directory",
-            zmanager_core::sevenz_backend::SevenZEntryKind::AntiItem => "anti-item",
-        }
-        .to_owned(),
-        name: entry.name,
-        size: entry.size,
-        compressed_size: Some(entry.compressed_size),
-        ..GenericEntry::default()
-    }
-}
-
-#[allow(dead_code)]
-fn rar_list_entry_to_generic(entry: zmanager_core::rar_backend::RarListEntry) -> GenericEntry {
-    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
-}
-
-#[allow(dead_code)]
-fn dmg_list_entry_to_generic(entry: zmanager_core::apple_dmg_backend::DmgListEntry) -> GenericEntry {
-    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
-}
-
-#[allow(dead_code)]
-fn pkg_list_entry_to_generic(entry: zmanager_core::apple_pkg_backend::PkgListEntry) -> GenericEntry {
-    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
-}
-
-#[allow(dead_code)]
-fn virtual_disk_list_entry_to_generic(entry: zmanager_core::virtual_disk_backend::VirtualDiskListEntry) -> GenericEntry {
-    GenericEntry { kind: format!("{:?}", entry.kind).to_lowercase(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
-}
-
-#[allow(dead_code)]
-fn msi_list_entry_to_generic(entry: zmanager_core::msi_backend::MsiListEntry) -> GenericEntry {
-    // The MSI database has only regular files; no directory or symlink entries.
-    GenericEntry { kind: "file".to_owned(), name: entry.path, size: entry.size, compressed_size: None, ..GenericEntry::default() }
-}
-
-#[allow(dead_code)]
-fn libarchive_list_entry_to_generic(entry: zmanager_core::libarchive_backend::LibarchiveListEntry) -> GenericEntry {
-    GenericEntry {
-        kind: format!("{:?}", entry.kind).to_lowercase(),
-        name: entry.path,
-        size: u64::try_from(entry.size).unwrap_or(0),
-        compressed_size: None,
-        ..GenericEntry::default()
-    }
-}
-
 fn filter_entries(entries: &mut Vec<GenericEntry>, includes: &[String], excludes: &[String]) {
     entries.retain(|entry| entry_selected(&entry.name, includes, excludes));
 }
@@ -655,29 +582,4 @@ pub(crate) fn entry_selected(path: &str, includes: &[String], excludes: &[String
     let matches_exclude = excludes.iter().any(|pattern| archive_pattern_matches(pattern, path));
 
     matches_include && !matches_exclude
-}
-#[allow(dead_code)]
-fn list_apple_archive_cli(archive: &str, password: Option<&str>) -> Result<Vec<GenericEntry>, String> {
-    zmanager_core::apple_archive_backend::list_apple_archive(archive, password)
-        .map(|listing| map_generic_entries(listing.entries, apple_archive_list_entry_to_generic))
-        .map_err(|error| error.to_string())
-}
-
-#[allow(dead_code)]
-fn apple_archive_list_entry_to_generic(entry: zmanager_core::apple_archive_backend::AppleArchiveListEntry) -> GenericEntry {
-    GenericEntry {
-        kind: match entry.kind {
-            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::File => "file",
-            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Directory => "directory",
-            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Symlink => "symlink",
-            zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Device | zmanager_core::apple_archive_backend::AppleArchiveEntryKind::Special => {
-                "special"
-            }
-        }
-        .to_owned(),
-        name: entry.path,
-        size: entry.size.unwrap_or(0),
-        compressed_size: None,
-        ..GenericEntry::default()
-    }
 }
