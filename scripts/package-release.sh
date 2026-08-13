@@ -194,11 +194,17 @@ else
   tar -C "$STAGE" -czf "$OUT_ABS/$OFFLINE_ARCHIVE" "$OFFLINE_BINARY" LICENSE NOTICE
 fi
 
-if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 "$OUT_ABS/$OFFLINE_ARCHIVE" > "$OUT_ABS/$OFFLINE_ARCHIVE.sha256"
-else
-  sha256sum "$OUT_ABS/$ARCHIVE" > "$OUT_ABS/$ARCHIVE.sha256"
-fi
+write_sha256() {
+  local archive=$1
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$OUT_ABS/$archive" > "$OUT_ABS/$archive.sha256"
+  else
+    sha256sum "$OUT_ABS/$archive" > "$OUT_ABS/$archive.sha256"
+  fi
+}
+
+write_sha256 "$ARCHIVE"
+write_sha256 "$OFFLINE_ARCHIVE"
 
 scripts/inspect-runtime-deps.sh "$TARGET" "$OUT_ABS" >/dev/null
 

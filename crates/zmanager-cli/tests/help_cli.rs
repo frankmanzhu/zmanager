@@ -661,9 +661,10 @@ fn package_preview_uploads_artifacts_without_publishing_release() {
         "scripts/package-release.sh",
         "powershell -ExecutionPolicy Bypass -File scripts/ci-windows.ps1",
         "actions/upload-artifact@v6",
-        "name: zm-preview-${{ matrix.target }}",
-        // Dual artifacts per target: the glob covers both the zm binary and the auth stub.
-        "path: dist/zm*${{ matrix.target }}.*",
+        "name: zm-preview-${{ matrix.target }}-online",
+        "path: dist/zm-${{ matrix.target }}.*",
+        "name: zm-preview-${{ matrix.target }}-offline",
+        "path: dist/zm-offline-${{ matrix.target }}.*",
         "Linux tarballs are static single-binary artifacts.",
         "if-no-files-found: error",
         "retention-days: 14",
@@ -676,6 +677,12 @@ fn package_preview_uploads_artifacts_without_publishing_release() {
         ["contents: write", "gh release create", "actions/download-artifact", "scripts/package-deb.sh", "dist/zmanager-cli_*.deb", "matrix.deb_arch"]
     {
         assert_not_contains(PACKAGE_PREVIEW_WORKFLOW, forbidden);
+    }
+
+    assert_eq!(PACKAGE_PREVIEW_WORKFLOW.matches("actions/upload-artifact@v6").count(), 2);
+
+    for required in ["--no-default-features", "New-OfflineReleasePackage", "zm-offline-$TargetTriple.zip"] {
+        assert_contains(CI_WINDOWS_PS1, required);
     }
 }
 

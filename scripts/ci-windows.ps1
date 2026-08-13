@@ -243,14 +243,21 @@ function Invoke-CargoTest {
 function Invoke-CargoBuildRelease {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$TargetTriple
+        [string]$TargetTriple,
+
+        [switch]$Offline
     )
 
+    $arguments = @("build", "--locked", "--release", "--target", $TargetTriple, "-p", "zmanager-cli", "--bin", "zm")
+    if ($Offline) {
+        $arguments += "--no-default-features"
+    }
+
     Invoke-NativeLogged `
-        -Title "cargo release build failed on $TargetTriple" `
+        -Title ("cargo " + $(if ($Offline) { "offline " } else { "" }) + "release build failed on $TargetTriple") `
         -LogName "cargo-build-windows-$TargetTriple.log" `
         -FilePath "cargo" `
-        -Arguments @("build", "--locked", "--release", "--target", $TargetTriple, "-p", "zmanager-cli", "--bin", "zm")
+        -Arguments $arguments
 }
 
 function Copy-ReleaseFiles {
@@ -441,6 +448,35 @@ function New-ReleasePackage {
     }
 }
 
+function New-OfflineReleasePackage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetTriple
+    )
+
+    $outRoot = Join-Path $RepositoryRoot $OutDir
+    New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
+
+    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("zmanager-offline-release-" + [System.Guid]::NewGuid())
+    New-Item -ItemType Directory -Path $stage | Out-Null
+    try {
+        Copy-Item (Join-Path $RepositoryRoot "target\$TargetTriple\release\zm.exe") (Join-Path $stage "zm-offline.exe")
+        Copy-Item (Join-Path $RepositoryRoot "LICENSE") $stage
+        Copy-Item (Join-Path $RepositoryRoot "NOTICE") $stage
+
+        $archive = Join-Path $outRoot ("zm-offline-$TargetTriple.zip")
+        if (Test-Path $archive) {
+            Remove-Item $archive
+        }
+        Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $archive
+        $hash = Get-FileHash -Algorithm SHA256 -Path $archive
+        Set-Content -Path ($archive + ".sha256") -Value ($hash.Hash.ToLowerInvariant() + "  " + (Split-Path -Leaf $archive))
+        Write-Host $archive
+    } finally {
+        Remove-Item -Recurse -Force $stage
+    }
+}
+
 Import-VisualStudioEnvironment -Architecture $VcArch -RequiredComponent $VsComponent
 Ensure-Vcpkg
 
@@ -466,6 +502,8 @@ Invoke-NativeLogged `
 if ($Package) {
     Invoke-CargoBuildRelease -TargetTriple $Target
     New-ReleasePackage -TargetTriple $Target
+    Invoke-CargoBuildRelease -TargetTriple $Target -Offline
+    New-OfflineReleasePackage -TargetTriple $Target
 } else {
     Invoke-CargoTest -TargetTriple $Target
     Invoke-CargoBuildRelease -TargetTriple $Target
