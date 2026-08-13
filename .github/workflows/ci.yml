@@ -103,6 +103,9 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
+      - name: Verify reduced artifact profiles
+        run: bash scripts/verify-artifact-profiles.sh
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets
 
