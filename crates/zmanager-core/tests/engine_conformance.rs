@@ -336,6 +336,33 @@ fn native_rpm_adapter_composes_header_and_cpio_when_rpmbuild_available() {
 }
 
 #[test]
+fn native_cab_adapter_composes_shared_safety_and_atomic_output() {
+    let temp = TestDir::new("engine-conformance-cab");
+    let archive = temp.path("payload.cab");
+    let mut builder = cab::CabinetBuilder::new();
+    let folder = builder.add_folder(cab::CompressionType::MsZip);
+    folder.add_file("project/file.txt");
+    let mut writer = builder.build(File::create(&archive).unwrap()).unwrap();
+    writer.next_file().unwrap().unwrap().write_all(b"cab engine payload\n").unwrap();
+    writer.finish().unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    assert_eq!(listing.entries[0].path, "project/file.txt");
+    let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert_eq!(test.tested_entries, 1);
+    let mut copied = Vec::new();
+    handle.copy_entry(listing.entries[0].id, &mut copied).unwrap();
+    assert_eq!(copied, b"cab engine payload\n");
+    let destination = temp.path("out");
+    let mut options = ExtractOptions { destination: destination.clone(), ..ExtractOptions::default() };
+    assert_eq!(handle.extract(&mut options).unwrap().written_entries, 1);
+    assert_eq!(fs::read(destination.join("project/file.txt")).unwrap(), b"cab engine payload\n");
+    handle.close().unwrap();
+}
+
+#[test]
 fn engine_creation_cancellation_does_not_commit_output() {
     let temp = TestDir::new("engine-conformance-create-cancel");
     let source = temp.path("source.txt");
