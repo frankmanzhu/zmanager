@@ -301,6 +301,14 @@ static XAR_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static LHA_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_lha_adapter",
+    format: FormatId::LHA,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 /// Native Debian package adapter composing AR with the registered payload engines.
 #[derive(Debug, Default)]
 pub struct DebListAdapter;
@@ -642,6 +650,94 @@ fn xar_error(path: &std::path::Path, error: &crate::xar_backend::XarError) -> Ar
         crate::xar_backend::XarError::Parser { .. } => ErrorKind::CorruptData,
         crate::xar_backend::XarError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::xar_backend::XarError::Cancelled => ErrorKind::Cancelled,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
+
+/// Native LHA/LZH adapter backed by `delharc`.
+#[derive(Debug, Default)]
+pub struct LhaListAdapter;
+
+impl ReadAdapterFactory for LhaListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &LHA_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.source.primary_path();
+        let entries = crate::lha_backend::list(path).map_err(|error| lha_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_lha_entries(entries) })
+    }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::lha_backend::test(path, test_options).map_err(|error| lha_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = crate::lha_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| lha_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(
+        &self,
+        archive: &DetectedArchive,
+        _open_options: &OpenOptions,
+        entry_id: EntryId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<CopyReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let written_bytes = crate::lha_backend::copy(
+            path,
+            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            writer,
+        )
+        .map_err(|error| lha_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn map_lha_entries(entries: Vec<crate::lha_backend::LhaEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| EngineEntry {
+            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            path: entry.path,
+            kind: entry.kind,
+            size: Some(entry.size),
+            compressed_size: None,
+            encrypted: Some(false),
+            method: Some("lha".to_owned()),
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn lha_error(path: &std::path::Path, error: &crate::lha_backend::LhaError) -> ArchiveError {
+    let kind = match error {
+        crate::lha_backend::LhaError::Io { .. } => ErrorKind::Io,
+        crate::lha_backend::LhaError::Invalid { .. } => ErrorKind::CorruptData,
+        crate::lha_backend::LhaError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::lha_backend::LhaError::Cancelled => ErrorKind::Cancelled,
     };
     ArchiveError {
         kind,

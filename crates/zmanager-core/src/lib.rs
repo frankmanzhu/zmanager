@@ -59,6 +59,7 @@ pub mod cpio_backend;
 pub mod deb_backend;
 pub mod engine;
 pub mod jobs;
+pub mod lha_backend;
 #[cfg(feature = "libarchive-fallback")]
 pub mod libarchive_backend;
 #[cfg(not(feature = "libarchive-fallback"))]

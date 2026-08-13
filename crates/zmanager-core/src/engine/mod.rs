@@ -35,7 +35,7 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::zip::ZipListAdapter::single_volume()))?;
         builder.register_read_adapter(Arc::new(adapters::zip::ZipListAdapter::split_volume()))?;
 
-        // Native adapters for 7z, TAR.ZST, TZAP, RAR, RawStreams, Apple Archive, DMG, PKG, MSI, VirtualDisks
+        // Native adapters for 7z, TAR.ZST, TZAP, RAR, LHA, RawStreams, Apple Archive, DMG, PKG, MSI, VirtualDisks
         builder.register_read_adapter(Arc::new(adapters::native::SevenZListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TarZstListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TarGzListAdapter))?;
@@ -61,6 +61,7 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::native::RpmListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::CabListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::XarListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::LhaListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::TzapListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RarListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::RawStreamListAdapter))?;
