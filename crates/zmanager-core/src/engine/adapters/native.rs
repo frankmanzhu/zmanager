@@ -11,7 +11,9 @@ use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions};
+use crate::engine::types::{
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions, SessionDisposition, TestOptions, TestReport,
+};
 use crate::msi_backend;
 use crate::rar_backend;
 use crate::raw_stream_backend;
@@ -57,7 +59,7 @@ fn sevenz_archive_error(error: sevenz_backend::SevenZError, path: &std::path::Pa
 static SEVEN_Z_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_7z_lister",
     format: FormatId::SEVEN_Z,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -102,13 +104,25 @@ impl ReadAdapterFactory for SevenZListAdapter {
 
         Ok(ArchiveListing { entries })
     }
+
+    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = sevenz_backend::test_7z_with_password_filter(path, open_options.password.as_deref(), |entry_path| test_options.selects(entry_path))
+            .map_err(|error| sevenz_archive_error(error, path))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.tested_bytes,
+            warnings: Vec::new(),
+        })
+    }
 }
 
 // --- TAR.ZST ---
 static TAR_ZST_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_tar_zst_lister",
     format: FormatId::TAR_ZST,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -170,13 +184,33 @@ impl ReadAdapterFactory for TarZstListAdapter {
 
         Ok(ArchiveListing { entries })
     }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let mut sink = std::io::sink();
+        let report = crate::tar_zst_backend::copy_tar_zst_files_to_writer(path, |entry_path| test_options.selects(entry_path), &mut sink).map_err(|error| {
+            let kind = match error {
+                crate::tar_zst_backend::TarZstdError::Io { .. } => ErrorKind::Io,
+                crate::tar_zst_backend::TarZstdError::Cancelled => ErrorKind::Cancelled,
+                _ => ErrorKind::CorruptData,
+            };
+            let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
+            ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
+        })?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.written_entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.written_bytes,
+            warnings: report.warnings,
+        })
+    }
 }
 
 // --- TZAP ---
 static TZAP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_tzap_lister",
     format: FormatId::TZAP,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -246,13 +280,50 @@ impl ReadAdapterFactory for TzapListAdapter {
 
         Ok(ArchiveListing { entries })
     }
+
+    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let trust = test_options.tzap_x509_trust.as_ref();
+        let recipient_key = test_options.recipient_key.as_deref().or(open_options.recipient_key_path());
+        let report = if let Some(recipient_key) = recipient_key {
+            tzap_backend::test_tzap_with_recipient_key_filter_and_x509_trust(path, recipient_key, |entry_path| test_options.selects(entry_path), trust)
+        } else {
+            tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(
+                path,
+                open_options.password.as_deref(),
+                |entry_path| test_options.selects(entry_path),
+                trust,
+            )
+        }
+        .map_err(|error| {
+            let kind = match error {
+                tzap_backend::TzapError::PasswordRequired | tzap_backend::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
+                tzap_backend::TzapError::Cancelled => ErrorKind::Cancelled,
+                tzap_backend::TzapError::Io { .. } => ErrorKind::Io,
+                _ => ErrorKind::CorruptData,
+            };
+            let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
+            ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
+        })?;
+        let mut warnings = Vec::new();
+        if let Some(root_auth) = report.x509_root_auth {
+            warnings.push(format!("TZAP root-auth verified for {}", root_auth.subject));
+            warnings.extend(root_auth.diagnostics);
+        }
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.tested_bytes,
+            warnings,
+        })
+    }
 }
 
 // --- RAR ---
 static RAR_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_rar_lister",
     format: FormatId::RAR,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -313,13 +384,36 @@ impl ReadAdapterFactory for RarListAdapter {
 
         Ok(ArchiveListing { entries })
     }
+
+    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = rar_backend::test_rar_with_password_filter(path, open_options.password.as_deref(), |entry_path| test_options.selects(entry_path))
+            .map_err(|error| {
+                let message = error.to_string();
+                let kind = if message.to_lowercase().contains("password") {
+                    ErrorKind::WrongPassword
+                } else if matches!(error, rar_backend::RarBackendError::Io { .. }) {
+                    ErrorKind::Io
+                } else {
+                    ErrorKind::CorruptData
+                };
+                let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
+                ArchiveError { kind, message, disposition, path: Some(path.to_path_buf()) }
+            })?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.tested_bytes,
+            warnings: report.warnings,
+        })
+    }
 }
 
 // --- Raw Streams ---
 static RAW_STREAM_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_raw_stream_lister",
     format: FormatId::RAW_STREAM,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -361,13 +455,31 @@ impl ReadAdapterFactory for RawStreamListAdapter {
 
         Ok(ArchiveListing { entries: vec![entry] })
     }
+
+    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let format = raw_stream_backend::detect_raw_stream_format(path)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(path))?;
+        let payload_name = raw_stream_backend::output_name_for_raw_stream(path, format)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Could not determine raw stream output name").with_path(path))?;
+        if !test_options.selects(&payload_name) {
+            return Ok(TestReport { tested_entries: 0, skipped_entries: 1, tested_bytes: 0, warnings: Vec::new() });
+        }
+        let tested_bytes = raw_stream_backend::test_raw_stream(path, format).map_err(|error| ArchiveError {
+            kind: ErrorKind::CorruptData,
+            message: error.to_string(),
+            disposition: SessionDisposition::Unusable,
+            path: Some(path.to_path_buf()),
+        })?;
+        Ok(TestReport { tested_entries: 1, skipped_entries: 0, tested_bytes, warnings: Vec::new() })
+    }
 }
 
 // --- Apple Archive ---
 static APPLE_ARCHIVE_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_apple_archive_lister",
     format: FormatId::APPLE_ARCHIVE,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -413,6 +525,27 @@ impl ReadAdapterFactory for AppleArchiveListAdapter {
             .collect();
 
         Ok(ArchiveListing { entries })
+    }
+
+    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        let report = apple_archive_backend::test_apple_archive_filter(path, |entry_path| test_options.selects(entry_path), open_options.password.as_deref())
+            .map_err(|error| {
+                let kind = match error {
+                    apple_archive_backend::AppleArchiveError::Unsupported => ErrorKind::UnsupportedOperation,
+                    apple_archive_backend::AppleArchiveError::Cancelled => ErrorKind::Cancelled,
+                    apple_archive_backend::AppleArchiveError::Io { .. } => ErrorKind::Io,
+                    _ => ErrorKind::CorruptData,
+                };
+                let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
+                ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
+            })?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.tested_bytes,
+            warnings: Vec::new(),
+        })
     }
 }
 

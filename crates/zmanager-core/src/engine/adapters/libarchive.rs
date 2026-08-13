@@ -6,7 +6,9 @@ use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions};
+use crate::engine::types::{
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions, SessionDisposition, TestOptions, TestReport,
+};
 use crate::libarchive_backend::{self, LibarchiveEntryKind};
 
 fn system_time_string(time: SystemTime) -> Option<String> {
@@ -70,7 +72,7 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
         Box::leak(Box::new(AdapterDescriptor {
             name: "libarchive_compatibility_lister",
             format: self.format,
-            operations: &[ArchiveOperation::List],
+            operations: &[ArchiveOperation::List, ArchiveOperation::Test],
             required_source_access: SourceAccess::Seekable,
             supports_encryption: true,
         }))
@@ -120,5 +122,29 @@ impl ReadAdapterFactory for LibarchiveListAdapter {
             .collect();
 
         Ok(ArchiveListing { entries })
+    }
+
+    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        if !LIBARCHIVE_ALLOW_LIST.contains(&archive.format) {
+            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Format '{}' is rejected prior to libarchive probing", archive.format)));
+        }
+        let path = archive.source.primary_path();
+        let report =
+            libarchive_backend::test_archive_with_password_filter(path, open_options.password.as_deref(), |entry_path| test_options.selects(entry_path))
+                .map_err(|error| {
+                    let kind = match error {
+                        libarchive_backend::LibarchiveError::Io { .. } => ErrorKind::Io,
+                        libarchive_backend::LibarchiveError::Cancelled => ErrorKind::Cancelled,
+                        _ => ErrorKind::CorruptData,
+                    };
+                    let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
+                    ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
+                })?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.tested_bytes,
+            warnings: Vec::new(),
+        })
     }
 }

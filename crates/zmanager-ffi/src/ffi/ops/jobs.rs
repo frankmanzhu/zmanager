@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use zmanager_core::apple_archive_backend;
 use zmanager_core::archive_browser::{self, BrowserEntry, BrowserEntryKind, BrowserExtractOptions, BrowserListOptions};
 use zmanager_core::jobs::{self, CancellationToken, JobEvent as CoreJobEvent, JobKind as CoreJobKind};
-use zmanager_core::libarchive_backend::{self, LibarchiveTestReport};
+use zmanager_core::libarchive_backend;
 use zmanager_core::manifest::{ManifestFileType, PlanOptions};
 use zmanager_core::raw_stream_backend;
 use zmanager_core::safety::{
@@ -16,8 +16,8 @@ use zmanager_core::safety::{
 use zmanager_core::secrets::SecretString;
 use zmanager_core::sevenz_backend::SevenZCreateOptions;
 use zmanager_core::tar_zst_backend::TarZstdCreateOptions;
-use zmanager_core::tzap_backend::{self, TzapCreateOptions, TzapKeySource, TzapTestReport, TzapX509SigningOptions};
-use zmanager_core::zip_backend::{self, ZipCreateOptions, ZipTestReport};
+use zmanager_core::tzap_backend::{self, TzapCreateOptions, TzapKeySource, TzapX509SigningOptions};
+use zmanager_core::zip_backend::{self, ZipCreateOptions};
 
 use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
@@ -589,58 +589,12 @@ pub(crate) struct TestArchiveReport {
 }
 
 impl TestArchiveReport {
-    pub(crate) fn from_zip(report: ZipTestReport) -> Self {
+    pub(crate) fn from_engine(report: zmanager_core::engine::TestReport) -> Self {
         Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
+            tested_entries: report.tested_entries,
+            skipped_entries: report.skipped_entries,
             tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
-        }
-    }
-
-    pub(crate) fn from_7z(report: zmanager_core::sevenz_backend::SevenZTestReport) -> Self {
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
-        }
-    }
-
-    pub(crate) fn from_libarchive(report: LibarchiveTestReport) -> Self {
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
-        }
-    }
-
-    pub(crate) fn from_tzap(report: TzapTestReport) -> Self {
-        let warnings = report
-            .x509_root_auth
-            .map(|verification| {
-                let mut warnings = Vec::with_capacity(1 + verification.diagnostics.len());
-                warnings.push(bridge_warning(format!("TZAP root-auth verified for {}", verification.subject)));
-                warnings.extend(verification.diagnostics.into_iter().map(bridge_warning));
-                warnings
-            })
-            .unwrap_or_default();
-
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings,
-        }
-    }
-
-    pub(crate) fn from_apple_archive(report: apple_archive_backend::AppleArchiveTestReport) -> Self {
-        Self {
-            tested_entries: usize_to_u64(report.tested_entries),
-            skipped_entries: usize_to_u64(report.skipped_entries),
-            tested_bytes: report.tested_bytes,
-            warnings: Vec::new(),
+            warnings: report.warnings.into_iter().map(bridge_warning).collect(),
         }
     }
 

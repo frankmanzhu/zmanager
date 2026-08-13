@@ -1,4 +1,3 @@
-use std::path::Path;
 pub(crate) const FORMAT_ZIP: &str = "zip";
 pub(crate) const FORMAT_TAR_ZST: &str = "tar.zst";
 pub(crate) const FORMAT_TZAP: &str = "tzap";
@@ -111,14 +110,6 @@ use zmanager_core::archive_format::{ArchiveFormatKind, detect_archive_format};
 
 pub(crate) fn is_zip_family_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::Zip | ArchiveFormatKind::SplitZip)
-}
-
-pub(crate) fn is_split_zip_archive_path(path: &str) -> bool {
-    zmanager_core::libarchive_backend::is_split_zip_path(Path::new(path))
-}
-
-pub(crate) fn is_7z_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::SevenZ)
 }
 
 #[allow(dead_code)]

@@ -6,14 +6,16 @@ use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions};
+use crate::engine::types::{
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, EngineEntry, EntryId, ErrorKind, OpenOptions, TestOptions, TestReport,
+};
 use crate::zip_backend::ZipBackendError;
 use crate::zip_split::open_zip_reader;
 
 static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_zip_lister",
     format: FormatId::ZIP,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: true,
 };
@@ -21,7 +23,7 @@ static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 static SPLIT_ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_split_zip_lister",
     format: FormatId::SPLIT_ZIP,
-    operations: &[ArchiveOperation::List],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
     required_source_access: SourceAccess::MultiVolumeSet,
     supports_encryption: true,
 };
@@ -106,5 +108,35 @@ impl ReadAdapterFactory for ZipListAdapter {
         }
 
         Ok(ArchiveListing { entries })
+    }
+
+    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.source.primary_path();
+        if test_options.is_cancelled() {
+            return Err(ArchiveError::usable(ErrorKind::Cancelled, "ZIP test was cancelled").with_path(path));
+        }
+        let report = crate::zip_backend::test_zip_with_password_filter(path, open_options.password.as_deref(), |entry_path| test_options.selects(entry_path))
+            .map_err(|error| {
+            let kind = match error {
+                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
+                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
+                ZipBackendError::Cancelled => ErrorKind::Cancelled,
+                ZipBackendError::Io { .. } => ErrorKind::Io,
+                ZipBackendError::UnsupportedSplitZip { .. } => ErrorKind::InvalidFormat,
+                _ => ErrorKind::CorruptData,
+            };
+            let disposition = if matches!(kind, ErrorKind::CorruptData) {
+                crate::engine::types::SessionDisposition::Unusable
+            } else {
+                crate::engine::types::SessionDisposition::Usable
+            };
+            ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
+        })?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.tested_bytes,
+            warnings: Vec::new(),
+        })
     }
 }

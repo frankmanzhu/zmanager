@@ -6,6 +6,7 @@ use crate::engine::source::{ArchiveSource, SourceAccess};
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, atomic::AtomicBool};
 
 /// Session-scoped entry identifier (ARC-103).
 ///
@@ -126,6 +127,46 @@ pub struct ArchiveListing {
     pub entries: Vec<EngineEntry>,
 }
 
+/// Options for a normalized archive integrity test.
+#[derive(Debug, Clone, Default)]
+pub struct TestOptions {
+    /// Exact archive paths to verify. An empty list verifies every entry.
+    pub selected_paths: Vec<String>,
+    /// Optional recipient key used by encrypted TZAP archives.
+    pub recipient_key: Option<PathBuf>,
+    /// Optional X.509 trust policy for TZAP root-auth verification.
+    pub tzap_x509_trust: Option<crate::tzap_backend::TzapX509TrustOptions>,
+    /// Cooperative cancellation flag checked before and during test work.
+    pub cancellation: Option<Arc<AtomicBool>>,
+}
+
+impl TestOptions {
+    /// Returns whether an entry path is selected by this request.
+    #[must_use]
+    pub fn selects(&self, path: &str) -> bool {
+        self.selected_paths.is_empty() || self.selected_paths.iter().any(|selected| selected == path)
+    }
+
+    /// Returns whether the operation was cancelled.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// Normalized data-verification report shared by every test adapter.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct TestReport {
+    /// Number of entries whose payload or integrity metadata was verified.
+    pub tested_entries: u64,
+    /// Number of entries excluded by the request or not meaningfully testable.
+    pub skipped_entries: u64,
+    /// Number of decoded regular-file bytes consumed during verification.
+    pub tested_bytes: u64,
+    /// Non-fatal diagnostics produced by the adapter.
+    pub warnings: Vec<String>,
+}
+
 /// Archive operation supported by the engine seam.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum ArchiveOperation {
@@ -171,6 +212,8 @@ pub enum ErrorKind {
     Io,
     /// Operation not supported by this format/adapter.
     UnsupportedOperation,
+    /// Operation was cooperatively cancelled.
+    Cancelled,
 }
 
 /// Structured error returned by the archive engine interface.
@@ -228,6 +271,7 @@ impl ArchiveError {
             ErrorKind::SafetyViolation => "safety violation",
             ErrorKind::Io => "I/O error",
             ErrorKind::UnsupportedOperation => "unsupported operation",
+            ErrorKind::Cancelled => "cancelled",
         }
     }
 }

@@ -9,23 +9,15 @@ use std::time::UNIX_EPOCH;
 
 use sha2::{Digest as _, Sha256};
 
-use zmanager_core::apple_archive_backend;
 use zmanager_core::archive_browser::{self, BrowserExtractOptions, BrowserListOptions};
-use zmanager_core::engine::{ArchiveOperation, ArchiveSource, OpenOptions, create_default_engine};
+use zmanager_core::engine::{ArchiveOperation, ArchiveSource, OpenOptions, TestOptions, create_default_engine};
 use zmanager_core::jobs::CancellationToken;
-use zmanager_core::libarchive_backend;
 use zmanager_core::manifest;
-use zmanager_core::raw_stream_backend;
 use zmanager_core::safety::{ExtractionPolicy, ExtractionSafetyPlanner};
-use zmanager_core::sevenz_backend;
-use zmanager_core::tzap_backend;
-use zmanager_core::zip_backend;
 
-use crate::ffi::error::map_apple_archive_error;
 use crate::ffi::error::{
     ERROR_INVALID_REQUEST, ERROR_OPERATION_FAILED, ERROR_UNSUPPORTED_FORMAT, WARNING_LAUNCH_GATED_FORMAT, bridge_error, bridge_error_from_mobile,
-    bridge_warning, bridge_warning_with_code, hint, map_7z_error, map_archive_browser_error, map_libarchive_error, map_plan_error, map_raw_stream_error,
-    map_tzap_error, map_zip_error,
+    bridge_warning, bridge_warning_with_code, hint, map_archive_browser_error, map_plan_error,
 };
 use crate::ffi::ops::jobs::{
     CreateJobInput, ExtractJobInput, PlanEntryOutcome, RegistryJobEventSink, TestArchiveReport, create_plan_options, create_verify_supported, job_registry,
@@ -293,59 +285,21 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
     })
 }
 
-fn maybe_test_apple_archive(format: ArchiveFormat, path: &Path, selected_paths: &[String]) -> Option<Result<TestArchiveReport, ZmanagerGuiError>> {
-    if !matches!(format, ArchiveFormat::AppleArchive) {
-        return None;
-    }
-    Some(
-        apple_archive_backend::test_apple_archive_filter(path, |entry_path| selected_path_matches(selected_paths, entry_path), None)
-            .map_err(map_apple_archive_error)
-            .map(TestArchiveReport::from_apple_archive),
-    )
-}
-
 #[allow(non_snake_case)]
 pub fn testArchive(request: TestArchiveRequest) -> Result<TestArchiveResult, ZmanagerGuiError> {
     let archive_path = ensure_existing_file_path(request.archive_path, "archivePath")?;
-    let password = password_ref(&request.password);
     let selected_paths = sanitize_selected_paths(request.selected_paths);
     let path = Path::new(&archive_path);
     let (format, _warnings) = classify_archive_path(path);
-
-    let report = if matches!(format, ArchiveFormat::Zip) {
-        let selected_paths = selected_paths.as_slice();
-        TestArchiveReport::from_zip(
-            zip_backend::test_zip_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path))
-                .map_err(map_zip_error)?,
-        )
-    } else if matches!(format, ArchiveFormat::Tzap) {
-        let selected_paths = selected_paths.as_slice();
-        TestArchiveReport::from_tzap(
-            tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(
-                path,
-                password,
-                |entry_path| selected_path_matches(selected_paths, entry_path),
-                None,
-            )
-            .map_err(map_tzap_error)?,
-        )
-    } else if matches!(format, ArchiveFormat::SevenZ) {
-        let selected_paths = selected_paths.as_slice();
-        TestArchiveReport::from_7z(
-            sevenz_backend::test_7z_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path))
-                .map_err(map_7z_error)?,
-        )
-    } else if let Some(report) = maybe_test_apple_archive(format, path, &selected_paths) {
-        report?
-    } else if let Some(raw_format) = raw_stream_backend::detect_raw_stream_format(path) {
-        test_raw_stream(path, raw_format, &selected_paths)?
-    } else {
-        let selected_paths = selected_paths.as_slice();
-        TestArchiveReport::from_libarchive(
-            libarchive_backend::test_archive_with_password_filter(path, password, |entry_path| selected_path_matches(selected_paths, entry_path))
-                .map_err(map_libarchive_error)?,
-        )
-    };
+    let password = password_ref(&request.password);
+    let engine = create_default_engine().map_err(crate::ffi::error::map_archive_engine_error)?;
+    let mut handle = engine
+        .open(ArchiveSource::from_path_autodetect(path), OpenOptions { password: password.map(str::to_owned), recipient_key: None })
+        .map_err(crate::ffi::error::map_archive_engine_error)?;
+    let report = TestArchiveReport::from_engine(
+        handle.test(&TestOptions { selected_paths, ..TestOptions::default() }).map_err(crate::ffi::error::map_archive_engine_error)?,
+    );
+    handle.close().map_err(crate::ffi::error::map_archive_engine_error)?;
 
     Ok(TestArchiveResult {
         archive_path,
@@ -687,17 +641,4 @@ pub(crate) fn sanitize_selected_paths(selected_paths: Vec<String>) -> Vec<String
 
 pub(crate) fn selected_path_matches(selected_paths: &[String], entry_path: &str) -> bool {
     selected_paths.is_empty() || selected_paths.iter().any(|value| value == entry_path)
-}
-
-fn test_raw_stream(path: &Path, format: raw_stream_backend::RawStreamFormat, selected_paths: &[String]) -> Result<TestArchiveReport, ZmanagerGuiError> {
-    let synthetic_entry =
-        raw_stream_backend::output_name_for_raw_stream(path, format).unwrap_or_else(|| format_label(classify_archive_path(path).0).to_string());
-
-    if !selected_path_matches(selected_paths, &synthetic_entry) {
-        return Ok(TestArchiveReport { tested_entries: 0, skipped_entries: 1, tested_bytes: 0, warnings: Vec::new() });
-    }
-
-    let tested_bytes = raw_stream_backend::test_raw_stream(path, format).map_err(map_raw_stream_error)?;
-
-    Ok(TestArchiveReport { tested_entries: 1, skipped_entries: 0, tested_bytes, warnings: Vec::new() })
 }

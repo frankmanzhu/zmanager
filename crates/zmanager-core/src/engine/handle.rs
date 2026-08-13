@@ -6,7 +6,9 @@ use crate::archive_format::detect_archive_format;
 use crate::engine::format::FormatId;
 use crate::engine::registry::{AdapterRegistry, ReadAdapterFactory};
 use crate::engine::source::ArchiveSource;
-use crate::engine::types::{ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities, OpenOptions, SessionDisposition};
+use crate::engine::types::{
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, HandleCapabilities, OpenOptions, SessionDisposition, TestOptions, TestReport,
+};
 
 /// The stateful archive engine instance.
 #[derive(Clone, Debug)]
@@ -55,7 +57,14 @@ impl ArchiveEngine {
 
         let detected = DetectedArchive { format, source };
 
-        Ok(ArchiveHandle { engine_registry: self.registry.clone(), detected, options, cached_session: None, disposition: SessionDisposition::Usable })
+        Ok(ArchiveHandle {
+            engine_registry: self.registry.clone(),
+            detected,
+            options,
+            cached_session: None,
+            cached_test_session: None,
+            disposition: SessionDisposition::Usable,
+        })
     }
 }
 
@@ -65,6 +74,7 @@ pub struct ArchiveHandle {
     detected: DetectedArchive,
     options: OpenOptions,
     cached_session: Option<Arc<dyn ReadAdapterFactory>>,
+    cached_test_session: Option<Arc<dyn ReadAdapterFactory>>,
     disposition: SessionDisposition,
 }
 
@@ -124,6 +134,36 @@ impl ArchiveHandle {
         }
     }
 
+    /// Verifies archive data using the adapter bound to this session.
+    pub fn test(&mut self, options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        if self.disposition == SessionDisposition::Unusable {
+            return Err(ArchiveError::unusable(ErrorKind::CorruptData, "Archive handle session is unusable; close and reopen the archive"));
+        }
+        if options.is_cancelled() {
+            return Err(ArchiveError::usable(ErrorKind::Cancelled, "Archive test was cancelled"));
+        }
+
+        let factory = if let Some(factory) = &self.cached_test_session {
+            factory.clone()
+        } else {
+            let factory = self.engine_registry.resolve(self.detected.format, ArchiveOperation::Test).ok_or_else(|| {
+                ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("No data-test adapter registered for format '{}'", self.detected.format))
+            })?;
+            self.cached_test_session = Some(factory.clone());
+            factory
+        };
+
+        match factory.test(&self.detected, &self.options, options) {
+            Ok(report) => Ok(report),
+            Err(error) => {
+                if error.disposition == SessionDisposition::Unusable {
+                    self.disposition = SessionDisposition::Unusable;
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Consumes the handle and explicitly closes the archive session (ARC-105).
     ///
     /// # Errors
@@ -131,6 +171,7 @@ impl ArchiveHandle {
     /// Returns `Ok(())` on clean close or `ArchiveError` on cleanup failure.
     pub fn close(mut self) -> Result<(), ArchiveError> {
         self.cached_session = None;
+        self.cached_test_session = None;
         Ok(())
     }
 }

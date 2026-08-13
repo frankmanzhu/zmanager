@@ -2,7 +2,9 @@
 
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
-use crate::engine::types::{ArchiveError, ArchiveOperation, DetectedArchive, ErrorKind, FormatCapabilities, HandleCapabilities, OpenOptions};
+use crate::engine::types::{
+    ArchiveError, ArchiveListing, ArchiveOperation, DetectedArchive, ErrorKind, FormatCapabilities, HandleCapabilities, OpenOptions, TestOptions, TestReport,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -27,7 +29,12 @@ pub trait ReadAdapterFactory: Send + Sync {
     fn descriptor(&self) -> &'static AdapterDescriptor;
 
     /// Lists entries for the given detected archive and optional password.
-    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<crate::engine::types::ArchiveListing, ArchiveError>;
+    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError>;
+
+    /// Verifies selected entry payloads and integrity metadata.
+    fn test(&self, _archive: &DetectedArchive, _open_options: &OpenOptions, _test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide data verification"))
+    }
 }
 
 /// Immutable registry mapping `(FormatId, ArchiveOperation)` to an adapter factory.

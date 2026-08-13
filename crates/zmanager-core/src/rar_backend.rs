@@ -105,6 +105,19 @@ pub struct RarExtractReport {
     pub warnings: Vec<String>,
 }
 
+/// RAR data-verification report.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RarTestReport {
+    /// Number of selected entries whose data or structural metadata was verified.
+    pub tested_entries: usize,
+    /// Number of entries excluded or not meaningfully testable.
+    pub skipped_entries: usize,
+    /// Uncompressed bytes requested from regular-file entries.
+    pub tested_bytes: u64,
+    /// Non-fatal diagnostics.
+    pub warnings: Vec<String>,
+}
+
 /// Error returned by the RAR backend.
 #[derive(Debug)]
 pub enum RarBackendError {
@@ -186,6 +199,50 @@ pub fn list_rar_with_password(archive: impl AsRef<Path>, password: Option<&str>)
         .collect();
 
     Ok(RarListing { entries })
+}
+
+/// Reads selected RAR entries through bundled `UnRAR` without exposing a
+/// compatibility fallback. Regular files are extracted into a private,
+/// automatically removed directory so the same native decoder path validates
+/// payloads and detects truncation or password failures.
+pub fn test_rar_with_password_filter(
+    archive: impl AsRef<Path>,
+    password: Option<&str>,
+    mut selected: impl FnMut(&str) -> bool,
+) -> Result<RarTestReport, RarBackendError> {
+    let archive = archive.as_ref();
+    let entries = zmanager_unrar::list_archive(archive, password)?;
+    let temporary = crate::temp_names::TemporaryDirectory::new("rar-test").map_err(|error| RarBackendError::Io { path: error.path, source: error.source })?;
+    let mut selections = BTreeMap::new();
+    let mut report = RarTestReport { tested_entries: 0, skipped_entries: 0, tested_bytes: 0, warnings: Vec::new() };
+
+    for (index, entry) in entries.into_iter().enumerate() {
+        reject_large_dictionary(&entry)?;
+        if !selected(&entry.path) {
+            report.skipped_entries += 1;
+            continue;
+        }
+        match entry.kind {
+            zmanager_unrar::RarEntryKind::File => {
+                let destination = temporary.path().join(format!("entry-{index}"));
+                selections.insert(entry.path, destination);
+                report.tested_entries += 1;
+                report.tested_bytes = report.tested_bytes.saturating_add(entry.unpacked_size);
+            }
+            zmanager_unrar::RarEntryKind::Directory => report.tested_entries += 1,
+            zmanager_unrar::RarEntryKind::Symlink | zmanager_unrar::RarEntryKind::Hardlink | zmanager_unrar::RarEntryKind::FileCopy => {
+                report.skipped_entries += 1;
+                report.warnings.push(format!("skipped non-payload RAR entry {}", entry.path));
+            }
+            zmanager_unrar::RarEntryKind::Special => {
+                report.skipped_entries += 1;
+                report.warnings.push(format!("skipped unsupported RAR special entry {}", entry.path));
+            }
+        }
+    }
+
+    zmanager_unrar::extract_selected(archive, password, &selections)?;
+    Ok(report)
 }
 
 /// Options for the single core RAR extraction implementation.

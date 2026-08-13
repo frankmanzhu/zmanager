@@ -93,6 +93,7 @@ pub(crate) fn map_archive_engine_error(error: ArchiveError) -> ZmanagerGuiError 
         ErrorKind::InvalidFormat | ErrorKind::UnsupportedOperation | ErrorKind::ResourceLimitExceeded => {
             bridge_error(ERROR_UNSUPPORTED_FORMAT, message, None, BridgeSeverity::Warning, false)
         }
+        ErrorKind::Cancelled => bridge_error(ERROR_OPERATION_FAILED, message, None, BridgeSeverity::Warning, true),
     }
 }
 

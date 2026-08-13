@@ -5,6 +5,10 @@ mod common;
 use common::TestDir;
 use std::fs::{self, File};
 use std::io::Write as _;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{
@@ -36,6 +40,12 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         assert_eq!(capabilities.source_access, source_access, "{format} advertised the wrong source access");
     }
     assert!(!zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.contains(&FormatId::RAR));
+    for format in
+        [FormatId::ZIP, FormatId::SPLIT_ZIP, FormatId::SEVEN_Z, FormatId::TAR_ZST, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM, FormatId::APPLE_ARCHIVE]
+    {
+        let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
+        assert!(capabilities.operations.contains(&ArchiveOperation::Test), "{format} must claim data testing");
+    }
 }
 
 #[test]
@@ -48,6 +58,7 @@ fn capability_snapshot_reports_registration_and_platform_state() {
     assert!(zip.platform_available);
     assert!(zip.unavailable_reason.is_none());
     assert!(zip.operations.contains(&ArchiveOperation::List));
+    assert!(zip.operations.contains(&ArchiveOperation::Test));
     assert_eq!(zip.source_access, Some(SourceAccess::Seekable));
     assert!(zip.encryption_supported);
 
@@ -79,6 +90,43 @@ fn engine_lists_native_zip_fixture() {
     assert_eq!(listing.entries[0].size, Some(12));
 
     handle.close().unwrap();
+}
+
+#[test]
+fn engine_tests_native_zip_payload_and_honors_selection() {
+    let temp = TestDir::new("engine-conformance-test-zip");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("selected.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"payload").unwrap();
+    zip.start_file("skipped.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"other").unwrap();
+    zip.finish().unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&zip_path), OpenOptions::default()).unwrap();
+    let report = handle.test(&zmanager_core::engine::TestOptions { selected_paths: vec!["selected.txt".to_owned()], ..Default::default() }).unwrap();
+    assert_eq!(report.tested_entries, 1);
+    assert_eq!(report.skipped_entries, 1);
+    assert_eq!(report.tested_bytes, 7);
+}
+
+#[test]
+fn engine_test_cancellation_is_reported_before_adapter_work() {
+    let temp = TestDir::new("engine-conformance-test-cancelled");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("payload.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"payload").unwrap();
+    zip.finish().unwrap();
+
+    let cancellation = Arc::new(AtomicBool::new(true));
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::from_path_autodetect(&zip_path), OpenOptions::default()).unwrap();
+    let error = handle.test(&zmanager_core::engine::TestOptions { cancellation: Some(Arc::clone(&cancellation)), ..Default::default() }).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::Cancelled);
+    assert!(cancellation.load(Ordering::Relaxed));
 }
 
 #[test]
@@ -140,4 +188,17 @@ fn engine_unusable_session_prevents_subsequent_operations() {
     // Second call should report session unusable
     let res2 = handle.list();
     assert!(res2.is_err());
+}
+
+#[test]
+fn engine_test_corruption_invalidates_the_session() {
+    let temp = TestDir::new("engine-conformance-test-corrupt");
+    let corrupt_zip = temp.path("corrupt.zip");
+    fs::write(&corrupt_zip, b"this is not a valid zip archive").unwrap();
+
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::Path(corrupt_zip), OpenOptions::default()).unwrap();
+    let error = handle.test(&Default::default()).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::CorruptData);
+    assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
+    assert!(handle.test(&Default::default()).is_err());
 }
