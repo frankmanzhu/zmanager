@@ -116,8 +116,6 @@ jobs:
             fi
           }
 
-          publish_if_needed zmanager-libarchive-sys
-          publish_if_needed zmanager-libarchive
           publish_if_needed zmanager-apple-archive
           publish_if_needed zmanager-unrar
           publish_if_needed zmanager-core

@@ -20,7 +20,6 @@ pub(crate) const FORMAT_AR: &str = "ar";
 pub(crate) const FORMAT_WARC: &str = "warc";
 pub(crate) const FORMAT_MTREE: &str = "mtree";
 pub(crate) const FORMAT_RAW_STREAM: &str = "raw-stream";
-pub(crate) const FORMAT_LIBARCHIVE: &str = "libarchive";
 pub(crate) const BACKEND_DEB_NESTED: &str = "deb-nested";
 pub(crate) const TZAP_DEFAULT_RECOVERY_PERCENTAGE: u8 = 5;
 pub(crate) const TZAP_SINGLE_VOLUME_LOSS_TOLERANCE: u8 = 0;
@@ -47,10 +46,6 @@ pub(crate) use zmanager_core::archive_format::{
 };
 
 pub(crate) const ZIP_CREATE_EXTENSIONS: &[&str] = &[".zip"];
-// Placeholder extensions for the libarchive fallback handler, which accepts
-// formats the other backends cannot parse (DEB, RAR, raw streams, ...).
-const LIBARCHIVE_FALLBACK_EXTENSIONS: &[&str] = &["fallback"];
-
 #[derive(Clone, Copy)]
 pub(crate) struct FormatDescriptor {
     pub(crate) name: &'static str,
@@ -98,8 +93,6 @@ pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
     FormatDescriptor { name: FORMAT_WARC, extensions: WARC_EXTENSIONS, kind: ArchiveFormatKind::Warc },
     FormatDescriptor { name: FORMAT_MTREE, extensions: MTREE_EXTENSIONS, kind: ArchiveFormatKind::Mtree },
     FormatDescriptor { name: FORMAT_RAW_STREAM, extensions: zmanager_core::raw_stream_backend::RAW_STREAM_SUFFIXES, kind: ArchiveFormatKind::RawStream },
-    // Fallback handler: no dedicated format kind, always available.
-    FormatDescriptor { name: FORMAT_LIBARCHIVE, extensions: LIBARCHIVE_FALLBACK_EXTENSIONS, kind: ArchiveFormatKind::Unknown },
 ];
 // Path-based format detection delegates to the core detector (CR-114); the
 // extension predicates no longer live here so consumers cannot drift.

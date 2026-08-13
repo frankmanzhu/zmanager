@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use zmanager_core::apple_archive_backend;
 use zmanager_core::archive_browser::{self, BrowserEntry, BrowserEntryKind, BrowserExtractOptions, BrowserListOptions};
 use zmanager_core::jobs::{self, CancellationToken, JobEvent as CoreJobEvent, JobKind as CoreJobKind};
-use zmanager_core::libarchive_backend;
 use zmanager_core::manifest::{ManifestFileType, PlanOptions};
 use zmanager_core::raw_stream_backend;
 use zmanager_core::safety::{
@@ -580,7 +579,6 @@ archive_job_report_from!(zmanager_core::rar_backend::RarExtractReport, report, r
 archive_job_report_from!(tzap_backend::TzapExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(apple_archive_backend::AppleArchiveExtractReport, report, report.skipped_entries, None, None, None);
 archive_job_report_from!(raw_stream_backend::RawStreamExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(libarchive_backend::LibarchiveExtractReport, report, report.skipped_entries, None, None, None);
 
 archive_job_report_from!(zip_backend::ZipCreateReport, report, 0, Some(report.encrypted), report.volume_size, Some(report.volume_count));
 archive_job_report_from!(zmanager_core::sevenz_backend::SevenZCreateReport, report, 0, Some(report.encrypted), report.volume_size, Some(report.volume_count));

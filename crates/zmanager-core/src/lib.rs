@@ -60,11 +60,6 @@ pub mod deb_backend;
 pub mod engine;
 pub mod jobs;
 pub mod lha_backend;
-#[cfg(feature = "libarchive-fallback")]
-pub mod libarchive_backend;
-#[cfg(not(feature = "libarchive-fallback"))]
-#[path = "libarchive_backend_stub.rs"]
-pub mod libarchive_backend;
 pub mod manifest;
 pub mod msi_backend;
 pub mod mtree_backend;

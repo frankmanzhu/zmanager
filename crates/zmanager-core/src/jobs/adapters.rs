@@ -15,8 +15,6 @@ use crate::zip_backend::{self, ZipBackendError};
 #[cfg(test)]
 use crate::zip_backend::{ZipCreateOptions, ZipCreateReport};
 use crate::{
-    libarchive_backend,
-    libarchive_backend::LibarchiveError,
     rar_backend,
     rar_backend::RarBackendError,
     raw_stream_backend,
@@ -448,36 +446,6 @@ pub fn run_rar_extract_job_with_password_and_policy(
     finish_rar_extract_result(result, sink)
 }
 
-/// Runs a broad libarchive extract job with an optional password and explicit
-/// extraction policy while emitting coarse lifecycle events.
-///
-/// Partial output state: cancellation is checked before extraction starts, but
-/// libarchive extraction itself is synchronous in this v1 adapter.
-///
-/// # Errors
-///
-/// Returns [`LibarchiveError`] when libarchive reading, password validation,
-/// extraction safety, or filesystem I/O fails.
-pub fn run_libarchive_extract_job_with_password_and_policy(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    password: Option<&str>,
-    policy: ExtractionPolicy,
-    token: &CancellationToken,
-    sink: &mut dyn JobEventSink,
-) -> Result<libarchive_backend::LibarchiveExtractReport, LibarchiveError> {
-    if let Some(source) = pre_start_cancelled(token, sink) {
-        return Err(LibarchiveError::Io { path: archive_path.as_ref().to_path_buf(), source });
-    }
-
-    sink.emit(JobEvent::Started { kind: JobKind::ArchiveExtract, total_bytes: None });
-
-    let mut context = JobContext::new(token, sink);
-    let result = libarchive_backend::extract_archive_with_password_and_context(archive_path, destination, policy, password, &mut context);
-    context.flush_progress();
-    finish_libarchive_extract_result(result, sink)
-}
-
 /// Runs a raw single-file stream extract job with an explicit extraction policy
 /// while emitting coarse lifecycle events.
 ///
@@ -623,7 +591,5 @@ finish_result!(finish_tar_zst_extract_result, TarZstdExtractReport, TarZstdError
 finish_result!(finish_7z_extract_result, sevenz_backend::SevenZExtractReport, SevenZError, emit_warnings: true, cancelled: SevenZError::Cancelled);
 
 finish_result_no_cancelled!(finish_rar_extract_result, rar_backend::RarExtractReport, RarBackendError, emit_warnings: true);
-
-finish_result_no_cancelled!(finish_libarchive_extract_result, libarchive_backend::LibarchiveExtractReport, LibarchiveError, emit_warnings: true);
 
 finish_result_no_cancelled!(finish_raw_stream_extract_result, raw_stream_backend::RawStreamExtractReport, RawStreamError, emit_warnings: true);

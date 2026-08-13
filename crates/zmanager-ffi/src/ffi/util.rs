@@ -250,7 +250,7 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
 pub(crate) fn format_capabilities(format: ArchiveFormat) -> (bool, bool, bool) {
     match format {
         ArchiveFormat::Xip => (false, false, false),
-        ArchiveFormat::Other => (true, true, false),
+        ArchiveFormat::Other => (false, false, false),
         _ => format_capabilities_for_kind(kind_for_format(format)),
     }
 }
@@ -276,48 +276,24 @@ fn kind_for_format(format: ArchiveFormat) -> zmanager_core::archive_format::Arch
 
 /// Capability triple for a core format kind: (can_list, can_extract, can_create).
 ///
-/// Availability consults the compile-time registry (`format_status`); creation
-/// is limited to the kinds with a create backend. Kinds without a dedicated
-/// row report as listable/extractable so the libarchive fallback can try them.
+/// The FFI reports the same operation set as the native engine registry. This
+/// keeps bridge capability gates from drifting when an adapter is added,
+/// removed, or platform-gated.
 pub(crate) fn format_capabilities_for_kind(kind: zmanager_core::archive_format::ArchiveFormatKind) -> (bool, bool, bool) {
-    use zmanager_core::archive_format::ArchiveFormatKind;
-    match kind {
-        ArchiveFormatKind::AppleArchive => {
-            let available = zmanager_core::archive_format::format_status(kind) == zmanager_core::archive_format::BackendStatus::Available;
-            (available, available, false)
-        }
-        ArchiveFormatKind::Zip | ArchiveFormatKind::SevenZ | ArchiveFormatKind::TarZst | ArchiveFormatKind::Tzap => (true, true, true),
-        ArchiveFormatKind::Rar
-        | ArchiveFormatKind::SplitZip
-        | ArchiveFormatKind::Tar
-        | ArchiveFormatKind::TarGz
-        | ArchiveFormatKind::TarBz2
-        | ArchiveFormatKind::TarXz
-        | ArchiveFormatKind::TarLzma
-        | ArchiveFormatKind::TarLz
-        | ArchiveFormatKind::TarLzo
-        | ArchiveFormatKind::TarCompress
-        | ArchiveFormatKind::TarLz4
-        | ArchiveFormatKind::TarLrz
-        | ArchiveFormatKind::RawStream
-        | ArchiveFormatKind::Iso
-        | ArchiveFormatKind::Cab
-        | ArchiveFormatKind::Cpio
-        | ArchiveFormatKind::Rpm
-        | ArchiveFormatKind::Xar
-        | ArchiveFormatKind::Pkg
-        | ArchiveFormatKind::Dmg
-        | ArchiveFormatKind::Msi
-        | ArchiveFormatKind::Vhd
-        | ArchiveFormatKind::Vmdk
-        | ArchiveFormatKind::Udf
-        | ArchiveFormatKind::Lha
-        | ArchiveFormatKind::Ar
-        | ArchiveFormatKind::Warc
-        | ArchiveFormatKind::Mtree
-        | ArchiveFormatKind::Deb
-        | ArchiveFormatKind::Unknown => (true, true, false),
-    }
+    let Some(format) = zmanager_core::engine::FormatId::from_archive_format_kind(kind) else {
+        return (false, false, false);
+    };
+    let Ok(engine) = zmanager_core::engine::create_default_engine() else {
+        return (false, false, false);
+    };
+    let Some(capabilities) = engine.registry().capabilities_for_format(format) else {
+        return (false, false, false);
+    };
+    (
+        capabilities.operations.contains(&zmanager_core::engine::ArchiveOperation::List),
+        capabilities.operations.contains(&zmanager_core::engine::ArchiveOperation::Extract),
+        capabilities.operations.contains(&zmanager_core::engine::ArchiveOperation::Create),
+    )
 }
 
 /// Display label for a core format kind, used by `listFormats`. The FFI's

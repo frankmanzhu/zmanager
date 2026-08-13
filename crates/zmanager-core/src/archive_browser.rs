@@ -1,6 +1,5 @@
 use crate::apple_archive_backend::AppleArchiveError;
 use crate::engine::types::ArchiveError;
-use crate::libarchive_backend::LibarchiveError;
 use crate::rar_backend::RarBackendError;
 use crate::raw_stream_backend::RawStreamError;
 use crate::safety::{ExtractionPolicy, ExtractionSafetyError, OverwritePolicy};
@@ -179,8 +178,6 @@ pub enum ArchiveBrowserError {
     Tzap(TzapError),
     /// `AppleArchive` backend failed.
     AppleArchive(AppleArchiveError),
-    /// Libarchive backend failed.
-    Libarchive(LibarchiveError),
     /// Raw single-file stream backend failed.
     RawStream(RawStreamError),
     /// The stateful archive engine rejected a listing request.
@@ -209,7 +206,6 @@ impl fmt::Display for ArchiveBrowserError {
             Self::AppleArchive(source) => {
                 write!(f, "AppleArchive browser operation failed: {source}")
             }
-            Self::Libarchive(source) => write!(f, "libarchive browser operation failed: {source}"),
             Self::RawStream(source) => write!(f, "raw stream browser operation failed: {source}"),
             Self::Engine { format: Some(crate::engine::FormatId::TZAP), source } => write!(f, "TZAP browser operation failed: {source}"),
             Self::Engine { source, .. } => write!(f, "archive engine listing failed: {source}"),
@@ -239,7 +235,6 @@ impl std::error::Error for ArchiveBrowserError {
             Self::Rar(source) => Some(source),
             Self::Tzap(source) => Some(source),
             Self::AppleArchive(source) => Some(source),
-            Self::Libarchive(source) => Some(source),
             Self::RawStream(source) => Some(source),
             Self::Engine { source, .. } => Some(source),
             Self::Io { source, .. } => Some(source),
@@ -287,12 +282,6 @@ impl From<AppleArchiveError> for ArchiveBrowserError {
     }
 }
 
-impl From<LibarchiveError> for ArchiveBrowserError {
-    fn from(source: LibarchiveError) -> Self {
-        Self::Libarchive(source)
-    }
-}
-
 impl From<RawStreamError> for ArchiveBrowserError {
     fn from(source: RawStreamError) -> Self {
         Self::RawStream(source)
@@ -305,7 +294,7 @@ impl From<ExtractionSafetyError> for ArchiveBrowserError {
     }
 }
 
-/// Lists entries in a ZIP, TAR.ZST, or libarchive-backed archive.
+/// Lists entries through the stateful archive engine.
 ///
 /// # Errors
 ///
@@ -860,7 +849,6 @@ mod tests {
 
         let missing_password = list_entries(&archive).unwrap_err().to_string();
         assert!(missing_password.contains("password"), "{missing_password}");
-        assert!(!missing_password.contains("libarchive"), "{missing_password}");
 
         let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password"), recipient_key: None }).unwrap();
         assert_eq!(listing.entries.iter().filter(|entry| entry.path.replace('\\', "/") == "rar-fixture/data/stream.bin").count(), 1);
@@ -876,12 +864,11 @@ mod tests {
         let error = list_entries(&archive).unwrap_err().to_string();
 
         assert!(error.contains("TZAP browser operation failed"), "{error}");
-        assert!(!error.contains("libarchive"), "{error}");
     }
 
     #[test]
-    fn lists_and_extracts_single_libarchive_backed_tar_entry() {
-        let temp = TestDir::new("browser_libarchive_tar");
+    fn lists_and_extracts_single_native_tar_entry() {
+        let temp = TestDir::new("browser_native_tar");
         let archive = temp.path("archive.tar");
         write_tar(&archive, &[("a.txt", b"a".as_slice()), ("b.txt", b"b".as_slice())]);
 
@@ -899,8 +886,8 @@ mod tests {
     }
 
     #[test]
-    fn libarchive_listing_exposes_tar_link_targets() {
-        let temp = TestDir::new("browser_libarchive_tar_link");
+    fn native_tar_listing_exposes_tar_link_targets() {
+        let temp = TestDir::new("browser_native_tar_link");
         let archive = temp.path("archive.tar");
         let file = File::create(&archive).unwrap();
         let mut builder = Builder::new(file);

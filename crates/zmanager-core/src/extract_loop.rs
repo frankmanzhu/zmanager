@@ -1,6 +1,6 @@
 //! Shared per-entry extraction protocol for the archive backends.
 //!
-//! The five extraction backends (zip, tar zstd, libarchive, Apple Archive,
+//! The native extraction backends (zip, tar zstd, Apple Archive,
 //! 7z) used to each carry a private copy of the same per-entry skeleton:
 //! cancellation checks, progress reporting, archive-root-directory skipping,
 //! safety validation, skip-warning emission, and the deferred-directory
@@ -9,7 +9,7 @@
 //! reader and materializing entries into filesystem objects.
 //!
 //! Backends whose readers hand entries one at a time (zip, tar zstd,
-//! libarchive, Apple Archive) call [`process_extraction_entry`] from their
+//! TAR, Apple Archive, and other streaming readers call [`process_extraction_entry`] from their
 //! own iteration loop. The 7z reader is callback-based and plans every entry
 //! before any writes, so it calls [`process_planned_entry`] with the
 //! pre-computed decision instead.
@@ -43,7 +43,6 @@ macro_rules! extract_report_impl {
 }
 
 extract_report_impl!(crate::apple_archive_backend::AppleArchiveExtractReport);
-extract_report_impl!(crate::libarchive_backend::LibarchiveExtractReport);
 extract_report_impl!(crate::sevenz_backend::SevenZExtractReport);
 extract_report_impl!(crate::tar_zst_backend::TarZstdExtractReport);
 extract_report_impl!(crate::zip_backend::ZipExtractReport);
@@ -63,7 +62,7 @@ pub(crate) struct WriteDecision<'a> {
 pub(crate) enum EntryAction<'a> {
     /// Discard the entry (policy skip, archive root directory, or another
     /// reason not to materialize it). Backends whose readers need the entry
-    /// data consumed before advancing (libarchive, Apple Archive, 7z) must
+    /// data consumed before advancing (Apple Archive, 7z) must
     /// skip or drain the data here.
     Skip,
     /// Materialize the entry at the planned destination.
@@ -165,8 +164,8 @@ where
 /// atomically.
 ///
 /// The caller supplies `read` because backends read entry data differently:
-/// tar and zip entries implement `io::Read`, libarchive exposes `read_data`,
-/// and 7z hands the callback a `dyn Read`. The read closure keeps each
+/// tar and zip entries implement `io::Read`, while 7z hands the callback a
+/// `dyn Read`. The read closure keeps each
 /// backend's error type, so read failures surface with the same variant they
 /// do today; `io_error` maps filesystem failures into the backend error.
 pub(crate) fn copy_file_entry<E>(

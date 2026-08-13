@@ -56,7 +56,7 @@ impl ArchiveSource {
 
 /// Returns true if `path` points to a split-ZIP volume or the final `.zip` of a split set (ARC-102).
 ///
-/// This consolidated predicate replaces `libarchive_backend::is_split_zip_path` across core and CLI.
+/// This consolidated predicate is shared by core and CLI.
 #[must_use]
 pub fn is_split_zip_archive_path(path: &Path) -> bool {
     let filename = match path.file_name().and_then(|n| n.to_str()) {

@@ -17,7 +17,6 @@ const RELEASE_DOC: &str = include_str!("../../../RELEASE.md");
 const CI_WORKFLOW: &str = include_str!("../../../.github/workflows/ci.yml");
 const RELEASE_WORKFLOW: &str = include_str!("../../../.github/workflows/release.yml");
 const PACKAGE_PREVIEW_WORKFLOW: &str = include_str!("../../../.github/workflows/package-preview.yml");
-const LIBARCHIVE_SYS_BUILD_RS: &str = include_str!("../../../crates/zmanager-libarchive-sys/build.rs");
 const PACKAGE_RELEASE_SH: &str = include_str!("../../../scripts/package-release.sh");
 const PACKAGE_METADATA_SH: &str = include_str!("../../../scripts/generate-package-metadata.sh");
 const RELEASE_COMPATIBILITY_SH: &str = include_str!("../../../scripts/release-compatibility-check.sh");
@@ -44,8 +43,6 @@ const LEGACY_COMMANDS: &[&str] = &[
     "source-small",
     "7z-list",
     "7z-extract",
-    "libarchive-list",
-    "libarchive-extract",
 ];
 
 const TOP_LEVEL_FLAGS: &[&str] = &[
@@ -551,15 +548,8 @@ fn release_packaging_generates_third_party_notices() {
         assert_contains(CI_WINDOWS_PS1, required);
     }
 
-    for required in [
-        "cargo metadata",
-        "vendor/libarchive/libarchive-3.8.9/COPYING",
-        "vendor/unrar/license.txt",
-        "VCPKG_PORTS",
-        "Rust Crate License Inventory",
-        "License: Apache-2.0",
-        "Notice file: NOTICE",
-    ] {
+    for required in ["cargo metadata", "vendor/unrar/license.txt", "VCPKG_PORTS", "Rust Crate License Inventory", "License: Apache-2.0", "Notice file: NOTICE"]
+    {
         assert_contains(THIRD_PARTY_NOTICE_GENERATOR, required);
     }
 
@@ -733,18 +723,6 @@ fn linux_release_artifacts_are_static_tarballs() {
     for forbidden in ["scripts/package-deb.sh", "deb_arch:", "release-artifacts/*.deb", "zmanager-cli-${{ matrix.deb_arch }}-deb"] {
         assert_not_contains(RELEASE_WORKFLOW, forbidden);
         assert_not_contains(PACKAGE_PREVIEW_WORKFLOW, forbidden);
-    }
-}
-
-#[test]
-fn libarchive_cmake_vcpkg_toolchain_is_windows_msvc_only() {
-    let build_rs = normalize_newlines(LIBARCHIVE_SYS_BUILD_RS);
-
-    for required in [
-        "if !target_uses_vcpkg(target) {\n        return;\n    }",
-        "fn target_uses_vcpkg(target: &str) -> bool {\n    target.contains(\"windows\") && target.contains(\"msvc\")\n}",
-    ] {
-        assert_contains(&build_rs, required);
     }
 }
 

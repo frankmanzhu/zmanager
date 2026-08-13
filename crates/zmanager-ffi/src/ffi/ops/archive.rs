@@ -34,8 +34,8 @@ use crate::ffi::types::{
 };
 use crate::ffi::util::{
     classify_archive_path, create_format_label, ensure_destination_archive_path, ensure_destination_root_path, ensure_existing_file_path,
-    ensure_existing_source_paths, ensure_non_empty_entry_path, format_capabilities, format_capabilities_for_kind, format_label, kind_label,
-    map_browser_entry_kind, password_ref, sanitize_password, usize_from_u64,
+    ensure_existing_source_paths, ensure_non_empty_entry_path, format_capabilities, format_label, kind_label, map_browser_entry_kind, password_ref,
+    sanitize_password, usize_from_u64,
 };
 
 fn map_archive_session_error(error: zmanager_core::engine::ArchiveError) -> ZmanagerGuiError {
@@ -184,7 +184,6 @@ pub fn listFormats() -> ListFormatsResult {
     let formats = zmanager_core::archive_format::FORMAT_CAPABILITIES
         .iter()
         .map(|capability| {
-            let (can_list, can_extract, can_create) = format_capabilities_for_kind(capability.kind);
             let engine_capability = zmanager_core::engine::FormatId::from_archive_format_kind(capability.kind)
                 .and_then(|format| engine_snapshot.iter().find(|snapshot| snapshot.format == format));
             let recognized = !matches!(capability.kind, zmanager_core::archive_format::ArchiveFormatKind::Unknown);
@@ -196,9 +195,9 @@ pub fn listFormats() -> ListFormatsResult {
                 kind: format!("{:?}", capability.kind),
                 label: kind_label(capability.kind).to_string(),
                 extensions: capability.extensions.iter().map(|suffix| suffix.to_string()).collect(),
-                can_list: engine_capability.is_some_and(|snapshot| snapshot.operations.contains(&ArchiveOperation::List)) && can_list,
-                can_extract,
-                can_create,
+                can_list: engine_capability.is_some_and(|snapshot| snapshot.operations.contains(&ArchiveOperation::List)),
+                can_extract: engine_capability.is_some_and(|snapshot| snapshot.operations.contains(&ArchiveOperation::Extract)),
+                can_create: engine_capability.is_some_and(|snapshot| snapshot.operations.contains(&ArchiveOperation::Create)),
                 recognized,
                 platform_available,
                 unavailable_reason,

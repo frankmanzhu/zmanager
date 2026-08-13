@@ -4,8 +4,6 @@ members = [
     "crates/zmanager-cli",
     "crates/zmanager-core",
     "crates/zmanager-ffi",
-    "crates/zmanager-libarchive",
-    "crates/zmanager-libarchive-sys",
     "crates/zmanager-unrar",
 ]
 resolver = "2"
@@ -34,8 +32,5 @@ zmanager-cli = { path = "crates/zmanager-cli", version = "2.0.1" }
 # `auth` feature, which each member re-enables through its own feature.
 zmanager-core = { path = "crates/zmanager-core", version = "2.0.1", default-features = false }
 zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.0.1" }
-zmanager-libarchive = { path = "crates/zmanager-libarchive", version = "2.0.1" }
-zmanager-libarchive-sys = { path = "crates/zmanager-libarchive-sys", version = "2.0.1" }
 zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.0.1" }
-
 

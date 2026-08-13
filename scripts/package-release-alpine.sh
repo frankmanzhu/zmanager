@@ -74,9 +74,8 @@ docker run --rm \
     # net.git-fetch-with-cli, so cargo shells out to the git CLI for the
     # dpp/tzap/forensic-vfs-engine git dependencies.
     #
-    # xz-dev/xz-static provide the system liblzma that is the ONLY liblzma
-    # in the static link (see zmanager-libarchive-sys/build.rs: lzma-sys is
-    # non-static on musl, and libarchive has no whole-archive lzma).
+    # xz-dev/xz-static provide the system liblzma used by the native LZMA
+    # decoder in the static link.
     apk add --no-cache \
       bash \
       binutils \

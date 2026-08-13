@@ -632,8 +632,8 @@ mod tests {
     }
 
     #[test]
-    fn split_zip_round_trips_through_libarchive() {
-        let temp = TestDir::new("split_zip_round_trips_through_libarchive");
+    fn split_zip_round_trips_through_native_engine() {
+        let temp = TestDir::new("split_zip_round_trips_through_native_engine");
         let payload = deterministic_bytes(200_000);
         temp.write_file("project/blob.bin", &payload);
         let archive = temp.path("archive.zip");
@@ -651,14 +651,6 @@ mod tests {
         assert_eq!(&fs::read(temp.path("archive.z01")).unwrap()[..ZIP_SPLIT_SIGNATURE.len()], ZIP_SPLIT_SIGNATURE.as_slice());
         assert!(archive.is_file());
 
-        let listing = crate::libarchive_backend::list_archive_with_password(&archive, None).unwrap();
-        assert!(listing.entries.iter().any(|entry| entry.path == "project/blob.bin"));
-
-        let extract_report = crate::libarchive_backend::extract_archive_with_password(&archive, temp.path("out"), ExtractionPolicy::default(), None).unwrap();
-
-        assert_eq!(extract_report.written_bytes, payload.len() as u64);
-        assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), payload);
-
         let native_listing = crate::zip_backend::list_zip(&archive).unwrap();
         assert!(native_listing.entries.iter().any(|entry| entry.name == "project/blob.bin"));
         crate::zip_backend::test_zip_with_password_filter(&archive, None, |_| true).unwrap();
@@ -670,15 +662,10 @@ mod tests {
         assert_eq!(fs::read(native_out.join("project/blob.bin")).unwrap(), payload);
     }
 
-    /// Split ZIP round-trip through libarchive across the compression range.
+    /// Split ZIP round-trip through the native reader across the compression range.
     ///
-    /// The original split-ZIP tests only used `Store`, which never invokes a
-    /// codec: a libarchive build compiled without zlib (the static-musl
-    /// release configuration) still passes them. Deflate cases exercise the
-    /// inflate path and fail on such builds — deliberately, so the codec gap
-    /// is visible instead of shipping silently.
     #[test]
-    fn split_zip_compression_range_round_trips_through_libarchive() {
+    fn split_zip_compression_range_round_trips_through_native_reader() {
         // Deflate levels below 1 are rejected by the zip crate.
         let cases = [
             ("store", ZipCompression::Store, None),
@@ -701,17 +688,21 @@ mod tests {
             .unwrap_or_else(|error| panic!("{name}: split create failed: {error}"));
             assert!(report.volume_count > 1, "{name}: expected multiple volumes");
 
-            let extract_report = crate::libarchive_backend::extract_archive_with_password(&archive, temp.path("out"), ExtractionPolicy::default(), None)
-                .unwrap_or_else(|error| panic!("{name}: libarchive extract failed: {error}"));
+            let token = crate::jobs::CancellationToken::new();
+            let mut sink = |_event: crate::jobs::JobEvent| {};
+            let mut context = crate::jobs::JobContext::new(&token, &mut sink);
+            let destination = temp.path("out");
+            let report = crate::zip_backend::extract_zip_with_context_and_password(&archive, &destination, ExtractionPolicy::default(), None, &mut context)
+                .unwrap_or_else(|error| panic!("{name}: native extract failed: {error}"));
 
-            assert_eq!(extract_report.written_bytes, payload.len() as u64, "{name}");
-            assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), payload, "{name}");
+            assert_eq!(report.written_bytes, payload.len() as u64, "{name}");
+            assert_eq!(fs::read(destination.join("project/blob.bin")).unwrap(), payload, "{name}");
         }
     }
 
     #[test]
-    fn passworded_split_zip_extracts_through_libarchive() {
-        let temp = TestDir::new("passworded_split_zip_extracts_through_libarchive");
+    fn passworded_split_zip_extracts_through_native_reader() {
+        let temp = TestDir::new("passworded_split_zip_extracts_through_native_reader");
         let payload = deterministic_bytes(200_000);
         temp.write_file("project/blob.bin", &payload);
         let archive = temp.path("secret.zip");
@@ -731,8 +722,6 @@ mod tests {
         assert!(report.encrypted);
         assert!(report.volume_count > 1);
 
-        crate::libarchive_backend::extract_archive_with_password(&archive, temp.path("out"), ExtractionPolicy::default(), Some("correct horse")).unwrap();
-
         let token = crate::jobs::CancellationToken::new();
         let mut sink = |_event: crate::jobs::JobEvent| {};
         let mut context = crate::jobs::JobContext::new(&token, &mut sink);
@@ -745,7 +734,6 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(fs::read(temp.path("out/project/blob.bin")).unwrap(), payload);
         assert_eq!(fs::read(temp.path("native-out/project/blob.bin")).unwrap(), payload);
     }
 

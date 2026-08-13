@@ -28,4 +28,4 @@ Run fuzz targets separately from normal tests with:
 FUZZ_SECONDS=60 bash scripts/fuzz.sh
 ```
 
-The fuzz script requires `cargo-fuzz` and currently exposes `path_normalization`, `zip_metadata`, and `libarchive_input`.
+The fuzz script requires `cargo-fuzz` and currently exposes `path_normalization`, `zip_metadata`, and `tzap_footer_inspect`.

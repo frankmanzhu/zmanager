@@ -425,7 +425,7 @@ fn optional_unzip_validates_zip_fixture_when_available() {
 }
 
 #[test]
-fn optional_bsdtar_lists_common_libarchive_fixtures_when_available() {
+fn optional_bsdtar_lists_common_archive_fixtures_when_available() {
     let Some(bsdtar) = find_on_path("bsdtar") else {
         return;
     };
@@ -1870,7 +1870,7 @@ fn zm_extract_tar_zst_materializes_safe_hardlink_entries() {
 
 #[cfg(unix)]
 #[test]
-fn zm_extract_libarchive_tar_materializes_safe_hardlink_entries() {
+fn zm_extract_native_tar_materializes_safe_hardlink_entries() {
     use std::os::unix::fs::MetadataExt as _;
 
     let temp = TestDir::new("zm_tar_hardlink_extract");
@@ -2096,8 +2096,8 @@ fn zm_extract_7z_honors_filters_and_strip_components() {
 }
 
 #[test]
-fn zm_extract_libarchive_tar_honors_filters_and_strip_components() {
-    let temp = TestDir::new("zm_extract_libarchive_tar_filters");
+fn zm_extract_native_tar_honors_filters_and_strip_components() {
+    let temp = TestDir::new("zm_extract_native_tar_filters");
     let archive = temp.path("project.tar");
     write_tar_entries(&archive, &[("project/keep.txt", b"keep\n"), ("project/drop.txt", b"drop\n"), ("project/nested/deep.txt", b"deep\n")]);
 
@@ -2112,7 +2112,7 @@ fn zm_extract_libarchive_tar_honors_filters_and_strip_components() {
         .arg("2")
         .output()
         .unwrap();
-    assert_success("zm extract libarchive tar --include --strip-components", &extract);
+    assert_success("zm extract native tar --include --strip-components", &extract);
 
     assert_eq!(fs::read_to_string(temp.path("out/deep.txt")).unwrap(), "deep\n");
     assert!(!temp.path("out/project/keep.txt").exists());
@@ -2200,18 +2200,18 @@ fn zm_extract_tar_zst_and_7z_to_stdout_match_selected_file_bytes() {
 }
 
 #[test]
-fn zm_extract_libarchive_tar_to_stdout_requires_one_selected_regular_file() {
-    let temp = TestDir::new("zm_libarchive_tar_to_stdout");
+fn zm_extract_native_tar_to_stdout_requires_one_selected_regular_file() {
+    let temp = TestDir::new("zm_native_tar_to_stdout");
     let archive = temp.path("project.tar");
     write_tar_entries(&archive, &[("project/keep.txt", b"keep\n"), ("project/drop.txt", b"drop\n")]);
 
     let extract = Command::new(zm_path()).arg("extract").arg(&archive).arg("--to-stdout").arg("--include").arg("project/keep.txt").output().unwrap();
-    assert_success("zm extract libarchive tar --to-stdout", &extract);
+    assert_success("zm extract native tar --to-stdout", &extract);
     assert_eq!(String::from_utf8_lossy(&extract.stdout), "keep\n");
     assert!(extract.stderr.is_empty(), "stderr should stay quiet unless verbose/error:\n{}", String::from_utf8_lossy(&extract.stderr));
 
     let multiple = Command::new(zm_path()).arg("extract").arg(&archive).arg("--to-stdout").arg("--include").arg("project/**").output().unwrap();
-    assert_failure("zm extract libarchive tar --to-stdout multiple", &multiple);
+    assert_failure("zm extract native tar --to-stdout multiple", &multiple);
     assert!(multiple.stdout.is_empty(), "failed stdout extraction must not write partial bytes:\n{}", String::from_utf8_lossy(&multiple.stdout));
     assert!(
         String::from_utf8_lossy(&multiple.stderr).contains("exactly one selected regular file"),

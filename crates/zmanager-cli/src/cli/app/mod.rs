@@ -2,8 +2,8 @@ use crate::cli::auth::auth_command;
 use crate::cli::create::{create_command, create_command_from_expanded};
 use crate::cli::extract::{extract_command, extract_command_from_expanded};
 use crate::cli::format::{
-    APPLE_ARCHIVE_EXTENSIONS, CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FORMAT_LIBARCHIVE, FormatDescriptor, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS,
-    TAR_ZST_EXTENSIONS, TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX, ZIP_FAMILY_EXTENSIONS, strip_suffix_ignore_ascii_case,
+    APPLE_ARCHIVE_EXTENSIONS, CREATE_FORMATS, DEB_EXTENSIONS, EXTRACT_FORMATS, FormatDescriptor, RAR_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_ZST_EXTENSIONS,
+    TEMP_ARCHIVE_MARKER, TEMP_ARCHIVE_PREFIX, ZIP_FAMILY_EXTENSIONS, strip_suffix_ignore_ascii_case,
 };
 use crate::cli::open::{list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded};
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_output_mode};
@@ -697,28 +697,16 @@ fn print_formats_table(global: &GlobalOptions) {
     output::stdout_line(global.color, format_args!("{}", output::styled(StyleRole::Heading, format_args!("Extract:"))));
     for format in EXTRACT_FORMATS {
         let padding = " ".repeat(9usize.saturating_sub(format.name.len()));
-        if format.name == FORMAT_LIBARCHIVE {
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "  {}{} fallback for supported archive formats{}",
-                    output::styled(StyleRole::Command, format_args!("{}", format.name)),
-                    padding,
-                    unsupported_annotation(format)
-                ),
-            );
-        } else {
-            output::stdout_line(
-                global.color,
-                format_args!(
-                    "  {}{} {}{}",
-                    output::styled(StyleRole::Command, format_args!("{}", format.name)),
-                    padding,
-                    format.extensions.join(", "),
-                    unsupported_annotation(format)
-                ),
-            );
-        }
+        output::stdout_line(
+            global.color,
+            format_args!(
+                "  {}{} {}{}",
+                output::styled(StyleRole::Command, format_args!("{}", format.name)),
+                padding,
+                format.extensions.join(", "),
+                unsupported_annotation(format)
+            ),
+        );
     }
 }
 

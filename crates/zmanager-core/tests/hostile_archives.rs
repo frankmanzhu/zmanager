@@ -10,7 +10,6 @@ use sevenz_rust2::{ArchiveEntry, ArchiveWriter};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 use zmanager_core::jobs::{CancellationToken, JobContext, JobEvent};
-use zmanager_core::libarchive_backend::extract_archive;
 use zmanager_core::safety::{ExtractionLimits, ExtractionPolicy, ExtractionSafetyError};
 use zmanager_core::sevenz_backend::extract_7z;
 use zmanager_core::tar_zst_backend::extract_tar_zst;
@@ -98,8 +97,8 @@ fn lzma_high_memory_exhaustion_is_rejected() {
 }
 
 #[test]
-fn libarchive_tar_hostile_fixtures_are_rejected() {
-    let temp = TestDir::new("libarchive_tar_hostile_fixtures_are_rejected");
+fn native_tar_hostile_fixtures_are_rejected() {
+    let temp = TestDir::new("native_tar_hostile_fixtures_are_rejected");
     let cases = [
         raw_tar_case(temp.path("traversal.tar"), &[RawTarEntry::file("../escape.txt", b"owned")]),
         raw_tar_case(temp.path("absolute.tar"), &[RawTarEntry::file("/tmp/zmanager-escape.txt", b"owned")]),
@@ -109,7 +108,11 @@ fn libarchive_tar_hostile_fixtures_are_rejected() {
     ];
 
     for archive in cases {
-        let error = extract_archive(&archive, temp.path("out"), ExtractionPolicy::default());
+        let engine = zmanager_core::engine::create_default_engine().unwrap();
+        let source = zmanager_core::engine::ArchiveSource::from_path_autodetect(&archive);
+        let mut handle = engine.open(source, zmanager_core::engine::OpenOptions::default()).unwrap();
+        let mut options = zmanager_core::engine::ExtractOptions { destination: temp.path("out"), policy: ExtractionPolicy::default(), ..Default::default() };
+        let error = handle.extract(&mut options);
         assert!(error.is_err(), "{} should be rejected", archive.display());
     }
 
@@ -131,7 +134,12 @@ fn truncated_and_corrupt_archives_fail_closed() {
     assert!(extract_zip_default(&truncated_zip, temp.path("zip-out"), ExtractionPolicy::default()).is_err());
     assert!(extract_tar_zst(temp.path("corrupt.tar.zst"), temp.path("tar-zst-out"), ExtractionPolicy::default()).is_err());
     assert!(extract_7z(temp.path("corrupt.7z"), temp.path("seven-out"), None, ExtractionPolicy::default()).is_err());
-    assert!(extract_archive(temp.path("corrupt.tar"), temp.path("tar-out"), ExtractionPolicy::default()).is_err());
+    let engine = zmanager_core::engine::create_default_engine().unwrap();
+    let mut handle = engine
+        .open(zmanager_core::engine::ArchiveSource::from_path_autodetect(temp.path("corrupt.tar")), zmanager_core::engine::OpenOptions::default())
+        .unwrap();
+    let mut options = zmanager_core::engine::ExtractOptions { destination: temp.path("tar-out"), policy: ExtractionPolicy::default(), ..Default::default() };
+    assert!(handle.extract(&mut options).is_err());
 }
 
 #[test]

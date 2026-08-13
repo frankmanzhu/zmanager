@@ -1,9 +1,9 @@
-//! Multi-volume and split-archive discovery for the libarchive backend.
+//! Multi-volume and split-archive discovery for native adapters.
 //!
-//! libarchive itself only reads a single file, so split and multi-part
-//! archive sets — standard split ZIP (`.z01`/.../`.zip`), numbered 7z/zip
+//! Native adapters may require more than one source file, so split and
+//! multi-part archive sets — standard split ZIP (`.z01`/.../`.zip`), numbered 7z/zip
 //! stream volumes (`.7z.001`/...), and RAR parts (`.partNN` and old-style
-//! `.rNN`) — must be discovered and ordered before libarchive sees them.
+//! `.rNN`) — are discovered and ordered before their owning adapter opens them.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -214,7 +214,7 @@ fn parse_old_rar_part_name(name: &str, base: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::{discover_multi_volume_paths, is_split_zip_path, parse_numbered_7z_volume_name, parse_numbered_archive_volume_name};
-    use crate::libarchive_backend::{extract_archive, list_archive};
+    use crate::engine::{ArchiveSource, ExtractOptions, OpenOptions, create_default_engine};
     use crate::safety::ExtractionPolicy;
     use crate::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
     use crate::test_support::TestDir;
@@ -235,8 +235,11 @@ mod tests {
         )
         .unwrap();
 
-        let listing = list_archive(temp.path("payload.7z.001")).unwrap();
-        let report = extract_archive(temp.path("payload.7z.001"), temp.path("out"), ExtractionPolicy::default()).unwrap();
+        let engine = create_default_engine().unwrap();
+        let mut handle = engine.open(ArchiveSource::from_path_autodetect(temp.path("payload.7z.001")), OpenOptions::default()).unwrap();
+        let listing = handle.list().unwrap();
+        let mut options = ExtractOptions { destination: temp.path("out"), policy: ExtractionPolicy::default(), ..ExtractOptions::default() };
+        let report = handle.extract(&mut options).unwrap();
 
         assert!(listing.entries.iter().any(|entry| entry.path == "payload/blob.bin"));
         assert_eq!(report.written_bytes, payload.len() as u64);

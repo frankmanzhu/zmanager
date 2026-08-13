@@ -31,8 +31,8 @@ curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
 ```
 
 If no matching binary exists, the installer falls back to building from source.
-Source fallback requires `git`, Rust/Cargo, CMake, and the native compression
-development libraries used by libarchive.
+Source fallback requires `git`, Rust/Cargo, and the target platform's native
+compression and cryptography development libraries.
 
 ## Direct Downloads
 

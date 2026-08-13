@@ -30,7 +30,7 @@ drift is caught early.
 | `basic.tar.gz` | TAR.GZ | `bsdtar -czf` | Preserves directory structure and symlink. |
 | `basic.tar.xz` | TAR.XZ | `bsdtar -cJf` | Preserves directory structure and symlink. |
 | `basic.tar.zst` | TAR.ZST | `zmanager-cli source-fast` | Preserves directory structure and symlink. |
-| `basic.cpio` | CPIO | `bsdtar --format=cpio` | Broad libarchive fixture. |
+| `basic.cpio` | CPIO | `bsdtar --format=cpio` | External-oracle fixture for the native CPIO adapter. |
 | `basic.xar` | XAR | macOS `xar` | Apple package-adjacent archive fixture. |
 | `basic.iso` | ISO 9660/Joliet | macOS `hdiutil makehybrid` | Disk/container listing and extraction fixture; generated without symlink because ISO/Joliet is not the symlink-preserving path. |
 | `basic.deb` | Debian package | `bsdtar --format=ar` plus tar members | Package/container fixture; extraction exposes package members. |

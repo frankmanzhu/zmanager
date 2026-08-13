@@ -1,8 +1,8 @@
 use super::{
     CancellationToken, JobEvent, JobOutcome, JobPhase, JobProgressState, PROGRESS_MIN_BYTE_STEP, ProgressCoalescer,
-    run_7z_create_job_from_sources_with_plan_options, run_7z_extract_job_with_password_and_policy, run_libarchive_extract_job_with_password_and_policy,
-    run_raw_stream_extract_job_with_policy, run_tar_zst_create_job_from_sources_with_plan_options, run_tzap_create_job_from_sources_with_plan_options,
-    run_tzap_extract_job_with_password_and_policy, run_zip_create_job_from_sources_with_plan_options, run_zip_extract_job_with_password_and_policy,
+    run_7z_create_job_from_sources_with_plan_options, run_7z_extract_job_with_password_and_policy, run_raw_stream_extract_job_with_policy,
+    run_tar_zst_create_job_from_sources_with_plan_options, run_tzap_create_job_from_sources_with_plan_options, run_tzap_extract_job_with_password_and_policy,
+    run_zip_create_job_from_sources_with_plan_options, run_zip_extract_job_with_password_and_policy,
 };
 use crate::test_support::TestDir;
 
@@ -279,34 +279,6 @@ fn sevenz_extract_job_starts_without_progress_only_listing() {
     .unwrap();
 
     assert_extract_started_with_unknown_total(&events, super::JobKind::SevenZExtract);
-}
-
-#[test]
-fn libarchive_extract_job_starts_without_progress_only_listing() {
-    let temp = TestDir::new("libarchive_extract_without_progress_listing");
-    temp.write_file("project/file.txt", b"hello");
-    run_zip_create_job_from_sources_with_plan_options(
-        &[temp.path("project")],
-        temp.path("archive.zip"),
-        &ZipCreateOptions::default(),
-        &PlanOptions::default(),
-        &CancellationToken::new(),
-        &mut |_| {},
-    )
-    .unwrap();
-    let mut events = Vec::new();
-
-    run_libarchive_extract_job_with_password_and_policy(
-        temp.path("archive.zip"),
-        temp.path("out"),
-        None,
-        ExtractionPolicy::default(),
-        &CancellationToken::new(),
-        &mut |event| events.push(event),
-    )
-    .unwrap();
-
-    assert_extract_started_with_unknown_total(&events, super::JobKind::ArchiveExtract);
 }
 
 #[test]

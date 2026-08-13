@@ -35,9 +35,9 @@ creates, extracts, lists, tests, and plans archives.
 The public command surface is designed for scriptable stdout and human-readable
 diagnostics on stderr.
 .Pp
-ZIP, TAR.ZST, TZAP, and 7z have native backends.
-RAR extraction uses the bundled extraction-only RAR backend.
-Other supported archive formats fall back to libarchive.
+ZIP, TAR, compressed TAR, TZAP, 7z, RAR, and the other registered archive
+formats use native adapters. The registry determines which operations are
+available for the current platform; unsupported formats fail closed.
 .Sh COMMANDS
 .Bl -tag -width "formats"
 .It Cm create Ar archive Ar paths ...
@@ -391,8 +391,8 @@ and
 .Pa .cbr .
 Passworded RAR list/extract uses the bundled RAR backend with
 .Fl -password-stdin .
-.It Cm fallback
-Other libarchive-supported formats.
+.It Cm formats
+Show the native format registry and its available operations.
 .El
 .Sh PASSWORD HANDLING
 Passwords should flow through stdin or the interactive prompt.

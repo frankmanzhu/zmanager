@@ -1,45 +1,25 @@
 # Windows Build Notes
 
-Windows builds use the MSVC Rust targets and the project-owned libarchive
-wrapper. They do not use MinGW, bindgen, LLVM, or the former patched Rust
-binding path.
+Windows builds use the MSVC Rust targets. Archive readers and writers are
+implemented by the native Rust adapters in this workspace; there is no bundled
+compatibility archive runtime.
 
-## Supported Targets
+## Supported targets
 
 | Platform | Rust target | vcpkg triplet | Runner |
 | --- | --- | --- | --- |
 | Windows x64 | `x86_64-pc-windows-msvc` | `x64-windows-static` | `windows-2025` |
 | Windows ARM64 | `aarch64-pc-windows-msvc` | `arm64-windows-static` | `windows-11-arm` |
 
-## Required Tools
+## Required tools
 
 - Rust stable with the target being tested.
 - Visual Studio C++ build tools for the target architecture.
 - Windows SDK.
-- CMake.
-- vcpkg at `C:\vcpkg`.
+- CMake and vcpkg for the native compression and cryptography dependencies.
 
-The libarchive wrapper builds the vendored libarchive 3.8.9 source from
-`vendor/libarchive/libarchive-3.8.9`. vcpkg supplies the compression and crypto
-dependencies used by that build:
-
-```powershell
-C:\vcpkg\vcpkg.exe install `
-  zlib:x64-windows-static `
-  bzip2:x64-windows-static `
-  liblzma:x64-windows-static `
-  zstd:x64-windows-static `
-  lz4:x64-windows-static `
-  openssl:x64-windows-static
-```
-
-Use `arm64-windows-static` instead of `x64-windows-static` for native ARM64.
-
-## Local Validation
-
-Run the same script used by CI from the repository root.
-
-Windows x64:
+The checked-in Windows CI script installs the static vcpkg dependencies and
+sets the MSVC environment before invoking Cargo:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\ci-windows.ps1 `
@@ -49,52 +29,24 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ci-windows.ps1 `
   -VsComponent "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
 ```
 
-Windows ARM64:
+Use `arm64-windows-static`, `arm64`, and the ARM64 Visual Studio component for
+the ARM64 target. Add `-Package -OutDir dist` to create the release zip.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\ci-windows.ps1 `
-  -Target "aarch64-pc-windows-msvc" `
-  -Triplet "arm64-windows-static" `
-  -VcArch "arm64" `
-  -VsComponent "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
-```
+## Build behavior
 
-To create the release zip locally, add `-Package -OutDir dist`.
+The workspace uses native Rust format adapters and the dedicated bundled RAR
+and Apple Archive implementations where those platforms support them. The
+registry is the source of truth for available list, test, extract, and create
+operations. Unsupported or platform-gated formats fail closed and are reported
+through the same capability snapshot used by the CLI and FFI.
 
-## Build Behavior
-
-`crates/zmanager-libarchive-sys` builds libarchive 3.8.9 through CMake with a
-narrow set of owned FFI declarations. The safe Rust wrapper in
-`crates/zmanager-libarchive` exposes only the read/list/extract operations that
-`zmanager-core` uses.
-
-Windows builds intentionally use XmlLite and Windows CNG where possible, and use
-vcpkg static-library triplets with the static MSVC runtime (`-C
-target-feature=+crt-static` and `MSVC_USE_STATIC_CRT=ON`). That keeps the
-libarchive dependency boundary smaller than the former MinGW path, avoids
-libxml2/iconv runtime requirements on Windows, and statically links the
-third-party compression and crypto libraries.
-
-The Windows release package should not require vcpkg DLLs beside `zm.exe` when
-built with the documented static triplets. It may still depend on normal Windows
-system DLLs supplied by the OS/runtime.
+Static vcpkg triplets keep the compression and cryptography dependencies
+inside the release executable. The Windows package should not require vcpkg
+DLLs beside `zm.exe`; normal Windows system DLLs remain supplied by the OS.
 
 ## CI
 
-The CI workflow covers six target goals:
-
-- macOS Apple Silicon
-- macOS Intel
-- Linux x86_64
-- Linux ARM64
-- Windows x64 MSVC
-- Windows ARM64 MSVC
-
-Windows jobs call `scripts/ci-windows.ps1`, which:
-
-- initializes the Visual Studio environment with `vcvarsall.bat`;
-- installs the vcpkg dependencies for the requested triplet;
-- sets `CMAKE_TOOLCHAIN_FILE`, `VCPKG_*`, `LIB`, `INCLUDE`, and any vcpkg
-  runtime paths present for the selected triplet;
-- runs `cargo test --workspace --target <target>`;
-- builds `zm.exe` in release mode for the same target.
+The CI workflow covers macOS, Linux, and both supported Windows targets. The
+Windows jobs call `scripts/ci-windows.ps1`, which initializes Visual Studio,
+installs the target triplet, runs the workspace tests, and builds both the
+online and offline release packages.

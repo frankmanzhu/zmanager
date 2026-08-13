@@ -20,10 +20,9 @@ pub(crate) use adapters::{
     run_tzap_create_job_from_sources_with_plan_options, run_zip_create_job_from_sources_with_plan_options,
 };
 pub use adapters::{
-    run_7z_extract_job_with_password_and_policy, run_engine_create_job_from_sources, run_libarchive_extract_job_with_password_and_policy,
-    run_rar_extract_job_with_password_and_policy, run_raw_stream_extract_job_with_policy, run_tar_zst_extract_job_with_policy,
-    run_tzap_extract_job_with_password_and_policy, run_tzap_extract_job_with_password_and_policy_and_restore_options,
-    run_zip_extract_job_with_password_and_policy,
+    run_7z_extract_job_with_password_and_policy, run_engine_create_job_from_sources, run_rar_extract_job_with_password_and_policy,
+    run_raw_stream_extract_job_with_policy, run_tar_zst_extract_job_with_policy, run_tzap_extract_job_with_password_and_policy,
+    run_tzap_extract_job_with_password_and_policy_and_restore_options, run_zip_extract_job_with_password_and_policy,
 };
 pub use cancellation::{CancellationToken, JobCancelled};
 pub use progress::{JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT, PROGRESS_RECENT_PATH_LIMIT};
@@ -64,7 +63,7 @@ pub enum JobKind {
     AppleArchiveCreate,
     /// `AppleArchive` extraction.
     AppleArchiveExtract,
-    /// Broad libarchive-backed extraction.
+    /// Generic engine extraction.
     ArchiveExtract,
     /// Raw single-file stream extraction.
     RawStreamExtract,

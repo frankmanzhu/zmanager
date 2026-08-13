@@ -18,8 +18,7 @@ impl Default for FormatId {
 }
 
 impl FormatId {
-    /// Catch-all identity used for explicit libarchive probing of unknown
-    /// filename spellings.
+    /// Stable identity used while reporting an unrecognized format.
     pub const UNKNOWN: FormatId = FormatId("unknown");
     pub const ZIP: FormatId = FormatId("zip");
     pub const SPLIT_ZIP: FormatId = FormatId("split_zip");

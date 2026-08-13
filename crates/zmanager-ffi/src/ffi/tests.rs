@@ -77,12 +77,14 @@ fn list_formats_returns_full_registry() {
     let apple_archive = by_kind.get("AppleArchive").expect("Apple Archive row");
     assert_eq!(apple_archive.label, "AppleArchive / AAR");
     assert_eq!(apple_archive.extensions, vec![".aar".to_string(), ".aea".to_string()]);
-    assert_eq!(
-        apple_archive.can_list,
-        zmanager_core::archive_format::format_status(zmanager_core::archive_format::ArchiveFormatKind::AppleArchive)
-            == zmanager_core::archive_format::BackendStatus::Available
-    );
-    assert!(!apple_archive.can_create);
+    let apple_capabilities = zmanager_core::engine::create_default_engine()
+        .unwrap()
+        .capability_snapshot()
+        .into_iter()
+        .find(|snapshot| snapshot.format == zmanager_core::engine::FormatId::APPLE_ARCHIVE)
+        .expect("Apple Archive capability row");
+    assert_eq!(apple_archive.can_list, apple_capabilities.operations.contains(&zmanager_core::engine::ArchiveOperation::List));
+    assert_eq!(apple_archive.can_create, apple_capabilities.operations.contains(&zmanager_core::engine::ArchiveOperation::Create));
 
     let zip = by_kind.get("Zip").expect("Zip row");
     assert!(zip.extensions.contains(&".zip".to_string()));
@@ -102,7 +104,7 @@ fn list_formats_returns_full_registry() {
 
     // The FFI-level capability semantics are preserved alongside the registry.
     assert_eq!(format_capabilities(ArchiveFormat::Xip), (false, false, false));
-    assert_eq!(format_capabilities(ArchiveFormat::Other), (true, true, false));
+    assert_eq!(format_capabilities(ArchiveFormat::Other), (false, false, false));
     assert_eq!(format_capabilities(ArchiveFormat::MultipartRar), (true, true, false));
 }
 

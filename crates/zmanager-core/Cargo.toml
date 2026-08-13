@@ -12,9 +12,8 @@ readme = "README.md"
 path = "src/lib.rs"
 
 [features]
-default = ["auth", "libarchive-fallback"]
+default = ["auth"]
 auth = []
-libarchive-fallback = ["dep:zmanager-libarchive"]
 
 [dependencies]
 base64 = "0.22.1"
@@ -43,7 +42,6 @@ tzap-plugin-keywrap = "0.2.2"
 tzap-plugin-signing = "0.2.2"
 zip = "8.6.0"
 zeroize = "1.8.2"
-zmanager-libarchive = { workspace = true, optional = true }
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }

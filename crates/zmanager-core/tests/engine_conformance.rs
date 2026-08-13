@@ -58,8 +58,6 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
     assert!(mtree.operations.contains(&ArchiveOperation::List));
     assert!(mtree.operations.contains(&ArchiveOperation::Test));
     assert!(!mtree.operations.contains(&ArchiveOperation::Extract));
-    #[cfg(feature = "libarchive-fallback")]
-    assert!(zmanager_core::engine::adapters::libarchive::LIBARCHIVE_ALLOW_LIST.is_empty());
     for format in
         [FormatId::ZIP, FormatId::SPLIT_ZIP, FormatId::SEVEN_Z, FormatId::TAR_ZST, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM, FormatId::APPLE_ARCHIVE]
     {
@@ -776,7 +774,7 @@ fn engine_rejects_ambiguous_registrations_at_build_time() {
 }
 
 #[test]
-fn engine_handles_split_zip_sidecar_detection_without_libarchive() {
+fn engine_handles_split_zip_sidecar_detection_without_compatibility_fallback() {
     let temp = TestDir::new("engine-conformance-split-zip");
     let z01 = temp.path("split_test.z01");
     let zip = temp.path("split_test.zip");

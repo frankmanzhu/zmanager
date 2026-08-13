@@ -306,9 +306,6 @@ Extract/List/Test:
   tgz       .tgz, .tar.gz
   raw       .zst, .gz, .bz2, .xz, .lzma, .lz, .br, .lz4, .lzo, .Z, .lrz
   rar       .rar, .cbr; passworded list/extract uses bundled UnRAR with --password-stdin
-  fallback  libarchive fallback for .tar, .cpio, .ar, .cab, .iso, .xar, .deb, .rpm, .lzh, .lha,
-            and compressed TAR variants (.tar.gz, .tar.bz2, .tar.xz, etc.)
-
 raw single-file streams decompress to one file. TAR-wrapped streams such as
 project.tar.zst or project.tar.gz extract as archives.
 ";

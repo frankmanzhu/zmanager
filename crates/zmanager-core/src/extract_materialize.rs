@@ -1,6 +1,6 @@
 //! Shared extraction-materialization helpers used by the archive backends.
 //!
-//! These helpers were historically triplicated across the libarchive, tar
+//! These helpers were historically triplicated across the tar
 //! zstd, and Apple Archive backends with only the per-backend error enums
 //! differing. They live here as `io::Result`-based, error-type-agnostic
 //! functions; each backend keeps a thin wrapper that maps errors into its own

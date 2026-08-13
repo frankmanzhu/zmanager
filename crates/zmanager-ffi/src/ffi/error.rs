@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use zmanager_core::apple_archive_backend::AppleArchiveError;
 use zmanager_core::archive_browser::ArchiveBrowserError;
 use zmanager_core::engine::{ArchiveError, ErrorKind};
-use zmanager_core::libarchive_backend::LibarchiveError;
 use zmanager_core::manifest::PlanError;
 use zmanager_core::rar_backend::RarBackendError;
 use zmanager_core::raw_stream_backend::RawStreamError;
@@ -59,7 +58,6 @@ pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerG
         ArchiveBrowserError::Rar(source) => map_rar_error(source),
         ArchiveBrowserError::Tzap(source) => map_tzap_error(source),
         ArchiveBrowserError::AppleArchive(source) => map_apple_archive_error(source),
-        ArchiveBrowserError::Libarchive(source) => map_libarchive_error(source),
         ArchiveBrowserError::RawStream(source) => map_raw_stream_error(source),
         ArchiveBrowserError::Engine { source, .. } => map_archive_engine_error(source),
         ArchiveBrowserError::Io { path, source } => map_io_error(path, source),
@@ -236,26 +234,6 @@ pub(crate) fn map_rar_error(error: RarBackendError) -> ZmanagerGuiError {
             }
         }
         source => operation_failed(format!("RAR operation failed: {source}")),
-    }
-}
-
-pub(crate) fn map_libarchive_error(error: LibarchiveError) -> ZmanagerGuiError {
-    match error {
-        LibarchiveError::Archive(source) => damaged_archive(format!("Archive could not be read: {source}")),
-        LibarchiveError::RawStream(source) => map_raw_stream_error(source),
-        LibarchiveError::Io { path, source } => map_io_error(path, source),
-        LibarchiveError::Safety(source) => {
-            bridge_error(ERROR_UNSAFE_ARCHIVE, format!("Entry blocked by safety policy: {source}"), None, BridgeSeverity::Warning, false)
-        }
-        LibarchiveError::EntryNotFound { path } => bridge_error(
-            ERROR_NOT_FOUND,
-            format!("Archive entry not found: {path}"),
-            hint("Open a different archive or choose a different entry."),
-            BridgeSeverity::Warning,
-            false,
-        ),
-        LibarchiveError::Cancelled => bridge_error(ERROR_CANCELLED, "Archive job was cancelled.", None, BridgeSeverity::Info, true),
-        source => operation_failed(format!("Archive operation failed: {source}")),
     }
 }
 
