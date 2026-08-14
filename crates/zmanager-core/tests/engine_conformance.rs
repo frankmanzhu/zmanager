@@ -117,7 +117,13 @@ fn capability_snapshot_reports_registration_and_platform_state() {
 
     let apple_archive = snapshot.iter().find(|capability| capability.format == FormatId::APPLE_ARCHIVE).expect("Apple Archive capability should be present");
     assert!(apple_archive.recognized);
-    assert!(apple_archive.platform_available);
+    if cfg!(any(target_os = "macos", target_os = "ios")) {
+        assert!(apple_archive.platform_available);
+        assert!(apple_archive.unavailable_reason.is_none());
+    } else {
+        assert!(!apple_archive.platform_available);
+        assert_eq!(apple_archive.unavailable_reason.as_deref(), Some("unsupported platform"));
+    }
 
     let package = snapshot.iter().find(|capability| capability.format == FormatId::PKG).expect("PKG capability should be present");
     assert_eq!(package.role, Some(ArchivePluginRole::Extraction));
