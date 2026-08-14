@@ -11,12 +11,19 @@
 #[cfg(feature = "tzap-online")]
 #[allow(clippy::module_inception)]
 mod auth;
+#[cfg(feature = "tzap-online")]
 mod cert;
+#[cfg(feature = "tzap-online")]
 mod contacts;
+#[cfg(feature = "tzap-online")]
 mod device;
+#[cfg(feature = "tzap-online")]
 mod hosted;
+#[cfg(feature = "tzap-online")]
 mod share;
+#[cfg(feature = "tzap-online")]
 mod sign;
+#[cfg(feature = "tzap-online")]
 mod support;
 #[cfg(all(test, feature = "tzap-online"))]
 mod tests;
@@ -25,12 +32,17 @@ mod unavailable;
 
 #[cfg(feature = "tzap-online")]
 pub(crate) use auth::auth_command as hosted_auth_command;
+#[cfg(feature = "tzap-online")]
 pub(crate) use cert::cert_command;
 #[cfg(feature = "tzap-online")]
 pub(crate) use cert::me_command;
+#[cfg(feature = "tzap-online")]
 pub(crate) use contacts::contact_command;
+#[cfg(feature = "tzap-online")]
 pub(crate) use device::device_command;
+#[cfg(feature = "tzap-online")]
 pub(crate) use share::share_command;
+#[cfg(feature = "tzap-online")]
 pub(crate) use sign::{sign_command, verify_command};
 #[cfg(all(test, feature = "tzap-online"))]
 pub(crate) use {contacts::contact_keygen_command, hosted::create_and_store_staging_enrollment_key, support::build_hosted_http_request};
@@ -59,14 +71,25 @@ pub(super) struct TzapCliContext {
 
 impl Default for TzapCliContext {
     fn default() -> Self {
-        Self { state_dir: support::default_tzap_state_dir(), account_key: zmanager_core::local_identity_store::DEFAULT_IDENTITY_INVENTORY_ACCOUNT.to_owned() }
+        Self { state_dir: default_offline_tzap_state_dir(), account_key: zmanager_core::local_identity_store::DEFAULT_IDENTITY_INVENTORY_ACCOUNT.to_owned() }
     }
+}
+
+fn default_offline_tzap_state_dir() -> PathBuf {
+    for variable in ["ZM_TZAP_STATE_DIR", "ZMANAGER_TZAP_STATE_DIR"] {
+        if let Some(path) = std::env::var_os(variable)
+            && !path.is_empty()
+        {
+            return PathBuf::from(path);
+        }
+    }
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from(".").join(".zmanager").join("tzap"), |home| PathBuf::from(home).join(".zmanager").join("tzap"))
 }
 
 #[cfg(feature = "tzap-online")]
 #[derive(Debug, Clone)]
 pub(super) struct AuthEndpointOptions {
-    pub(super) environment: zmanager_core::auth_client::TzapHostedAuthEnvironment,
+    pub(super) environment: zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment,
     pub(super) auth_base_url: Option<String>,
     pub(super) account_base_url: Option<String>,
     pub(super) client_id: String,
@@ -79,7 +102,7 @@ pub(super) struct AuthEndpointOptions {
 impl Default for AuthEndpointOptions {
     fn default() -> Self {
         Self {
-            environment: zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod,
+            environment: zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Prod,
             auth_base_url: None,
             account_base_url: None,
             client_id: DEFAULT_TZAP_CLIENT_ID.to_owned(),
@@ -98,17 +121,6 @@ pub(crate) fn auth_command(args: &[String], global: crate::cli::options::GlobalO
 
     #[cfg(not(feature = "tzap-online"))]
     {
-        if args.first().is_some_and(|command| matches!(command.as_str(), "login" | "callback" | "status" | "forget" | "account" | "me")) {
-            return unavailable::hosted_command(args, global);
-        }
-        match args.first().map(String::as_str) {
-            Some("cert") => cert_command(&args[1..], global),
-            Some("device") => device_command(&args[1..], global),
-            Some("sign") => sign_command(&args[1..], global),
-            Some("verify") => verify_command(&args[1..], global),
-            Some("contact") => contact_command(&args[1..], global),
-            Some("share") => share_command(&args[1..], global),
-            _ => unavailable::auth_command(args, global),
-        }
+        unavailable::auth_command(args, global)
     }
 }

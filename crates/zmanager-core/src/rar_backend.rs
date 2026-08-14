@@ -39,22 +39,6 @@ pub struct RarListEntry {
     pub mtime: u64,
 }
 
-impl RarListEntry {
-    pub(crate) fn into_unrar_entry(self) -> zmanager_unrar::RarEntry {
-        zmanager_unrar::RarEntry {
-            path: self.path,
-            unpacked_size: self.size,
-            dictionary_size: self.dictionary_size,
-            kind: self.kind.into_unrar_kind(),
-            link_target: self.link_target,
-            encrypted: self.encrypted,
-            solid: self.solid,
-            file_attr: self.file_attr,
-            mtime: self.mtime,
-        }
-    }
-}
-
 /// Portable RAR listing entry type.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum RarListEntryKind {
@@ -70,19 +54,6 @@ pub enum RarListEntryKind {
     FileCopy,
     /// Unsupported special entry.
     Special,
-}
-
-impl RarListEntryKind {
-    fn into_unrar_kind(self) -> RarEntryKind {
-        match self {
-            Self::File => RarEntryKind::File,
-            Self::Directory => RarEntryKind::Directory,
-            Self::Symlink => RarEntryKind::Symlink,
-            Self::Hardlink => RarEntryKind::Hardlink,
-            Self::FileCopy => RarEntryKind::FileCopy,
-            Self::Special => RarEntryKind::Special,
-        }
-    }
 }
 
 /// RAR listing report.
@@ -202,7 +173,7 @@ pub fn list_rar_with_password(archive: impl AsRef<Path>, password: Option<&str>)
 }
 
 /// Reads selected RAR entries through bundled `UnRAR` without exposing a
-/// compatibility fallback. Regular files are extracted into a private,
+/// secondary reader path. Regular files are extracted into a private,
 /// automatically removed directory so the same native decoder path validates
 /// payloads and detects truncation or password failures.
 pub fn test_rar_with_password_filter(
@@ -314,6 +285,29 @@ pub fn extract_rar_entry_by_index(
     extract_rar_with_options(archive, destination.as_ref(), policy, RarExtractOptions { password, overwrite_resolver, context: None, entries: vec![entry] })
 }
 
+/// Extracts exactly one RAR entry by its retained path and duplicate
+/// occurrence.  The occurrence is resolved against the native listing rather
+/// than treating an engine entry ID as an unchecked index.
+pub(crate) fn extract_rar_entry_by_path_occurrence(
+    archive: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    password: Option<&str>,
+    entry_path: &str,
+    occurrence: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<RarExtractReport, RarBackendError> {
+    let archive = archive.as_ref();
+    let entry = zmanager_unrar::list_archive(archive, password)?.into_iter().filter(|entry| entry.path == entry_path).nth(occurrence).ok_or_else(|| {
+        RarBackendError::Io {
+            path: archive.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::NotFound, "retained RAR entry is not present in this archive"),
+        }
+    })?;
+    reject_large_dictionary(&entry)?;
+    extract_rar_with_options(archive, destination.as_ref(), policy, RarExtractOptions { password, overwrite_resolver, context: None, entries: vec![entry] })
+}
+
 /// Copies exactly one regular RAR entry by its archive-order index.
 pub fn copy_rar_entry_by_index(
     archive: impl AsRef<Path>,
@@ -326,6 +320,39 @@ pub fn copy_rar_entry_by_index(
     let entry = entries.into_iter().nth(entry_index).ok_or_else(|| RarBackendError::Io {
         path: archive.to_path_buf(),
         source: io::Error::new(io::ErrorKind::NotFound, "retained RAR entry ID is not present in this archive"),
+    })?;
+    reject_large_dictionary(&entry)?;
+    if !matches!(entry.kind, RarEntryKind::File) {
+        return Err(RarBackendError::Io {
+            path: PathBuf::from(&entry.path),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "retained RAR entry is not a regular file"),
+        });
+    }
+
+    let temporary = crate::temp_names::TemporaryDirectory::new("rar-copy").map_err(|error| RarBackendError::Io { path: error.path, source: error.source })?;
+    let temporary_path = temporary.path().join("payload");
+    let mut selections = BTreeMap::new();
+    selections.insert(entry.path.clone(), temporary_path.clone());
+    zmanager_unrar::extract_selected(archive, password, &selections)?;
+    let mut decoded = fs::File::open(&temporary_path).map_err(|source| RarBackendError::Io { path: temporary_path.clone(), source })?;
+    io::copy(&mut decoded, output).map_err(|source| RarBackendError::Io { path: temporary_path, source })
+}
+
+/// Copies exactly one regular RAR entry by its retained path and duplicate
+/// occurrence.
+pub(crate) fn copy_rar_entry_by_path_occurrence(
+    archive: impl AsRef<Path>,
+    password: Option<&str>,
+    entry_path: &str,
+    occurrence: usize,
+    output: &mut dyn io::Write,
+) -> Result<u64, RarBackendError> {
+    let archive = archive.as_ref();
+    let entry = zmanager_unrar::list_archive(archive, password)?.into_iter().filter(|entry| entry.path == entry_path).nth(occurrence).ok_or_else(|| {
+        RarBackendError::Io {
+            path: archive.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::NotFound, "retained RAR entry is not present in this archive"),
+        }
     })?;
     reject_large_dictionary(&entry)?;
     if !matches!(entry.kind, RarEntryKind::File) {
@@ -359,22 +386,6 @@ pub fn extract_rar_with_password_and_context(
     context: &mut JobContext<'_>,
 ) -> Result<RarExtractReport, RarBackendError> {
     let entries = zmanager_unrar::list_archive(archive.as_ref(), password)?;
-    extract_rar_with_options(
-        archive.as_ref(),
-        destination.as_ref(),
-        policy,
-        RarExtractOptions { password, overwrite_resolver: None, context: Some(context), entries },
-    )
-}
-
-pub(crate) fn extract_rar_entries_with_password_and_context(
-    archive: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    entries: Vec<zmanager_unrar::RarEntry>,
-    context: &mut JobContext<'_>,
-) -> Result<RarExtractReport, RarBackendError> {
     extract_rar_with_options(
         archive.as_ref(),
         destination.as_ref(),

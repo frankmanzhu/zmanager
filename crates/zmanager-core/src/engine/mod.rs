@@ -1,6 +1,6 @@
 //! Stateful archive engine and adapter seam (ARC-100 to ARC-111).
 
-pub mod adapters;
+pub(crate) mod adapters;
 pub mod format;
 pub mod handle;
 pub mod plugins;
@@ -13,13 +13,76 @@ use std::sync::Arc;
 pub use format::FormatId;
 pub use handle::{ArchiveEngine, ArchiveHandle};
 pub use plugins::{ArchivePlugin, build_engine_with_plugins};
-pub use registry::{AdapterDescriptor, AdapterRegistry, ArchiveEngineBuilder, CreateAdapterFactory, ReadAdapterFactory};
-pub use source::{ArchiveSource, SourceAccess, discover_split_zip_volumes, is_split_zip_archive_path};
+pub use registry::{AdapterDescriptor, AdapterRegistry, ArchiveEngineBuilder, CreateAdapterFactory, ReadAdapterFactory, ReadAdapterSession};
+pub use source::{ArchiveSource, SourceAccess, SourceFingerprint, SourceProvenance, discover_split_zip_volumes, is_split_zip_archive_path};
 pub use types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, ArchivePluginRole, CopyReport, CreateOptions, CreateReport, CreateRequest, DetectedArchive, EngineEntry,
-    EntryId, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, SessionDisposition,
-    TestOptions, TestReport,
+    AppleArchiveCompression, AppleArchiveCreateOptions, ArchiveError, ArchiveListing, ArchiveOperation, ArchivePluginRole, CopyReport, CreateOptions,
+    CreateReport, CreateRequest, CredentialRequirement, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities,
+    HandleCapabilities, NavigationMode, OpenLimits, OpenOptions, SelectedExtractOptions, SessionDisposition, SevenZCreateOptions, TarGzCreateOptions,
+    TarZstdCreateOptions, TestOptions, TestReport, TzapCreateOptions, TzapKeySource, TzapRestoreOptions, TzapRestorePolicy, TzapX509SignerInspection,
+    TzapX509SigningOptions, TzapX509TrustOptions, TzapX509VerificationReport, ZipCompression, ZipCreateOptions,
 };
+
+/// Engine-owned TZAP protocol operations used by hosted orchestration.
+///
+/// The archive implementation remains private to `zmanager-core`; callers
+/// consume this narrow protocol seam instead of importing backend modules.
+pub mod tzap {
+    pub use crate::tzap::{
+        TzapPublicDisplaySummary, TzapPublicMetadataSummary, TzapPublicSignatureStatus, TzapPublicVolumeSummary, TzapTestReport, TzapX509SignerInspection,
+        TzapX509SigningOptions, TzapX509TrustOptions, TzapX509VerificationReport, inspect_tzap_x509_public_no_key_signer, inspect_tzap_x509_signer,
+        summarize_tzap_public_display, summarize_tzap_public_metadata, test_tzap_with_optional_password_filter_and_x509_trust,
+        tzap_x509_signing_options_from_inventory, verify_tzap_x509_public_no_key,
+    };
+}
+
+/// Returns whether a path is a supported raw single-file stream.
+#[must_use]
+pub fn is_raw_stream_path(path: impl AsRef<std::path::Path>) -> bool {
+    crate::raw_stream_backend::detect_raw_stream_format(path).is_some()
+}
+
+/// Returns whether a path belongs to a TZAP archive or its volume set.
+#[must_use]
+pub fn is_tzap_archive_path(path: impl AsRef<std::path::Path>) -> bool {
+    crate::tzap::is_tzap_archive_path(path.as_ref())
+}
+
+/// Returns whether a TZAP archive has any existing input volume.
+#[must_use]
+pub fn has_existing_tzap_input_volume(path: impl AsRef<std::path::Path>) -> bool {
+    crate::tzap::has_existing_tzap_input_volume(path.as_ref())
+}
+
+/// Returns whether a path resolves to an existing 7z input file or volume
+/// set through the engine's native 7z discovery rules.
+#[must_use]
+pub fn has_existing_7z_input_volume(path: impl AsRef<std::path::Path>) -> bool {
+    crate::sevenz_backend::has_existing_7z_input(path.as_ref())
+}
+
+/// Returns the raw stream suffixes recognized by the engine.
+#[must_use]
+pub const fn raw_stream_suffixes() -> &'static [&'static str] {
+    crate::raw_stream_backend::RAW_STREAM_SUFFIXES
+}
+
+/// Verifies a TZAP X.509 `RootAuth` footer through the engine-owned contract.
+pub fn verify_tzap_x509_public_no_key(archive: impl AsRef<std::path::Path>, trust: &TzapX509TrustOptions) -> Result<TzapX509VerificationReport, ArchiveError> {
+    let archive = archive.as_ref();
+    let backend_trust = crate::tzap::TzapX509TrustOptions::from(trust.clone());
+    crate::tzap::verify_tzap_x509_public_no_key(archive, &backend_trust)
+        .map(Into::into)
+        .map_err(|error| ArchiveError::usable(ErrorKind::CorruptData, error.to_string()).with_path(archive))
+}
+
+/// Inspects a TZAP X.509 `RootAuth` signer through the engine-owned contract.
+pub fn inspect_tzap_x509_public_no_key_signer(archive: impl AsRef<std::path::Path>) -> Result<TzapX509SignerInspection, ArchiveError> {
+    let archive = archive.as_ref();
+    crate::tzap::inspect_tzap_x509_public_no_key_signer(archive)
+        .map(Into::into)
+        .map_err(|error| ArchiveError::usable(ErrorKind::CorruptData, error.to_string()).with_path(archive))
+}
 
 /// Default compile-time plugin packaging for Phase 1 listing.
 #[derive(Debug, Default)]
@@ -96,10 +159,11 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::native::DmgListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::PkgListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::MsiListAdapter))?;
-        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VHD)))?;
-        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::VMDK)))?;
-        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::UDF)))?;
-        builder.register_read_adapter(Arc::new(adapters::native::VirtualDiskListAdapter::new(FormatId::ISO)))?;
+        for format in [FormatId::VHD, FormatId::VMDK, FormatId::UDF, FormatId::ISO] {
+            let adapter = adapters::native::VirtualDiskListAdapter::new(format)
+                .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("unsupported virtual disk adapter format '{format}'")))?;
+            builder.register_read_adapter(Arc::new(adapter))?;
+        }
 
         // Native one-shot creation adapters.
         builder.register_create_adapter(Arc::new(adapters::create::ZipCreateAdapter))?;

@@ -192,6 +192,26 @@ pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Wri
     read_entry_to(path, archive.header(), &entry.source, writer)
 }
 
+/// Copies one retained XAR file by path and duplicate occurrence.
+pub fn copy_by_path_occurrence(path: impl AsRef<Path>, selected_path: &str, selected_occurrence: usize, writer: &mut dyn io::Write) -> Result<u64, XarError> {
+    let path = path.as_ref();
+    let archive = open(path)?;
+    let entries = collect_entries(&archive, path)?;
+    let mut occurrence = 0_usize;
+    let entry = entries
+        .into_iter()
+        .find(|entry| {
+            if entry.path != selected_path {
+                return false;
+            }
+            let matches = occurrence == selected_occurrence;
+            occurrence = occurrence.saturating_add(1);
+            matches
+        })
+        .ok_or_else(|| parser_error(path, "retained XAR entry is not present"))?;
+    read_entry_to(path, archive.header(), &entry.source, writer)
+}
+
 fn read_entry_to(path: &Path, header: &dpp::xara::XarHeader, file: &dpp::xara::XarFile, writer: &mut dyn io::Write) -> Result<u64, XarError> {
     let Some(data) = &file.data else {
         return Ok(0);

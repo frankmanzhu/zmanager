@@ -1,4 +1,3 @@
-#![cfg(feature = "tzap-online")]
 mod common;
 
 use common::TestDir;
@@ -20,13 +19,9 @@ use std::fs;
 use std::path::Path;
 use x509_parser::extensions::ParsedExtension;
 use x509_parser::prelude::{FromDer as _, X509Certificate};
-use zmanager_core::auth_client::{
-    AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpRequest,
-    TzapAuthHttpResponse, TzapAuthHttpTransport, TzapAuthRelayCompletion, TzapBearerToken, TzapHostedAuthCallback, TzapHostedAuthEnvironment,
-    TzapHostedAuthLaunchConfig, TzapOAuthStateTracker, TzapPendingAuthState, TzapPkcePair, TzapSessionRecord, TzapSessionStore, complete_hosted_auth_handoff,
-};
-use zmanager_core::certificate_lifecycle::{
-    TzapCertificateLifecycleClient, TzapCertificateLifecycleError, TzapRenewalPolicy, TzapRenewalRequest, TzapRetirementCompletion,
+use zmanager_core::backend_test_support::tzap::{
+    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapRestoreOptions, create_tzap_from_manifest_with_context, extract_tzap,
+    list_tzap_with_recipient_key,
 };
 use zmanager_core::contact_card::{
     TzapContactCardError, TzapContactCardExportRequest, TzapContactCardImportOptions, accepted_contact_recipients, export_tzap_contact_card,
@@ -36,10 +31,6 @@ use zmanager_core::device_identity::{TzapDeviceCsrOptions, generate_device_signi
 use zmanager_core::document_envelope::validate_tzap_document_envelope_value;
 use zmanager_core::document_signing::{TzapDocumentSigningRequest, sign_tzap_document_payload};
 use zmanager_core::document_verification::{TzapOfflineVerificationOptions, verify_tzap_document_envelope_offline};
-use zmanager_core::enrollment_client::{
-    ENROLL_OPERATION, ENROLLMENT_CHALLENGE_CANONICALIZATION, TzapCustomEnrollmentCertificateValidator, TzapEnrollmentClient, TzapEnrollmentDenialKind,
-    TzapEnrollmentError, TzapEnrollmentRequest, enroll_device_certificate,
-};
 use zmanager_core::jobs::{CancellationToken, JobContext};
 use zmanager_core::local_identity_store::{
     DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord,
@@ -47,15 +38,23 @@ use zmanager_core::local_identity_store::{
 };
 use zmanager_core::manifest::{ManifestEntry, ManifestFileType, PermissionSnapshot};
 use zmanager_core::safety::ExtractionPolicy;
-use zmanager_core::status_client::{
-    TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, online_verification_result_from_status,
-};
 use zmanager_core::trust::{
     self, TzapCertificateProfileOptions, TzapCertificatePublicMetadata, TzapCertificateStatus, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState,
 };
-use zmanager_core::tzap_backend::{
-    TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapRestoreOptions, create_tzap_from_manifest_with_context, extract_tzap,
-    list_tzap_with_recipient_key,
+use zmanager_tzap_hosted::auth_client::{
+    AUTH_HANDOFF_LIFETIME_SECONDS, InMemoryTzapSessionStore, SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpRequest,
+    TzapAuthHttpResponse, TzapAuthHttpTransport, TzapAuthRelayCompletion, TzapBearerToken, TzapHostedAuthCallback, TzapHostedAuthEnvironment,
+    TzapHostedAuthLaunchConfig, TzapOAuthStateTracker, TzapPendingAuthState, TzapPkcePair, TzapSessionRecord, TzapSessionStore, complete_hosted_auth_handoff,
+};
+use zmanager_tzap_hosted::certificate_lifecycle::{
+    TzapCertificateLifecycleClient, TzapCertificateLifecycleError, TzapRenewalPolicy, TzapRenewalRequest, TzapRetirementCompletion,
+};
+use zmanager_tzap_hosted::enrollment_client::{
+    ENROLL_OPERATION, ENROLLMENT_CHALLENGE_CANONICALIZATION, TzapCustomEnrollmentCertificateValidator, TzapEnrollmentClient, TzapEnrollmentDenialKind,
+    TzapEnrollmentError, TzapEnrollmentRequest, enroll_device_certificate,
+};
+use zmanager_tzap_hosted::status_client::{
+    TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, online_verification_result_from_status,
 };
 
 const ACCOUNT_KEY: &str = DEFAULT_IDENTITY_INVENTORY_ACCOUNT;
@@ -975,7 +974,7 @@ fn json_response_with_code(status_code: u16, value: &Value) -> TzapAuthHttpRespo
 #[derive(Clone)]
 struct AcceptingLifecycleValidator;
 
-impl zmanager_core::enrollment_client::TzapEnrollmentCertificateValidator for AcceptingLifecycleValidator {
+impl zmanager_tzap_hosted::enrollment_client::TzapEnrollmentCertificateValidator for AcceptingLifecycleValidator {
     fn validate_certificate_chain(&self, _chain_der: &[Vec<u8>]) -> Result<TzapCertificatePublicMetadata, TzapEnrollmentError> {
         Ok(public_metadata())
     }

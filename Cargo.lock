@@ -4883,6 +4883,7 @@ dependencies = [
  "xattr",
  "zip",
  "zmanager-core",
+ "zmanager-tzap-hosted",
  "zstd",
 ]
 
@@ -4943,6 +4944,24 @@ dependencies = [
  "tzap-core",
  "tzap-plugin-signing",
  "uniffi",
+ "zmanager-core",
+ "zmanager-tzap-hosted",
+]
+
+[[package]]
+name = "zmanager-tzap-hosted"
+version = "2.0.1"
+dependencies = [
+ "base64",
+ "num-bigint",
+ "openssl",
+ "rand",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha2 0.10.9",
+ "time",
+ "x509-parser",
  "zmanager-core",
 ]
 

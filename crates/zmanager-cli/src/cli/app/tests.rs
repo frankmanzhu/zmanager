@@ -51,7 +51,7 @@ fn contact_keygen_persists_a_distinct_recipient_key() {
 fn pending_organization_enrollment_reuses_the_same_device_key() {
     let temp = TestDir::new("organization-enrollment-key-retry");
     let mut store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&temp.root);
-    let request = zmanager_core::enrollment_client::TzapEnrollmentRequest {
+    let request = zmanager_tzap_hosted::enrollment_client::TzapEnrollmentRequest {
         account_key: "default".to_owned(),
         org_id: Some("porg_test".to_owned()),
         requested_validity_seconds: 86_400,
@@ -205,7 +205,7 @@ fn extract_parser_accepts_tzap_metadata_restore_options() {
 
     parse_extract_request(&args, &mut global, &mut request).unwrap();
 
-    assert_eq!(request.tzap_restore_policy, zmanager_core::tzap_backend::TzapRestorePolicy::SameOs);
+    assert_eq!(request.tzap_restore_policy, zmanager_core::engine::TzapRestorePolicy::SameOs);
     assert!(request.tzap_allow_degraded);
 }
 

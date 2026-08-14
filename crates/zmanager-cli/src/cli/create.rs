@@ -90,13 +90,13 @@ pub(crate) fn parse_create_request(args: &[String], global: &mut GlobalOptions, 
                 request.level = Some(parse_i32(&take_value(args, &mut index, arg)?, arg)?);
             }
             "-0" => {
-                request.compression = zmanager_core::zip_backend::ZipCompression::Store;
+                request.compression = zmanager_core::engine::ZipCompression::Store;
                 request.level = Some(0);
                 index += 1;
             }
             "-1" | "-2" | "-3" | "-4" | "-5" | "-6" | "-7" | "-8" | "-9" => {
                 request.level = Some(parse_i32(&arg[1..], arg)?);
-                request.compression = zmanager_core::zip_backend::ZipCompression::Deflate;
+                request.compression = zmanager_core::engine::ZipCompression::Deflate;
                 index += 1;
             }
             "-C" | "--directory" => {
@@ -123,7 +123,7 @@ pub(crate) fn parse_create_request(args: &[String], global: &mut GlobalOptions, 
                 request.exclude_from.push(PathBuf::from(take_value(args, &mut index, arg)?));
             }
             "--store" => {
-                request.compression = zmanager_core::zip_backend::ZipCompression::Store;
+                request.compression = zmanager_core::engine::ZipCompression::Store;
                 index += 1;
             }
             "--solid" => {
@@ -335,7 +335,7 @@ fn build_engine_create_options(
                 print_error_line(global, format_args!("{error}"));
                 ExitCode::from(2)
             })?;
-            zmanager_core::engine::CreateOptions::Zip(zmanager_core::zip_backend::ZipCreateOptions {
+            zmanager_core::engine::CreateOptions::Zip(zmanager_core::engine::ZipCreateOptions {
                 compression,
                 level,
                 preserve_metadata: !request.no_metadata,
@@ -344,22 +344,22 @@ fn build_engine_create_options(
                 volume_size: request.volume_size,
             })
         }
-        ArchiveFormat::TarZst => zmanager_core::engine::CreateOptions::TarZstd(zmanager_core::tar_zst_backend::TarZstdCreateOptions {
-            level: request.level.unwrap_or_else(|| zmanager_core::tar_zst_backend::TarZstdCreateOptions::default().level),
+        ArchiveFormat::TarZst => zmanager_core::engine::CreateOptions::TarZstd(zmanager_core::engine::TarZstdCreateOptions {
+            level: request.level.unwrap_or_else(|| zmanager_core::engine::TarZstdCreateOptions::default().level),
             preserve_metadata: !request.no_metadata,
             replace_existing,
-            ..zmanager_core::tar_zst_backend::TarZstdCreateOptions::default()
+            ..zmanager_core::engine::TarZstdCreateOptions::default()
         }),
-        ArchiveFormat::Tgz => zmanager_core::engine::CreateOptions::TarGz(zmanager_core::tar_gz_backend::TarGzCreateOptions {
-            level: request.level.unwrap_or_else(|| zmanager_core::tar_gz_backend::TarGzCreateOptions::default().level),
+        ArchiveFormat::Tgz => zmanager_core::engine::CreateOptions::TarGz(zmanager_core::engine::TarGzCreateOptions {
+            level: request.level.unwrap_or_else(|| zmanager_core::engine::TarGzCreateOptions::default().level),
             preserve_metadata: !request.no_metadata,
             replace_existing,
         }),
         ArchiveFormat::Tzap => {
             let key_source = if let Some(recipient_certificate) = &request.tzap_recipient_cert {
-                zmanager_core::tzap_backend::TzapKeySource::RecipientCertificate(recipient_certificate.clone())
+                zmanager_core::engine::TzapKeySource::RecipientCertificate(recipient_certificate.clone())
             } else {
-                password.map_or(zmanager_core::tzap_backend::TzapKeySource::NoPassword, zmanager_core::tzap_backend::TzapKeySource::Passphrase)
+                password.map_or(zmanager_core::engine::TzapKeySource::NoPassword, zmanager_core::engine::TzapKeySource::Passphrase)
             };
             let x509_signing = match &request.tzap_signing_cert {
                 Some(certificate) => {
@@ -367,7 +367,7 @@ fn build_engine_create_options(
                         print_error_line(global, format_args!("create failed: --signing-cert and --signing-private-key must be used together"));
                         return Err(ExitCode::from(2));
                     };
-                    Some(zmanager_core::tzap_backend::TzapX509SigningOptions::CertificateAndKey {
+                    Some(zmanager_core::engine::TzapX509SigningOptions::CertificateAndKey {
                         signing_certificate: certificate.clone(),
                         signing_private_key: private_key.clone(),
                         signing_chain: request.tzap_signing_chain.clone(),
@@ -375,7 +375,7 @@ fn build_engine_create_options(
                 }
                 None => None,
             };
-            zmanager_core::engine::CreateOptions::Tzap(zmanager_core::tzap_backend::TzapCreateOptions {
+            zmanager_core::engine::CreateOptions::Tzap(zmanager_core::engine::TzapCreateOptions {
                 key_source,
                 level: request.level.unwrap_or(3),
                 preserve_metadata: !request.no_metadata,
@@ -391,14 +391,14 @@ fn build_engine_create_options(
                 print_error_line(global, format_args!("{error}"));
                 ExitCode::from(2)
             })?;
-            zmanager_core::engine::CreateOptions::AppleArchive(zmanager_core::apple_archive_backend::AppleArchiveCreateOptions {
+            zmanager_core::engine::CreateOptions::AppleArchive(zmanager_core::engine::AppleArchiveCreateOptions {
                 compression,
                 preserve_metadata: !request.no_metadata,
                 replace_existing,
-                ..zmanager_core::apple_archive_backend::AppleArchiveCreateOptions::default()
+                ..zmanager_core::engine::AppleArchiveCreateOptions::default()
             })
         }
-        ArchiveFormat::SevenZ => zmanager_core::engine::CreateOptions::SevenZ(zmanager_core::sevenz_backend::SevenZCreateOptions {
+        ArchiveFormat::SevenZ => zmanager_core::engine::CreateOptions::SevenZ(zmanager_core::engine::SevenZCreateOptions {
             solid: request.solid,
             level: sevenz_level(request),
             preserve_metadata: !request.no_metadata,
@@ -406,7 +406,7 @@ fn build_engine_create_options(
             encrypt_file_names: true,
             replace_existing,
             volume_size: request.volume_size,
-            ..zmanager_core::sevenz_backend::SevenZCreateOptions::default()
+            ..zmanager_core::engine::SevenZCreateOptions::default()
         }),
     };
     Ok(options)
@@ -488,7 +488,7 @@ fn create_stream(
             return ExitCode::from(2);
         }
     };
-    let options = zmanager_core::zip_backend::ZipCreateOptions {
+    let options = zmanager_core::engine::ZipCreateOptions {
         compression,
         level,
         preserve_metadata: !request.no_metadata,
@@ -589,7 +589,7 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
             ArchiveFormat::Zip | ArchiveFormat::SevenZ | ArchiveFormat::Tzap | ArchiveFormat::Tgz if !(0..=9).contains(&level) => {
                 return Err(format!("unsupported compression level for selected archive format: {level}"));
             }
-            ArchiveFormat::Zip if request.compression == zmanager_core::zip_backend::ZipCompression::Store && level != 0 => {
+            ArchiveFormat::Zip if request.compression == zmanager_core::engine::ZipCompression::Store && level != 0 => {
                 return Err(format!("cannot combine ZIP store compression with compression level {level}"));
             }
             ArchiveFormat::AppleArchive => {
@@ -602,8 +602,8 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
     Ok(())
 }
 
-fn apple_archive_compression(request: &CreateRequest) -> Result<zmanager_core::apple_archive_backend::AppleArchiveCompression, String> {
-    use zmanager_core::apple_archive_backend::AppleArchiveCompression;
+fn apple_archive_compression(request: &CreateRequest) -> Result<zmanager_core::engine::AppleArchiveCompression, String> {
+    use zmanager_core::engine::AppleArchiveCompression;
 
     match request.method.as_deref() {
         None => Ok(AppleArchiveCompression::default()),
@@ -616,12 +616,12 @@ fn apple_archive_compression(request: &CreateRequest) -> Result<zmanager_core::a
     }
 }
 
-fn zip_compression_options(request: &CreateRequest) -> Result<(zmanager_core::zip_backend::ZipCompression, Option<i64>), String> {
+fn zip_compression_options(request: &CreateRequest) -> Result<(zmanager_core::engine::ZipCompression, Option<i64>), String> {
     let mut compression = request.compression;
     if let Some(method) = request.method.as_deref() {
         compression = match method {
-            "store" => zmanager_core::zip_backend::ZipCompression::Store,
-            "deflate" => zmanager_core::zip_backend::ZipCompression::Deflate,
+            "store" => zmanager_core::engine::ZipCompression::Store,
+            "deflate" => zmanager_core::engine::ZipCompression::Deflate,
             _ => compression,
         };
     }
@@ -632,14 +632,14 @@ fn zip_compression_options(request: &CreateRequest) -> Result<(zmanager_core::zi
     if !(0..=9).contains(&level) {
         return Err(format!("unsupported compression level for selected archive format: {level}"));
     }
-    if compression == zmanager_core::zip_backend::ZipCompression::Store {
+    if compression == zmanager_core::engine::ZipCompression::Store {
         if level == 0 {
             return Ok((compression, None));
         }
         return Err(format!("cannot combine ZIP store compression with compression level {level}"));
     }
     if level == 0 {
-        return Ok((zmanager_core::zip_backend::ZipCompression::Store, None));
+        return Ok((zmanager_core::engine::ZipCompression::Store, None));
     }
 
     Ok((compression, Some(i64::from(level))))

@@ -5,7 +5,8 @@ use std::io;
 use std::path::Path;
 
 use zmanager_core::archive_browser::BrowserEntryKind;
-use zmanager_core::tzap_backend::{has_existing_tzap_input_volume, is_tzap_archive_path};
+#[cfg(feature = "tzap-online")]
+use zmanager_core::engine::{has_existing_tzap_input_volume, is_tzap_archive_path};
 
 use crate::ffi::error::{ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, bridge_error, hint, map_io_error};
 use crate::ffi::types::{ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CreateArchiveFormat, ZmanagerGuiError};
@@ -145,19 +146,24 @@ pub(crate) fn ensure_existing_file_path(value: String, field: &str) -> Result<St
     let value = sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
 
     let path = Path::new(&value);
-    let metadata = fs::metadata(path).map_err(|source| {
-        if source.kind() == io::ErrorKind::NotFound {
-            bridge_error(
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            // Volume-set archives are addressed by their logical base path;
+            // the engine owns discovery of the physical numbered volumes.
+            if zmanager_core::engine::has_existing_tzap_input_volume(path) || zmanager_core::engine::has_existing_7z_input_volume(path) {
+                return Ok(value);
+            }
+            return Err(bridge_error(
                 ERROR_NOT_FOUND,
                 format!("{field} does not exist"),
                 hint("Choose an archive that has already been copied into app-controlled storage."),
                 BridgeSeverity::Warning,
                 false,
-            )
-        } else {
-            map_io_error(path.to_path_buf(), source)
+            ));
         }
-    })?;
+        Err(source) => return Err(map_io_error(path.to_path_buf(), source)),
+    };
 
     if !metadata.is_file() {
         return Err(bridge_error(ERROR_INVALID_REQUEST, format!("{field} must point to a file"), None, BridgeSeverity::Warning, false));
@@ -172,6 +178,7 @@ pub(crate) fn ensure_existing_file_path(value: String, field: &str) -> Result<St
 /// names a TZAP archive (or one of its numbered volumes) whose volumes exist
 /// beside it — a multi-volume archive is addressed by its non-existent base
 /// name (e.g. `sample.tzap`), and the core discovery resolves the volumes.
+#[cfg(feature = "tzap-online")]
 pub(crate) fn ensure_existing_tzap_archive_path(value: String, field: &str) -> Result<String, ZmanagerGuiError> {
     let value = sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
 
@@ -231,8 +238,10 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_split_zip_extension(&extension) => ArchiveFormat::SplitZip,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_rar_sidecar_extension(&extension) => ArchiveFormat::MultipartRar,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if extension == "xip" => ArchiveFormat::Xip,
-        // Kinds with no FFI variant (TarLzma, TarLz, TarLzo, TarCompress, TarLz4, TarLrz, Iso, Cab, Cpio, Rpm, Xar, Pkg,
-        // Dmg, Msi, Lha, Ar, Warc, Mtree, Deb) and unknown paths: generic fallback.
+        // Kinds with no dedicated FFI variant (TarLzma, TarLz, TarLzo,
+        // TarCompress, TarLz4, TarLrz, Iso, Cab, Cpio, Rpm, Xar, Pkg, Dmg,
+        // Msi, Lha, Ar, Warc, Mtree, Deb) and unknown paths use the generic
+        // product classification.
         _ => ArchiveFormat::Other,
     };
 

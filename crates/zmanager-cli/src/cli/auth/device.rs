@@ -7,8 +7,8 @@ use crate::cli::options::{GlobalOptions, parse_global_option, take_value};
 use crate::cli::usage::{DEVICE_HELP, command_usage_error, print_help_stdout, print_success_line, wants_help};
 use serde_json::json;
 use std::process::ExitCode;
-use zmanager_core::auth_client::TzapSessionStore as _;
-use zmanager_core::tzap_service::tzap_device_retire_json;
+use zmanager_tzap_hosted::auth_client::TzapSessionStore as _;
+use zmanager_tzap_hosted::tzap_service::tzap_device_retire_json;
 
 pub(crate) fn device_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if wants_help(args) || args.is_empty() {
@@ -81,15 +81,18 @@ pub(super) fn device_revoke_command(args: &[String], mut global: GlobalOptions) 
     let Some(sign_device_id) = sign_device_id else {
         return command_usage_error("device", "missing --device-id", &global);
     };
-    let sign_base_url = service_base_url.unwrap_or_else(|| zmanager_core::auth_client::SIGN_TZAP_BASE_URL.to_owned());
-    let session_store = zmanager_core::tzap_service_auth::TzapFfiSessionStore::new(&context.state_dir);
+    let sign_base_url = service_base_url.unwrap_or_else(|| zmanager_tzap_hosted::auth_client::SIGN_TZAP_BASE_URL.to_owned());
+    let session_store = zmanager_tzap_hosted::tzap_service_auth::TzapFfiSessionStore::new(&context.state_dir);
     let Some(session) = session_store.load_session(&context.account_key) else {
         print_stable_tzap_error("device_revoke", MISSING_TZAP_SESSION, &global);
         return ExitCode::FAILURE;
     };
     let transport = CliHttpJsonTransport;
-    let lifecycle =
-        zmanager_core::certificate_lifecycle::TzapCertificateLifecycleClient::new(&sign_base_url, zmanager_core::auth_client::LOGIN_TZAP_BASE_URL, &transport);
+    let lifecycle = zmanager_tzap_hosted::certificate_lifecycle::TzapCertificateLifecycleClient::new(
+        &sign_base_url,
+        zmanager_tzap_hosted::auth_client::LOGIN_TZAP_BASE_URL,
+        &transport,
+    );
     match lifecycle.revoke_personal_device(&session, &sign_device_id) {
         Ok(completion) => {
             if global.json {

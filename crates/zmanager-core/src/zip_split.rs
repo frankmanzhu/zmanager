@@ -64,13 +64,22 @@ pub(crate) fn split_zip_temp_archive(archive_path: &Path, destination: &Path, vo
 /// `zip` crate can perform all metadata, decompression, encryption, and CRC
 /// handling. The volume payload is read on demand; it is never concatenated
 /// into memory or a temporary file.
-pub(crate) trait ReadSeek: Read + Seek {}
-impl<T: Read + Seek> ReadSeek for T {}
+pub(crate) trait ReadSeek: Read + Seek + Send {}
+impl<T: Read + Seek + Send> ReadSeek for T {}
 
 pub(crate) fn open_zip_reader(path: &Path) -> Result<Box<dyn ReadSeek>, ZipBackendError> {
     let paths = crate::multi_volume::discover_multi_volume_paths(path);
+    open_zip_reader_from_paths(&paths)
+}
+
+/// Opens a ZIP reader from the caller-owned, already resolved volume set.
+///
+/// The engine uses this entry point after `ArchiveSource` has captured the
+/// source shape. It must not rediscover sidecars from a final path.
+pub(crate) fn open_zip_reader_from_paths(paths: &[PathBuf]) -> Result<Box<dyn ReadSeek>, ZipBackendError> {
     if paths.len() <= 1 {
-        return File::open(path).map(|file| Box::new(file) as Box<dyn ReadSeek>).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source });
+        let path = paths.first().cloned().unwrap_or_else(|| PathBuf::from("<ZIP source>"));
+        return File::open(&path).map(|file| Box::new(file) as Box<dyn ReadSeek>).map_err(|source| ZipBackendError::Io { path, source });
     }
     let Some(first_path) = paths.first() else {
         return Err(unsupported_split_zip("split ZIP volume set is incomplete"));
@@ -79,12 +88,15 @@ pub(crate) fn open_zip_reader(path: &Path) -> Result<Box<dyn ReadSeek>, ZipBacke
     let mut first = File::open(first_path).map_err(|source| ZipBackendError::Io { path: first_path.clone(), source })?;
     let read = first.read(&mut header).map_err(|source| ZipBackendError::Io { path: paths[0].clone(), source })?;
     if read == header.len() && header == ZIP_SPLIT_SIGNATURE {
-        Ok(Box::new(SplitZipReader::open(&paths)?))
+        Ok(Box::new(SplitZipReader::open(paths)?))
     } else {
         // 7-Zip's `-v` ZIP output is a raw contiguous stream split across
         // numbered `.zip.001` volumes rather than a disk-spanned ZIP with
         // PK\x07\x08 markers. Present the ordered segments directly.
-        Ok(Box::new(SegmentedReader::open(paths).map_err(|source| ZipBackendError::Io { path: path.to_path_buf(), source })?))
+        Ok(Box::new(
+            SegmentedReader::open(paths.to_vec())
+                .map_err(|source| ZipBackendError::Io { path: paths.first().cloned().unwrap_or_else(|| PathBuf::from("<split ZIP>")), source })?,
+        ))
     }
 }
 

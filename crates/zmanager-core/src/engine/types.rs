@@ -34,6 +34,13 @@ pub struct DetectedArchive {
     pub source: ArchiveSource,
 }
 
+/// Bounded source limits applied while opening an archive handle.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct OpenLimits {
+    /// Optional aggregate byte limit for the owned source/volume set.
+    pub max_source_bytes: Option<u64>,
+}
+
 /// Immutable credentials and source options bound to an opened archive handle.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct OpenOptions {
@@ -41,6 +48,8 @@ pub struct OpenOptions {
     pub password: Option<String>,
     /// Optional private key used to unwrap recipient-encrypted TZAP archives.
     pub recipient_key: Option<PathBuf>,
+    /// Bounds applied to the owned source before adapter dispatch.
+    pub limits: OpenLimits,
 }
 
 impl OpenOptions {
@@ -96,6 +105,13 @@ pub struct EngineEntry {
     pub group: Option<String>,
 }
 
+/// Canonicalizes archive names for the engine contract without deciding
+/// whether a name is safe to extract. Traversal components remain visible so
+/// the safety planner can reject them deliberately at extraction time.
+pub(crate) fn normalize_engine_path(raw_path: &str) -> String {
+    raw_path.replace('\\', "/").split('/').filter(|component| !component.is_empty() && *component != ".").collect::<Vec<_>>().join("/")
+}
+
 impl Default for EngineEntry {
     fn default() -> Self {
         Self {
@@ -138,7 +154,7 @@ pub struct TestOptions {
     /// Optional recipient key used by encrypted TZAP archives.
     pub recipient_key: Option<PathBuf>,
     /// Optional X.509 trust policy for TZAP root-auth verification.
-    pub tzap_x509_trust: Option<crate::tzap_backend::TzapX509TrustOptions>,
+    pub tzap_x509_trust: Option<TzapX509TrustOptions>,
     /// Cooperative cancellation flag checked before and during test work.
     pub cancellation: Option<Arc<AtomicBool>>,
 }
@@ -181,7 +197,7 @@ pub struct ExtractOptions<'a> {
     /// Optional in-memory private key used by recipient-encrypted formats.
     pub recipient_key_bytes: Option<Vec<u8>>,
     /// Optional TZAP metadata restoration policy for full extraction.
-    pub tzap_restore_options: Option<crate::tzap_backend::TzapRestoreOptions>,
+    pub tzap_restore_options: Option<TzapRestoreOptions>,
     /// Optional password for TZAP extraction, independent of the archive open password.
     pub tzap_password: Option<String>,
     /// Optional cancellation token owned by the consumer/job registry.
@@ -247,7 +263,7 @@ pub struct SelectedExtractOptions<'a> {
     /// Shared safety and overwrite policy.
     pub policy: ExtractionPolicy,
     /// Optional TZAP metadata restoration policy for selected extraction.
-    pub tzap_restore_options: Option<crate::tzap_backend::TzapRestoreOptions>,
+    pub tzap_restore_options: Option<TzapRestoreOptions>,
     /// Optional cancellation token.
     pub cancellation: Option<CancellationToken>,
     /// Optional overwrite resolver for `Ask` policy.
@@ -279,21 +295,323 @@ pub struct CopyReport {
     pub written_bytes: u64,
 }
 
+/// ZIP compression selected by the engine creation contract.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum ZipCompression {
+    /// Store file data without compression.
+    Store,
+    /// Deflate file data.
+    #[default]
+    Deflate,
+}
+
+/// Engine-owned ZIP creation options.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ZipCreateOptions {
+    /// Compression method for regular files.
+    pub compression: ZipCompression,
+    /// Optional compression level.
+    pub level: Option<i64>,
+    /// Preserve portable metadata.
+    pub preserve_metadata: bool,
+    /// Replace an existing destination archive.
+    pub replace_existing: bool,
+    /// Optional password.
+    pub password: Option<crate::secrets::SecretString>,
+    /// Optional split volume size.
+    pub volume_size: Option<u64>,
+}
+
+impl Default for ZipCreateOptions {
+    fn default() -> Self {
+        Self { compression: ZipCompression::default(), level: None, preserve_metadata: true, replace_existing: false, password: None, volume_size: None }
+    }
+}
+
+/// Engine-owned 7z creation options.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct SevenZCreateOptions {
+    /// Whether regular files share a solid block.
+    pub solid: bool,
+    /// LZMA2 compression level.
+    pub level: Option<u32>,
+    /// LZMA2 worker count.
+    pub threads: Option<u32>,
+    /// LZMA2 independent chunk size.
+    pub chunk_size: Option<u64>,
+    /// Preserve timestamps and attributes.
+    pub preserve_metadata: bool,
+    /// Optional AES password.
+    pub password: Option<crate::secrets::SecretString>,
+    /// Encrypt archive headers.
+    pub encrypt_file_names: bool,
+    /// Replace an existing destination archive.
+    pub replace_existing: bool,
+    /// Optional split volume size.
+    pub volume_size: Option<u64>,
+}
+
+impl Default for SevenZCreateOptions {
+    fn default() -> Self {
+        Self {
+            solid: true,
+            level: None,
+            threads: crate::tar_metadata::available_parallelism_at_least_two(),
+            chunk_size: Some(16 * 1024 * 1024),
+            preserve_metadata: true,
+            password: None,
+            encrypt_file_names: true,
+            replace_existing: false,
+            volume_size: None,
+        }
+    }
+}
+
+/// Engine-owned TAR.ZST creation options.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TarZstdCreateOptions {
+    /// Zstandard compression level.
+    pub level: i32,
+    /// Zstandard worker count.
+    pub threads: Option<u32>,
+    /// Preserve portable metadata.
+    pub preserve_metadata: bool,
+    /// Replace an existing destination archive.
+    pub replace_existing: bool,
+}
+
+impl Default for TarZstdCreateOptions {
+    fn default() -> Self {
+        Self { level: 3, threads: crate::tar_metadata::available_parallelism_at_least_two(), preserve_metadata: true, replace_existing: false }
+    }
+}
+
+/// Engine-owned TAR.GZ creation options.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TarGzCreateOptions {
+    /// Gzip compression level.
+    pub level: i32,
+    /// Preserve portable metadata.
+    pub preserve_metadata: bool,
+    /// Replace an existing destination archive.
+    pub replace_existing: bool,
+}
+
+impl Default for TarGzCreateOptions {
+    fn default() -> Self {
+        Self { level: 6, preserve_metadata: true, replace_existing: false }
+    }
+}
+
+/// Apple Archive compression selected by the engine creation contract.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum AppleArchiveCompression {
+    /// No compression.
+    None,
+    /// LZ4 compression.
+    Lz4,
+    /// ZLIB compression.
+    Zlib,
+    /// LZMA compression.
+    Lzma,
+    /// LZFSE compression.
+    #[default]
+    Lzfse,
+    /// LZBITMAP compression.
+    Lzbitmap,
+}
+
+/// Engine-owned Apple Archive creation options.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AppleArchiveCreateOptions {
+    /// Compression algorithm.
+    pub compression: AppleArchiveCompression,
+    /// Compression block size.
+    pub block_size: usize,
+    /// Native worker count.
+    pub threads: i32,
+    /// Preserve portable metadata.
+    pub preserve_metadata: bool,
+    /// Replace an existing destination archive.
+    pub replace_existing: bool,
+    /// Optional encryption password.
+    pub password: Option<String>,
+}
+
+impl Default for AppleArchiveCreateOptions {
+    fn default() -> Self {
+        Self {
+            compression: AppleArchiveCompression::default(),
+            block_size: 4 * 1024 * 1024,
+            threads: 0,
+            preserve_metadata: true,
+            replace_existing: false,
+            password: None,
+        }
+    }
+}
+
+/// Engine-owned TZAP metadata restoration policy.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum TzapRestorePolicy {
+    /// Restore payload bytes only.
+    Content,
+    /// Restore portable metadata.
+    #[default]
+    Portable,
+    /// Request authenticated metadata for the current operating system.
+    SameOs,
+    /// Explicitly authorize system metadata restoration.
+    System,
+}
+
+/// Engine-owned TZAP extraction restoration options.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct TzapRestoreOptions {
+    /// Requested restoration level.
+    pub policy: TzapRestorePolicy,
+    /// Permit unsupported metadata to be skipped with diagnostics.
+    pub allow_degraded: bool,
+    /// Allow absolute symlinks.
+    pub allow_absolute_symlinks: bool,
+}
+
+/// Engine-owned TZAP X.509 signing options.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum TzapX509SigningOptions {
+    /// PKCS#12 signing identity.
+    Pkcs12 { identity: PathBuf, password: crate::secrets::SecretString },
+    /// PEM/DER signing certificate and key.
+    CertificateAndKey { signing_certificate: PathBuf, signing_private_key: PathBuf, signing_chain: Vec<PathBuf> },
+    /// Signing material resolved from a secure local store.
+    InMemory { signing_certificate: Vec<u8>, signing_private_key: crate::secrets::SecretBytes, signing_chain: Vec<Vec<u8>> },
+}
+
+/// Engine-owned TZAP X.509 trust options.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct TzapX509TrustOptions {
+    /// PEM or DER trusted CA certificates.
+    pub trusted_ca_certificates: Vec<PathBuf>,
+    /// Allow system trust roots.
+    pub trusted_system_roots: bool,
+    /// Include the embedded official TZAP root.
+    pub include_official_tzap_root: bool,
+}
+
+impl TzapX509TrustOptions {
+    /// Returns whether verification has at least one configured trust source.
+    #[must_use]
+    pub fn has_trust_source(&self) -> bool {
+        self.include_official_tzap_root || !self.trusted_ca_certificates.is_empty() || self.trusted_system_roots
+    }
+}
+
+/// Engine-owned public TZAP X.509 verification report.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TzapX509VerificationReport {
+    /// Verified archive root commitment.
+    pub archive_root: [u8; 32],
+    /// `RootAuth` authenticator identifier.
+    pub authenticator_id: u16,
+    /// `RootAuth` signer identity type.
+    pub signer_identity_type: u16,
+    /// Number of data blocks covered by the `RootAuth` footer.
+    pub total_data_block_count: u64,
+    /// Signer-claimed signing time.
+    pub signed_at_unix_seconds: i64,
+    /// Leaf certificate subject.
+    pub subject: String,
+    /// Leaf certificate issuer.
+    pub issuer: String,
+    /// Leaf certificate serial number.
+    pub serial_number_hex: String,
+    /// SHA-256 fingerprint of the leaf certificate.
+    pub certificate_sha256: [u8; 32],
+    /// Subjects in the verified chain.
+    pub verified_chain_subjects: Vec<String>,
+    /// Trust anchor subject, when available.
+    pub trust_anchor_subject: Option<String>,
+    /// Verification diagnostics.
+    pub diagnostics: Vec<String>,
+}
+
+/// Engine-owned public TZAP X.509 signer inspection report.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TzapX509SignerInspection {
+    /// Archive root commitment.
+    pub archive_root: [u8; 32],
+    /// `RootAuth` authenticator identifier.
+    pub authenticator_id: u16,
+    /// `RootAuth` signer identity type.
+    pub signer_identity_type: u16,
+    /// Number of covered data blocks.
+    pub total_data_block_count: u64,
+    /// Signer-claimed signing time.
+    pub signed_at_unix_seconds: i64,
+    /// Leaf certificate subject.
+    pub subject: String,
+    /// Leaf certificate issuer.
+    pub issuer: String,
+    /// Leaf certificate serial number.
+    pub serial_number_hex: String,
+    /// Leaf certificate SHA-256 fingerprint.
+    pub certificate_sha256: [u8; 32],
+    /// Diagnostics from signer inspection.
+    pub diagnostics: Vec<String>,
+}
+
+/// Engine-owned TZAP archive key source.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum TzapKeySource {
+    /// Password-derived key.
+    Passphrase(crate::secrets::SecretString),
+    /// One recipient certificate.
+    RecipientCertificate(PathBuf),
+    /// Multiple recipient certificates.
+    RecipientCertificates(Vec<PathBuf>),
+    /// Multiple recipient public keys.
+    RecipientPublicKeys(Vec<Vec<u8>>),
+    /// Unencrypted archive.
+    NoPassword,
+}
+
+/// Engine-owned TZAP creation options.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TzapCreateOptions {
+    /// Archive key source.
+    pub key_source: TzapKeySource,
+    /// Zstandard compression level.
+    pub level: i32,
+    /// Preserve portable metadata.
+    pub preserve_metadata: bool,
+    /// Replace an existing destination archive.
+    pub replace_existing: bool,
+    /// Optional split volume size.
+    pub volume_size: Option<u64>,
+    /// Recovery percentage.
+    pub recovery_percentage: u8,
+    /// Missing-volume tolerance.
+    pub volume_loss_tolerance: u8,
+    /// Optional X.509 `RootAuth` signer.
+    pub x509_signing: Option<TzapX509SigningOptions>,
+}
+
 /// Typed format-specific options for one-shot archive creation.
 #[derive(Debug, Clone)]
 pub enum CreateOptions {
     /// Native seekable or split ZIP creation.
-    Zip(crate::zip_backend::ZipCreateOptions),
+    Zip(ZipCreateOptions),
     /// Native 7z creation.
-    SevenZ(crate::sevenz_backend::SevenZCreateOptions),
+    SevenZ(SevenZCreateOptions),
     /// Native TAR.ZST creation.
-    TarZstd(crate::tar_zst_backend::TarZstdCreateOptions),
+    TarZstd(TarZstdCreateOptions),
     /// Native TAR.GZ creation.
-    TarGz(crate::tar_gz_backend::TarGzCreateOptions),
+    TarGz(TarGzCreateOptions),
     /// Native TZAP creation.
-    Tzap(crate::tzap_backend::TzapCreateOptions),
+    Tzap(TzapCreateOptions),
     /// Native Apple Archive creation.
-    AppleArchive(crate::apple_archive_backend::AppleArchiveCreateOptions),
+    AppleArchive(AppleArchiveCreateOptions),
 }
 
 impl CreateOptions {
@@ -362,7 +680,7 @@ pub struct CreateReport {
 }
 
 /// Archive operation supported by the engine seam.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum ArchiveOperation {
     /// List entries in the archive.
     List,
@@ -404,6 +722,8 @@ pub enum ErrorKind {
     SafetyViolation,
     /// Underlying filesystem I/O error.
     Io,
+    /// The opened source changed after the handle was created or listed.
+    SourceChanged,
     /// Operation not supported by this format/adapter.
     UnsupportedOperation,
     /// Operation was cooperatively cancelled.
@@ -464,6 +784,7 @@ impl ArchiveError {
             ErrorKind::ResourceLimitExceeded => "resource limit exceeded",
             ErrorKind::SafetyViolation => "safety violation",
             ErrorKind::Io => "I/O error",
+            ErrorKind::SourceChanged => "source changed",
             ErrorKind::UnsupportedOperation => "unsupported operation",
             ErrorKind::Cancelled => "cancelled",
         }
@@ -485,6 +806,10 @@ pub struct HandleCapabilities {
     pub format: FormatId,
     /// Source access capability.
     pub source_access: SourceAccess,
+    /// How the adapter navigates entries after listing.
+    pub navigation: NavigationMode,
+    /// Credentials accepted by the adapter, if any.
+    pub credential_requirement: CredentialRequirement,
     /// Supported operations.
     pub operations: Vec<ArchiveOperation>,
     /// Whether header or payload encryption is supported.
@@ -506,10 +831,34 @@ pub struct FormatCapabilities {
     pub operations: Vec<ArchiveOperation>,
     /// Source access required by the registered adapters.
     pub source_access: Option<SourceAccess>,
+    /// Navigation behavior exposed by the registered read adapter.
+    pub navigation: Option<NavigationMode>,
+    /// Credential behavior exposed by the registered adapter.
+    pub credential_requirement: CredentialRequirement,
     /// Whether any registered adapter supports encryption.
     pub encryption_supported: bool,
     /// Product-facing role derived from registered operations.
     pub role: Option<ArchivePluginRole>,
+}
+
+/// Entry-navigation behavior promised by an adapter claim.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum NavigationMode {
+    /// The session can service arbitrary retained entry IDs.
+    RandomAccess,
+    /// The session must scan from the beginning for entry operations.
+    SequentialScan,
+}
+
+/// Credential shape accepted by an adapter claim.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum CredentialRequirement {
+    /// The format is not encrypted or does not require credentials.
+    None,
+    /// A password may be supplied.
+    Password,
+    /// A password or recipient private key may be supplied.
+    PasswordOrRecipientKey,
 }
 
 /// Product-facing capability role derived from operation registrations.
@@ -521,4 +870,16 @@ pub enum ArchivePluginRole {
     Extraction,
     /// The format has both creation and read/extraction operations.
     Both,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_engine_path;
+
+    #[test]
+    fn engine_path_normalization_is_display_stable_without_hiding_traversal() {
+        assert_eq!(normalize_engine_path("./folder\\\\file.txt"), "folder/file.txt");
+        assert_eq!(normalize_engine_path("//folder///file.txt"), "folder/file.txt");
+        assert_eq!(normalize_engine_path("../outside.txt"), "../outside.txt");
+    }
 }

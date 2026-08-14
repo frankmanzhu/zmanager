@@ -10,7 +10,7 @@ use crate::cli::usage::ME_HELP;
 use crate::cli::usage::{CERT_HELP, command_usage_error, print_error_line, print_help_stdout, print_success_line, wants_help};
 use serde_json::{Value, json};
 use std::process::ExitCode;
-use zmanager_core::tzap_service::{tzap_cert_enroll_json, tzap_cert_renew_json, tzap_cert_revoke_json, tzap_certificate_inventory_json};
+use zmanager_tzap_hosted::tzap_service::{tzap_cert_enroll_json, tzap_cert_renew_json, tzap_cert_revoke_json, tzap_certificate_inventory_json};
 
 #[cfg(feature = "tzap-online")]
 pub(crate) fn me_command(args: &[String], global: GlobalOptions) -> ExitCode {

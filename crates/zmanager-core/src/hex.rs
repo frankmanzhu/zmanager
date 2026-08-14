@@ -1,7 +1,7 @@
 //! Shared hex encoding tables and helpers.
 //!
 //! Historically each module shipped its own nibble tables and loops
-//! (`trust`, `auth_client`, `x509_format`, `status_client`); this is the
+//! (`trust`, `x509_format`); this is the
 //! single implementation so the schemes cannot drift.
 
 pub(crate) const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";

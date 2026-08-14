@@ -96,7 +96,7 @@ fn run_list_request(request: &ListRequest, global: &GlobalOptions) -> ExitCode {
     if let Some(code) = validate_recipient_key_open_option("list", &request.archive, request.password_stdin, request.recipient_key.as_ref(), global) {
         return code;
     }
-    if request.password_stdin && zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() {
+    if request.password_stdin && zmanager_core::engine::is_raw_stream_path(&request.archive) {
         print_error_line(global, format_args!("list failed: raw streams are not encrypted; remove --password-stdin"));
         return ExitCode::from(2);
     }
@@ -263,7 +263,7 @@ pub(crate) fn run_test_request(request: &TestRequest, global: &GlobalOptions) ->
     if request.public_no_key {
         return run_tzap_public_no_key_test(&request.archive, request, global);
     }
-    if request.password_stdin && zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() {
+    if request.password_stdin && zmanager_core::engine::is_raw_stream_path(&request.archive) {
         print_error_line(global, format_args!("test failed: raw streams are not encrypted; remove --password-stdin"));
         return ExitCode::from(2);
     }
@@ -315,7 +315,7 @@ fn run_engine_test(request: &TestRequest, password: Option<&str>) -> Result<(Str
     let engine = zmanager_core::engine::create_default_engine()?;
     let mut handle = engine.open(
         zmanager_core::engine::ArchiveSource::from_path_autodetect(&request.archive),
-        zmanager_core::engine::OpenOptions { password: password.map(str::to_owned), recipient_key: request.recipient_key.clone() },
+        zmanager_core::engine::OpenOptions { password: password.map(str::to_owned), recipient_key: request.recipient_key.clone(), ..Default::default() },
     )?;
     let selected_paths = if request.include.is_empty() && request.exclude.is_empty() {
         Vec::new()
@@ -342,8 +342,8 @@ pub(crate) fn tzap_default_volume_loss_tolerance(volume_size: Option<u64>) -> u8
     if volume_size.is_some() { TZAP_SPLIT_VOLUME_LOSS_TOLERANCE } else { TZAP_SINGLE_VOLUME_LOSS_TOLERANCE }
 }
 
-fn test_request_x509_trust(request: &TestRequest) -> zmanager_core::tzap_backend::TzapX509TrustOptions {
-    zmanager_core::tzap_backend::TzapX509TrustOptions {
+fn test_request_x509_trust(request: &TestRequest) -> zmanager_core::engine::TzapX509TrustOptions {
+    zmanager_core::engine::TzapX509TrustOptions {
         trusted_ca_certificates: request.trusted_ca_certs.clone(),
         trusted_system_roots: request.trusted_system_roots,
         include_official_tzap_root: !test_request_has_x509_trust(request),
@@ -352,7 +352,7 @@ fn test_request_x509_trust(request: &TestRequest) -> zmanager_core::tzap_backend
 
 fn run_tzap_public_no_key_test(archive: &str, request: &TestRequest, global: &GlobalOptions) -> ExitCode {
     let trust = test_request_x509_trust(request);
-    match zmanager_core::tzap_backend::verify_tzap_x509_public_no_key(archive, &trust) {
+    match zmanager_core::engine::verify_tzap_x509_public_no_key(archive, &trust) {
         Ok(report) => {
             print_tzap_public_no_key_success(&report, archive, global);
             ExitCode::SUCCESS
@@ -380,7 +380,7 @@ fn print_data_test_success(format: &str, tested_entries: u64, skipped_entries: u
     }
 }
 
-fn print_tzap_public_no_key_success(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport, archive: &str, global: &GlobalOptions) {
+fn print_tzap_public_no_key_success(root_auth: &zmanager_core::engine::TzapX509VerificationReport, archive: &str, global: &GlobalOptions) {
     if global.json {
         print!(
             "{{\"status\":\"ok\",\"format\":\"{}\",\"verification_mode\":\"public-no-key\",\"archive\":\"{}\",\"root_auth\":",
@@ -398,7 +398,7 @@ fn print_tzap_public_no_key_success(root_auth: &zmanager_core::tzap_backend::Tza
     }
 }
 
-fn print_tzap_x509_root_auth_json(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport) {
+fn print_tzap_x509_root_auth_json(root_auth: &zmanager_core::engine::TzapX509VerificationReport) {
     let status = root_auth.diagnostics.first().map_or("root_auth_content_verified", String::as_str);
     print!("{{\"status\":\"{}\",\"diagnostics\":", json_escape(status));
     print!("{}", crate::cli::usage::json_string_array(&root_auth.diagnostics));
@@ -428,7 +428,7 @@ fn print_tzap_x509_root_auth_json(root_auth: &zmanager_core::tzap_backend::TzapX
     print!("}}");
 }
 
-fn print_tzap_x509_root_auth_text(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport, public_no_key: bool, global: &GlobalOptions) {
+fn print_tzap_x509_root_auth_text(root_auth: &zmanager_core::engine::TzapX509VerificationReport, public_no_key: bool, global: &GlobalOptions) {
     let mode = if public_no_key { "public-no-key x509" } else { "x509" };
     print_success_line(global, format_args!("root-auth: OK {mode} {}", hex_lower(&root_auth.archive_root)));
     print_success_line(global, format_args!("root-auth signer: {}", root_auth.subject));
@@ -439,7 +439,7 @@ fn print_tzap_x509_root_auth_text(root_auth: &zmanager_core::tzap_backend::TzapX
     print_tzap_x509_diagnostics_text(root_auth, "root-auth", global);
 }
 
-fn print_tzap_x509_diagnostics_text(root_auth: &zmanager_core::tzap_backend::TzapX509VerificationReport, prefix: &str, global: &GlobalOptions) {
+fn print_tzap_x509_diagnostics_text(root_auth: &zmanager_core::engine::TzapX509VerificationReport, prefix: &str, global: &GlobalOptions) {
     for diagnostic in &root_auth.diagnostics {
         print_success_line(global, format_args!("{prefix}: {diagnostic}"));
     }

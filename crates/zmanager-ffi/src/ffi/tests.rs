@@ -8,10 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zmanager_core::backend_test_support::sevenz_backend::{SevenZCreateOptions, create_7z_from_manifest};
+use zmanager_core::backend_test_support::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
 use zmanager_core::jobs::{CancellationToken, JobEvent as CoreJobEvent, JobKind as CoreJobKind};
 use zmanager_core::manifest::{PlanOptions, plan_archive, plan_archives};
-use zmanager_core::sevenz_backend::{SevenZCreateOptions, create_7z_from_manifest};
-use zmanager_core::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
 
 #[cfg(feature = "tzap-online")]
 use tzap_core::format::FormatError;
@@ -78,8 +78,8 @@ fn classify_archive_path_supports_launch_extensions() {
 #[test]
 fn list_formats_returns_full_registry() {
     let result = listFormats();
-    // One row per core format kind (26 rows including RawStream and Unknown).
-    assert_eq!(result.formats.len(), zmanager_core::archive_format::FORMAT_CAPABILITIES.len());
+    // One row per core format kind plus the product-facing Unknown result.
+    assert_eq!(result.formats.len(), zmanager_core::archive_format::FORMAT_CAPABILITIES.len() + 1);
     assert!(result.formats.len() >= 26);
 
     let by_kind: std::collections::HashMap<&str, &FormatDescriptor> = result.formats.iter().map(|format| (format.kind.as_str(), format)).collect();
@@ -912,9 +912,9 @@ fn tzap_service_endpoints_return_validation_error_instead_of_continuing() {
 // TZAP online surface; only present in the full (auth) build.
 #[cfg(feature = "tzap-online")]
 fn tzap_public_metadata_display_summary_reports_unsigned_archive() {
+    use zmanager_core::backend_test_support::tzap::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
     use zmanager_core::jobs::JobContext;
     use zmanager_core::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
-    use zmanager_core::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
 
     let temp = TestDir::new("tzap-display-summary");
     let source = temp.path("payload.txt");

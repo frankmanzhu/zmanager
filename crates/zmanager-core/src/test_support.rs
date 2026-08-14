@@ -9,7 +9,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static NEXT_TEST_DIR_ID: AtomicU64 = AtomicU64::new(0);
 
 /// A uniquely named temporary directory that removes itself on drop.
 pub struct TestDir {
@@ -20,7 +23,8 @@ impl TestDir {
     /// Creates a fresh, uniquely named directory under the system temp dir.
     pub fn new(label: &str) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-        let root = std::env::temp_dir().join(format!("zmanager-{label}-{}-{now}", std::process::id()));
+        let id = NEXT_TEST_DIR_ID.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("zmanager-{label}-{}-{now}-{id}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         Self { root }
     }

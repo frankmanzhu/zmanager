@@ -19,10 +19,11 @@ sha2 = "0.10.8"
 thiserror = "2"
 uniffi = { version = "0.29", features = ["cli"] }
 zmanager-core = { workspace = true }
+zmanager-tzap-hosted = { workspace = true, optional = true }
 
 [features]
 default = ["tzap-online"]
-tzap-online = ["zmanager-core/tzap-online"]
+tzap-online = ["dep:zmanager-tzap-hosted"]
 
 [build-dependencies]
 uniffi = { version = "0.29", features = ["build"] }

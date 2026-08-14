@@ -26,6 +26,8 @@ use crate::tzap_service_auth::{
 };
 
 use crate::auth_client::TzapSessionStore;
+use crate::engine::tzap::TzapPublicSignatureStatus;
+use crate::engine::{TzapCreateOptions, TzapKeySource, TzapX509TrustOptions};
 use crate::jobs::{CancellationToken, JobEvent};
 use crate::local_identity_store::{
     FileTzapLocalIdentityStore, TzapContactRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory,
@@ -33,7 +35,6 @@ use crate::local_identity_store::{
 };
 use crate::manifest::PlanOptions;
 use crate::secrets::SecretString;
-use crate::tzap_backend::{TzapCreateOptions, TzapKeySource, TzapPublicSignatureStatus, TzapX509TrustOptions};
 use crate::x509_format::{hex_lower, x509_name_to_string};
 
 const TZAP_DEFAULT_COMPRESSION_LEVEL: i32 = 3;
@@ -379,7 +380,7 @@ pub fn create_tzap_self_signed_identity(identity_path: &str, public_certificate_
     }
 }
 
-fn tzap_public_metadata_json(summary: &crate::tzap_backend::TzapPublicMetadataSummary) -> Value {
+fn tzap_public_metadata_json(summary: &crate::engine::tzap::TzapPublicMetadataSummary) -> Value {
     let volumes = summary
         .volumes
         .iter()
@@ -426,7 +427,7 @@ fn tzap_public_metadata_json(summary: &crate::tzap_backend::TzapPublicMetadataSu
         },
     })
 }
-fn tzap_x509_root_auth_json(report: &crate::tzap_backend::TzapX509VerificationReport) -> Value {
+fn tzap_x509_root_auth_json(report: &crate::engine::tzap::TzapX509VerificationReport) -> Value {
     let status = report.diagnostics.first().map_or("root_auth_content_verified", String::as_str);
     json!({
         "status": status,
@@ -447,7 +448,7 @@ fn tzap_x509_root_auth_json(report: &crate::tzap_backend::TzapX509VerificationRe
         "trust_anchor_subject": report.trust_anchor_subject,
     })
 }
-fn tzap_x509_signer_inspection_json(report: &crate::tzap_backend::TzapX509SignerInspection) -> Value {
+fn tzap_x509_signer_inspection_json(report: &crate::engine::tzap::TzapX509SignerInspection) -> Value {
     let status = report.diagnostics.first().map_or("root_auth_signer_inspected", String::as_str);
     json!({
         "status": status,
@@ -483,7 +484,8 @@ pub fn verify_tzap_x509(archive_path: &str, password: Option<&str>, trusted_ca_c
     if !trust.has_trust_source() {
         return ffi_error_json("X.509 verification requires trusted roots");
     }
-    match crate::tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(PathBuf::from(archive_path), password, |_| true, Some(&trust)) {
+    let backend_trust = crate::engine::tzap::TzapX509TrustOptions::from(trust);
+    match crate::engine::tzap::test_tzap_with_optional_password_filter_and_x509_trust(PathBuf::from(archive_path), password, |_| true, Some(&backend_trust)) {
         Ok(report) => match report.x509_root_auth.as_ref() {
             Some(root_auth) => json!({
                 "ok": true,
@@ -508,7 +510,8 @@ pub fn verify_tzap_x509_public_no_key(archive_path: &str, trusted_ca_certs: &[St
     if !trust.has_trust_source() {
         return ffi_error_json("X.509 verification requires trusted roots");
     }
-    match crate::tzap_backend::verify_tzap_x509_public_no_key(PathBuf::from(archive_path), &trust) {
+    let backend_trust = crate::engine::tzap::TzapX509TrustOptions::from(trust);
+    match crate::engine::tzap::verify_tzap_x509_public_no_key(PathBuf::from(archive_path), &backend_trust) {
         Ok(root_auth) => json!({
             "ok": true,
             "verification_mode": "public-no-key",
@@ -524,7 +527,7 @@ pub fn verify_tzap_x509_public_no_key(archive_path: &str, trusted_ca_certs: &[St
 /// password, returning a JSON response envelope.
 #[must_use]
 pub fn inspect_tzap_x509_signer(archive_path: &str, password: Option<&str>) -> String {
-    match crate::tzap_backend::inspect_tzap_x509_signer(PathBuf::from(archive_path), password) {
+    match crate::engine::tzap::inspect_tzap_x509_signer(PathBuf::from(archive_path), password) {
         Ok(report) => json!({
             "ok": true,
             "inspection_mode": "full",
@@ -539,7 +542,7 @@ pub fn inspect_tzap_x509_signer(archive_path: &str, password: Option<&str>) -> S
 /// archive key, returning a JSON response envelope.
 #[must_use]
 pub fn inspect_tzap_x509_public_no_key_signer(archive_path: &str) -> String {
-    match crate::tzap_backend::inspect_tzap_x509_public_no_key_signer(PathBuf::from(archive_path)) {
+    match crate::engine::tzap::inspect_tzap_x509_public_no_key_signer(PathBuf::from(archive_path)) {
         Ok(report) => json!({
             "ok": true,
             "inspection_mode": "public-no-key",
@@ -557,18 +560,22 @@ pub fn inspect_tzap_x509_public_no_key_signer(archive_path: &str) -> String {
 #[must_use]
 pub fn tzap_public_metadata_summary(archive_path: &str) -> String {
     let archive_path = PathBuf::from(archive_path);
-    match crate::tzap_backend::summarize_tzap_public_metadata(&archive_path) {
+    match crate::engine::tzap::summarize_tzap_public_metadata(&archive_path) {
         Ok(summary) => {
-            let signature = match crate::tzap_backend::verify_tzap_x509_public_no_key(
+            let signature = match crate::engine::tzap::verify_tzap_x509_public_no_key(
                 &archive_path,
-                &TzapX509TrustOptions { trusted_ca_certificates: Vec::new(), trusted_system_roots: true, include_official_tzap_root: true },
+                &crate::engine::tzap::TzapX509TrustOptions {
+                    trusted_ca_certificates: Vec::new(),
+                    trusted_system_roots: true,
+                    include_official_tzap_root: true,
+                },
             ) {
                 Ok(root_auth) => json!({
                     "status": "verified",
                     "verification_mode": "public-no-key",
                     "root_auth": tzap_x509_root_auth_json(&root_auth),
                 }),
-                Err(error) => match crate::tzap_backend::inspect_tzap_x509_public_no_key_signer(&archive_path) {
+                Err(error) => match crate::engine::tzap::inspect_tzap_x509_public_no_key_signer(&archive_path) {
                     Ok(root_auth) => json!({
                         "status": "unverified",
                         "verification_mode": "public-no-key-inspection",
@@ -611,7 +618,7 @@ pub fn tzap_public_metadata_summary(archive_path: &str) -> String {
 #[must_use]
 pub fn tzap_public_metadata_display_summary(archive_path: &str) -> String {
     let archive_path = PathBuf::from(archive_path);
-    match crate::tzap_backend::summarize_tzap_public_display(&archive_path) {
+    match crate::engine::tzap::summarize_tzap_public_display(&archive_path) {
         Ok(summary) => {
             let signature = match &summary.signature {
                 TzapPublicSignatureStatus::Signed { signer } => json!({
@@ -1070,7 +1077,7 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
         // path with progress, instead of the job path without signing.
         let x509_signing = match certificate_id.as_deref() {
             Some(certificate_id) => Some(
-                crate::tzap_backend::tzap_x509_signing_options_from_inventory(&store, &context.account_key, certificate_id, now_unix_seconds)
+                crate::engine::tzap::tzap_x509_signing_options_from_inventory(&store, &context.account_key, certificate_id, now_unix_seconds)
                     .map_err(|error| error.clone())?,
             ),
             None => None,
@@ -1087,7 +1094,7 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
             volume_size: None,
             recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
             volume_loss_tolerance: TZAP_SINGLE_VOLUME_LOSS_TOLERANCE,
-            x509_signing,
+            x509_signing: x509_signing.map(Into::into),
         };
         let manifest = crate::manifest::plan_archives(&sources, &PlanOptions::default()).map_err(|error| error.to_string())?;
         let token = CancellationToken::new();

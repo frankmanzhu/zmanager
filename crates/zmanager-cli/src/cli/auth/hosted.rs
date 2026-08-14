@@ -9,9 +9,9 @@ use crate::cli::usage::{command_usage_error, print_error_line, print_success_lin
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
-#[cfg(feature = "tzap-online")]
-use zmanager_core::auth_client::TzapSessionStore as _;
 use zmanager_core::local_identity_store::TzapLocalIdentityStore;
+#[cfg(feature = "tzap-online")]
+use zmanager_tzap_hosted::auth_client::TzapSessionStore as _;
 
 #[derive(Debug)]
 
@@ -113,7 +113,7 @@ pub(super) fn run_hosted_cert_operation<F>(
 where
     F: FnOnce(
         &str,
-        &zmanager_core::auth_client::TzapSessionRecord,
+        &zmanager_tzap_hosted::auth_client::TzapSessionRecord,
         &mut zmanager_core::local_identity_store::FileTzapLocalIdentityStore,
         Vec<String>,
         Vec<Vec<u8>>,
@@ -123,7 +123,7 @@ where
     if options.trusted_root_cert_paths.is_empty() {
         return command_usage_error("cert", &format!("hosted {hosted_kind_label} requires at least one --trusted-root-cert"), global);
     }
-    let session_store = zmanager_core::tzap_service_auth::TzapFfiSessionStore::new(&options.context.state_dir);
+    let session_store = zmanager_tzap_hosted::tzap_service_auth::TzapFfiSessionStore::new(&options.context.state_dir);
     let Some(session) = session_store.load_session(&options.context.account_key) else {
         print_stable_tzap_error(operation, MISSING_TZAP_SESSION, global);
         return ExitCode::FAILURE;
@@ -175,7 +175,7 @@ pub(super) fn run_hosted_cert_enroll(options: &HostedCertOptions, global: &Globa
         global,
         |service_base_url, session, identity_store, trusted_root_sha256, trusted_root_der| {
             let now_unix_seconds = current_unix_seconds();
-            let request = zmanager_core::enrollment_client::TzapEnrollmentRequest {
+            let request = zmanager_tzap_hosted::enrollment_client::TzapEnrollmentRequest {
                 account_key: options.context.account_key.clone(),
                 org_id: options.org_id.clone().or_else(|| session.selected_org_id.clone()),
                 requested_validity_seconds: options.requested_validity_seconds,
@@ -186,13 +186,13 @@ pub(super) fn run_hosted_cert_enroll(options: &HostedCertOptions, global: &Globa
                 Err(error) => return Err(HostedCertOperationError::Message(error)),
             };
             let transport = CliHttpJsonTransport;
-            let client = zmanager_core::enrollment_client::TzapEnrollmentClient::local_staging_server(service_base_url, &transport);
+            let client = zmanager_tzap_hosted::enrollment_client::TzapEnrollmentClient::local_staging_server(service_base_url, &transport);
             let validator = CliTrustedEnrollmentCertificateValidator {
                 trusted_root_sha256,
                 trusted_root_der,
                 options: zmanager_core::trust::TzapCertificateProfileOptions::default(),
             };
-            zmanager_core::enrollment_client::enroll_device_certificate(&client, &validator, identity_store, session, &request, &signing_key, &csr_der)
+            zmanager_tzap_hosted::enrollment_client::enroll_device_certificate(&client, &validator, identity_store, session, &request, &signing_key, &csr_der)
                 .map_err(|error| HostedCertOperationError::Operation(error.to_string()))
         },
     )
@@ -233,25 +233,25 @@ pub(super) fn run_hosted_cert_renew(options: &HostedCertOptions, global: &Global
                 Err(error) => return Err(HostedCertOperationError::Message(format!("cannot generate CSR: {error}"))),
             };
             let now_unix_seconds = current_unix_seconds();
-            let login_base_url = zmanager_core::auth_client::LOGIN_TZAP_BASE_URL;
+            let login_base_url = zmanager_tzap_hosted::auth_client::LOGIN_TZAP_BASE_URL;
             let transport = CliHttpJsonTransport;
             let lifecycle =
-                zmanager_core::certificate_lifecycle::TzapCertificateLifecycleClient::local_staging_server(service_base_url, login_base_url, &transport);
+                zmanager_tzap_hosted::certificate_lifecycle::TzapCertificateLifecycleClient::local_staging_server(service_base_url, login_base_url, &transport);
             let validator = CliTrustedEnrollmentCertificateValidator {
                 trusted_root_sha256,
                 trusted_root_der,
                 options: zmanager_core::trust::TzapCertificateProfileOptions::default(),
             };
             let org_id = options.org_id.clone().or_else(|| session.selected_org_id.clone());
-            let renewal_request = zmanager_core::certificate_lifecycle::TzapRenewalRequest {
+            let renewal_request = zmanager_tzap_hosted::certificate_lifecycle::TzapRenewalRequest {
                 account_key: options.context.account_key.clone(),
                 previous_certificate_id: previous_certificate.certificate_id,
                 previous_certificate_sha256: previous_certificate.certificate_sha256,
                 org_id,
                 requested_validity_seconds: options.requested_validity_seconds,
-                renewal_policy: zmanager_core::certificate_lifecycle::TzapRenewalPolicy::SameKeyRequired,
+                renewal_policy: zmanager_tzap_hosted::certificate_lifecycle::TzapRenewalPolicy::SameKeyRequired,
                 now_unix_seconds,
-                server_grace_seconds: zmanager_core::certificate_lifecycle::RENEWAL_GRACE_MAX_SECONDS,
+                server_grace_seconds: zmanager_tzap_hosted::certificate_lifecycle::RENEWAL_GRACE_MAX_SECONDS,
             };
             lifecycle
                 .renew_certificate(&validator, identity_store, session, &renewal_request, &signing_key, &signing_key, &csr_der)
@@ -262,7 +262,7 @@ pub(super) fn run_hosted_cert_renew(options: &HostedCertOptions, global: &Global
 
 pub(crate) fn create_and_store_staging_enrollment_key(
     store: &mut zmanager_core::local_identity_store::FileTzapLocalIdentityStore,
-    request: &zmanager_core::enrollment_client::TzapEnrollmentRequest,
+    request: &zmanager_tzap_hosted::enrollment_client::TzapEnrollmentRequest,
     now_unix_seconds: u64,
 ) -> Result<(zmanager_core::local_identity_store::TzapDeviceSigningKeyRecord, Vec<u8>), String> {
     let mut inventory = store.load_inventory(&request.account_key).map_err(|error| error.to_string())?;
@@ -306,18 +306,18 @@ pub(super) struct CliTrustedEnrollmentCertificateValidator {
     options: zmanager_core::trust::TzapCertificateProfileOptions,
 }
 
-impl zmanager_core::enrollment_client::TzapEnrollmentCertificateValidator for CliTrustedEnrollmentCertificateValidator {
+impl zmanager_tzap_hosted::enrollment_client::TzapEnrollmentCertificateValidator for CliTrustedEnrollmentCertificateValidator {
     fn validate_certificate_chain(
         &self,
         chain_der: &[Vec<u8>],
-    ) -> Result<zmanager_core::trust::TzapCertificatePublicMetadata, zmanager_core::enrollment_client::TzapEnrollmentError> {
+    ) -> Result<zmanager_core::trust::TzapCertificatePublicMetadata, zmanager_tzap_hosted::enrollment_client::TzapEnrollmentError> {
         self.validate_custom_chain_with_root_pin(chain_der).map(|validation| validation.public_metadata)
     }
 
     fn validate_and_complete_certificate_chain(
         &self,
         chain_der: &[Vec<u8>],
-    ) -> Result<(Vec<Vec<u8>>, zmanager_core::trust::TzapCertificatePublicMetadata), zmanager_core::enrollment_client::TzapEnrollmentError> {
+    ) -> Result<(Vec<Vec<u8>>, zmanager_core::trust::TzapCertificatePublicMetadata), zmanager_tzap_hosted::enrollment_client::TzapEnrollmentError> {
         let mut last_error = match self.validate_completed_chain(chain_der) {
             Ok(result) => return Ok(result),
             Err(error) => error,
@@ -340,18 +340,18 @@ impl CliTrustedEnrollmentCertificateValidator {
     fn validate_completed_chain(
         &self,
         chain_der: &[Vec<u8>],
-    ) -> Result<(Vec<Vec<u8>>, zmanager_core::trust::TzapCertificatePublicMetadata), zmanager_core::enrollment_client::TzapEnrollmentError> {
+    ) -> Result<(Vec<Vec<u8>>, zmanager_core::trust::TzapCertificatePublicMetadata), zmanager_tzap_hosted::enrollment_client::TzapEnrollmentError> {
         self.validate_custom_chain_with_root_pin(chain_der).map(|validation| (chain_der.to_vec(), validation.public_metadata))
     }
 
     fn validate_custom_chain_with_root_pin(
         &self,
         chain_der: &[Vec<u8>],
-    ) -> Result<zmanager_core::trust::TzapCertificateProfileValidation, zmanager_core::enrollment_client::TzapEnrollmentError> {
+    ) -> Result<zmanager_core::trust::TzapCertificateProfileValidation, zmanager_tzap_hosted::enrollment_client::TzapEnrollmentError> {
         let validation = zmanager_core::trust::validate_custom_tzap_certificate_chain_der(chain_der, &self.options)
-            .map_err(|error| zmanager_core::enrollment_client::TzapEnrollmentError::CertificateChain(error.to_string()))?;
+            .map_err(|error| zmanager_tzap_hosted::enrollment_client::TzapEnrollmentError::CertificateChain(error.to_string()))?;
         if !self.trusted_root_sha256.iter().any(|trusted| trusted == &validation.root_certificate_sha256) {
-            return Err(zmanager_core::enrollment_client::TzapEnrollmentError::CertificateChain(format!(
+            return Err(zmanager_tzap_hosted::enrollment_client::TzapEnrollmentError::CertificateChain(format!(
                 "root certificate is not in the temporary trust store: {}",
                 validation.root_certificate_sha256
             )));

@@ -203,6 +203,24 @@ pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Wri
     Err(invalid(path, "retained WARC entry ID is not present"))
 }
 
+/// Copies one retained WARC record by path and duplicate occurrence.
+pub fn copy_by_path_occurrence(path: impl AsRef<Path>, selected_path: &str, selected_occurrence: usize, writer: &mut dyn io::Write) -> Result<u64, WarcError> {
+    let path = path.as_ref();
+    let mut occurrence = 0_usize;
+    let entry_index = list(path)?
+        .into_iter()
+        .find_map(|entry| {
+            if entry.path != selected_path {
+                return None;
+            }
+            let matches = occurrence == selected_occurrence;
+            occurrence = occurrence.saturating_add(1);
+            matches.then_some(entry.index)
+        })
+        .ok_or_else(|| invalid(path, "retained WARC entry is not present"))?;
+    copy(path, entry_index, writer)
+}
+
 fn record_path<T: io::Read>(
     record: &warc::Record<warc::StreamingBody<'_, T>>,
     index: usize,

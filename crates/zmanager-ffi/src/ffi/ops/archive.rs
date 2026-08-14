@@ -5,12 +5,11 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::UNIX_EPOCH;
 
 use sha2::{Digest as _, Sha256};
 
 use zmanager_core::archive_browser::{self, BrowserExtractOptions, BrowserListOptions};
-use zmanager_core::engine::{ArchiveOperation, ArchiveSource, OpenOptions, TestOptions, create_default_engine};
+use zmanager_core::engine::{ArchiveOperation, ArchiveSource, OpenOptions, SourceFingerprint, TestOptions, create_default_engine};
 use zmanager_core::jobs::CancellationToken;
 use zmanager_core::manifest;
 use zmanager_core::safety::{ExtractionPolicy, ExtractionSafetyPlanner};
@@ -59,8 +58,7 @@ struct ExtractionPlanRegistry {
 struct ExtractionPlanBinding {
     archive_path: String,
     destination_root: String,
-    archive_size: u64,
-    archive_modified_nanos: Option<u128>,
+    source_fingerprint: SourceFingerprint,
     password_digest: [u8; 32],
     selected_paths: Vec<String>,
     strip_components: u64,
@@ -76,22 +74,14 @@ impl ExtractionPlanBinding {
         strip_components: u64,
         collision_policy: ExtractionCollisionPolicy,
     ) -> Result<Self, ZmanagerGuiError> {
-        let metadata = std::fs::metadata(&archive_path).map_err(|_| {
-            bridge_error(
-                ERROR_INVALID_REQUEST,
-                "Unable to read the archive while preparing extraction.",
-                hint("Reopen the archive and review the extraction plan again."),
-                BridgeSeverity::Warning,
-                true,
-            )
-        })?;
-        let archive_modified_nanos = metadata.modified().ok().and_then(|modified| modified.duration_since(UNIX_EPOCH).ok()).map(|duration| duration.as_nanos());
+        let source = ArchiveSource::from_path_autodetect(&archive_path);
+        let engine = create_default_engine().map_err(crate::ffi::error::map_archive_engine_error)?;
+        let source_fingerprint = engine.capture_source_fingerprint(&source).map_err(crate::ffi::error::map_archive_engine_error)?;
 
         Ok(Self {
             archive_path,
             destination_root,
-            archive_size: metadata.len(),
-            archive_modified_nanos,
+            source_fingerprint,
             password_digest: extraction_password_digest(password),
             selected_paths,
             strip_components,
@@ -102,8 +92,7 @@ impl ExtractionPlanBinding {
     fn matches(&self, other: &Self) -> bool {
         self.archive_path == other.archive_path
             && self.destination_root == other.destination_root
-            && self.archive_size == other.archive_size
-            && self.archive_modified_nanos == other.archive_modified_nanos
+            && self.source_fingerprint == other.source_fingerprint
             && self.password_digest == other.password_digest
             && self.selected_paths == other.selected_paths
             && self.strip_components == other.strip_components
@@ -181,7 +170,7 @@ pub fn healthcheck() -> HealthcheckResult {
 #[allow(non_snake_case)]
 pub fn listFormats() -> ListFormatsResult {
     let engine_snapshot = create_default_engine().ok().map(|engine| engine.capability_snapshot()).unwrap_or_default();
-    let formats = zmanager_core::archive_format::FORMAT_CAPABILITIES
+    let mut formats = zmanager_core::archive_format::FORMAT_CAPABILITIES
         .iter()
         .map(|capability| {
             let engine_capability = zmanager_core::engine::FormatId::from_archive_format_kind(capability.kind)
@@ -205,7 +194,24 @@ pub fn listFormats() -> ListFormatsResult {
                 encryption_supported,
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
+    // Unknown is a product-facing detection result, not an engine registry
+    // row. Keep it here only for clients that display an explicit
+    // unrecognized-format state; it cannot resolve to an engine format or
+    // operation.
+    formats.push(FormatDescriptor {
+        kind: "Unknown".to_owned(),
+        label: kind_label(zmanager_core::archive_format::ArchiveFormatKind::Unknown).to_string(),
+        extensions: Vec::new(),
+        can_list: false,
+        can_extract: false,
+        can_create: false,
+        recognized: false,
+        platform_available: false,
+        unavailable_reason: Some("unrecognized format".to_owned()),
+        source_access: None,
+        encryption_supported: false,
+    });
     ListFormatsResult { formats }
 }
 
@@ -253,7 +259,10 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
     let listing = {
         let mut sessions = session_registry().lock().unwrap_or_else(|error| error.into_inner());
         let session_id = sessions
-            .open_session(ArchiveSource::from_path_autodetect(path), OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: None })
+            .open_session(
+                ArchiveSource::from_path_autodetect(path),
+                OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: None, ..Default::default() },
+            )
             .map_err(crate::ffi::error::map_archive_engine_error)?;
         let listing = sessions.list_session(&session_id).map_err(crate::ffi::error::map_archive_engine_error)?;
         sessions.close_session(&session_id).map_err(crate::ffi::error::map_archive_engine_error)?;
@@ -298,7 +307,7 @@ pub fn openArchiveSession(request: ArchiveSessionOpenRequest) -> Result<ArchiveS
     let password = password_ref(&request.password).map(ToOwned::to_owned);
     let mut sessions = session_registry().lock().unwrap_or_else(|error| error.into_inner());
     let session_id = sessions
-        .open_session(ArchiveSource::from_path_autodetect(Path::new(&archive_path)), OpenOptions { password, recipient_key: None })
+        .open_session(ArchiveSource::from_path_autodetect(Path::new(&archive_path)), OpenOptions { password, recipient_key: None, ..Default::default() })
         .map_err(crate::ffi::error::map_archive_engine_error)?;
     Ok(ArchiveSessionOpenResult { session_id })
 }
@@ -347,7 +356,7 @@ pub fn testArchive(request: TestArchiveRequest) -> Result<TestArchiveResult, Zma
     let password = password_ref(&request.password);
     let engine = create_default_engine().map_err(crate::ffi::error::map_archive_engine_error)?;
     let mut handle = engine
-        .open(ArchiveSource::from_path_autodetect(path), OpenOptions { password: password.map(str::to_owned), recipient_key: None })
+        .open(ArchiveSource::from_path_autodetect(path), OpenOptions { password: password.map(str::to_owned), recipient_key: None, ..Default::default() })
         .map_err(crate::ffi::error::map_archive_engine_error)?;
     let report = TestArchiveReport::from_engine(
         handle.test(&TestOptions { selected_paths, ..TestOptions::default() }).map_err(crate::ffi::error::map_archive_engine_error)?,

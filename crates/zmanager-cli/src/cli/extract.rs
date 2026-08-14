@@ -142,13 +142,13 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
             return usage_failure(global, format_args!("extract failed: --extract-nested is currently supported only for .deb packages"));
         }
         let destination = request.destination.unwrap_or_else(|| default_extract_destination(&request.archive));
-        return run_engine_extract(request.archive, destination, policy, None, None, zmanager_core::tzap_backend::TzapRestoreOptions::default(), global);
+        return run_engine_extract(request.archive, destination, policy, None, None, zmanager_core::engine::TzapRestoreOptions::default(), global);
     }
-    if zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() && request.password_stdin {
+    if zmanager_core::engine::is_raw_stream_path(&request.archive) && request.password_stdin {
         return usage_failure(global, format_args!("extract failed: raw streams are not encrypted; remove --password-stdin"));
     }
     let destination = request.destination.unwrap_or_else(|| {
-        if zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() {
+        if zmanager_core::engine::is_raw_stream_path(&request.archive) {
             default_raw_stream_destination(&request.archive)
         } else {
             default_extract_destination(&request.archive)
@@ -164,7 +164,7 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
         policy,
         password.as_deref(),
         request.recipient_key.as_deref(),
-        zmanager_core::tzap_backend::TzapRestoreOptions {
+        zmanager_core::engine::TzapRestoreOptions {
             policy: request.tzap_restore_policy,
             allow_degraded: request.tzap_allow_degraded,
             allow_absolute_symlinks: false,
@@ -179,7 +179,7 @@ fn run_engine_extract(
     policy: zmanager_core::safety::ExtractionPolicy,
     password: Option<&str>,
     recipient_key: Option<&Path>,
-    tzap_restore_options: zmanager_core::tzap_backend::TzapRestoreOptions,
+    tzap_restore_options: zmanager_core::engine::TzapRestoreOptions,
     global: &GlobalOptions,
 ) -> ExitCode {
     let archive_path = archive.as_ref().to_path_buf();
@@ -229,13 +229,21 @@ fn run_engine_extract(
         options.overwrite_resolver = Some(&mut resolver);
         zmanager_core::engine::extract_with_default_engine(
             zmanager_core::engine::ArchiveSource::from_path_autodetect(&archive_path),
-            zmanager_core::engine::OpenOptions { password: password.map(str::to_owned), recipient_key: recipient_key.map(Path::to_path_buf) },
+            zmanager_core::engine::OpenOptions {
+                password: password.map(str::to_owned),
+                recipient_key: recipient_key.map(Path::to_path_buf),
+                ..Default::default()
+            },
             &mut options,
         )
     } else {
         zmanager_core::engine::extract_with_default_engine(
             zmanager_core::engine::ArchiveSource::from_path_autodetect(&archive_path),
-            zmanager_core::engine::OpenOptions { password: password.map(str::to_owned), recipient_key: recipient_key.map(Path::to_path_buf) },
+            zmanager_core::engine::OpenOptions {
+                password: password.map(str::to_owned),
+                recipient_key: recipient_key.map(Path::to_path_buf),
+                ..Default::default()
+            },
             &mut options,
         )
     };
@@ -288,7 +296,7 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
         return ExitCode::from(2);
     }
 
-    if zmanager_core::raw_stream_backend::detect_raw_stream_format(&request.archive).is_some() && request.password_stdin {
+    if zmanager_core::engine::is_raw_stream_path(&request.archive) && request.password_stdin {
         print_error_line(global, format_args!("extract to stdout failed: raw streams are not encrypted; remove --password-stdin"));
         return ExitCode::from(2);
     }
@@ -342,12 +350,12 @@ fn copy_archive_to_stdout_via_engine(request: &ExtractRequest, password: Option<
         }
     }
 }
-fn parse_tzap_restore_policy(value: &str) -> Result<zmanager_core::tzap_backend::TzapRestorePolicy, String> {
+fn parse_tzap_restore_policy(value: &str) -> Result<zmanager_core::engine::TzapRestorePolicy, String> {
     match value {
-        "content" => Ok(zmanager_core::tzap_backend::TzapRestorePolicy::Content),
-        "portable" => Ok(zmanager_core::tzap_backend::TzapRestorePolicy::Portable),
-        "same-os" => Ok(zmanager_core::tzap_backend::TzapRestorePolicy::SameOs),
-        "system" => Ok(zmanager_core::tzap_backend::TzapRestorePolicy::System),
+        "content" => Ok(zmanager_core::engine::TzapRestorePolicy::Content),
+        "portable" => Ok(zmanager_core::engine::TzapRestorePolicy::Portable),
+        "same-os" => Ok(zmanager_core::engine::TzapRestorePolicy::SameOs),
+        "system" => Ok(zmanager_core::engine::TzapRestorePolicy::System),
         _ => Err(format!("unsupported TZAP restore policy: {value}; expected content, portable, same-os, or system")),
     }
 }

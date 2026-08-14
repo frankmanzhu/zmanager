@@ -18,8 +18,6 @@ impl Default for FormatId {
 }
 
 impl FormatId {
-    /// Stable identity used while reporting an unrecognized format.
-    pub const UNKNOWN: FormatId = FormatId("unknown");
     pub const ZIP: FormatId = FormatId("zip");
     pub const SPLIT_ZIP: FormatId = FormatId("split_zip");
     pub const SEVEN_Z: FormatId = FormatId("7z");
@@ -59,7 +57,7 @@ impl FormatId {
     #[must_use]
     pub const fn from_archive_format_kind(kind: ArchiveFormatKind) -> Option<Self> {
         match kind {
-            ArchiveFormatKind::Unknown => Some(Self::UNKNOWN),
+            ArchiveFormatKind::Unknown => None,
             ArchiveFormatKind::Zip => Some(Self::ZIP),
             ArchiveFormatKind::SplitZip => Some(Self::SPLIT_ZIP),
             ArchiveFormatKind::SevenZ => Some(Self::SEVEN_Z),
@@ -153,7 +151,7 @@ impl From<ArchiveFormatKind> for Option<FormatId> {
             ArchiveFormatKind::Vmdk => Some(FormatId::VMDK),
             ArchiveFormatKind::Udf => Some(FormatId::UDF),
             ArchiveFormatKind::RawStream => Some(FormatId::RAW_STREAM),
-            ArchiveFormatKind::Unknown => Some(FormatId::UNKNOWN),
+            ArchiveFormatKind::Unknown => None,
         }
     }
 }

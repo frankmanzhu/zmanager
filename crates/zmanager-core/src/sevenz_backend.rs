@@ -389,6 +389,11 @@ pub fn has_existing_7z_input(path: &Path) -> bool {
     discover_7z_read_volume_paths(path).is_ok_and(|paths| paths.iter().any(|candidate| candidate.is_file()))
 }
 
+/// Returns the complete path-backed input set used by the 7z reader.
+pub(crate) fn discover_7z_input_paths(path: &Path) -> Result<Vec<PathBuf>, SevenZError> {
+    discover_7z_read_volume_paths(path)
+}
+
 fn open_7z_reader(path: &Path) -> Result<SevenZReadSource, SevenZError> {
     let volume_paths = discover_7z_read_volume_paths(path)?;
     if volume_paths.len() > 1 {
@@ -544,6 +549,23 @@ pub fn extract_7z_entry_by_index(
     let mut selected_policy = policy;
     selected_policy.include_patterns = vec![entry.name.clone()];
     extract_7z_inner(archive_path, destination, password, selected_policy, overwrite_resolver, None, Some((entry.name.as_str(), occurrence)))
+}
+
+/// Extracts one retained 7z entry by its stable archive path and duplicate
+/// occurrence.  Unlike the legacy index wrapper, this does not list the
+/// archive again before opening the extraction reader.
+pub(crate) fn extract_7z_entry_by_name_occurrence(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    password: Option<&str>,
+    policy: ExtractionPolicy,
+    entry_name: &str,
+    occurrence: usize,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<SevenZExtractReport, SevenZError> {
+    let mut selected_policy = policy;
+    selected_policy.include_patterns = vec![entry_name.to_owned()];
+    extract_7z_inner(archive_path, destination, password, selected_policy, overwrite_resolver, None, Some((entry_name, occurrence)))
 }
 
 /// Extracts a `.7z` archive with an overwrite resolver.
@@ -727,6 +749,19 @@ pub fn copy_7z_entry_by_index<W: Write + ?Sized>(
     })?;
     let target_occurrence = listing.entries[..entry_index].iter().filter(|candidate| candidate.name == target.name).count();
     let target_name = target.name.clone();
+    copy_7z_entry_by_name_occurrence(archive_path, password, &target_name, target_occurrence, output)
+}
+
+/// Copies one retained regular 7z entry by its stable archive path and
+/// duplicate occurrence without re-listing the archive.
+pub(crate) fn copy_7z_entry_by_name_occurrence<W: Write + ?Sized>(
+    archive_path: impl AsRef<Path>,
+    password: Option<&str>,
+    target_name: &str,
+    target_occurrence: usize,
+    output: &mut W,
+) -> Result<u64, SevenZError> {
+    let archive_path = archive_path.as_ref();
     let password = archive_password(password);
     let source = open_7z_reader(archive_path)?;
     let mut reader = ArchiveReader::new(source, password)?;

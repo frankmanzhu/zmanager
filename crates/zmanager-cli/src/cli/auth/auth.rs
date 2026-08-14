@@ -8,7 +8,9 @@ use crate::cli::usage::{AUTH_MENU_HELP, command_usage_error, json_escape, print_
 use serde_json::{Value, json};
 use std::fs;
 use std::process::ExitCode;
-use zmanager_core::tzap_service::{tzap_auth_account_url_json, tzap_auth_callback_json, tzap_auth_forget_json, tzap_auth_login_json, tzap_auth_status_json};
+use zmanager_tzap_hosted::tzap_service::{
+    tzap_auth_account_url_json, tzap_auth_callback_json, tzap_auth_forget_json, tzap_auth_login_json, tzap_auth_status_json,
+};
 
 pub(crate) fn auth_command(args: &[String], global: GlobalOptions) -> ExitCode {
     if args.is_empty() {
@@ -109,9 +111,9 @@ pub(super) fn auth_login_command(args: &[String], mut global: GlobalOptions) -> 
         &context,
         json!({
             "environment": match endpoints.environment {
-                zmanager_core::auth_client::TzapHostedAuthEnvironment::Local => "local",
-                zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging => "staging",
-                zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod => "prod",
+                zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Local => "local",
+                zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Staging => "staging",
+                zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Prod => "prod",
             },
             "client_id": endpoints.client_id,
             "redirect_uri": endpoints.redirect_uri,
@@ -239,14 +241,14 @@ pub(super) fn auth_callback_command(args: &[String], mut global: GlobalOptions) 
             }
         }
     }
-    let pending = match zmanager_core::tzap_service_auth::load_pending_auth(&context.state_dir) {
+    let pending = match zmanager_tzap_hosted::tzap_service_auth::load_pending_auth(&context.state_dir) {
         Ok(pending) => pending,
         Err(error) => {
             print_error_line(&global, format_args!("auth callback failed: {error}"));
             return ExitCode::FAILURE;
         }
     };
-    let pending_metadata = zmanager_core::tzap_service_auth::load_pending_auth_metadata(&context.state_dir);
+    let pending_metadata = zmanager_tzap_hosted::tzap_service_auth::load_pending_auth_metadata(&context.state_dir);
     if state.is_none() {
         state = callback_url.as_deref().and_then(|url| callback_url_parameter(url, "state"));
     }
@@ -271,7 +273,7 @@ pub(super) fn auth_callback_command(args: &[String], mut global: GlobalOptions) 
         }
     } else if let Some(handoff_code) = handoff_code {
         let exchange_base_url =
-            auth_base_url.or(pending_metadata.auth_base_url).unwrap_or_else(|| zmanager_core::auth_client::LOCAL_HOSTED_AUTH_BASE_URL.to_owned());
+            auth_base_url.or(pending_metadata.auth_base_url).unwrap_or_else(|| zmanager_tzap_hosted::auth_client::LOCAL_HOSTED_AUTH_BASE_URL.to_owned());
         let exchange_client_id = client_id.or(pending_metadata.client_id).unwrap_or_else(|| DEFAULT_TZAP_CLIENT_ID.to_owned());
         match exchange_handoff_code(&exchange_base_url, &exchange_client_id, &redirect_uri, &state, &pkce_verifier, &handoff_code) {
             Ok(bytes) => bytes,
@@ -402,9 +404,9 @@ pub(super) fn auth_account_command(args: &[String], mut global: GlobalOptions) -
     }
     let request = json!({
         "environment": match endpoints.environment {
-            zmanager_core::auth_client::TzapHostedAuthEnvironment::Local => "local",
-            zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging => "staging",
-            zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod => "prod",
+            zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Local => "local",
+            zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Staging => "staging",
+            zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Prod => "prod",
         },
         "client_id": endpoints.client_id,
         "redirect_uri": endpoints.redirect_uri,

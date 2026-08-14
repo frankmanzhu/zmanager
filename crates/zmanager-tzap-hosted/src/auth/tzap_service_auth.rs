@@ -8,10 +8,10 @@
 //! CLI's former `FileTzapSessionStore` and its pending-auth helpers were
 //! merged here so there is one storage path.
 
-use crate::atomic_file::write_atomic_secret_file;
 use crate::auth_client::TzapSessionStore;
 use crate::trust;
 use crate::tzap_service::{request_string, request_u64, required_request_string};
+use crate::write_atomic_secret_file;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};

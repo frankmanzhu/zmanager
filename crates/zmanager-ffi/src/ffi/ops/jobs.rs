@@ -4,19 +4,17 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use zmanager_core::apple_archive_backend;
-use zmanager_core::archive_browser::{self, BrowserEntry, BrowserEntryKind, BrowserExtractOptions, BrowserListOptions};
+use zmanager_core::archive_browser::{self, BrowserEntry, BrowserEntryKind, BrowserExtractOptions};
+use zmanager_core::engine::{
+    ArchiveSource, OpenOptions, SevenZCreateOptions, TarZstdCreateOptions, TzapCreateOptions, TzapKeySource, TzapX509SigningOptions, ZipCreateOptions,
+    create_default_engine,
+};
 use zmanager_core::jobs::{self, CancellationToken, JobEvent as CoreJobEvent, JobKind as CoreJobKind};
 use zmanager_core::manifest::{ManifestFileType, PlanOptions};
-use zmanager_core::raw_stream_backend;
 use zmanager_core::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwritePolicy,
 };
 use zmanager_core::secrets::SecretString;
-use zmanager_core::sevenz_backend::SevenZCreateOptions;
-use zmanager_core::tar_zst_backend::TarZstdCreateOptions;
-use zmanager_core::tzap_backend::{self, TzapCreateOptions, TzapKeySource, TzapX509SigningOptions};
-use zmanager_core::zip_backend::{self, ZipCreateOptions};
 
 use crate::ffi::error::{
     ERROR_CANCELLED, ERROR_NOT_FOUND, bridge_error, bridge_error_from_mobile, bridge_warning, cancelled_bridge_error, hint, map_archive_browser_error,
@@ -414,7 +412,7 @@ fn run_full_extract_job(input: ExtractJobInput, token: &CancellationToken, sink:
         zmanager_core::engine::ExtractOptions { destination: destination_root.to_path_buf(), policy, cancellation: Some(token.clone()), ..Default::default() };
     let result = zmanager_core::engine::extract_with_default_engine(
         zmanager_core::engine::ArchiveSource::from_path_autodetect(archive_path),
-        zmanager_core::engine::OpenOptions { password: input.password, recipient_key: None },
+        zmanager_core::engine::OpenOptions { password: input.password, recipient_key: None, ..Default::default() },
         &mut options,
     );
     match result {
@@ -453,8 +451,14 @@ fn run_selected_extract_job(
     let archive_path = Path::new(&input.archive_path);
     let destination_root = Path::new(&input.destination_root);
     let password = input.password.as_deref();
-    let listing =
-        archive_browser::list_entries_with_options(archive_path, BrowserListOptions { password, recipient_key: None }).map_err(map_archive_browser_error)?;
+    let engine = create_default_engine().map_err(map_archive_engine_error)?;
+    let mut handle = engine
+        .open(
+            ArchiveSource::from_path_autodetect(archive_path),
+            OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: None, ..Default::default() },
+        )
+        .map_err(map_archive_engine_error)?;
+    let listing = handle.list().map_err(map_archive_engine_error)?;
     let entries: Vec<_> = listing.entries.into_iter().filter(|entry| selected_path_matches(&input.selected_paths, &entry.path)).collect();
 
     if entries.is_empty() {
@@ -483,7 +487,7 @@ fn run_selected_extract_job(
         ..Default::default()
     };
 
-    let extracted = archive_browser::extract_selected_entries_with_options(archive_path, &selected_entry_paths, destination_root, options)
+    let extracted = archive_browser::extract_selected_entries_from_engine_handle(&mut handle, &selected_entry_paths, destination_root, options)
         .map_err(map_archive_browser_error)?;
 
     for (entry_path, report) in extracted {
@@ -548,42 +552,6 @@ impl From<zmanager_core::engine::CreateReport> for ArchiveJobReport {
         }
     }
 }
-
-/// Generates the `From<...Report> for ArchiveJobReport` impls. The four
-/// differing fields (`skipped_entries`, `encrypted`, `volume_size`,
-/// `volume_count`) are supplied per report type; the rest of the mapping is
-/// shared.
-macro_rules! archive_job_report_from {
-    ($report_type:ty, $report:ident, $skipped_entries:expr, $encrypted:expr, $volume_size:expr, $volume_count:expr) => {
-        impl From<$report_type> for ArchiveJobReport {
-            fn from($report: $report_type) -> Self {
-                Self {
-                    written_entries: $report.written_entries,
-                    skipped_entries: $skipped_entries,
-                    written_bytes: $report.written_bytes,
-                    encrypted: $encrypted,
-                    volume_size: $volume_size,
-                    volume_count: $volume_count,
-                    output_paths: Vec::new(),
-                    warnings: $report.warnings,
-                }
-            }
-        }
-    };
-}
-
-archive_job_report_from!(zip_backend::ZipExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(zmanager_core::tar_zst_backend::TarZstdExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(zmanager_core::sevenz_backend::SevenZExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(zmanager_core::rar_backend::RarExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(tzap_backend::TzapExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(apple_archive_backend::AppleArchiveExtractReport, report, report.skipped_entries, None, None, None);
-archive_job_report_from!(raw_stream_backend::RawStreamExtractReport, report, report.skipped_entries, None, None, None);
-
-archive_job_report_from!(zip_backend::ZipCreateReport, report, 0, Some(report.encrypted), report.volume_size, Some(report.volume_count));
-archive_job_report_from!(zmanager_core::sevenz_backend::SevenZCreateReport, report, 0, Some(report.encrypted), report.volume_size, Some(report.volume_count));
-archive_job_report_from!(zmanager_core::tar_zst_backend::TarZstdCreateReport, report, 0, Some(false), None, Some(1));
-archive_job_report_from!(tzap_backend::TzapCreateReport, report, 0, None, report.volume_size, Some(report.volume_count));
 
 impl From<ArchiveJobReport> for JobTerminalSummary {
     fn from(report: ArchiveJobReport) -> Self {
@@ -835,7 +803,7 @@ fn core_extract_job_kind(path: &Path, format: ArchiveFormat) -> CoreJobKind {
         CoreJobKind::TzapExtract
     } else if let Some(kind) = maybe_apple_extract_job_kind(format) {
         kind
-    } else if raw_stream_backend::detect_raw_stream_format(path).is_some() {
+    } else if zmanager_core::engine::is_raw_stream_path(path) {
         CoreJobKind::RawStreamExtract
     } else {
         CoreJobKind::ArchiveExtract

@@ -315,7 +315,7 @@ pub(crate) struct CreateRequest {
     pub(crate) format: Option<ArchiveFormat>,
     pub(crate) method: Option<String>,
     pub(crate) level: Option<i32>,
-    pub(crate) compression: zmanager_core::zip_backend::ZipCompression,
+    pub(crate) compression: zmanager_core::engine::ZipCompression,
     pub(crate) solid: bool,
     pub(crate) clean: bool,
     pub(crate) no_ignore: bool,
@@ -350,7 +350,7 @@ impl Default for CreateRequest {
             format: None,
             method: None,
             level: None,
-            compression: zmanager_core::zip_backend::ZipCompression::Deflate,
+            compression: zmanager_core::engine::ZipCompression::Deflate,
             solid: true,
             clean: false,
             no_ignore: false,
@@ -392,7 +392,7 @@ pub(crate) struct ExtractRequest {
     pub(crate) extract_nested: bool,
     pub(crate) password_stdin: bool,
     pub(crate) recipient_key: Option<PathBuf>,
-    pub(crate) tzap_restore_policy: zmanager_core::tzap_backend::TzapRestorePolicy,
+    pub(crate) tzap_restore_policy: zmanager_core::engine::TzapRestorePolicy,
     pub(crate) tzap_allow_degraded: bool,
 }
 

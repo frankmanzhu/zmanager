@@ -3,11 +3,12 @@
 use crate::engine::format::FormatId;
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
-    ArchiveError, ArchiveListing, ArchiveOperation, ArchivePluginRole, CopyReport, CreateReport, CreateRequest, DetectedArchive, EntryId, ErrorKind,
-    ExtractOptions, ExtractReport, FormatCapabilities, HandleCapabilities, OpenOptions, SelectedExtractOptions, TestOptions, TestReport,
+    ArchiveError, ArchiveListing, ArchiveOperation, ArchivePluginRole, CopyReport, CreateReport, CreateRequest, CredentialRequirement, DetectedArchive,
+    EntryId, ErrorKind, ExtractOptions, ExtractReport, FormatCapabilities, HandleCapabilities, NavigationMode, OpenOptions, SelectedExtractOptions,
+    TestOptions, TestReport,
 };
 use crate::jobs::JobContext;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::sync::Arc;
 
@@ -26,50 +27,65 @@ pub struct AdapterDescriptor {
     pub supports_encryption: bool,
 }
 
+impl AdapterDescriptor {
+    /// Returns the navigation claim for the adapter implementation.
+    ///
+    /// ZIP sessions retain an indexed archive object and can address arbitrary
+    /// retained entries directly. The current native adapters deliberately
+    /// retain a stable selector but create a session-owned cursor and scan from
+    /// its beginning for selected/copy operations, so their capability must
+    /// remain `SequentialScan` even when those operations are registered.
+    #[must_use]
+    pub fn navigation(&self) -> NavigationMode {
+        match self.format {
+            FormatId::ZIP | FormatId::SPLIT_ZIP => NavigationMode::RandomAccess,
+            _ => NavigationMode::SequentialScan,
+        }
+    }
+
+    /// Returns the credential claim for this adapter.
+    #[must_use]
+    pub fn credential_requirement(&self) -> CredentialRequirement {
+        if !self.supports_encryption {
+            CredentialRequirement::None
+        } else if self.format == FormatId::TZAP {
+            CredentialRequirement::PasswordOrRecipientKey
+        } else {
+            CredentialRequirement::Password
+        }
+    }
+}
+
+/// Opened read session retained by one `ArchiveHandle`.
+pub trait ReadAdapterSession: Send {
+    /// Lists entries from the retained adapter session.
+    fn list(&mut self) -> Result<ArchiveListing, ArchiveError>;
+
+    /// Verifies selected entry payloads from the retained session.
+    fn test(&mut self, options: &TestOptions) -> Result<TestReport, ArchiveError>;
+
+    /// Extracts the complete archive from the retained session.
+    fn extract<'a>(&mut self, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError>;
+
+    /// Extracts one retained physical entry.
+    fn selected_extract<'a>(&mut self, entry_id: EntryId, options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError>;
+
+    /// Copies one retained regular-file entry.
+    fn copy_to_writer(&mut self, entry_id: EntryId, writer: &mut dyn Write) -> Result<CopyReport, ArchiveError>;
+
+    /// Releases parser state, indexes, and temporary source resources.
+    fn close(&mut self) -> Result<(), ArchiveError> {
+        Ok(())
+    }
+}
+
 /// Abstract factory trait implemented by read archive adapters.
-pub trait ReadAdapterFactory: Send + Sync {
+pub trait ReadAdapterFactory: Send + Sync + 'static {
     /// Returns static metadata descriptor for this adapter.
     fn descriptor(&self) -> &'static AdapterDescriptor;
 
-    /// Lists entries for the given detected archive and optional password.
-    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError>;
-
-    /// Verifies selected entry payloads and integrity metadata.
-    fn test(&self, _archive: &DetectedArchive, _open_options: &OpenOptions, _test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide data verification"))
-    }
-
-    /// Extracts the complete archive through the adapter's safety pipeline.
-    fn extract<'a>(
-        &self,
-        _archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        _options: &'a mut ExtractOptions<'a>,
-    ) -> Result<ExtractReport, ArchiveError> {
-        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide full extraction"))
-    }
-
-    /// Extracts one entry selected by its retained session ID.
-    fn selected_extract<'a>(
-        &self,
-        _archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        _entry_id: EntryId,
-        _options: &'a mut SelectedExtractOptions<'a>,
-    ) -> Result<ExtractReport, ArchiveError> {
-        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide selected extraction"))
-    }
-
-    /// Copies one regular-file entry selected by its retained session ID.
-    fn copy_to_writer(
-        &self,
-        _archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        _entry_id: EntryId,
-        _writer: &mut dyn Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive adapter does not provide writer copy"))
-    }
+    /// Opens one retained session for the handle.
+    fn open(self: Arc<Self>, archive: DetectedArchive, options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError>;
 }
 
 /// Abstract factory trait implemented by one-shot archive writers.
@@ -122,18 +138,24 @@ impl AdapterRegistry {
     pub fn capabilities_for_format(&self, format: FormatId) -> Option<HandleCapabilities> {
         let mut ops = Vec::new();
         let mut source_access = SourceAccess::Seekable;
+        let mut navigation = NavigationMode::SequentialScan;
+        let mut credential_requirement = CredentialRequirement::None;
         let mut encryption = false;
         let mut found = false;
+        let mut has_read = false;
 
-        for ((reg_format, op), factory) in &self.registrations {
-            if *reg_format == format {
-                found = true;
-                ops.push(*op);
-                let desc = factory.descriptor();
-                source_access = desc.required_source_access;
-                if desc.supports_encryption {
-                    encryption = true;
-                }
+        let mut registrations: Vec<_> = self.registrations.iter().filter(|((reg_format, _), _)| *reg_format == format).collect();
+        registrations.sort_by_key(|((_, operation), _)| *operation);
+        for ((_, op), factory) in registrations {
+            found = true;
+            has_read = true;
+            ops.push(*op);
+            let desc = factory.descriptor();
+            source_access = desc.required_source_access;
+            navigation = desc.navigation();
+            credential_requirement = desc.credential_requirement();
+            if desc.supports_encryption {
+                encryption = true;
             }
         }
 
@@ -143,9 +165,16 @@ impl AdapterRegistry {
             if factory.descriptor().supports_encryption {
                 encryption = true;
             }
+            if !has_read {
+                credential_requirement = factory.descriptor().credential_requirement();
+            }
         }
 
-        if found { Some(HandleCapabilities { format, source_access, operations: ops, encryption_supported: encryption }) } else { None }
+        if found {
+            Some(HandleCapabilities { format, source_access, navigation, credential_requirement, operations: ops, encryption_supported: encryption })
+        } else {
+            None
+        }
     }
 
     /// Returns one capability row for every canonical recognized format.
@@ -169,6 +198,8 @@ impl AdapterRegistry {
                     unavailable_reason,
                     operations: registered.as_ref().map_or_else(Vec::new, |value| value.operations.clone()),
                     source_access: registered.as_ref().map(|value| value.source_access),
+                    navigation: registered.as_ref().map(|value| value.navigation),
+                    credential_requirement: registered.as_ref().map_or(CredentialRequirement::None, |value| value.credential_requirement),
                     encryption_supported: registered.as_ref().is_some_and(|value| value.encryption_supported),
                     role: registered.as_ref().map(|value| {
                         let has_create = value.operations.contains(&ArchiveOperation::Create);
@@ -207,7 +238,17 @@ impl ArchiveEngineBuilder {
     #[allow(clippy::needless_pass_by_value)]
     pub fn register_read_adapter(&mut self, factory: Arc<dyn ReadAdapterFactory>) -> Result<(), ArchiveError> {
         let desc = factory.descriptor();
+        if desc.operations.is_empty() {
+            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Read adapter '{}' must claim at least one operation", desc.name)));
+        }
+        let mut claimed_operations = HashSet::with_capacity(desc.operations.len());
         for &op in desc.operations {
+            if !claimed_operations.insert(op) {
+                return Err(ArchiveError::usable(
+                    ErrorKind::InvalidFormat,
+                    format!("Ambiguous registration: adapter '{}' claims operation '{op:?}' more than once", desc.name),
+                ));
+            }
             let key = (desc.format, op);
             if self.registrations.contains_key(&key) {
                 return Err(ArchiveError::usable(
@@ -215,7 +256,32 @@ impl ArchiveEngineBuilder {
                     format!("Ambiguous registration: operation '{op:?}' for format '{}' is already claimed", desc.format),
                 ));
             }
-            self.registrations.insert(key, factory.clone());
+        }
+        if self
+            .registrations
+            .values()
+            .filter(|factory| factory.descriptor().format == desc.format)
+            .any(|factory| factory.descriptor().required_source_access != desc.required_source_access)
+        {
+            return Err(ArchiveError::usable(
+                ErrorKind::InvalidFormat,
+                format!("Ambiguous registration: source access for format '{}' has conflicting claims", desc.format),
+            ));
+        }
+        if self.registrations.values().filter(|factory| factory.descriptor().format == desc.format).any(|factory| factory.descriptor().name != desc.name) {
+            return Err(ArchiveError::usable(
+                ErrorKind::InvalidFormat,
+                format!("Ambiguous registration: read operations for format '{}' must share one opened session provider", desc.format),
+            ));
+        }
+        if self.registrations.values().filter(|factory| factory.descriptor().format == desc.format).any(|registered| !Arc::ptr_eq(registered, &factory)) {
+            return Err(ArchiveError::usable(
+                ErrorKind::InvalidFormat,
+                format!("Ambiguous registration: read operations for format '{}' must use one factory instance", desc.format),
+            ));
+        }
+        for &op in desc.operations {
+            self.registrations.insert((desc.format, op), factory.clone());
         }
         Ok(())
     }

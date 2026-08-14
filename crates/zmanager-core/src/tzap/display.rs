@@ -192,8 +192,10 @@ pub(crate) fn inspect_tzap_public_footer_signature_from(
     volume_paths: &[PathBuf],
     first_volume_file: &mut File,
 ) -> Result<TzapPublicSignatureStatus, TzapError> {
-    let first_volume_path =
-        volume_paths.iter().find(|path| path.exists()).expect("caller contract: first_volume_file is a handle to the first existing volume path");
+    let first_volume_path = volume_paths
+        .iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| io_error(requested_path, io::ErrorKind::NotFound, "no existing TZAP input volume is available for the opened handle"))?;
     let first_header = read_public_tzap_header_from(first_volume_file, first_volume_path)?;
     let expected_volume_count =
         usize::try_from(first_header.volume_header.stripe_width).map_err(|_| TzapError::Format(FormatError::InvalidArchive("TZAP volume count overflow")))?;

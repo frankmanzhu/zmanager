@@ -1,8 +1,10 @@
 //! TZAP backend implementation.
 //!
-//! This module tree hosts the code previously contained in
-//! `tzap_backend.rs`. The historical `crate::tzap_backend::...` paths are
-//! preserved by the re-export facade in `tzap_backend.rs`.
+//! This module tree owns the protocol implementation. Historical backend
+//! facade paths are private implementation aliases; consumers use the
+//! engine-owned protocol seam.
+
+#![allow(unused_imports)]
 
 mod display;
 mod extract;
@@ -25,6 +27,7 @@ pub use listing::{
     list_tzap_index_with_optional_password, list_tzap_index_with_recipient_key, list_tzap_with_optional_password, list_tzap_with_password,
     list_tzap_with_recipient_key,
 };
+pub(crate) use open::discover_tzap_input_volume_paths;
 pub use open::is_tzap_archive_path;
 pub use open::{TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume, summarize_tzap_public_metadata};
 pub use write::{TzapCreateOptions, TzapCreateReport, TzapKeySource, create_tzap_from_manifest_with_context};

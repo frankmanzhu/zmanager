@@ -8,7 +8,7 @@ use crate::cli::usage::{CONTACT_HELP, command_usage_error, json_escape, print_er
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zmanager_core::tzap_service::{
+use zmanager_tzap_hosted::tzap_service::{
     tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json, tzap_recipient_key_generate_json,
 };
 

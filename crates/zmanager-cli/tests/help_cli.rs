@@ -258,7 +258,7 @@ fn no_args_prints_help_successfully() {
 
 #[test]
 fn formats_command_lists_apple_archive_with_platform_annotation() {
-    let supported = zmanager_core::apple_archive_backend::apple_archive_supported();
+    let supported = zmanager_core::backend_test_support::apple_archive_backend::apple_archive_supported();
     let expected_aar_json = if supported {
         r#"{"format":"aar","extensions":[".aar",".aea"],"status":"available"}"#
     } else {

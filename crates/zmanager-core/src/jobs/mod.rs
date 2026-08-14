@@ -1,11 +1,10 @@
 //! Job model: event types, progress projection, cancellation, and the
-//! per-backend job adapters.
+//! engine job orchestration, progress, and cancellation.
 //!
 //! Split by concern (CR-139): the event/progress model lives here,
-//! [`progress`] owns the coalescing machinery, [`cancellation`] owns the
-//! token, and [`adapters`] owns the `run_*_job` wrappers around the archive
-//! backends. This module re-exports their public items so the crate's API
-//! surface is unchanged.
+//! [`progress`] owns the coalescing machinery and [`cancellation`] owns the
+//! token. Archive operation execution belongs to the engine seam; the private
+//! adapter test module is not part of the production interface.
 
 mod adapters;
 mod cancellation;
@@ -13,21 +12,11 @@ mod progress;
 #[cfg(test)]
 mod tests;
 
-pub use adapters::run_apple_archive_extract_job_with_policy;
-#[cfg(test)]
-pub(crate) use adapters::{
-    run_7z_create_job_from_sources_with_plan_options, run_tar_zst_create_job_from_sources_with_plan_options,
-    run_tzap_create_job_from_sources_with_plan_options, run_zip_create_job_from_sources_with_plan_options,
-};
-pub use adapters::{
-    run_7z_extract_job_with_password_and_policy, run_engine_create_job_from_sources, run_rar_extract_job_with_password_and_policy,
-    run_raw_stream_extract_job_with_policy, run_tar_zst_extract_job_with_policy, run_tzap_extract_job_with_password_and_policy,
-    run_tzap_extract_job_with_password_and_policy_and_restore_options, run_zip_extract_job_with_password_and_policy,
-};
+pub use adapters::run_engine_create_job_from_sources;
 pub use cancellation::{CancellationToken, JobCancelled};
-pub use progress::{JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT, PROGRESS_RECENT_PATH_LIMIT};
 #[cfg(test)]
-pub(crate) use progress::{PROGRESS_ENTRY_STEP, PROGRESS_MIN_BYTE_STEP};
+pub(crate) use progress::PROGRESS_ENTRY_STEP;
+pub use progress::{JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT, PROGRESS_RECENT_PATH_LIMIT};
 pub(crate) use progress::{ProgressBatch, ProgressCoalescer};
 
 use self::progress::path_identity;

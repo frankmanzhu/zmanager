@@ -216,6 +216,22 @@ pub fn extract(
     Ok(report)
 }
 
+/// Extracts one retained entry by its path and duplicate occurrence in the
+/// session listing.
+pub fn extract_by_path_occurrence(
+    path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    resolver: Option<&mut dyn OverwriteResolver>,
+    selected_path: &str,
+    selected_occurrence: usize,
+    cancellation: Option<&crate::jobs::CancellationToken>,
+) -> Result<CpioReport, CpioError> {
+    let path = path.as_ref();
+    let selected_index = find_path_occurrence(path, selected_path, selected_occurrence)?;
+    extract(path, destination, policy, resolver, Some(selected_index), cancellation)
+}
+
 /// Copies one retained regular-file entry to a caller-owned writer.
 pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn Write) -> Result<u64, CpioError> {
     let path = path.as_ref();
@@ -229,6 +245,29 @@ pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn Write) 
     }
     let mut file = open(path)?;
     copy_payload(&mut file, path, &entry, writer)
+}
+
+/// Copies one retained regular-file entry by path and duplicate occurrence.
+pub fn copy_by_path_occurrence(path: impl AsRef<Path>, selected_path: &str, selected_occurrence: usize, writer: &mut dyn Write) -> Result<u64, CpioError> {
+    let path = path.as_ref();
+    let entry_index = find_path_occurrence(path, selected_path, selected_occurrence)?;
+    copy(path, entry_index, writer)
+}
+
+fn find_path_occurrence(path: &Path, selected_path: &str, selected_occurrence: usize) -> Result<usize, CpioError> {
+    let mut occurrence = 0_usize;
+    parse(path)?
+        .entries
+        .into_iter()
+        .find_map(|entry| {
+            if entry.public.path != selected_path {
+                return None;
+            }
+            let matches = occurrence == selected_occurrence;
+            occurrence = occurrence.saturating_add(1);
+            matches.then_some(entry.public.index)
+        })
+        .ok_or_else(|| io_error(path, io::Error::new(io::ErrorKind::NotFound, "retained CPIO entry is not present")))
 }
 
 impl CpioEntry {

@@ -84,14 +84,14 @@ pub(super) fn parse_tzap_context_option(
 pub(super) fn parse_environment_option(
     args: &[String],
     index: &mut usize,
-    environment: &mut zmanager_core::auth_client::TzapHostedAuthEnvironment,
+    environment: &mut zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment,
     global: &GlobalOptions,
 ) -> Result<(), ExitCode> {
     let value = take_value(args, index, "--environment").map_err(|error| command_usage_error("auth", &error, global))?;
     *environment = match value.as_str() {
-        "local" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Local,
-        "staging" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Staging,
-        "prod" => zmanager_core::auth_client::TzapHostedAuthEnvironment::Prod,
+        "local" => zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Local,
+        "staging" => zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Staging,
+        "prod" => zmanager_tzap_hosted::auth_client::TzapHostedAuthEnvironment::Prod,
         _ => return Err(command_usage_error("auth", "environment must be local, staging, or prod", global)),
     };
     Ok(())
@@ -118,18 +118,13 @@ pub(super) fn certificate_summary_value(cert: &zmanager_core::local_identity_sto
     })
 }
 
+#[cfg(feature = "tzap-online")]
 #[allow(clippy::needless_pass_by_value)]
-pub(super) fn retirement_completion_label(completion: zmanager_core::certificate_lifecycle::TzapRetirementCompletion) -> &'static str {
+pub(super) fn retirement_completion_label(completion: zmanager_tzap_hosted::certificate_lifecycle::TzapRetirementCompletion) -> &'static str {
     match completion {
-        zmanager_core::certificate_lifecycle::TzapRetirementCompletion::Complete => "complete",
-        zmanager_core::certificate_lifecycle::TzapRetirementCompletion::Incomplete => "incomplete",
+        zmanager_tzap_hosted::certificate_lifecycle::TzapRetirementCompletion::Complete => "complete",
+        zmanager_tzap_hosted::certificate_lifecycle::TzapRetirementCompletion::Incomplete => "incomplete",
     }
-}
-
-pub(super) fn default_tzap_state_dir() -> PathBuf {
-    // CR-113: single state-directory default shared with the tzap JSON
-    // service (honors `ZM_TZAP_STATE_DIR`, then `ZMANAGER_TZAP_STATE_DIR`).
-    zmanager_core::tzap_service_auth::default_tzap_state_dir()
 }
 
 pub(super) fn current_unix_seconds() -> u64 {
@@ -192,12 +187,12 @@ pub(super) fn exchange_handoff_code(
             "redirect_uri": redirect_uri,
             "state": state,
             "code_verifier": pkce_verifier,
-            "required_audience": zmanager_core::auth_client::SESSION_AUDIENCE_SIGN_TZAP,
+            "required_audience": zmanager_tzap_hosted::auth_client::SESSION_AUDIENCE_SIGN_TZAP,
         }),
     )?;
     let session_token = json_string_field(&exchange, "session_token")?;
     let session_id = json_string_field(&exchange, "session_id")?;
-    let audience = json_string_field(&exchange, "audience").unwrap_or_else(|_| zmanager_core::auth_client::SESSION_AUDIENCE_SIGN_TZAP.to_owned());
+    let audience = json_string_field(&exchange, "audience").unwrap_or_else(|_| zmanager_tzap_hosted::auth_client::SESSION_AUDIENCE_SIGN_TZAP.to_owned());
     let expires_at_unix_seconds = exchange
         .get("expires_at_unix_seconds")
         .and_then(Value::as_u64)
@@ -221,7 +216,7 @@ pub(super) fn exchange_handoff_code(
 
 #[cfg(feature = "tzap-online")]
 pub(super) fn http_post_json(url: &str, body: &Value) -> Result<Value, String> {
-    let response = http_json_request("POST", url, None, Some(body), &zmanager_core::auth_client::TzapAuthRequestOptions::default())?;
+    let response = http_json_request("POST", url, None, Some(body), &zmanager_tzap_hosted::auth_client::TzapAuthRequestOptions::default())?;
     if !(200..=299).contains(&response.status_code) {
         return Err(format!("hosted auth exchange failed with HTTP {}", response.status_code));
     }
@@ -233,23 +228,23 @@ pub(super) fn http_post_json(url: &str, body: &Value) -> Result<Value, String> {
 pub(super) struct CliHttpJsonTransport;
 
 #[cfg(feature = "tzap-online")]
-impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
+impl zmanager_tzap_hosted::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
     fn send(
         &self,
-        request: &zmanager_core::auth_client::TzapAuthHttpRequest,
-    ) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, zmanager_core::auth_client::TzapAuthError> {
+        request: &zmanager_tzap_hosted::auth_client::TzapAuthHttpRequest,
+    ) -> Result<zmanager_tzap_hosted::auth_client::TzapAuthHttpResponse, zmanager_tzap_hosted::auth_client::TzapAuthError> {
         let method = match request.method {
-            zmanager_core::auth_client::TzapAuthHttpMethod::Get => "GET",
-            zmanager_core::auth_client::TzapAuthHttpMethod::Post => "POST",
+            zmanager_tzap_hosted::auth_client::TzapAuthHttpMethod::Get => "GET",
+            zmanager_tzap_hosted::auth_client::TzapAuthHttpMethod::Post => "POST",
         };
         http_json_request(
             method,
             &request.url,
-            request.bearer_token.as_ref().map(zmanager_core::auth_client::TzapBearerToken::expose),
+            request.bearer_token.as_ref().map(zmanager_tzap_hosted::auth_client::TzapBearerToken::expose),
             request.body.as_ref(),
             &request.options,
         )
-        .map_err(|message| zmanager_core::auth_client::TzapAuthError::Transport { message })
+        .map_err(|message| zmanager_tzap_hosted::auth_client::TzapAuthError::Transport { message })
     }
 }
 
@@ -258,12 +253,12 @@ impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport 
 pub(super) struct CliHttpJsonTransport;
 
 #[cfg(not(feature = "tzap-online"))]
-impl zmanager_core::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
+impl zmanager_tzap_hosted::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
     fn send(
         &self,
-        _request: &zmanager_core::auth_client::TzapAuthHttpRequest,
-    ) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, zmanager_core::auth_client::TzapAuthError> {
-        Err(zmanager_core::auth_client::TzapAuthError::Transport { message: "tzap-online feature not enabled in this build".to_owned() })
+        _request: &zmanager_tzap_hosted::auth_client::TzapAuthHttpRequest,
+    ) -> Result<zmanager_tzap_hosted::auth_client::TzapAuthHttpResponse, zmanager_tzap_hosted::auth_client::TzapAuthError> {
+        Err(zmanager_tzap_hosted::auth_client::TzapAuthError::Transport { message: "tzap-online feature not enabled in this build".to_owned() })
     }
 }
 
@@ -273,9 +268,9 @@ pub(super) fn http_json_request(
     url: &str,
     bearer_token: Option<&str>,
     body: Option<&Value>,
-    options: &zmanager_core::auth_client::TzapAuthRequestOptions,
-) -> Result<zmanager_core::auth_client::TzapAuthHttpResponse, String> {
-    if options.cancellation.as_ref().is_some_and(zmanager_core::auth_client::TzapAuthCancellation::is_cancelled) {
+    options: &zmanager_tzap_hosted::auth_client::TzapAuthRequestOptions,
+) -> Result<zmanager_tzap_hosted::auth_client::TzapAuthHttpResponse, String> {
+    if options.cancellation.as_ref().is_some_and(zmanager_tzap_hosted::auth_client::TzapAuthCancellation::is_cancelled) {
         return Err("hosted HTTPS request was cancelled".to_owned());
     }
     let client = reqwest::blocking::Client::builder()
@@ -286,12 +281,12 @@ pub(super) fn http_json_request(
         .map_err(|error| format!("could not initialize hosted HTTPS client: {error}"))?;
     let request = build_hosted_http_request(&client, method, url, bearer_token, body)?;
     let response = client.execute(request).map_err(|error| format!("hosted HTTPS request failed: {error}"))?;
-    if options.cancellation.as_ref().is_some_and(zmanager_core::auth_client::TzapAuthCancellation::is_cancelled) {
+    if options.cancellation.as_ref().is_some_and(zmanager_tzap_hosted::auth_client::TzapAuthCancellation::is_cancelled) {
         return Err("hosted HTTPS request was cancelled".to_owned());
     }
     let status_code = response.status().as_u16();
     let response_body = response.bytes().map_err(|error| format!("could not read hosted HTTPS response: {error}"))?.to_vec();
-    Ok(zmanager_core::auth_client::TzapAuthHttpResponse { status_code, body: response_body })
+    Ok(zmanager_tzap_hosted::auth_client::TzapAuthHttpResponse { status_code, body: response_body })
 }
 
 #[cfg(feature = "tzap-online")]

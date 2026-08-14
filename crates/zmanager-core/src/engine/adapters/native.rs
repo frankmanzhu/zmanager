@@ -1,8 +1,11 @@
 //! Native listing adapters for 7z, TAR.ZST, TZAP, RAR, `RawStreams`, Apple Archive, DMG, PKG, MSI, `VirtualDisks` (ARC-200).
 
 use flate2::read::GzDecoder;
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write as _};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::apple_archive_backend;
@@ -10,8 +13,8 @@ use crate::apple_dmg_backend;
 use crate::apple_pkg_backend;
 use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
-use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
-use crate::engine::source::SourceAccess;
+use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory, ReadAdapterSession};
+use crate::engine::source::{SourceAccess, SourceCursorFactory};
 use crate::engine::types::{
     ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
     SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
@@ -20,8 +23,183 @@ use crate::msi_backend;
 use crate::rar_backend;
 use crate::raw_stream_backend;
 use crate::sevenz_backend;
-use crate::tzap_backend;
+use crate::tzap;
 use crate::virtual_disk_backend;
+
+/// Immutable context shared by every operation in one native read session.
+///
+/// The context is deliberately the only source/options value an adapter
+/// receives. This keeps source ownership and cursor creation at the session
+/// seam while allowing adapters to retain format-specific parser state later.
+struct NativeReadContext {
+    options: OpenOptions,
+    cursor_factory: SourceCursorFactory,
+    retained_entries: Vec<NativeEntrySelector>,
+    selected_entry: Cell<Option<EntryId>>,
+}
+
+/// Physical identity retained from the adapter's listing for one engine
+/// session. Path and occurrence are stable enough to select the same physical
+/// record when a legacy reader must create a fresh cursor from the session
+/// source capability.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct NativeEntrySelector {
+    id: EntryId,
+    path: String,
+    kind: BrowserEntryKind,
+    occurrence: usize,
+}
+
+impl NativeReadContext {
+    fn new(cursor_factory: SourceCursorFactory, options: OpenOptions) -> Self {
+        Self { options, cursor_factory, retained_entries: Vec::new(), selected_entry: Cell::new(None) }
+    }
+
+    fn retain_listing(&mut self, listing: &ArchiveListing) {
+        let mut occurrences = HashMap::<String, usize>::new();
+        self.retained_entries = listing
+            .entries
+            .iter()
+            .map(|entry| {
+                let occurrence = occurrences.entry(entry.path.clone()).or_insert(0);
+                let selector = NativeEntrySelector { id: entry.id, path: entry.path.clone(), kind: entry.kind, occurrence: *occurrence };
+                *occurrence = occurrence.saturating_add(1);
+                selector
+            })
+            .collect();
+    }
+
+    fn set_selected_entry(&self, entry_id: EntryId) {
+        self.selected_entry.set(Some(entry_id));
+    }
+
+    fn retained_entry(&self, entry_id: EntryId) -> Result<&NativeEntrySelector, ArchiveError> {
+        self.retained_entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Entry ID {entry_id} is not present in the native session listing")))
+    }
+
+    fn selected_entry_selector(&self, entry_id: EntryId) -> Result<&NativeEntrySelector, ArchiveError> {
+        debug_assert_eq!(self.selected_entry.get(), Some(entry_id));
+        self.retained_entry(entry_id)
+    }
+
+    fn primary_path(&self) -> &std::path::Path {
+        self.cursor_factory.source().primary_path()
+    }
+
+    fn options(&self) -> &OpenOptions {
+        &self.options
+    }
+
+    fn open_primary_file(&self) -> Result<File, ArchiveError> {
+        let path = self.primary_path();
+        self.cursor_factory.open_primary_file().map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))
+    }
+}
+
+/// The operation implementation owned by a native archive session.
+///
+/// Native backends expose format-specific readers with different ownership
+/// models. This private seam keeps those details behind one retained engine
+/// session. The session context owns the source and credentials; a backend may
+/// request a fresh cursor from that context for an individual sequential pass
+/// when its parser cannot be retained, but the engine never re-resolves an
+/// adapter or bypasses the session.
+trait NativeReadAdapter: Send + Sync + 'static {
+    fn descriptor(&self) -> &'static AdapterDescriptor;
+
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError>;
+
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let _ = (archive, test_options);
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "archive verification is not supported for this archive format"))
+    }
+
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let _ = (archive, options);
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "full extraction is not supported for this archive format"))
+    }
+
+    fn selected_extract<'a>(
+        &self,
+        archive: &NativeReadContext,
+        entry_id: EntryId,
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let _ = (archive, entry_id, options);
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "selected extraction is not supported for this archive format"))
+    }
+
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let _ = (archive, entry_id, writer);
+        Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "writer copy is not supported for this archive format"))
+    }
+}
+
+/// A retained native session that owns its adapter, source context, and
+/// cursor factory for its entire lifetime. Legacy native readers that accept
+/// paths are invoked only with the path exposed by this context; they never
+/// rediscover or receive source paths from callers.
+struct NativeReadSession<T: NativeReadAdapter> {
+    adapter: Arc<T>,
+    context: NativeReadContext,
+    closed: bool,
+}
+
+impl<T: NativeReadAdapter> NativeReadSession<T> {
+    fn ensure_open(&self) -> Result<(), ArchiveError> {
+        if self.closed { Err(ArchiveError::unusable(ErrorKind::UnsupportedOperation, "archive session is already closed")) } else { Ok(()) }
+    }
+}
+
+impl<T: NativeReadAdapter> ReadAdapterSession for NativeReadSession<T> {
+    fn list(&mut self) -> Result<ArchiveListing, ArchiveError> {
+        self.ensure_open()?;
+        let listing = self.adapter.list(&self.context)?;
+        self.context.retain_listing(&listing);
+        Ok(listing)
+    }
+
+    fn test(&mut self, options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        self.ensure_open()?;
+        self.adapter.test(&self.context, options)
+    }
+
+    fn extract<'a>(&mut self, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        self.ensure_open()?;
+        self.adapter.extract(&self.context, options)
+    }
+
+    fn selected_extract<'a>(&mut self, entry_id: EntryId, options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        self.ensure_open()?;
+        self.context.set_selected_entry(entry_id);
+        self.adapter.selected_extract(&self.context, entry_id, options)
+    }
+
+    fn copy_to_writer(&mut self, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        self.ensure_open()?;
+        self.context.set_selected_entry(entry_id);
+        self.adapter.copy_to_writer(&self.context, entry_id, writer)
+    }
+
+    fn close(&mut self) -> Result<(), ArchiveError> {
+        self.closed = true;
+        Ok(())
+    }
+}
+
+impl<T: NativeReadAdapter> ReadAdapterFactory for T {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        NativeReadAdapter::descriptor(self)
+    }
+
+    fn open(self: Arc<Self>, archive: DetectedArchive, options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+        let cursor_factory = archive.source.cursor_factory();
+        Ok(Box::new(NativeReadSession { adapter: self, context: NativeReadContext::new(cursor_factory, options), closed: false }))
+    }
+}
 
 // --- TAR.GZ and plain TAR ---
 static TAR_GZ_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
@@ -44,22 +222,22 @@ static TAR_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct TarGzListAdapter;
 
-impl ReadAdapterFactory for TarGzListAdapter {
+impl NativeReadAdapter for TarGzListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &TAR_GZ_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let decoder = GzDecoder::new(file);
         let entries = crate::tar_backend::list(decoder, path).map_err(|error| tar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_tar_entries(entries, "gzip") })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let decoder = GzDecoder::new(file);
         let report = crate::tar_backend::test(decoder, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
             .map_err(|error| tar_error(path, &error))?;
@@ -71,9 +249,9 @@ impl ReadAdapterFactory for TarGzListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let decoder = GzDecoder::new(file);
         let report = crate::tar_backend::extract(
             decoder,
@@ -90,41 +268,36 @@ impl ReadAdapterFactory for TarGzListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let file = archive.open_primary_file()?;
         let decoder = GzDecoder::new(file);
-        let report = crate::tar_backend::extract(
+        let report = crate::tar_backend::extract_by_path_occurrence(
             decoder,
             path,
             &options.destination,
             options.policy.clone(),
             options.overwrite_resolver.as_deref_mut(),
-            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             options.cancellation.as_ref(),
         )
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let file = archive.open_primary_file()?;
         let decoder = GzDecoder::new(file);
-        let written_bytes = crate::tar_backend::copy(
+        let written_bytes = crate::tar_backend::copy_by_path_occurrence(
             decoder,
             path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             writer,
         )
         .map_err(|error| tar_error(path, &error))?;
@@ -136,21 +309,21 @@ impl ReadAdapterFactory for TarGzListAdapter {
 #[derive(Debug, Default)]
 pub struct TarListAdapter;
 
-impl ReadAdapterFactory for TarListAdapter {
+impl NativeReadAdapter for TarListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &TAR_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let entries = crate::tar_backend::list(file, path).map_err(|error| tar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_tar_entries(entries, "tar") })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let report = crate::tar_backend::test(file, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
             .map_err(|error| tar_error(path, &error))?;
         Ok(TestReport {
@@ -161,9 +334,9 @@ impl ReadAdapterFactory for TarListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let report = crate::tar_backend::extract(
             file,
             path,
@@ -179,39 +352,34 @@ impl ReadAdapterFactory for TarListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
-        let report = crate::tar_backend::extract(
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let file = archive.open_primary_file()?;
+        let report = crate::tar_backend::extract_by_path_occurrence(
             file,
             path,
             &options.destination,
             options.policy.clone(),
             options.overwrite_resolver.as_deref_mut(),
-            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             options.cancellation.as_ref(),
         )
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
-        let written_bytes = crate::tar_backend::copy(
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let file = archive.open_primary_file()?;
+        let written_bytes = crate::tar_backend::copy_by_path_occurrence(
             file,
             path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             writer,
         )
         .map_err(|error| tar_error(path, &error))?;
@@ -329,19 +497,19 @@ static MTREE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct DebListAdapter;
 
-impl ReadAdapterFactory for DebListAdapter {
+impl NativeReadAdapter for DebListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &DEB_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::ar_backend::list(path).map_err(|error| ar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_ar_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::ar_backend::test(path, test_options).map_err(|error| ar_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -351,8 +519,8 @@ impl ReadAdapterFactory for DebListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
             crate::deb_backend::extract_deb_nested_with_overwrite_resolver(path, &options.destination, &options.policy, resolver)
         } else {
@@ -362,20 +530,11 @@ impl ReadAdapterFactory for DebListAdapter {
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = crate::ar_backend::copy(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| ar_error(path, &error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            crate::ar_backend::copy_by_path_occurrence(path, &selector.path, selector.occurrence, writer).map_err(|error| ar_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -418,19 +577,19 @@ fn deb_error(path: &std::path::Path, error: &crate::deb_backend::DebError) -> Ar
 #[derive(Debug, Default)]
 pub struct RpmListAdapter;
 
-impl ReadAdapterFactory for RpmListAdapter {
+impl NativeReadAdapter for RpmListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &RPM_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::rpm_backend::list(path).map_err(|error| rpm_error(path, &error))?;
         Ok(ArchiveListing { entries: map_cpio_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::rpm_backend::test(path, test_options).map_err(|error| rpm_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -440,8 +599,8 @@ impl ReadAdapterFactory for RpmListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::rpm_backend::extract(
             path,
             &options.destination,
@@ -453,20 +612,11 @@ impl ReadAdapterFactory for RpmListAdapter {
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = crate::rpm_backend::copy(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| rpm_error(path, &error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            crate::rpm_backend::copy_by_path_occurrence(path, &selector.path, selector.occurrence, writer).map_err(|error| rpm_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -501,19 +651,19 @@ fn rpm_error(path: &std::path::Path, error: &crate::rpm_backend::RpmError) -> Ar
 #[derive(Debug, Default)]
 pub struct CabListAdapter;
 
-impl ReadAdapterFactory for CabListAdapter {
+impl NativeReadAdapter for CabListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &CAB_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::cab_backend::list(path).map_err(|error| cab_error(path, &error))?;
         Ok(ArchiveListing { entries: map_cab_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::cab_backend::test(path, test_options).map_err(|error| cab_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -523,8 +673,8 @@ impl ReadAdapterFactory for CabListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::cab_backend::extract(
             path,
             &options.destination,
@@ -536,20 +686,11 @@ impl ReadAdapterFactory for CabListAdapter {
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = crate::cab_backend::copy(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| cab_error(path, &error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            crate::cab_backend::copy_by_path_occurrence(path, &selector.path, selector.occurrence, writer).map_err(|error| cab_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -591,19 +732,19 @@ fn cab_error(path: &std::path::Path, error: &crate::cab_backend::CabError) -> Ar
 #[derive(Debug, Default)]
 pub struct XarListAdapter;
 
-impl ReadAdapterFactory for XarListAdapter {
+impl NativeReadAdapter for XarListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &XAR_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::xar_backend::list(path).map_err(|error| xar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_xar_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::xar_backend::test(path, test_options).map_err(|error| xar_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -613,8 +754,8 @@ impl ReadAdapterFactory for XarListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::xar_backend::extract(
             path,
             &options.destination,
@@ -626,20 +767,11 @@ impl ReadAdapterFactory for XarListAdapter {
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = crate::xar_backend::copy(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| xar_error(path, &error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            crate::xar_backend::copy_by_path_occurrence(path, &selector.path, selector.occurrence, writer).map_err(|error| xar_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -679,19 +811,19 @@ fn xar_error(path: &std::path::Path, error: &crate::xar_backend::XarError) -> Ar
 #[derive(Debug, Default)]
 pub struct LhaListAdapter;
 
-impl ReadAdapterFactory for LhaListAdapter {
+impl NativeReadAdapter for LhaListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &LHA_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::lha_backend::list(path).map_err(|error| lha_error(path, &error))?;
         Ok(ArchiveListing { entries: map_lha_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::lha_backend::test(path, test_options).map_err(|error| lha_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -701,8 +833,8 @@ impl ReadAdapterFactory for LhaListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::lha_backend::extract(
             path,
             &options.destination,
@@ -714,20 +846,11 @@ impl ReadAdapterFactory for LhaListAdapter {
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = crate::lha_backend::copy(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| lha_error(path, &error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            crate::lha_backend::copy_by_path_occurrence(path, &selector.path, selector.occurrence, writer).map_err(|error| lha_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -767,19 +890,19 @@ fn lha_error(path: &std::path::Path, error: &crate::lha_backend::LhaError) -> Ar
 #[derive(Debug, Default)]
 pub struct WarcListAdapter;
 
-impl ReadAdapterFactory for WarcListAdapter {
+impl NativeReadAdapter for WarcListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &WARC_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::warc_backend::list(path).map_err(|error| warc_error(path, &error))?;
         Ok(ArchiveListing { entries: map_warc_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::warc_backend::test(path, test_options).map_err(|error| warc_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -789,8 +912,8 @@ impl ReadAdapterFactory for WarcListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::warc_backend::extract(
             path,
             &options.destination,
@@ -802,20 +925,11 @@ impl ReadAdapterFactory for WarcListAdapter {
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = crate::warc_backend::copy(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| warc_error(path, &error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            crate::warc_backend::copy_by_path_occurrence(path, &selector.path, selector.occurrence, writer).map_err(|error| warc_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -855,19 +969,19 @@ fn warc_error(path: &std::path::Path, error: &crate::warc_backend::WarcError) ->
 #[derive(Debug, Default)]
 pub struct MtreeListAdapter;
 
-impl ReadAdapterFactory for MtreeListAdapter {
+impl NativeReadAdapter for MtreeListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &MTREE_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::mtree_backend::list(path).map_err(|error| mtree_error(path, &error))?;
         Ok(ArchiveListing { entries: map_mtree_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::mtree_backend::test(path, test_options).map_err(|error| mtree_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -913,20 +1027,20 @@ fn mtree_error(path: &std::path::Path, error: &crate::mtree_backend::MtreeError)
 #[derive(Debug, Default)]
 pub struct CpioListAdapter;
 
-impl ReadAdapterFactory for CpioListAdapter {
+impl NativeReadAdapter for CpioListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &CPIO_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let (_temporary, source) = cpio_source(path)?;
         let entries = crate::cpio_backend::list(&source).map_err(|error| cpio_error(path, &error))?;
         Ok(ArchiveListing { entries: map_cpio_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let (_temporary, source) = cpio_source(path)?;
         let report = crate::cpio_backend::test(&source, test_options).map_err(|error| cpio_error(path, &error))?;
         Ok(TestReport {
@@ -937,8 +1051,8 @@ impl ReadAdapterFactory for CpioListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let (_temporary, source) = cpio_source(path)?;
         let report = crate::cpio_backend::extract(
             &source,
@@ -954,40 +1068,32 @@ impl ReadAdapterFactory for CpioListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
         let (_temporary, source) = cpio_source(path)?;
-        let report = crate::cpio_backend::extract(
+        let report = crate::cpio_backend::extract_by_path_occurrence(
             &source,
             &options.destination,
             options.policy.clone(),
             options.overwrite_resolver.as_deref_mut(),
-            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            &selector.path,
+            selector.occurrence,
             options.cancellation.as_ref(),
         )
         .map_err(|error| cpio_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
         let (_temporary, source) = cpio_source(path)?;
-        let written_bytes = crate::cpio_backend::copy(
-            &source,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| cpio_error(path, &error))?;
+        let written_bytes =
+            crate::cpio_backend::copy_by_path_occurrence(&source, &selector.path, selector.occurrence, writer).map_err(|error| cpio_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -1060,19 +1166,19 @@ fn cpio_error(path: &std::path::Path, error: &crate::cpio_backend::CpioError) ->
 #[derive(Debug, Default)]
 pub struct ArListAdapter;
 
-impl ReadAdapterFactory for ArListAdapter {
+impl NativeReadAdapter for ArListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &AR_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let entries = crate::ar_backend::list(path).map_err(|error| ar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_ar_entries(entries) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::ar_backend::test(path, test_options).map_err(|error| ar_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -1082,8 +1188,8 @@ impl ReadAdapterFactory for ArListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = crate::ar_backend::extract(
             path,
             &options.destination,
@@ -1098,38 +1204,30 @@ impl ReadAdapterFactory for ArListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let report = crate::ar_backend::extract(
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let report = crate::ar_backend::extract_by_path_occurrence(
             path,
             &options.destination,
             options.policy.clone(),
             options.overwrite_resolver.as_deref_mut(),
-            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            &selector.path,
+            selector.occurrence,
             options.cancellation.as_ref(),
         )
         .map_err(|error| ar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = crate::ar_backend::copy(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| ar_error(path, &error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            crate::ar_backend::copy_by_path_occurrence(path, &selector.path, selector.occurrence, writer).map_err(|error| ar_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -1274,7 +1372,7 @@ impl Read for TemporaryTarReader {
     }
 }
 
-impl ReadAdapterFactory for FilteredTarAdapter {
+impl NativeReadAdapter for FilteredTarAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         match self.format {
             FormatId::TAR_BZ2 => &TAR_BZ2_DESCRIPTOR,
@@ -1289,15 +1387,15 @@ impl ReadAdapterFactory for FilteredTarAdapter {
         }
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
         let reader = self.open_reader(path)?;
         let entries = crate::tar_backend::list(reader, path).map_err(|error| tar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_tar_entries(entries, self.method) })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let reader = self.open_reader(path)?;
         let report = crate::tar_backend::test(reader, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
             .map_err(|error| tar_error(path, &error))?;
@@ -1309,8 +1407,8 @@ impl ReadAdapterFactory for FilteredTarAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let reader = self.open_reader(path)?;
         let report = crate::tar_backend::extract(
             reader,
@@ -1327,39 +1425,34 @@ impl ReadAdapterFactory for FilteredTarAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
         let reader = self.open_reader(path)?;
-        let report = crate::tar_backend::extract(
+        let report = crate::tar_backend::extract_by_path_occurrence(
             reader,
             path,
             &options.destination,
             options.policy.clone(),
             options.overwrite_resolver.as_deref_mut(),
-            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             options.cancellation.as_ref(),
         )
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
         let reader = self.open_reader(path)?;
-        let written_bytes = crate::tar_backend::copy(
+        let written_bytes = crate::tar_backend::copy_by_path_occurrence(
             reader,
             path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             writer,
         )
         .map_err(|error| tar_error(path, &error))?;
@@ -1417,14 +1510,14 @@ static SEVEN_Z_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct SevenZListAdapter;
 
-impl ReadAdapterFactory for SevenZListAdapter {
+impl NativeReadAdapter for SevenZListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &SEVEN_Z_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
-        let listing = sevenz_backend::list_7z(primary_path, options.password.as_deref()).map_err(|err| sevenz_archive_error(err, primary_path))?;
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
+        let listing = sevenz_backend::list_7z(primary_path, archive.options().password.as_deref()).map_err(|err| sevenz_archive_error(err, primary_path))?;
 
         let entries = listing
             .entries
@@ -1454,9 +1547,9 @@ impl ReadAdapterFactory for SevenZListAdapter {
         Ok(ArchiveListing { entries })
     }
 
-    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let report = sevenz_backend::test_7z_with_password_filter(path, open_options.password.as_deref(), |entry_path| test_options.selects(entry_path))
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = sevenz_backend::test_7z_with_password_filter(path, archive.options().password.as_deref(), |entry_path| test_options.selects(entry_path))
             .map_err(|error| sevenz_archive_error(error, path))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
@@ -1466,12 +1559,18 @@ impl ReadAdapterFactory for SevenZListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
-            sevenz_backend::extract_7z_with_overwrite_resolver(path, &options.destination, open_options.password.as_deref(), options.policy.clone(), resolver)
+            sevenz_backend::extract_7z_with_overwrite_resolver(
+                path,
+                &options.destination,
+                archive.options().password.as_deref(),
+                options.policy.clone(),
+                resolver,
+            )
         } else {
-            sevenz_backend::extract_7z(path, &options.destination, open_options.password.as_deref(), options.policy.clone())
+            sevenz_backend::extract_7z(path, &options.destination, archive.options().password.as_deref(), options.policy.clone())
         }
         .map_err(|error| {
             let kind = match error {
@@ -1494,39 +1593,31 @@ impl ReadAdapterFactory for SevenZListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let report = sevenz_backend::extract_7z_entry_by_index(
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let report = sevenz_backend::extract_7z_entry_by_name_occurrence(
             path,
             &options.destination,
-            open_options.password.as_deref(),
+            archive.options().password.as_deref(),
             options.policy.clone(),
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            &selector.path,
+            selector.occurrence,
             options.overwrite_resolver.as_deref_mut(),
         )
         .map_err(|error| sevenz_archive_error(error, path))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = sevenz_backend::copy_7z_entry_by_index(
-            path,
-            open_options.password.as_deref(),
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| sevenz_archive_error(error, path))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            sevenz_backend::copy_7z_entry_by_name_occurrence(path, archive.options().password.as_deref(), &selector.path, selector.occurrence, writer)
+                .map_err(|error| sevenz_archive_error(error, path))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -1544,23 +1635,23 @@ static TAR_ZST_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct TarZstListAdapter;
 
-impl ReadAdapterFactory for TarZstListAdapter {
+impl NativeReadAdapter for TarZstListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &TAR_ZST_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let decoder =
             zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
         let entries = crate::tar_backend::list(decoder, path).map_err(|error| tar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_tar_entries(entries, "zstd") })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let decoder =
             zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
         let report = crate::tar_backend::test(decoder, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
@@ -1573,9 +1664,9 @@ impl ReadAdapterFactory for TarZstListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let file = archive.open_primary_file()?;
         let decoder =
             zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
         let report = crate::tar_backend::extract(
@@ -1593,43 +1684,38 @@ impl ReadAdapterFactory for TarZstListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let file = archive.open_primary_file()?;
         let decoder =
             zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
-        let report = crate::tar_backend::extract(
+        let report = crate::tar_backend::extract_by_path_occurrence(
             decoder,
             path,
             &options.destination,
             options.policy.clone(),
             options.overwrite_resolver.as_deref_mut(),
-            Some(usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?),
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             options.cancellation.as_ref(),
         )
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let file = File::open(path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let file = archive.open_primary_file()?;
         let decoder =
             zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
-        let written_bytes = crate::tar_backend::copy(
+        let written_bytes = crate::tar_backend::copy_by_path_occurrence(
             decoder,
             path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
             writer,
         )
         .map_err(|error| tar_error(path, &error))?;
@@ -1650,16 +1736,16 @@ static TZAP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct TzapListAdapter;
 
-impl ReadAdapterFactory for TzapListAdapter {
+impl NativeReadAdapter for TzapListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &TZAP_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
-        let listing = match options.recipient_key_path() {
-            Some(recipient_key) => tzap_backend::list_tzap_index_with_recipient_key(primary_path, recipient_key),
-            None => tzap_backend::list_tzap_index_with_optional_password(primary_path, options.password.as_deref()),
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
+        let listing = match archive.options().recipient_key_path() {
+            Some(recipient_key) => tzap::list_tzap_index_with_recipient_key(primary_path, recipient_key),
+            None => tzap::list_tzap_index_with_optional_password(primary_path, archive.options().password.as_deref()),
         }
         .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
@@ -1681,13 +1767,11 @@ impl ReadAdapterFactory for TzapListAdapter {
                 id: EntryId(u64::try_from(index).unwrap_or(0)),
                 path: entry.path,
                 kind: match entry.kind {
-                    tzap_backend::TzapEntryKind::File => BrowserEntryKind::File,
-                    tzap_backend::TzapEntryKind::Directory => BrowserEntryKind::Directory,
-                    tzap_backend::TzapEntryKind::Symlink => BrowserEntryKind::Symlink,
-                    tzap_backend::TzapEntryKind::Hardlink => BrowserEntryKind::Hardlink,
-                    tzap_backend::TzapEntryKind::CharacterDevice | tzap_backend::TzapEntryKind::BlockDevice | tzap_backend::TzapEntryKind::Fifo => {
-                        BrowserEntryKind::Special
-                    }
+                    tzap::TzapEntryKind::File => BrowserEntryKind::File,
+                    tzap::TzapEntryKind::Directory => BrowserEntryKind::Directory,
+                    tzap::TzapEntryKind::Symlink => BrowserEntryKind::Symlink,
+                    tzap::TzapEntryKind::Hardlink => BrowserEntryKind::Hardlink,
+                    tzap::TzapEntryKind::CharacterDevice | tzap::TzapEntryKind::BlockDevice | tzap::TzapEntryKind::Fifo => BrowserEntryKind::Special,
                 },
                 size: Some(entry.size),
                 compressed_size: (entry.compressed_size != 0).then_some(entry.compressed_size),
@@ -1712,25 +1796,25 @@ impl ReadAdapterFactory for TzapListAdapter {
         Ok(ArchiveListing { entries })
     }
 
-    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let trust = test_options.tzap_x509_trust.as_ref();
-        let recipient_key = test_options.recipient_key.as_deref().or(open_options.recipient_key_path());
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let trust = test_options.tzap_x509_trust.clone().map(Into::into);
+        let recipient_key = test_options.recipient_key.as_deref().or(archive.options().recipient_key_path());
         let report = if let Some(recipient_key) = recipient_key {
-            tzap_backend::test_tzap_with_recipient_key_filter_and_x509_trust(path, recipient_key, |entry_path| test_options.selects(entry_path), trust)
+            tzap::test_tzap_with_recipient_key_filter_and_x509_trust(path, recipient_key, |entry_path| test_options.selects(entry_path), trust.as_ref())
         } else {
-            tzap_backend::test_tzap_with_optional_password_filter_and_x509_trust(
+            tzap::test_tzap_with_optional_password_filter_and_x509_trust(
                 path,
-                open_options.password.as_deref(),
+                archive.options().password.as_deref(),
                 |entry_path| test_options.selects(entry_path),
-                trust,
+                trust.as_ref(),
             )
         }
         .map_err(|error| {
             let kind = match error {
-                tzap_backend::TzapError::PasswordRequired | tzap_backend::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
-                tzap_backend::TzapError::Cancelled => ErrorKind::Cancelled,
-                tzap_backend::TzapError::Io { .. } => ErrorKind::Io,
+                tzap::TzapError::PasswordRequired | tzap::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
+                tzap::TzapError::Cancelled => ErrorKind::Cancelled,
+                tzap::TzapError::Io { .. } => ErrorKind::Io,
                 _ => ErrorKind::CorruptData,
             };
             let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
@@ -1749,22 +1833,22 @@ impl ReadAdapterFactory for TzapListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let key = if let Some(recipient_key_bytes) = options.recipient_key_bytes.as_deref() {
-            tzap_backend::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
+            tzap::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
         } else if let Some(recipient_key) = options.recipient_key.as_deref() {
-            tzap_backend::TzapExtractKeySource::RecipientKeyPath(recipient_key)
+            tzap::TzapExtractKeySource::RecipientKeyPath(recipient_key)
         } else if let Some(password) = options.tzap_password.as_deref() {
-            tzap_backend::TzapExtractKeySource::Password(password)
+            tzap::TzapExtractKeySource::Password(password)
         } else {
-            tzap_backend::TzapExtractKeySource::None
+            tzap::TzapExtractKeySource::None
         };
-        let report = tzap_backend::extract_tzap(
-            tzap_backend::TzapExtractRequest {
+        let report = tzap::extract_tzap(
+            tzap::TzapExtractRequest {
                 key,
                 policy: options.policy.clone(),
-                restore_options: options.tzap_restore_options.unwrap_or_default(),
+                restore_options: options.tzap_restore_options.unwrap_or_default().into(),
                 overwrite_resolver: options.overwrite_resolver.as_deref_mut(),
                 context: None,
                 fast: false,
@@ -1774,9 +1858,9 @@ impl ReadAdapterFactory for TzapListAdapter {
         )
         .map_err(|error| {
             let kind = match error {
-                tzap_backend::TzapError::PasswordRequired | tzap_backend::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
-                tzap_backend::TzapError::Cancelled => ErrorKind::Cancelled,
-                tzap_backend::TzapError::Io { .. } => ErrorKind::Io,
+                tzap::TzapError::PasswordRequired | tzap::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
+                tzap::TzapError::Cancelled => ErrorKind::Cancelled,
+                tzap::TzapError::Io { .. } => ErrorKind::Io,
                 _ => ErrorKind::CorruptData,
             };
             ArchiveError {
@@ -1791,44 +1875,38 @@ impl ReadAdapterFactory for TzapListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let entries = match open_options.recipient_key_path() {
-            Some(recipient_key) => tzap_backend::list_tzap_index_with_recipient_key(path, recipient_key),
-            None => tzap_backend::list_tzap_index_with_optional_password(path, open_options.password.as_deref()),
-        }
-        .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?
-        .entries;
-        let index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?;
-        let entry =
-            entries.get(index).ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "retained TZAP entry ID is not present in this archive"))?;
-        let destination_path = options.destination.join(entry.path.replace('\\', "/").trim_matches('/'));
-        if matches!(entry.kind, tzap_backend::TzapEntryKind::Directory) {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let destination_path = options.destination.join(selector.path.replace('\\', "/").trim_matches('/'));
+        // The retained selector comes from the original engine listing.  The
+        // TZAP file operation resolves that exact path inside a newly opened
+        // reader without re-listing or treating the engine ID as a fresh index.
+        if matches!(selector.kind, BrowserEntryKind::Directory) {
             std::fs::create_dir_all(&destination_path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
             return Ok(ExtractReport { written_entries: 1, ..ExtractReport::default() });
         }
-        if !matches!(entry.kind, tzap_backend::TzapEntryKind::File) {
+        if !matches!(selector.kind, BrowserEntryKind::File) {
             return Ok(ExtractReport {
                 skipped_entries: 1,
-                warnings: vec![format!("skipped unsupported TZAP entry {}", entry.path)],
+                warnings: vec![format!("skipped unsupported TZAP entry {}", selector.path)],
                 ..ExtractReport::default()
             });
         }
-        let key = open_options.recipient_key_path().map_or_else(
-            || tzap_backend::TzapExtractKeySource::Password(open_options.password.as_deref().unwrap_or("")),
-            tzap_backend::TzapExtractKeySource::RecipientKeyPath,
+        let key = archive.options().recipient_key_path().map_or_else(
+            || tzap::TzapExtractKeySource::Password(archive.options().password.as_deref().unwrap_or("")),
+            tzap::TzapExtractKeySource::RecipientKeyPath,
         );
-        let report = tzap_backend::extract_tzap_file_to_destination(
+        let report = tzap::extract_tzap_file_to_destination(
             path,
             key,
-            &entry.path,
+            &selector.path,
             &destination_path,
             options.policy.overwrite == crate::safety::OverwritePolicy::Replace,
-            options.tzap_restore_options.unwrap_or_default(),
+            options.tzap_restore_options.unwrap_or_default().into(),
         )
         .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         let Some(report) = report else {
@@ -1837,29 +1915,14 @@ impl ReadAdapterFactory for TzapListAdapter {
         Ok(ExtractReport { written_entries: 1, written_bytes: report.written_bytes, warnings: report.metadata_diagnostics, ..ExtractReport::default() })
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let entries = match open_options.recipient_key_path() {
-            Some(recipient_key) => tzap_backend::list_tzap_index_with_recipient_key(path, recipient_key),
-            None => tzap_backend::list_tzap_index_with_optional_password(path, open_options.password.as_deref()),
-        }
-        .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?
-        .entries;
-        let index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?;
-        let entry =
-            entries.get(index).ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "retained TZAP entry ID is not present in this archive"))?;
-        let key = open_options.recipient_key_path().map_or_else(
-            || tzap_backend::TzapExtractKeySource::Password(open_options.password.as_deref().unwrap_or("")),
-            tzap_backend::TzapExtractKeySource::RecipientKeyPath,
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let key = archive.options().recipient_key_path().map_or_else(
+            || tzap::TzapExtractKeySource::Password(archive.options().password.as_deref().unwrap_or("")),
+            tzap::TzapExtractKeySource::RecipientKeyPath,
         );
-        let report =
-            tzap_backend::copy_tzap_file_to_writer(path, key, &entry.path, writer).map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        let report = tzap::copy_tzap_file_to_writer(path, key, &selector.path, writer).map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         Ok(CopyReport { written_bytes: report.written_bytes })
     }
 }
@@ -1877,14 +1940,14 @@ static RAR_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct RarListAdapter;
 
-impl ReadAdapterFactory for RarListAdapter {
+impl NativeReadAdapter for RarListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &RAR_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
-        let listing = rar_backend::list_rar_with_password(primary_path, options.password.as_deref()).map_err(|err| {
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
+        let listing = rar_backend::list_rar_with_password(primary_path, archive.options().password.as_deref()).map_err(|err| {
             let msg = err.to_string();
             let lower = msg.to_lowercase();
             if lower.contains("password") {
@@ -1930,9 +1993,9 @@ impl ReadAdapterFactory for RarListAdapter {
         Ok(ArchiveListing { entries })
     }
 
-    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let report = rar_backend::test_rar_with_password_filter(path, open_options.password.as_deref(), |entry_path| test_options.selects(entry_path))
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = rar_backend::test_rar_with_password_filter(path, archive.options().password.as_deref(), |entry_path| test_options.selects(entry_path))
             .map_err(|error| {
                 let message = error.to_string();
                 let kind = if message.to_lowercase().contains("password") {
@@ -1953,18 +2016,18 @@ impl ReadAdapterFactory for RarListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
             rar_backend::extract_rar_with_overwrite_resolver_and_password(
                 path,
                 &options.destination,
                 options.policy.clone(),
-                open_options.password.as_deref(),
+                archive.options().password.as_deref(),
                 resolver,
             )
         } else {
-            rar_backend::extract_rar_with_password(path, &options.destination, options.policy.clone(), open_options.password.as_deref())
+            rar_backend::extract_rar_with_password(path, &options.destination, options.policy.clone(), archive.options().password.as_deref())
         }
         .map_err(|error| {
             let message = error.to_string();
@@ -1988,18 +2051,19 @@ impl ReadAdapterFactory for RarListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let report = rar_backend::extract_rar_entry_by_index(
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let report = rar_backend::extract_rar_entry_by_path_occurrence(
             path,
             &options.destination,
             options.policy.clone(),
-            open_options.password.as_deref(),
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
+            archive.options().password.as_deref(),
+            &selector.path,
+            selector.occurrence,
             options.overwrite_resolver.as_deref_mut(),
         )
         .map_err(|error| {
@@ -2021,21 +2085,12 @@ impl ReadAdapterFactory for RarListAdapter {
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let written_bytes = rar_backend::copy_rar_entry_by_index(
-            path,
-            open_options.password.as_deref(),
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes =
+            rar_backend::copy_rar_entry_by_path_occurrence(path, archive.options().password.as_deref(), &selector.path, selector.occurrence, writer)
+                .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -2053,13 +2108,13 @@ static RAW_STREAM_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct RawStreamListAdapter;
 
-impl ReadAdapterFactory for RawStreamListAdapter {
+impl NativeReadAdapter for RawStreamListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &RAW_STREAM_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
         let format = raw_stream_backend::detect_raw_stream_format(primary_path)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(primary_path))?;
 
@@ -2087,8 +2142,8 @@ impl ReadAdapterFactory for RawStreamListAdapter {
         Ok(ArchiveListing { entries: vec![entry] })
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
         let format = raw_stream_backend::detect_raw_stream_format(path)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(path))?;
         let payload_name = raw_stream_backend::output_name_for_raw_stream(path, format)
@@ -2105,8 +2160,8 @@ impl ReadAdapterFactory for RawStreamListAdapter {
         Ok(TestReport { tested_entries: 1, skipped_entries: 0, tested_bytes, warnings: Vec::new() })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let format = raw_stream_backend::detect_raw_stream_format(path)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(path))?;
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
@@ -2132,15 +2187,15 @@ impl ReadAdapterFactory for RawStreamListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        if entry_id != EntryId(0) {
-            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, "raw stream contains only entry #0"));
+        let selector = archive.selected_entry_selector(entry_id)?;
+        if selector.kind != BrowserEntryKind::File {
+            return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "raw stream synthetic entry is not a regular file"));
         }
-        let path = archive.source.primary_path();
+        let path = archive.primary_path();
         let format = raw_stream_backend::detect_raw_stream_format(path)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(path))?;
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
@@ -2152,17 +2207,12 @@ impl ReadAdapterFactory for RawStreamListAdapter {
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        if entry_id != EntryId(0) {
-            return Err(ArchiveError::usable(ErrorKind::InvalidFormat, "raw stream contains only entry #0"));
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let selector = archive.selected_entry_selector(entry_id)?;
+        if selector.kind != BrowserEntryKind::File {
+            return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "raw stream synthetic entry is not a regular file"));
         }
-        let path = archive.source.primary_path();
+        let path = archive.primary_path();
         let format = raw_stream_backend::detect_raw_stream_format(path)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(path))?;
         let written_bytes =
@@ -2184,14 +2234,14 @@ static APPLE_ARCHIVE_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct AppleArchiveListAdapter;
 
-impl ReadAdapterFactory for AppleArchiveListAdapter {
+impl NativeReadAdapter for AppleArchiveListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &APPLE_ARCHIVE_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
-        let listing = apple_archive_backend::list_apple_archive(primary_path, options.password.as_deref())
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
+        let listing = apple_archive_backend::list_apple_archive(primary_path, archive.options().password.as_deref())
             .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
         let entries = listing
@@ -2223,19 +2273,20 @@ impl ReadAdapterFactory for AppleArchiveListAdapter {
         Ok(ArchiveListing { entries })
     }
 
-    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let report = apple_archive_backend::test_apple_archive_filter(path, |entry_path| test_options.selects(entry_path), open_options.password.as_deref())
-            .map_err(|error| {
-                let kind = match error {
-                    apple_archive_backend::AppleArchiveError::Unsupported => ErrorKind::UnsupportedOperation,
-                    apple_archive_backend::AppleArchiveError::Cancelled => ErrorKind::Cancelled,
-                    apple_archive_backend::AppleArchiveError::Io { .. } => ErrorKind::Io,
-                    _ => ErrorKind::CorruptData,
-                };
-                let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
-                ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
-            })?;
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report =
+            apple_archive_backend::test_apple_archive_filter(path, |entry_path| test_options.selects(entry_path), archive.options().password.as_deref())
+                .map_err(|error| {
+                    let kind = match error {
+                        apple_archive_backend::AppleArchiveError::Unsupported => ErrorKind::UnsupportedOperation,
+                        apple_archive_backend::AppleArchiveError::Cancelled => ErrorKind::Cancelled,
+                        apple_archive_backend::AppleArchiveError::Io { .. } => ErrorKind::Io,
+                        _ => ErrorKind::CorruptData,
+                    };
+                    let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
+                    ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
+                })?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
             skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
@@ -2244,18 +2295,18 @@ impl ReadAdapterFactory for AppleArchiveListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
             apple_archive_backend::extract_apple_archive_with_overwrite_resolver(
                 path,
                 &options.destination,
                 options.policy.clone(),
                 resolver,
-                open_options.password.as_deref(),
+                archive.options().password.as_deref(),
             )
         } else {
-            apple_archive_backend::extract_apple_archive(path, &options.destination, options.policy.clone(), open_options.password.as_deref())
+            apple_archive_backend::extract_apple_archive(path, &options.destination, options.policy.clone(), archive.options().password.as_deref())
         }
         .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
@@ -2263,47 +2314,40 @@ impl ReadAdapterFactory for AppleArchiveListAdapter {
 
     fn selected_extract<'a>(
         &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
+        archive: &NativeReadContext,
         entry_id: EntryId,
         options: &'a mut SelectedExtractOptions<'a>,
     ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let entries = apple_archive_backend::list_apple_archive(path, open_options.password.as_deref())
-            .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
-        let index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?;
-        let entry =
-            entries.entries.get(index).ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "retained Apple Archive entry ID is not present"))?;
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
         let report = apple_archive_backend::extract_apple_archive_entry(
             path,
-            &entry.path,
+            &selector.path,
             &options.destination,
             options.policy.clone(),
-            open_options.password.as_deref(),
+            archive.options().password.as_deref(),
         )
         .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?;
-        let mut current = 0_usize;
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let target_path = selector.path.clone();
+        let target_occurrence = selector.occurrence;
+        let mut occurrence = 0_usize;
         let report = apple_archive_backend::copy_apple_archive_files_to_writer(
             path,
             |entry_path| {
-                let selected = current == index;
-                current = current.saturating_add(1);
+                let selected = entry_path == target_path && occurrence == target_occurrence;
+                if entry_path == target_path {
+                    occurrence = occurrence.saturating_add(1);
+                }
                 selected && !entry_path.is_empty()
             },
             writer,
-            open_options.password.as_deref(),
+            archive.options().password.as_deref(),
         )
         .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
         Ok(CopyReport { written_bytes: report.written_bytes })
@@ -2323,13 +2367,13 @@ static DMG_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct DmgListAdapter;
 
-impl ReadAdapterFactory for DmgListAdapter {
+impl NativeReadAdapter for DmgListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &DMG_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
         let raw_entries =
             apple_dmg_backend::list_dmg(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
@@ -2356,8 +2400,8 @@ impl ReadAdapterFactory for DmgListAdapter {
         Ok(ArchiveListing { entries })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
             apple_dmg_backend::extract_dmg_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
         } else {
@@ -2381,13 +2425,13 @@ static PKG_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct PkgListAdapter;
 
-impl ReadAdapterFactory for PkgListAdapter {
+impl NativeReadAdapter for PkgListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &PKG_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
         let raw_entries =
             apple_pkg_backend::list_pkg(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
@@ -2414,8 +2458,8 @@ impl ReadAdapterFactory for PkgListAdapter {
         Ok(ArchiveListing { entries })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
             apple_pkg_backend::extract_pkg_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
         } else {
@@ -2439,13 +2483,13 @@ static MSI_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 #[derive(Debug, Default)]
 pub struct MsiListAdapter;
 
-impl ReadAdapterFactory for MsiListAdapter {
+impl NativeReadAdapter for MsiListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &MSI_LIST_DESCRIPTOR
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
         let raw_entries =
             msi_backend::list_msi(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
 
@@ -2472,8 +2516,8 @@ impl ReadAdapterFactory for MsiListAdapter {
         Ok(ArchiveListing { entries })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
             msi_backend::extract_msi_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver)
         } else {
@@ -2494,6 +2538,30 @@ static ISO_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static VHD_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::VHD,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static VMDK_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::VMDK,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static UDF_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::UDF,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 /// Native Virtual Disk listing adapter factory.
 #[derive(Debug)]
 pub struct VirtualDiskListAdapter {
@@ -2503,27 +2571,27 @@ pub struct VirtualDiskListAdapter {
 impl VirtualDiskListAdapter {
     /// Creates a virtual disk or optical filesystem adapter for VHD, VMDK, UDF, or ISO.
     #[must_use]
-    pub const fn new(format: FormatId) -> Self {
-        Self { format }
+    pub(crate) fn new(format: FormatId) -> Option<Self> {
+        match format {
+            FormatId::VHD | FormatId::VMDK | FormatId::UDF | FormatId::ISO => Some(Self { format }),
+            _ => None,
+        }
     }
 }
 
-impl ReadAdapterFactory for VirtualDiskListAdapter {
+impl NativeReadAdapter for VirtualDiskListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         match self.format {
             FormatId::ISO => &ISO_DESCRIPTOR,
-            _ => Box::leak(Box::new(AdapterDescriptor {
-                name: "native_virtual_disk_lister",
-                format: self.format,
-                operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
-                required_source_access: SourceAccess::Seekable,
-                supports_encryption: false,
-            })),
+            FormatId::VHD => &VHD_DESCRIPTOR,
+            FormatId::VMDK => &VMDK_DESCRIPTOR,
+            FormatId::UDF => &UDF_DESCRIPTOR,
+            _ => unreachable!("VirtualDiskListAdapter only accepts virtual disk formats"),
         }
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let primary_path = archive.primary_path();
         if self.format == FormatId::ISO {
             let raw_entries = virtual_disk_backend::list_iso(primary_path).map_err(|error| virtual_disk_error(primary_path, &error))?;
             return Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) });
@@ -2540,8 +2608,8 @@ impl ReadAdapterFactory for VirtualDiskListAdapter {
         Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
         let report =
             if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
                 match self.format {
@@ -2560,31 +2628,22 @@ impl ReadAdapterFactory for VirtualDiskListAdapter {
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
-    fn test(&self, archive: &DetectedArchive, _open_options: &OpenOptions, options: &TestOptions) -> Result<TestReport, ArchiveError> {
+    fn test(&self, archive: &NativeReadContext, options: &TestOptions) -> Result<TestReport, ArchiveError> {
         if self.format != FormatId::ISO {
             return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk test format '{}'", self.format)));
         }
-        let path = archive.source.primary_path();
+        let path = archive.primary_path();
         virtual_disk_backend::test_iso(path, options).map_err(|error| virtual_disk_error(path, &error))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        _open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         if self.format != FormatId::ISO {
             return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk copy format '{}'", self.format)));
         }
-        let path = archive.source.primary_path();
-        let written_bytes = virtual_disk_backend::copy_iso(
-            path,
-            usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "entry ID does not fit the native index"))?,
-            writer,
-        )
-        .map_err(|error| virtual_disk_error(path, &error))?;
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes = virtual_disk_backend::copy_iso_by_path_occurrence(path, &selector.path, selector.occurrence, writer)
+            .map_err(|error| virtual_disk_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -2628,5 +2687,59 @@ fn virtual_disk_error(path: &std::path::Path, error: &virtual_disk_backend::Virt
         message: error.to_string(),
         disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
         path: Some(path.to_path_buf()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NativeEntrySelector;
+    use super::NativeReadContext;
+    use crate::archive_browser::BrowserEntryKind;
+    use crate::engine::format::FormatId;
+    use crate::engine::source::ArchiveSource;
+    use crate::engine::types::{ArchiveListing, DetectedArchive, EngineEntry, EntryId, OpenOptions};
+    use crate::test_support::TestDir;
+    use std::io::Read as _;
+
+    #[test]
+    fn native_session_context_owns_source_cursor_factory() {
+        let temp = TestDir::new("native-session-context");
+        let path = temp.path("payload.tar");
+        temp.write_file("payload.tar", b"native cursor source");
+        let archive = DetectedArchive { format: FormatId::TAR, source: ArchiveSource::Path(path.clone()) };
+        let context = NativeReadContext::new(archive.source.cursor_factory(), OpenOptions::default());
+
+        assert_eq!(context.cursor_factory.source().primary_path(), path);
+        let mut cursor = context.open_primary_file().unwrap();
+        let mut contents = Vec::new();
+        cursor.read_to_end(&mut contents).unwrap();
+        assert_eq!(contents, b"native cursor source");
+        assert_eq!(context.cursor_factory.source().primary_path(), path);
+    }
+
+    #[test]
+    fn native_cursor_factory_clones_owned_source_descriptors() {
+        let source = ArchiveSource::Path("archive.tar".into());
+        let factory = source.cursor_factory();
+        assert_eq!(factory.source(), &source);
+    }
+
+    #[test]
+    fn retained_native_selector_preserves_duplicate_physical_occurrences() {
+        let source = ArchiveSource::Path("archive.7z".into());
+        let archive = DetectedArchive { format: FormatId::SEVEN_Z, source };
+        let mut context = NativeReadContext::new(archive.source.cursor_factory(), OpenOptions::default());
+        context.retain_listing(&ArchiveListing {
+            entries: vec![
+                EngineEntry { id: EntryId(4), path: "duplicate.txt".to_owned(), kind: BrowserEntryKind::File, ..EngineEntry::default() },
+                EngineEntry { id: EntryId(9), path: "duplicate.txt".to_owned(), kind: BrowserEntryKind::File, ..EngineEntry::default() },
+            ],
+        });
+
+        assert_eq!(
+            context.retained_entry(EntryId(4)).unwrap(),
+            &NativeEntrySelector { id: EntryId(4), path: "duplicate.txt".to_owned(), kind: BrowserEntryKind::File, occurrence: 0 }
+        );
+        assert_eq!(context.retained_entry(EntryId(9)).unwrap().occurrence, 1);
     }
 }

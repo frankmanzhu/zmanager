@@ -192,7 +192,6 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
     FormatCapability { kind: ArchiveFormatKind::Vhd, extensions: VHD_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Vmdk, extensions: VMDK_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Udf, extensions: UDF_EXTENSIONS, status: BackendStatus::Available },
-    FormatCapability { kind: ArchiveFormatKind::Unknown, extensions: &[], status: BackendStatus::Available },
 ];
 
 /// Availability of the native Apple Archive backend on this target.
@@ -202,11 +201,14 @@ const fn apple_archive_status() -> BackendStatus {
 
 /// Returns whether the backend for `kind` is available on this platform.
 ///
-/// Formats without a table row (or unknown kinds) report as available; the
-/// row is the authoritative source for platform-gated backends.
+/// Formats without a table row are not registered engine formats. Unknown
+/// input is intentionally handled as an invalid format at engine open.
 #[must_use]
 pub fn format_status(kind: ArchiveFormatKind) -> BackendStatus {
-    FORMAT_CAPABILITIES.iter().find(|capability| capability.kind == kind).map_or(BackendStatus::Available, |capability| capability.status)
+    FORMAT_CAPABILITIES
+        .iter()
+        .find(|capability| capability.kind == kind)
+        .map_or(BackendStatus::Unavailable { reason: "format is not registered" }, |capability| capability.status)
 }
 
 /// Detects the archive format from a path.
@@ -245,7 +247,7 @@ pub fn detect_archive_format(path: impl AsRef<Path>) -> ArchiveFormatKind {
 /// Detects the two compatibility inputs that intentionally have no useful
 /// filename extension: ZIP self-extracting executables and gzip-wrapped CPIO.
 /// This keeps `UNKNOWN` out of the engine registry while preserving the
-/// compatibility fixtures covered by the explicit fallback allow-list.
+/// compatibility fixtures covered by the explicit content-detection allow-list.
 fn detect_content_format(path: &Path) -> Option<ArchiveFormatKind> {
     let mut file = File::open(path).ok()?;
     let mut prefix = Vec::new();

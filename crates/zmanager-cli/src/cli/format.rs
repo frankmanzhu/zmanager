@@ -90,7 +90,7 @@ pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
     FormatDescriptor { name: FORMAT_AR, extensions: AR_EXTENSIONS, kind: ArchiveFormatKind::Ar },
     FormatDescriptor { name: FORMAT_WARC, extensions: WARC_EXTENSIONS, kind: ArchiveFormatKind::Warc },
     FormatDescriptor { name: FORMAT_MTREE, extensions: MTREE_EXTENSIONS, kind: ArchiveFormatKind::Mtree },
-    FormatDescriptor { name: FORMAT_RAW_STREAM, extensions: zmanager_core::raw_stream_backend::RAW_STREAM_SUFFIXES, kind: ArchiveFormatKind::RawStream },
+    FormatDescriptor { name: FORMAT_RAW_STREAM, extensions: zmanager_core::engine::raw_stream_suffixes(), kind: ArchiveFormatKind::RawStream },
 ];
 // Path-based format detection delegates to the core detector (CR-114); the
 // extension predicates no longer live here so consumers cannot drift.

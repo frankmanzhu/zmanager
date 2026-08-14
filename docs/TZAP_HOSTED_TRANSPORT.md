@@ -1,7 +1,7 @@
 # Hosted TZAP transport boundary
 
-Hosted TZAP behavior is owned by the reusable `zmanager-core` auth modules;
-CLI, desktop, and FFI layers only provide product adapters. The boundary is
+Hosted TZAP behavior is owned by the reusable `zmanager-tzap-hosted` product
+crate; CLI, desktop, and FFI layers only provide product adapters. The boundary is
 typed by `TzapAuthHttpRequest`, `TzapAuthHttpResponse`, and
 `TzapAuthHttpTransport`, so UI/FFI DTOs and provider-specific secrets do not
 cross into the core client.
@@ -16,7 +16,7 @@ Each request carries `TzapAuthRequestOptions`:
 - `TzapAuthCancellation` provides cooperative cancellation before and after a
   transport call, and adapters pass it through to their HTTP implementation.
 
-The core validates OAuth state, redirect URI, PKCE, session audience, provider
+The hosted crate validates OAuth state, redirect URI, PKCE, session audience, provider
 material, current-user fields, enrollment certificate chains, status freshness,
 and CRL contents before any session or identity inventory update. Bearer
 tokens and private key material use redacting, zeroizing secret wrappers.
@@ -29,7 +29,7 @@ HTTP dependencies. Build selection is documented in
 Focused verification:
 
 ```sh
-cargo test -p zmanager-core auth_client
-cargo test -p zmanager-core --test tzap_obligation_harness
+cargo test -p zmanager-tzap-hosted auth_client
+cargo test -p zmanager-tzap-hosted --test tzap_obligation_harness
 cargo test -p zmanager-ffi --no-default-features
 ```

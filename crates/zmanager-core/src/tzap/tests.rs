@@ -1218,47 +1218,6 @@ fn public_display_summary_reports_not_authentic_for_forged_signature() {
     assert_eq!(reason, "X.509 RootAuth signature failed");
 }
 
-/// Flipping one byte in the data region breaks the content commitment but
-/// not the footer's own signature (the signature covers the *claimed*
-/// root, which is unchanged). The footer-only display status must stay
-/// `Signed`, and the service JSON must mark the verification scope honestly.
-#[test]
-// This test crosses into the auth-gated tzap_service surface (public
-// metadata summary); the offline build's tzap module has no access to it.
-#[cfg(feature = "tzap-online")]
-fn public_display_summary_scope_markers_report_footer_only_status() {
-    let temp = TestDir::new("tzap_display_scope_markers");
-    let archive = temp.path("signed.tzap");
-    let signer = test_x509_root_auth_signer("ZManager Scope Signer");
-
-    // A payload large enough that the archive midpoint lands inside the data
-    // region, well clear of the header and terminal structures.
-    let payload = deterministic_bytes(4096);
-    let written = write_signed_test_archive(&[RegularFile::new("payload.bin", &payload)], 1, &signer);
-    let mut bytes = written.bytes;
-    let midpoint = bytes.len() / 2;
-    bytes[midpoint] ^= 0x01;
-    fs::write(&archive, &bytes).unwrap();
-
-    let summary = summarize_tzap_public_display(&archive).unwrap();
-    let TzapPublicSignatureStatus::Signed { signer } = &summary.signature else {
-        panic!("expected signed status, got {:?}", summary.signature);
-    };
-    assert_eq!(signer.subject, "CN=ZManager Scope Signer");
-
-    let json = crate::tzap_service::tzap_public_metadata_display_summary(archive.to_str().unwrap());
-    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(value["ok"], true);
-    assert_eq!(value["signature"]["status"], "signed");
-    assert_eq!(value["signature"]["verification_scope"], "footer-only");
-    assert_eq!(value["signature"]["content_verified"], false);
-    let root_auth = value["signature"]["root_auth"].as_object().unwrap();
-    assert_eq!(root_auth.len(), 16);
-    assert_eq!(root_auth["subject"], "CN=ZManager Scope Signer");
-    assert_eq!(root_auth["signature_verified"], true);
-    assert_eq!(root_auth["trust_validated"], false);
-}
-
 #[test]
 fn public_display_summary_reports_unavailable_for_missing_volume() {
     let temp = TestDir::new("tzap_display_missing_volume");

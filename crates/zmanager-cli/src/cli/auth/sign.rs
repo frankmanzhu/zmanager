@@ -9,7 +9,7 @@ use crate::cli::usage::{
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zmanager_core::tzap_service::tzap_document_verify_json;
+use zmanager_tzap_hosted::tzap_service::tzap_document_verify_json;
 
 pub(crate) fn sign_command(args: &[String], mut global: GlobalOptions) -> ExitCode {
     if wants_help(args) {
@@ -86,7 +86,7 @@ pub(crate) fn sign_command(args: &[String], mut global: GlobalOptions) -> ExitCo
             "payload": payload,
         }),
     );
-    match service_envelope(&zmanager_core::tzap_service::tzap_document_sign_json(&request.to_string())) {
+    match service_envelope(&zmanager_tzap_hosted::tzap_service::tzap_document_sign_json(&request.to_string())) {
         Ok(response) => {
             let Some(envelope) = response.get("envelope") else {
                 print_stable_tzap_error("sign", "service response is missing the envelope", &global);

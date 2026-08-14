@@ -108,6 +108,12 @@ pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Wri
     cpio_backend::copy(payload, entry_index, writer).map_err(RpmError::from)
 }
 
+/// Copies one retained CPIO payload entry by path and duplicate occurrence.
+pub fn copy_by_path_occurrence(path: impl AsRef<Path>, selected_path: &str, selected_occurrence: usize, writer: &mut dyn io::Write) -> Result<u64, RpmError> {
+    let (_temporary, payload) = materialize_payload(path.as_ref())?;
+    cpio_backend::copy_by_path_occurrence(&payload, selected_path, selected_occurrence, writer).map_err(RpmError::from)
+}
+
 fn materialize_payload(path: &Path) -> Result<(TemporaryDirectory, PathBuf), RpmError> {
     let payload = parse_payload(path)?;
     let temporary = TemporaryDirectory::new("zmanager-rpm")?;

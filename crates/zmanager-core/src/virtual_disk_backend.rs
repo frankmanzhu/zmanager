@@ -13,8 +13,8 @@
 //!
 //! ## Non-disk-input guard
 //!
-//! The engine also registers loose-archive openers (zip/7z/tar fallbacks), so a
-//! plain zip renamed `foo.vhd` resolves as a browsable archive tree with
+//! The underlying VFS resolver also recognizes embedded archive containers, so
+//! a plain zip renamed `foo.vhd` resolves as a browsable archive tree with
 //! `fs: Some(...)`. [`mount_disk`] rejects those with
 //! [`VirtualDiskBackendError::NotDiskImage`] (locator `Archive` layer check plus
 //! a logical-container kind check).
@@ -152,8 +152,8 @@ fn is_ntfs_metadata_path(path: &str) -> bool {
     path.split('/').next().is_some_and(|root| NTFS_METADATA_NAMES.contains(&root))
 }
 
-/// Logical-container kinds the engine's loose-archive fallback can produce
-/// (zip/7z/tar/dar/aff4/ad1). A file that resolves to one of these is an
+/// Logical-container kinds the VFS resolver can produce (zip/7z/tar/dar/aff4/ad1).
+/// A file that resolves to one of these is an
 /// archive tree, not a disk image.
 fn is_logical_container_kind(kind: FsKind) -> bool {
     matches!(kind.as_str(), "zip" | "7z" | "tar" | "dar" | "aff4" | "ad1")
@@ -212,10 +212,10 @@ fn collect_entries_with_path_map(
 
     let mut entries = Vec::with_capacity(walked.len());
     for entry in walked {
-        let fallback_path = entry.path.iter().map(|component| String::from_utf8_lossy(component).into_owned()).collect::<Vec<_>>().join("/");
+        let walked_path = entry.path.iter().map(|component| String::from_utf8_lossy(component).into_owned()).collect::<Vec<_>>().join("/");
         let path = match (path_map, entry.id) {
-            (Some(map), forensic_vfs::FileId::IsoExtent { block }) => map.get(&block).cloned().unwrap_or(fallback_path),
-            _ => fallback_path,
+            (Some(map), forensic_vfs::FileId::IsoExtent { block }) => map.get(&block).cloned().unwrap_or(walked_path),
+            _ => walked_path,
         };
         if path.is_empty() {
             continue;
@@ -321,6 +321,34 @@ pub fn copy_iso(archive_path: impl AsRef<Path>, entry_index: usize, writer: &mut
         return Err(VirtualDiskBackendError::Vfs("retained ISO entry is not a regular file".to_owned()));
     }
     stream_file(&fs, *file_id, &entry.archive_path, writer)
+}
+
+/// Copies one retained ISO file by path and duplicate occurrence.
+pub fn copy_iso_by_path_occurrence(
+    archive_path: impl AsRef<Path>,
+    selected_path: &str,
+    selected_occurrence: usize,
+    writer: &mut dyn io::Write,
+) -> Result<u64, VirtualDiskBackendError> {
+    let archive_path = archive_path.as_ref();
+    let mut occurrence = 0_usize;
+    let entry_index = list_iso(archive_path)?
+        .into_iter()
+        .enumerate()
+        .find_map(|entry| {
+            let (entry_index, entry) = entry;
+            if entry.path != selected_path {
+                return None;
+            }
+            let matches = occurrence == selected_occurrence;
+            occurrence = occurrence.saturating_add(1);
+            matches.then_some(entry_index)
+        })
+        .ok_or_else(|| VirtualDiskBackendError::Io {
+            path: archive_path.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::NotFound, "retained ISO entry is not present"),
+        })?;
+    copy_iso(archive_path, entry_index, writer)
 }
 
 fn list_virtual_disk_inner(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {

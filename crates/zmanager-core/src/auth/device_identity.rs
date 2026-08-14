@@ -143,7 +143,8 @@ fn spki_fingerprint(spki_der: &[u8]) -> String {
     trust::format_certificate_sha256(&digest)
 }
 
-pub(crate) fn csr_fingerprint(csr_der: &[u8]) -> String {
+#[must_use]
+pub fn csr_fingerprint(csr_der: &[u8]) -> String {
     let digest: [u8; 32] = Sha256::digest(csr_der).into();
     trust::format_csr_sha256(&digest)
 }

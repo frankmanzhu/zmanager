@@ -33,6 +33,7 @@ macro_rules! backend_error_from_impls {
 pub mod archive_format;
 mod archive_split;
 mod atomic_file;
+mod backend_impl;
 mod extract_loop;
 mod extract_materialize;
 mod gitignore;
@@ -40,26 +41,25 @@ mod multi_volume;
 mod segmented_reader;
 mod sevenz_volume;
 mod strings;
-pub mod tar_backend;
+pub(crate) use backend_impl::{
+    apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend, mtree_backend,
+    rar_backend, raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend, warc_backend,
+    xar_backend, zip_backend,
+};
 mod tar_metadata;
 mod temp_names;
 #[cfg(test)]
 mod test_support;
 mod tzap;
-mod wire_profile;
 mod zip_split;
 
 // Offline identity, catalog, signing, and verification remain part of the
-// core contract in every profile. The files stay under the historical auth
-// directory while their ownership is now explicit at the crate root.
-#[path = "auth/auth_client.rs"]
-pub mod auth_client;
-#[path = "auth/certificate_lifecycle.rs"]
-pub mod certificate_lifecycle;
+// core contract in every profile. Hosted account, enrollment, status, and
+// JSON-service modules are enabled only by the explicit hosted profile crate.
+// Offline identity files retain the historical auth directory for source
+// grouping, while their ownership is explicit at the crate root.
 #[path = "auth/contact_card.rs"]
 pub mod contact_card;
-#[path = "auth/crl.rs"]
-pub mod crl;
 #[path = "auth/device_identity.rs"]
 pub mod device_identity;
 #[path = "auth/document_envelope.rs"]
@@ -68,10 +68,6 @@ pub mod document_envelope;
 pub mod document_signing;
 #[path = "auth/document_verification.rs"]
 pub mod document_verification;
-#[path = "auth/enrollment_client.rs"]
-pub mod enrollment_client;
-#[path = "auth/http_client.rs"]
-pub(crate) mod http_client;
 #[path = "auth/identity_catalog.rs"]
 pub mod identity_catalog;
 #[path = "auth/identity_migration.rs"]
@@ -82,51 +78,48 @@ pub mod jcs;
 pub(crate) mod json_util;
 #[path = "auth/local_identity_store.rs"]
 pub mod local_identity_store;
-#[path = "auth/local_tzap_service.rs"]
-pub mod local_tzap_service;
 #[path = "auth/p256_signature.rs"]
 pub mod p256_signature;
-#[path = "auth/status_client.rs"]
-pub mod status_client;
-#[path = "auth/tzap_service.rs"]
-pub mod tzap_service;
-#[path = "auth/tzap_service_auth.rs"]
-pub mod tzap_service_auth;
 
-pub mod apple_archive_backend;
-pub mod apple_dmg_backend;
-pub mod apple_pkg_backend;
-pub mod ar_backend;
 pub mod archive_browser;
-pub mod cab_backend;
-pub mod cpio_backend;
-pub mod deb_backend;
 pub mod engine;
 pub mod jobs;
-pub mod lha_backend;
 pub mod manifest;
-pub mod msi_backend;
-pub mod mtree_backend;
-pub mod rar_backend;
-pub mod raw_stream_backend;
-pub mod rpm_backend;
 pub mod safety;
 pub mod secrets;
-pub mod sevenz_backend;
-pub mod tar_gz_backend;
-pub mod tar_zst_backend;
 pub mod trust;
-pub mod tzap_backend;
-pub mod virtual_disk_backend;
-pub mod warc_backend;
 pub mod x509_format;
-pub mod xar_backend;
-pub mod zip_backend;
+
+/// Hidden fixture-only access to adapter implementations.
+///
+/// Production callers must use [`engine`]. This compatibility namespace is
+/// retained only because Cargo integration tests and sibling crate test
+/// harnesses compile as external consumers; it is deliberately hidden from
+/// generated API documentation and is not a supported product contract.
+#[doc(hidden)]
+pub mod backend_test_support {
+    pub use super::backend_impl::{
+        apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend,
+        mtree_backend, rar_backend, raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend,
+        warc_backend, xar_backend, zip_backend,
+    };
+    pub mod tzap {
+        pub use crate::tzap::*;
+    }
+}
 
 mod hex;
 
 /// The stable engine name used in diagnostics and health checks.
 pub const ENGINE_NAME: &str = "zmanager-core";
+
+/// Atomically writes secret material with the platform's private-file policy.
+///
+/// This small storage primitive is shared by offline identity migration and
+/// the hosted session store; it contains no hosted protocol behavior.
+pub fn write_atomic_secret_file(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    atomic_file::write_atomic_secret_file(path, bytes)
+}
 
 pub(crate) const DEFAULT_IO_BUFFER_BYTES: usize = 128 * 1024;
 pub(crate) const MEBIBYTE_BYTES: u64 = 1024 * 1024;

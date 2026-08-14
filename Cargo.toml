@@ -4,6 +4,7 @@ members = [
     "crates/zmanager-cli",
     "crates/zmanager-core",
     "crates/zmanager-ffi",
+    "crates/zmanager-tzap-hosted",
     "crates/zmanager-unrar",
 ]
 resolver = "2"
@@ -28,9 +29,10 @@ pedantic = "warn"
 [workspace.dependencies]
 zmanager-apple-archive = { path = "crates/zmanager-apple-archive", version = "2.0.1" }
 zmanager-cli = { path = "crates/zmanager-cli", version = "2.0.1" }
-# default-features = false: online/identity modules are gated behind the
-# `auth` feature, which each member re-enables through its own feature.
+# default-features = false: the core crate has no hosted transport feature;
+# hosted account/certificate behavior is composed explicitly by products that
+# depend on `zmanager-tzap-hosted`.
 zmanager-core = { path = "crates/zmanager-core", version = "2.0.1", default-features = false }
+zmanager-tzap-hosted = { path = "crates/zmanager-tzap-hosted", version = "2.0.1" }
 zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.0.1" }
 zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.0.1" }
-

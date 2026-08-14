@@ -8,8 +8,9 @@ with positive Cargo features.
 | default | enabled | enabled | enabled | enabled in the CLI |
 | `--no-default-features` | enabled | enabled | unavailable at product boundaries | absent from the CLI graph |
 
-The feature name is `tzap-online` in `zmanager-core`, `zmanager-cli`, and
-`zmanager-ffi`. The core's typed identity and transport contracts remain
+The feature name is `tzap-online` in `zmanager-cli` and `zmanager-ffi`. Hosted
+transport is supplied by the explicit `zmanager-tzap-hosted` product crate. The
+core's typed identity and transport contracts remain
 available in reduced builds so local catalog, certificate parsing, document
 signing, document verification, and offline `.tzap` inspection do not require
 hosted account behavior. Network transport is supplied by the full CLI

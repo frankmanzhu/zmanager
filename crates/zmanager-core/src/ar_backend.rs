@@ -153,6 +153,22 @@ pub fn extract(
     Ok(report)
 }
 
+/// Extracts one retained member by its path and duplicate occurrence in the
+/// session listing.
+pub fn extract_by_path_occurrence(
+    path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    resolver: Option<&mut dyn OverwriteResolver>,
+    selected_path: &str,
+    selected_occurrence: usize,
+    cancellation: Option<&crate::jobs::CancellationToken>,
+) -> Result<ArReport, ArError> {
+    let path = path.as_ref();
+    let selected_index = find_path_occurrence(path, selected_path, selected_occurrence)?;
+    extract(path, destination, policy, resolver, Some(selected_index), cancellation)
+}
+
 /// Copies one retained AR member to a caller-owned writer.
 pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn Write) -> Result<u64, ArError> {
     let path = path.as_ref();
@@ -163,6 +179,28 @@ pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn Write) 
     let mut file = open(path)?;
     file.seek(SeekFrom::Start(entry.data_offset)).map_err(|source| io_error(path, source))?;
     io::copy(&mut (&mut file).take(entry.size), writer).map_err(|source| io_error(path, source))
+}
+
+/// Copies one retained member by path and duplicate occurrence.
+pub fn copy_by_path_occurrence(path: impl AsRef<Path>, selected_path: &str, selected_occurrence: usize, writer: &mut dyn Write) -> Result<u64, ArError> {
+    let path = path.as_ref();
+    let selected_index = find_path_occurrence(path, selected_path, selected_occurrence)?;
+    copy(path, selected_index, writer)
+}
+
+fn find_path_occurrence(path: &Path, selected_path: &str, selected_occurrence: usize) -> Result<usize, ArError> {
+    let mut occurrence = 0_usize;
+    parse(path)?
+        .into_iter()
+        .find_map(|entry| {
+            if entry.path != selected_path {
+                return None;
+            }
+            let matches = occurrence == selected_occurrence;
+            occurrence = occurrence.saturating_add(1);
+            matches.then_some(entry.index)
+        })
+        .ok_or_else(|| ArError::Io { path: path.to_path_buf(), source: io::Error::new(io::ErrorKind::NotFound, "retained AR entry is not present") })
 }
 
 #[derive(Debug)]

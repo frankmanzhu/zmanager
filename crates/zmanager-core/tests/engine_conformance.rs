@@ -5,6 +5,7 @@ mod common;
 use common::TestDir;
 use std::fs::{self, File};
 use std::io::Write as _;
+use std::path::PathBuf;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -12,8 +13,10 @@ use std::sync::{
 
 use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{
-    ArchiveEngineBuilder, ArchiveError, ArchiveOperation, ArchivePlugin, ArchivePluginRole, ArchiveSource, CreateOptions, CreateRequest, ExtractOptions,
-    FormatId, OpenOptions, SourceAccess, create_default_engine, is_split_zip_archive_path,
+    AdapterDescriptor, ArchiveEngineBuilder, ArchiveError, ArchiveListing, ArchiveOperation, ArchivePlugin, ArchivePluginRole, ArchiveSource, CreateOptions,
+    CreateRequest, CredentialRequirement, EngineEntry, ExtractOptions, FormatId, NavigationMode, OpenLimits, OpenOptions, ReadAdapterFactory,
+    ReadAdapterSession, SevenZCreateOptions, SourceAccess, TarGzCreateOptions, TarZstdCreateOptions, TzapCreateOptions, TzapKeySource, ZipCreateOptions,
+    create_default_engine, is_split_zip_archive_path,
 };
 
 struct NoopSink;
@@ -84,6 +87,16 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
     }
+
+    let zip = engine.registry().capabilities_for_format(FormatId::ZIP).unwrap();
+    assert_eq!(zip.navigation, NavigationMode::RandomAccess);
+    for format in [FormatId::TAR_GZ, FormatId::TAR_ZST, FormatId::SEVEN_Z, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM] {
+        let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
+        assert_eq!(capabilities.navigation, NavigationMode::SequentialScan, "{format} must advertise its cursor-scan navigation");
+    }
+    assert_eq!(zip.credential_requirement, CredentialRequirement::Password);
+    let tzap = engine.registry().capabilities_for_format(FormatId::TZAP).unwrap();
+    assert_eq!(tzap.credential_requirement, CredentialRequirement::PasswordOrRecipientKey);
 }
 
 #[test]
@@ -117,7 +130,7 @@ fn engine_creates_zip_through_one_shot_contract_and_commits_before_returning() {
     let archive = temp.path("created.zip");
     fs::write(&source, b"created through engine").unwrap();
     let manifest = zmanager_core::manifest::plan_archive(&source, &zmanager_core::manifest::PlanOptions::default()).unwrap();
-    let request = CreateRequest::new(manifest, &archive, CreateOptions::Zip(zmanager_core::zip_backend::ZipCreateOptions::default()));
+    let request = CreateRequest::new(manifest, &archive, CreateOptions::Zip(ZipCreateOptions::default()));
     let engine = create_default_engine().unwrap();
     let token = zmanager_core::jobs::CancellationToken::new();
     let mut sink = NoopSink;
@@ -158,13 +171,13 @@ fn engine_creation_adapters_round_trip_portable_formats() {
     let engine = create_default_engine().unwrap();
 
     let cases = [
-        ("created.tar.gz", CreateOptions::TarGz(zmanager_core::tar_gz_backend::TarGzCreateOptions::default())),
-        ("created.tar.zst", CreateOptions::TarZstd(zmanager_core::tar_zst_backend::TarZstdCreateOptions::default())),
-        ("created.7z", CreateOptions::SevenZ(zmanager_core::sevenz_backend::SevenZCreateOptions { encrypt_file_names: false, ..Default::default() })),
+        ("created.tar.gz", CreateOptions::TarGz(TarGzCreateOptions::default())),
+        ("created.tar.zst", CreateOptions::TarZstd(TarZstdCreateOptions::default())),
+        ("created.7z", CreateOptions::SevenZ(SevenZCreateOptions { encrypt_file_names: false, ..Default::default() })),
         (
             "created.tzap",
-            CreateOptions::Tzap(zmanager_core::tzap_backend::TzapCreateOptions {
-                key_source: zmanager_core::tzap_backend::TzapKeySource::NoPassword,
+            CreateOptions::Tzap(TzapCreateOptions {
+                key_source: TzapKeySource::NoPassword,
                 level: 1,
                 preserve_metadata: true,
                 replace_existing: false,
@@ -203,7 +216,12 @@ fn native_tar_family_uses_shared_reader_for_all_read_operations() {
     builder.finish().unwrap();
 
     let gzip_tar = temp.path("payload.tar.gz");
-    zmanager_core::tar_gz_backend::create_tar_gz_from_path(&source, &gzip_tar, &zmanager_core::tar_gz_backend::TarGzCreateOptions::default()).unwrap();
+    zmanager_core::backend_test_support::tar_gz_backend::create_tar_gz_from_path(
+        &source,
+        &gzip_tar,
+        &zmanager_core::backend_test_support::tar_gz_backend::TarGzCreateOptions::default(),
+    )
+    .unwrap();
 
     let bzip_tar = temp.path("payload.tar.bz2");
     let file = File::create(&bzip_tar).unwrap();
@@ -577,7 +595,7 @@ fn engine_creation_cancellation_does_not_commit_output() {
     let archive = temp.path("cancelled.tar.zst");
     fs::write(&source, b"cancelled create").unwrap();
     let manifest = zmanager_core::manifest::plan_archive(&source, &zmanager_core::manifest::PlanOptions::default()).unwrap();
-    let request = CreateRequest::new(manifest, &archive, CreateOptions::TarZstd(zmanager_core::tar_zst_backend::TarZstdCreateOptions::default()));
+    let request = CreateRequest::new(manifest, &archive, CreateOptions::TarZstd(TarZstdCreateOptions::default()));
     let engine = create_default_engine().unwrap();
     let token = zmanager_core::jobs::CancellationToken::new();
     token.cancel();
@@ -679,6 +697,55 @@ fn engine_extracts_and_copies_zip_entries_by_retained_id() {
 }
 
 #[test]
+fn engine_rejects_unknown_input_during_open() {
+    let temp = TestDir::new("engine-conformance-unknown-open");
+    let path = temp.path("payload.unknown");
+    fs::write(&path, b"not an archive format").unwrap();
+
+    let error = create_default_engine().unwrap().open(ArchiveSource::Path(path), OpenOptions::default()).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::InvalidFormat);
+}
+
+#[test]
+fn engine_rejects_source_changes_before_using_retained_entry_id() {
+    let temp = TestDir::new("engine-conformance-source-change");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("payload.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"original").unwrap();
+    zip.finish().unwrap();
+
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::Path(zip_path.clone()), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    fs::write(&zip_path, b"replacement archive with different bytes").unwrap();
+
+    let error = handle.copy_entry(listing.entries[0].id, &mut Vec::new()).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::SourceChanged);
+    assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
+}
+
+#[test]
+fn engine_entry_ids_are_scoped_to_the_handle_that_listed_them() {
+    let temp = TestDir::new("engine-conformance-entry-id-scope");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("payload.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"payload").unwrap();
+    zip.finish().unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let mut first = engine.open(ArchiveSource::Path(zip_path.clone()), OpenOptions::default()).unwrap();
+    let mut second = engine.open(ArchiveSource::Path(zip_path), OpenOptions::default()).unwrap();
+    let first_id = first.list().unwrap().entries[0].id;
+    second.list().unwrap();
+
+    let error = second.copy_entry(first_id, &mut Vec::new()).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::InvalidFormat);
+}
+
+#[test]
 fn engine_extract_cancellation_is_reported_before_adapter_work() {
     let temp = TestDir::new("engine-conformance-extract-cancelled");
     let zip_path = temp.path("test.zip");
@@ -755,13 +822,33 @@ fn engine_test_cancellation_is_reported_before_adapter_work() {
 
 #[test]
 fn engine_rejects_ambiguous_registrations_at_build_time() {
+    static DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+        name: "duplicate-registration-test-adapter",
+        format: FormatId::ZIP,
+        operations: &[ArchiveOperation::List],
+        required_source_access: SourceAccess::Seekable,
+        supports_encryption: false,
+    };
+
+    struct DuplicateFactory;
+
+    impl ReadAdapterFactory for DuplicateFactory {
+        fn descriptor(&self) -> &'static AdapterDescriptor {
+            &DESCRIPTOR
+        }
+
+        fn open(self: Arc<Self>, _archive: zmanager_core::engine::DetectedArchive, _options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "test factory is not opened"))
+        }
+    }
+
     struct DummyPlugin;
     impl ArchivePlugin for DummyPlugin {
         fn name(&self) -> &'static str {
             "dummy_duplicate"
         }
         fn register(&self, builder: &mut ArchiveEngineBuilder) -> Result<(), ArchiveError> {
-            let factory = std::sync::Arc::new(zmanager_core::engine::adapters::zip::ZipListAdapter::single_volume());
+            let factory = std::sync::Arc::new(DuplicateFactory);
             builder.register_read_adapter(factory.clone())?;
             builder.register_read_adapter(factory)
         }
@@ -771,6 +858,73 @@ fn engine_rejects_ambiguous_registrations_at_build_time() {
     assert!(result.is_err());
     let err = result.err().unwrap();
     assert!(err.message.contains("Ambiguous registration"));
+}
+
+#[test]
+fn engine_rejects_disjoint_factories_for_one_format() {
+    static LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+        name: "disjoint-factory-test-adapter",
+        format: FormatId::ZIP,
+        operations: &[ArchiveOperation::List],
+        required_source_access: SourceAccess::Seekable,
+        supports_encryption: false,
+    };
+    static TEST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+        name: "disjoint-factory-test-adapter",
+        format: FormatId::ZIP,
+        operations: &[ArchiveOperation::Test],
+        required_source_access: SourceAccess::Seekable,
+        supports_encryption: false,
+    };
+
+    struct ListOnlyFactory;
+    impl ReadAdapterFactory for ListOnlyFactory {
+        fn descriptor(&self) -> &'static AdapterDescriptor {
+            &LIST_DESCRIPTOR
+        }
+
+        fn open(self: Arc<Self>, _archive: zmanager_core::engine::DetectedArchive, _options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "test factory is not opened"))
+        }
+    }
+
+    struct TestOnlyFactory;
+    impl ReadAdapterFactory for TestOnlyFactory {
+        fn descriptor(&self) -> &'static AdapterDescriptor {
+            &TEST_DESCRIPTOR
+        }
+
+        fn open(self: Arc<Self>, _archive: zmanager_core::engine::DetectedArchive, _options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "test factory is not opened"))
+        }
+    }
+
+    static DUPLICATE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+        name: "duplicate-operation-test-adapter",
+        format: FormatId::TAR,
+        operations: &[ArchiveOperation::List, ArchiveOperation::List],
+        required_source_access: SourceAccess::Seekable,
+        supports_encryption: false,
+    };
+    struct DuplicateOperationFactory;
+    impl ReadAdapterFactory for DuplicateOperationFactory {
+        fn descriptor(&self) -> &'static AdapterDescriptor {
+            &DUPLICATE_DESCRIPTOR
+        }
+
+        fn open(self: Arc<Self>, _archive: zmanager_core::engine::DetectedArchive, _options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "test factory is not opened"))
+        }
+    }
+
+    let mut builder = ArchiveEngineBuilder::new();
+    builder.register_read_adapter(Arc::new(ListOnlyFactory)).unwrap();
+    let error = builder.register_read_adapter(Arc::new(TestOnlyFactory)).unwrap_err();
+    assert!(error.message.contains("one factory instance"));
+
+    let mut duplicate_builder = ArchiveEngineBuilder::new();
+    let error = duplicate_builder.register_read_adapter(Arc::new(DuplicateOperationFactory)).unwrap_err();
+    assert!(error.message.contains("more than once"));
 }
 
 #[test]
@@ -794,6 +948,101 @@ fn engine_handles_split_zip_sidecar_detection_without_compatibility_fallback() {
         }
         ArchiveSource::Path(_) => panic!("Expected VolumeSet for split ZIP"),
     }
+}
+
+#[test]
+fn engine_rejects_explicit_volume_sets_for_single_file_adapters() {
+    let temp = TestDir::new("engine-conformance-source-access");
+    let source = temp.path("archive.zip");
+    fs::write(&source, b"not a split archive").unwrap();
+
+    let error = create_default_engine().unwrap().open(ArchiveSource::VolumeSet(vec![source]), OpenOptions::default()).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::UnsupportedOperation);
+    assert!(error.message.contains("MultiVolumeSet"));
+    assert!(error.message.contains("Seekable"));
+}
+
+#[test]
+fn engine_enforces_configured_source_size_limit_before_adapter_open() {
+    let temp = TestDir::new("engine-conformance-source-limit");
+    let archive = temp.path("archive.zip");
+    fs::write(&archive, b"not a zip archive").unwrap();
+
+    let error = create_default_engine()
+        .unwrap()
+        .open(ArchiveSource::Path(archive), OpenOptions { limits: OpenLimits { max_source_bytes: Some(1) }, ..Default::default() })
+        .unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::ResourceLimitExceeded);
+}
+
+#[test]
+fn engine_rejects_tzap_sibling_mutation_after_open() {
+    let temp = TestDir::new("engine-conformance-tzap-source-integrity");
+    let source = temp.path("payload.bin");
+    let mut state = 0x1234_5678_9abc_def0_u64;
+    let payload: Vec<u8> = (0..(3 * 1024 * 1024))
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state.to_le_bytes()[0]
+        })
+        .collect();
+    fs::write(&source, payload).unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let archive = temp.path("split.tzap");
+    let report = create_engine_fixture(
+        &engine,
+        &source,
+        &archive,
+        CreateOptions::Tzap(TzapCreateOptions {
+            key_source: TzapKeySource::NoPassword,
+            level: 1,
+            preserve_metadata: true,
+            replace_existing: false,
+            volume_size: Some(1024 * 1024),
+            recovery_percentage: 0,
+            volume_loss_tolerance: 0,
+            x509_signing: None,
+        }),
+    );
+    assert!(report.volume_count > 1, "fixture must contain format-owned sibling volumes");
+
+    // A split TZAP archive has numbered volume files and no base `.tzap` file.
+    // Opening the requested base path must still use the same format-owned
+    // volume discovery path as opening one of its physical volumes.
+    let limited = engine
+        .open(ArchiveSource::from_path_autodetect(&archive), OpenOptions { limits: OpenLimits { max_source_bytes: Some(1) }, ..Default::default() })
+        .unwrap_err();
+    assert_eq!(limited.kind, zmanager_core::engine::ErrorKind::ResourceLimitExceeded);
+
+    let mut base_handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+    assert!(!base_handle.list().unwrap().entries.is_empty());
+
+    let first_volume = temp.path("split.vol000.tzap");
+    let second_volume = temp.path("split.vol001.tzap");
+    assert!(first_volume.is_file());
+    assert!(second_volume.is_file());
+
+    let logical_source = ArchiveSource::from_path_autodetect(&archive);
+    let plan_fingerprint = engine.capture_source_fingerprint(&logical_source).unwrap();
+
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&second_volume), OpenOptions::default()).unwrap();
+    let mut mutated = fs::read(&first_volume).unwrap();
+    mutated.push(0);
+    fs::write(&first_volume, mutated).unwrap();
+    assert_ne!(engine.capture_source_fingerprint(&logical_source).unwrap(), plan_fingerprint);
+
+    let error = handle.list().unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::SourceChanged);
+    assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
+
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&second_volume), OpenOptions::default()).unwrap();
+    fs::write(temp.path("split.vol999.tzap"), b"unexpected volume").unwrap();
+    let error = handle.list().unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::SourceChanged);
+    assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
 }
 
 #[test]
@@ -825,4 +1074,214 @@ fn engine_test_corruption_invalidates_the_session() {
     assert_eq!(error.kind, zmanager_core::engine::ErrorKind::CorruptData);
     assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
     assert!(handle.test(&zmanager_core::engine::TestOptions::default()).is_err());
+}
+
+#[test]
+fn engine_opens_one_read_session_and_reuses_the_listing_snapshot() {
+    static DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+        name: "counting-read-adapter",
+        format: FormatId::ZIP,
+        operations: &[ArchiveOperation::List],
+        required_source_access: SourceAccess::Seekable,
+        supports_encryption: false,
+    };
+
+    struct CountingFactory {
+        opens: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    struct CountingSession {
+        lists: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl ReadAdapterFactory for CountingFactory {
+        fn descriptor(&self) -> &'static AdapterDescriptor {
+            &DESCRIPTOR
+        }
+
+        fn open(self: Arc<Self>, _archive: zmanager_core::engine::DetectedArchive, _options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+            self.opens.fetch_add(1, Ordering::Relaxed);
+            Ok(Box::new(CountingSession { lists: Arc::new(std::sync::atomic::AtomicUsize::new(0)) }))
+        }
+    }
+
+    impl ReadAdapterSession for CountingSession {
+        fn list(&mut self) -> Result<ArchiveListing, ArchiveError> {
+            self.lists.fetch_add(1, Ordering::Relaxed);
+            Ok(ArchiveListing { entries: vec![EngineEntry { path: "payload.txt".to_owned(), ..EngineEntry::default() }] })
+        }
+
+        fn test(&mut self, _options: &zmanager_core::engine::TestOptions) -> Result<zmanager_core::engine::TestReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn extract<'a>(&mut self, _options: &'a mut ExtractOptions<'a>) -> Result<zmanager_core::engine::ExtractReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn selected_extract<'a>(
+            &mut self,
+            _entry_id: zmanager_core::engine::EntryId,
+            _options: &'a mut zmanager_core::engine::SelectedExtractOptions<'a>,
+        ) -> Result<zmanager_core::engine::ExtractReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn copy_to_writer(
+            &mut self,
+            _entry_id: zmanager_core::engine::EntryId,
+            _writer: &mut dyn std::io::Write,
+        ) -> Result<zmanager_core::engine::CopyReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+    }
+
+    let temp = TestDir::new("engine-conformance-session-reuse");
+    let source = temp.path("source.zip");
+    fs::write(&source, b"placeholder").unwrap();
+    let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut builder = ArchiveEngineBuilder::new();
+    builder.register_read_adapter(Arc::new(CountingFactory { opens: Arc::clone(&opens) })).unwrap();
+    let engine = zmanager_core::engine::ArchiveEngine::new(builder.build());
+    let mut handle = engine.open(ArchiveSource::Path(source), OpenOptions::default()).unwrap();
+
+    assert_eq!(handle.list().unwrap().entries[0].path, "payload.txt");
+    assert_eq!(handle.list().unwrap().entries[0].path, "payload.txt");
+    assert_eq!(opens.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn engine_rejects_source_mutation_detected_after_an_operation() {
+    static DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+        name: "mutating-read-adapter",
+        format: FormatId::ZIP,
+        operations: &[ArchiveOperation::List],
+        required_source_access: SourceAccess::Seekable,
+        supports_encryption: false,
+    };
+
+    struct MutatingFactory;
+    struct MutatingSession {
+        source: PathBuf,
+    }
+
+    impl ReadAdapterSession for MutatingSession {
+        fn list(&mut self) -> Result<ArchiveListing, ArchiveError> {
+            fs::write(&self.source, b"replacement archive written during listing").unwrap();
+            Ok(ArchiveListing { entries: vec![EngineEntry { path: "payload.txt".to_owned(), ..EngineEntry::default() }] })
+        }
+
+        fn test(&mut self, _options: &zmanager_core::engine::TestOptions) -> Result<zmanager_core::engine::TestReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn extract<'a>(&mut self, _options: &'a mut ExtractOptions<'a>) -> Result<zmanager_core::engine::ExtractReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn selected_extract<'a>(
+            &mut self,
+            _entry_id: zmanager_core::engine::EntryId,
+            _options: &'a mut zmanager_core::engine::SelectedExtractOptions<'a>,
+        ) -> Result<zmanager_core::engine::ExtractReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn copy_to_writer(
+            &mut self,
+            _entry_id: zmanager_core::engine::EntryId,
+            _writer: &mut dyn std::io::Write,
+        ) -> Result<zmanager_core::engine::CopyReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+    }
+
+    impl ReadAdapterFactory for MutatingFactory {
+        fn descriptor(&self) -> &'static AdapterDescriptor {
+            &DESCRIPTOR
+        }
+
+        fn open(self: Arc<Self>, archive: zmanager_core::engine::DetectedArchive, _options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+            Ok(Box::new(MutatingSession { source: archive.source.primary_path().to_path_buf() }))
+        }
+    }
+
+    let temp = TestDir::new("engine-conformance-post-operation-source-change");
+    let source = temp.path("source.zip");
+    fs::write(&source, b"original archive bytes").unwrap();
+    let mut builder = ArchiveEngineBuilder::new();
+    builder.register_read_adapter(Arc::new(MutatingFactory)).unwrap();
+    let engine = zmanager_core::engine::ArchiveEngine::new(builder.build());
+    let mut handle = engine.open(ArchiveSource::Path(source), OpenOptions::default()).unwrap();
+
+    let error = handle.list().unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::SourceChanged);
+    assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
+}
+
+#[test]
+fn engine_rejects_unclaimed_operations_at_the_registry_seam_after_open() {
+    static DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+        name: "list-only-read-adapter",
+        format: FormatId::ZIP,
+        operations: &[ArchiveOperation::List],
+        required_source_access: SourceAccess::Seekable,
+        supports_encryption: false,
+    };
+
+    struct ListOnlyFactory;
+    struct ListOnlySession;
+
+    impl ReadAdapterSession for ListOnlySession {
+        fn list(&mut self) -> Result<ArchiveListing, ArchiveError> {
+            Ok(ArchiveListing { entries: vec![EngineEntry { path: "payload.txt".to_owned(), ..EngineEntry::default() }] })
+        }
+
+        fn test(&mut self, _options: &zmanager_core::engine::TestOptions) -> Result<zmanager_core::engine::TestReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn extract<'a>(&mut self, _options: &'a mut ExtractOptions<'a>) -> Result<zmanager_core::engine::ExtractReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn selected_extract<'a>(
+            &mut self,
+            _entry_id: zmanager_core::engine::EntryId,
+            _options: &'a mut zmanager_core::engine::SelectedExtractOptions<'a>,
+        ) -> Result<zmanager_core::engine::ExtractReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+
+        fn copy_to_writer(
+            &mut self,
+            _entry_id: zmanager_core::engine::EntryId,
+            _writer: &mut dyn std::io::Write,
+        ) -> Result<zmanager_core::engine::CopyReport, ArchiveError> {
+            Err(ArchiveError::usable(zmanager_core::engine::ErrorKind::UnsupportedOperation, "not claimed"))
+        }
+    }
+
+    impl ReadAdapterFactory for ListOnlyFactory {
+        fn descriptor(&self) -> &'static AdapterDescriptor {
+            &DESCRIPTOR
+        }
+
+        fn open(self: Arc<Self>, _archive: zmanager_core::engine::DetectedArchive, _options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+            Ok(Box::new(ListOnlySession))
+        }
+    }
+
+    let temp = TestDir::new("engine-conformance-unclaimed-operation");
+    let source = temp.path("source.zip");
+    fs::write(&source, b"placeholder").unwrap();
+    let mut builder = ArchiveEngineBuilder::new();
+    builder.register_read_adapter(Arc::new(ListOnlyFactory)).unwrap();
+    let engine = zmanager_core::engine::ArchiveEngine::new(builder.build());
+    let mut handle = engine.open(ArchiveSource::Path(source), OpenOptions::default()).unwrap();
+
+    handle.list().unwrap();
+    let error = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::UnsupportedOperation);
+    assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Usable);
 }

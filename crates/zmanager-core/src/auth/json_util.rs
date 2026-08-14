@@ -5,34 +5,13 @@
 //! their `MissingField { path, field }` diagnostics are semantically richer
 //! than the flat `invalid_field(field)` form).
 
-use crate::certificate_lifecycle::TzapCertificateLifecycleError;
 use crate::contact_card::TzapContactCardError;
-use crate::enrollment_client::TzapEnrollmentError;
 use crate::local_identity_store::TzapLocalIdentityStoreError;
-use crate::status_client::TzapStatusClientError;
 use serde_json::{Map, Value};
 
 /// Error types that can report a named JSON field on parse failures.
 pub(crate) trait JsonFieldError: Sized {
     fn invalid_field(field: &'static str) -> Self;
-}
-
-impl JsonFieldError for TzapEnrollmentError {
-    fn invalid_field(field: &'static str) -> Self {
-        Self::InvalidField { field }
-    }
-}
-
-impl JsonFieldError for TzapStatusClientError {
-    fn invalid_field(field: &'static str) -> Self {
-        Self::InvalidField { field }
-    }
-}
-
-impl JsonFieldError for TzapCertificateLifecycleError {
-    fn invalid_field(field: &'static str) -> Self {
-        Self::InvalidField { field }
-    }
 }
 
 impl JsonFieldError for TzapLocalIdentityStoreError {

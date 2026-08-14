@@ -1,6 +1,6 @@
 # zmanager-core
 
-Core archive, authentication, and policy engine for ZManager.
+Core archive, offline identity, and policy engine for ZManager.
 
 Part of the [ZManager](https://github.com/tzap-org/zmanager) universal file archiving suite.
 

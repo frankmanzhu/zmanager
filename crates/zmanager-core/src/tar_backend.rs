@@ -154,6 +154,55 @@ pub fn extract<R: Read>(
     selected_index: Option<usize>,
     cancellation: Option<&CancellationToken>,
 ) -> Result<TarReport, TarError> {
+    extract_with_selector(reader, archive_path, destination, policy, resolver, selected_index.map(TarSelection::Index), cancellation)
+}
+
+/// Extracts one retained TAR entry by its path and duplicate occurrence in the
+/// session listing.
+pub fn extract_by_path_occurrence<R: Read>(
+    reader: R,
+    archive_path: &Path,
+    destination: &Path,
+    policy: ExtractionPolicy,
+    resolver: Option<&mut dyn OverwriteResolver>,
+    selector: TarEntrySelector<'_>,
+    cancellation: Option<&CancellationToken>,
+) -> Result<TarReport, TarError> {
+    extract_with_selector(
+        reader,
+        archive_path,
+        destination,
+        policy,
+        resolver,
+        Some(TarSelection::PathOccurrence { path: selector.path, occurrence: selector.occurrence }),
+        cancellation,
+    )
+}
+
+/// Stable path-based identity for a TAR entry retained by the engine session.
+#[derive(Debug, Clone, Copy)]
+pub struct TarEntrySelector<'a> {
+    /// Raw normalized archive path from the retained listing.
+    pub path: &'a str,
+    /// Zero-based occurrence among entries with the same path.
+    pub occurrence: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TarSelection<'a> {
+    Index(usize),
+    PathOccurrence { path: &'a str, occurrence: usize },
+}
+
+fn extract_with_selector<R: Read>(
+    reader: R,
+    archive_path: &Path,
+    destination: &Path,
+    policy: ExtractionPolicy,
+    resolver: Option<&mut dyn OverwriteResolver>,
+    selection: Option<TarSelection<'_>>,
+    cancellation: Option<&CancellationToken>,
+) -> Result<TarReport, TarError> {
     let root = crate::safety::prepare_destination_root(destination).map_err(|source| io_error(destination, source))?;
     let mut archive = tar::Archive::new(reader);
     let mut planner = crate::safety::ExtractionSafetyPlanner::with_overwrite_resolver(&root, policy, resolver);
@@ -162,16 +211,28 @@ pub fn extract<R: Read>(
     let mut deferred_directories = Vec::new();
     let mut deferred_hardlinks = Vec::new();
 
+    let mut path_occurrence = 0_usize;
     for (index, item) in archive.entries().map_err(|source| io_error(archive_path, source))?.enumerate() {
         if cancellation.is_some_and(CancellationToken::is_cancelled) {
             return Err(TarError::Cancelled);
         }
         let mut entry = item.map_err(|source| io_error(archive_path, source))?;
-        if selected_index.is_some_and(|selected| selected != index) {
+        let path = entry_path(&mut entry, archive_path)?;
+        let selected = match selection {
+            None => true,
+            Some(TarSelection::Index(selected)) => selected == index,
+            Some(TarSelection::PathOccurrence { path: selected_path, occurrence }) => {
+                let matches = path == selected_path && path_occurrence == occurrence;
+                if path == selected_path {
+                    path_occurrence = path_occurrence.saturating_add(1);
+                }
+                matches
+            }
+        };
+        if !selected {
             report.skipped_entries = report.skipped_entries.saturating_add(1);
             continue;
         }
-        let path = entry_path(&mut entry, archive_path)?;
         let kind = entry_kind(&mut entry, &path)?;
         let size = entry.header().size().unwrap_or(0);
         let safety_entry = ExtractionEntry { archive_path: path.clone(), kind, uncompressed_size: Some(size), compressed_size: None };
@@ -241,13 +302,37 @@ pub fn extract<R: Read>(
 
 /// Copies one retained regular-file TAR entry to a caller-owned writer.
 pub fn copy<R: Read>(reader: R, archive_path: &Path, entry_index: usize, output: &mut dyn Write) -> Result<u64, TarError> {
+    copy_with_selector(reader, archive_path, TarSelection::Index(entry_index), output)
+}
+
+/// Copies one retained regular-file TAR entry by path and duplicate occurrence.
+pub fn copy_by_path_occurrence<R: Read>(reader: R, archive_path: &Path, selector: TarEntrySelector<'_>, output: &mut dyn Write) -> Result<u64, TarError> {
+    copy_with_selector(reader, archive_path, TarSelection::PathOccurrence { path: selector.path, occurrence: selector.occurrence }, output)
+}
+
+fn copy_with_selector<R: Read>(reader: R, archive_path: &Path, selection: TarSelection<'_>, output: &mut dyn Write) -> Result<u64, TarError> {
     let mut archive = tar::Archive::new(reader);
-    let mut entry = archive
-        .entries()
-        .map_err(|source| io_error(archive_path, source))?
-        .nth(entry_index)
-        .ok_or_else(|| io_error(archive_path, io::Error::new(io::ErrorKind::NotFound, "retained TAR entry ID is not present")))?
-        .map_err(|source| io_error(archive_path, source))?;
+    let mut path_occurrence = 0_usize;
+    let mut entry = None;
+    for (index, item) in archive.entries().map_err(|source| io_error(archive_path, source))?.enumerate() {
+        let mut candidate = item.map_err(|source| io_error(archive_path, source))?;
+        let path = entry_path(&mut candidate, archive_path)?;
+        let selected = match selection {
+            TarSelection::Index(selected) => selected == index,
+            TarSelection::PathOccurrence { path: selected_path, occurrence } => {
+                let matches = path == selected_path && path_occurrence == occurrence;
+                if path == selected_path {
+                    path_occurrence = path_occurrence.saturating_add(1);
+                }
+                matches
+            }
+        };
+        if selected {
+            entry = Some(candidate);
+            break;
+        }
+    }
+    let mut entry = entry.ok_or_else(|| io_error(archive_path, io::Error::new(io::ErrorKind::NotFound, "retained TAR entry is not present")))?;
     let path = entry_path(&mut entry, archive_path)?;
     if !entry.header().entry_type().is_file() {
         return Err(io_error(Path::new(&path), io::Error::new(io::ErrorKind::InvalidInput, "retained TAR entry is not a regular file")));

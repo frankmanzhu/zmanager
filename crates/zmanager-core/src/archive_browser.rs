@@ -1,12 +1,7 @@
-use crate::apple_archive_backend::AppleArchiveError;
 use crate::engine::types::ArchiveError;
-use crate::rar_backend::RarBackendError;
-use crate::raw_stream_backend::RawStreamError;
+use crate::engine::{TzapRestoreOptions, TzapRestorePolicy};
 use crate::safety::{ExtractionPolicy, ExtractionSafetyError, OverwritePolicy};
-use crate::sevenz_backend::SevenZError;
-use crate::tar_zst_backend::TarZstdError;
-use crate::tzap_backend::{TzapError, TzapRestoreOptions, TzapRestorePolicy, is_tzap_archive_path};
-use crate::zip_backend::ZipBackendError;
+use crate::tzap::is_tzap_archive_path;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
@@ -166,20 +161,6 @@ impl Default for BrowserExtractOptions<'_> {
 pub enum ArchiveBrowserError {
     /// Enumeration was cancelled by the caller between entries.
     Cancelled,
-    /// ZIP backend failed.
-    Zip(ZipBackendError),
-    /// TAR.ZST backend failed.
-    TarZst(TarZstdError),
-    /// 7z backend failed.
-    SevenZ(SevenZError),
-    /// RAR backend failed.
-    Rar(RarBackendError),
-    /// TZAP backend failed.
-    Tzap(TzapError),
-    /// `AppleArchive` backend failed.
-    AppleArchive(AppleArchiveError),
-    /// Raw single-file stream backend failed.
-    RawStream(RawStreamError),
     /// The stateful archive engine rejected a listing request.
     Engine { format: Option<crate::engine::FormatId>, source: ArchiveError },
     /// Filesystem I/O failed.
@@ -198,15 +179,6 @@ impl fmt::Display for ArchiveBrowserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Cancelled => write!(f, "archive enumeration cancelled"),
-            Self::Zip(source) => write!(f, "ZIP browser operation failed: {source}"),
-            Self::TarZst(source) => write!(f, "TAR.ZST browser operation failed: {source}"),
-            Self::SevenZ(source) => write!(f, "7z browser operation failed: {source}"),
-            Self::Rar(source) => write!(f, "RAR browser operation failed: {source}"),
-            Self::Tzap(source) => write!(f, "TZAP browser operation failed: {source}"),
-            Self::AppleArchive(source) => {
-                write!(f, "AppleArchive browser operation failed: {source}")
-            }
-            Self::RawStream(source) => write!(f, "raw stream browser operation failed: {source}"),
             Self::Engine { format: Some(crate::engine::FormatId::TZAP), source } => write!(f, "TZAP browser operation failed: {source}"),
             Self::Engine { source, .. } => write!(f, "archive engine listing failed: {source}"),
             Self::Io { path, source } => write!(f, "I/O failed for {}: {source}", path.display()),
@@ -229,13 +201,6 @@ impl std::error::Error for ArchiveBrowserError {
         #[allow(clippy::match_same_arms)]
         match self {
             Self::Cancelled => None,
-            Self::Zip(source) => Some(source),
-            Self::TarZst(source) => Some(source),
-            Self::SevenZ(source) => Some(source),
-            Self::Rar(source) => Some(source),
-            Self::Tzap(source) => Some(source),
-            Self::AppleArchive(source) => Some(source),
-            Self::RawStream(source) => Some(source),
             Self::Engine { source, .. } => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::Safety(source) => Some(source),
@@ -243,48 +208,6 @@ impl std::error::Error for ArchiveBrowserError {
             Self::UnsupportedEntry { .. } => None,
             Self::UnsupportedOperation(_) => None,
         }
-    }
-}
-
-impl From<ZipBackendError> for ArchiveBrowserError {
-    fn from(source: ZipBackendError) -> Self {
-        Self::Zip(source)
-    }
-}
-
-impl From<TarZstdError> for ArchiveBrowserError {
-    fn from(source: TarZstdError) -> Self {
-        Self::TarZst(source)
-    }
-}
-
-impl From<SevenZError> for ArchiveBrowserError {
-    fn from(source: SevenZError) -> Self {
-        Self::SevenZ(source)
-    }
-}
-
-impl From<RarBackendError> for ArchiveBrowserError {
-    fn from(source: RarBackendError) -> Self {
-        Self::Rar(source)
-    }
-}
-
-impl From<TzapError> for ArchiveBrowserError {
-    fn from(source: TzapError) -> Self {
-        Self::Tzap(source)
-    }
-}
-
-impl From<AppleArchiveError> for ArchiveBrowserError {
-    fn from(source: AppleArchiveError) -> Self {
-        Self::AppleArchive(source)
-    }
-}
-
-impl From<RawStreamError> for ArchiveBrowserError {
-    fn from(source: RawStreamError) -> Self {
-        Self::RawStream(source)
     }
 }
 
@@ -330,8 +253,11 @@ pub fn list_directory_with_options(path: impl AsRef<Path>, dir_path: &str, optio
 
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(path);
-    let open_options =
-        crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: options.recipient_key.map(Path::to_path_buf) };
+    let open_options = crate::engine::OpenOptions {
+        password: options.password.map(ToOwned::to_owned),
+        recipient_key: options.recipient_key.map(Path::to_path_buf),
+        ..Default::default()
+    };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     list_directory_from_engine_handle(&mut handle, dir_path)
 }
@@ -357,9 +283,9 @@ pub fn list_directory_from_engine_handle(handle: &mut crate::engine::ArchiveHand
 
 /// Visits archive entries without requiring the caller to retain a complete listing.
 ///
-/// ZIP entries are delivered directly from the central directory. Backends that do
-/// not yet expose a progressive iterator use an explicit collect-then-publish
-/// fallback. Returning `false` from `visitor` cancels at the next entry boundary.
+/// ZIP entries are delivered directly from the central directory. Adapters that
+/// do not expose a progressive iterator use an explicit collect-then-publish
+/// path. Returning `false` from `visitor` cancels at the next entry boundary.
 ///
 /// # Errors
 ///
@@ -437,45 +363,75 @@ pub fn extract_selected_entries_with_options(
 ) -> Result<Vec<(String, EntryExtractReport)>, ArchiveBrowserError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
-    let destination_root =
-        crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
     let mut handle = engine
-        .open(source, crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: None })
+        .open(source, crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: None, ..Default::default() })
         .map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
+    extract_selected_entries_from_engine_handle(&mut handle, entry_paths, destination, options)
+}
+
+/// Extracts selected paths through a caller-owned retained engine handle.
+///
+/// Path selectors are resolved to `EntryId` values exactly once from the
+/// handle's cached listing. Reusing this function for a batch keeps duplicate
+/// physical entries distinct and prevents per-entry reopen/re-detect loops in
+/// product job runners.
+pub fn extract_selected_entries_from_engine_handle(
+    handle: &mut crate::engine::ArchiveHandle,
+    entry_paths: &[String],
+    destination: impl AsRef<Path>,
+    options: BrowserExtractOptions<'_>,
+) -> Result<Vec<(String, EntryExtractReport)>, ArchiveBrowserError> {
+    let destination = destination.as_ref();
+    let destination_root =
+        crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let format = handle.detected().format;
     let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
     let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
-    let mut reports = Vec::new();
+    if entry_paths.is_empty() {
+        return Ok(Vec::new());
+    }
     for requested_path in entry_paths {
-        let matching_entries: Vec<_> =
-            listing.entries.iter().filter(|entry| crate::safety::archive_entry_matches_selected(&entry.path, requested_path)).collect();
-        if matching_entries.is_empty() {
+        if !listing.entries.iter().any(|entry| crate::safety::archive_entry_matches_selected(&entry.path, requested_path)) {
             return Err(ArchiveBrowserError::EntryNotFound { path: requested_path.clone() });
         }
-        for entry in matching_entries {
-            let mut selected_options = crate::engine::SelectedExtractOptions {
-                destination: destination_root.clone(),
-                policy: policy.clone(),
-                tzap_restore_options: Some(TzapRestoreOptions {
-                    policy: options.tzap_restore_policy,
-                    allow_degraded: options.tzap_allow_degraded,
-                    allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
-                }),
-                ..Default::default()
-            };
-            let report =
-                handle.extract_selected(entry.id, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
-            reports.push((
-                entry.path.clone(),
-                EntryExtractReport {
-                    destination_path: destination_root.join(&entry.path),
-                    written_bytes: report.written_bytes,
-                    metadata_diagnostics: report.warnings,
-                },
-            ));
+    }
+    let mut selected_entries = Vec::new();
+    for entry in &listing.entries {
+        if entry_paths.iter().any(|requested_path| crate::safety::archive_entry_matches_selected(&entry.path, requested_path)) {
+            selected_entries.push(entry);
         }
+    }
+    if selected_entries.is_empty() {
+        return Err(ArchiveBrowserError::EntryNotFound { path: entry_paths[0].clone() });
+    }
+
+    // Resolve selectors against the retained listing once, in archive order.
+    // Matching each selector independently would extract duplicate physical
+    // entries repeatedly when the archive contains duplicate names or the
+    // caller supplies the same selector more than once.
+    let mut reports = Vec::with_capacity(selected_entries.len());
+    for entry in selected_entries {
+        let mut selected_options = crate::engine::SelectedExtractOptions {
+            destination: destination_root.clone(),
+            policy: policy.clone(),
+            tzap_restore_options: Some(TzapRestoreOptions {
+                policy: options.tzap_restore_policy,
+                allow_degraded: options.tzap_allow_degraded,
+                allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
+            }),
+            ..Default::default()
+        };
+        let report = handle.extract_selected(entry.id, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+        reports.push((
+            entry.path.clone(),
+            EntryExtractReport {
+                destination_path: destination_root.join(&entry.path),
+                written_bytes: report.written_bytes,
+                metadata_diagnostics: report.warnings,
+            },
+        ));
     }
     Ok(reports)
 }
@@ -530,8 +486,11 @@ pub fn preview_entry_with_options(
 fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(path);
-    let open_options =
-        crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: options.recipient_key.map(Path::to_path_buf) };
+    let open_options = crate::engine::OpenOptions {
+        password: options.password.map(ToOwned::to_owned),
+        recipient_key: options.recipient_key.map(Path::to_path_buf),
+        ..Default::default()
+    };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     list_entries_from_engine_handle(&mut handle)
 }
@@ -547,7 +506,8 @@ fn extract_entry_via_engine(
 ) -> Result<EntryExtractReport, ArchiveBrowserError> {
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
-    let open_options = crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: recipient_key.map(Path::to_path_buf) };
+    let open_options =
+        crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: recipient_key.map(Path::to_path_buf), ..Default::default() };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let format = handle.detected().format;
     let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
@@ -601,7 +561,8 @@ pub fn copy_selected_entries_to_writer(
     let archive_path = archive_path.as_ref();
     let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
-    let open_options = crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: recipient_key.map(Path::to_path_buf) };
+    let open_options =
+        crate::engine::OpenOptions { password: password.map(ToOwned::to_owned), recipient_key: recipient_key.map(Path::to_path_buf), ..Default::default() };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
     let format = handle.detected().format;
     let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
@@ -674,11 +635,12 @@ mod tests {
     use super::{ArchiveBrowserError, BrowserListOptions, extract_entry, list_entries, list_entries_with_options, preview_entry, visit_entries_with_options};
     use crate::jobs::{CancellationToken, JobContext};
     use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot, PlanOptions, plan_archive};
+    use crate::safety::OverwritePolicy;
     use crate::secrets::SecretString;
     use crate::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
     use crate::tar_zst_backend::{TarZstdCreateOptions, create_tar_zst_from_path};
     use crate::test_support::TestDir;
-    use crate::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
+    use crate::tzap::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
     use crate::zip_backend::{ZipCreateOptions, create_zip_from_manifest};
     use bzip2::Compression;
     use bzip2::write::BzEncoder;
@@ -856,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn split_tzap_listing_uses_tzap_backend_route() {
+    fn split_tzap_listing_uses_tzap_route() {
         let temp = TestDir::new("browser_split_tzap_route");
         let archive = temp.path("archive.vol000.tzap");
         fs::write(&archive, b"not a real tzap volume").unwrap();
@@ -946,6 +908,24 @@ mod tests {
 
         assert!(error.to_string().contains("extraction safety"));
         assert!(!temp.path("escape.txt").exists());
+    }
+
+    #[test]
+    fn selected_entry_extraction_deduplicates_path_selectors_but_keeps_physical_duplicates() {
+        let temp = TestDir::new("browser_duplicate_selection");
+        let archive = temp.path("archive.zip");
+        write_zip(&archive, &[("duplicate/./file.txt", b"first".as_slice()), ("duplicate/file.txt", b"second".as_slice())]);
+
+        let reports = super::extract_selected_entries_with_options(
+            &archive,
+            &["duplicate/file.txt".to_owned(), "duplicate/file.txt".to_owned()],
+            temp.path("out"),
+            super::BrowserExtractOptions { overwrite: OverwritePolicy::Replace, ..Default::default() },
+        )
+        .unwrap();
+
+        assert_eq!(reports.len(), 2, "each physical duplicate should be extracted once");
+        assert_eq!(fs::read_to_string(temp.path("out/duplicate/file.txt")).unwrap(), "second");
     }
 
     #[test]

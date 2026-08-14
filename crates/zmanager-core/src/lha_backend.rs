@@ -219,6 +219,24 @@ pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Wri
     Ok(bytes)
 }
 
+/// Copies one retained LHA file by path and duplicate occurrence.
+pub fn copy_by_path_occurrence(path: impl AsRef<Path>, selected_path: &str, selected_occurrence: usize, writer: &mut dyn io::Write) -> Result<u64, LhaError> {
+    let path = path.as_ref();
+    let mut occurrence = 0_usize;
+    let entry_index = list(path)?
+        .into_iter()
+        .find_map(|entry| {
+            if entry.path != selected_path {
+                return None;
+            }
+            let matches = occurrence == selected_occurrence;
+            occurrence = occurrence.saturating_add(1);
+            matches.then_some(entry.index)
+        })
+        .ok_or_else(|| invalid(path, "retained LHA entry is not present"))?;
+    copy(path, entry_index, writer)
+}
+
 fn open(path: &Path) -> Result<delharc::LhaDecodeReader<File>, LhaError> {
     delharc::parse_file(path).map_err(|source| io_error(path, source))
 }

@@ -5,7 +5,7 @@ use crate::cli::usage::{SHARE_HELP, command_usage_error, print_error_line, print
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use zmanager_core::tzap_service::tzap_share_create_json;
+use zmanager_tzap_hosted::tzap_service::tzap_share_create_json;
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn share_command(args: &[String], mut global: GlobalOptions) -> ExitCode {

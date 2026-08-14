@@ -1,17 +1,18 @@
 //! Native ZIP listing adapter for single and supported split ZIP archives (ARC-106).
 
+use std::path::PathBuf;
+use std::sync::Arc;
 use zip::ZipArchive;
 
 use crate::archive_browser::BrowserEntryKind;
 use crate::engine::format::FormatId;
-use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory};
+use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory, ReadAdapterSession};
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
     ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
     SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
 };
 use crate::zip_backend::ZipBackendError;
-use crate::zip_split::open_zip_reader;
 
 static ZIP_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_zip_lister",
@@ -49,90 +50,68 @@ impl ZipListAdapter {
     }
 }
 
-impl ReadAdapterFactory for ZipListAdapter {
-    fn descriptor(&self) -> &'static AdapterDescriptor {
-        if self.format == FormatId::SPLIT_ZIP { &SPLIT_ZIP_LIST_DESCRIPTOR } else { &ZIP_LIST_DESCRIPTOR }
+struct ZipReadSession {
+    archive: ZipArchive<Box<dyn crate::zip_split::ReadSeek>>,
+    path: PathBuf,
+    password: Option<String>,
+    retained_entries: Vec<(EntryId, usize)>,
+}
+
+fn zip_archive_error(path: &std::path::Path, error: &ZipBackendError) -> ArchiveError {
+    let kind = match &error {
+        ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
+        ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
+        ZipBackendError::Cancelled => ErrorKind::Cancelled,
+        ZipBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        ZipBackendError::Io { .. } => ErrorKind::Io,
+        ZipBackendError::UnsupportedSplitZip { .. } => ErrorKind::UnsupportedOperation,
+        ZipBackendError::Zip(_) | ZipBackendError::InvalidSymlinkTarget { .. } | ZipBackendError::VolumeSizeTooSmall { .. } => ErrorKind::CorruptData,
+        ZipBackendError::Plan(_) => ErrorKind::InvalidFormat,
+    };
+    ArchiveError {
+        kind,
+        message: error.to_string(),
+        disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
+        path: Some(path.to_path_buf()),
+    }
+}
+
+impl ReadAdapterSession for ZipReadSession {
+    fn list(&mut self) -> Result<ArchiveListing, ArchiveError> {
+        crate::zip_backend::list_zip_archive(&mut self.archive).map_err(|error| zip_archive_error(&self.path, &error)).map(|listing| {
+            let mut entries = Vec::with_capacity(listing.entries.len());
+            self.retained_entries.clear();
+            for (index, entry) in listing.entries.into_iter().enumerate() {
+                let id = EntryId(u64::try_from(index).unwrap_or(0));
+                self.retained_entries.push((id, index));
+                entries.push(EngineEntry {
+                    id,
+                    path: entry.name,
+                    kind: match entry.kind {
+                        crate::zip_backend::ZipEntryKind::Directory => BrowserEntryKind::Directory,
+                        crate::zip_backend::ZipEntryKind::Symlink => BrowserEntryKind::Symlink,
+                        crate::zip_backend::ZipEntryKind::File => BrowserEntryKind::File,
+                    },
+                    size: Some(entry.size),
+                    compressed_size: Some(entry.compressed_size),
+                    encrypted: Some(entry.encrypted),
+                    mode: entry.unix_mode,
+                    method: Some(entry.method),
+                    crc: Some(entry.crc),
+                    comment: entry.comment,
+                    ..EngineEntry::default()
+                });
+            }
+            ArchiveListing { entries }
+        })
     }
 
-    fn list(&self, archive: &DetectedArchive, _options: &OpenOptions) -> Result<ArchiveListing, ArchiveError> {
-        let primary_path = archive.source.primary_path();
-
-        let reader = match open_zip_reader(primary_path) {
-            Ok(reader) => reader,
-            Err(ZipBackendError::UnsupportedSplitZip { reason }) => {
-                return Err(
-                    ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("ZIP64 split archive is not supported: {reason}")).with_path(primary_path)
-                );
-            }
-            Err(err) => {
-                return Err(ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path));
-            }
-        };
-
-        let mut zip_archive = ZipArchive::new(reader)
-            .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Failed to parse ZIP central directory: {err}")).with_path(primary_path))?;
-
-        let len = zip_archive.len();
-        let mut entries = Vec::with_capacity(len);
-
-        for index in 0..len {
-            let file = zip_archive.by_index_raw(index).map_err(|err| {
-                ArchiveError::unusable(ErrorKind::CorruptData, format!("Failed to read ZIP entry header #{index}: {err}")).with_path(primary_path)
-            })?;
-
-            let kind = if file.is_dir() {
-                BrowserEntryKind::Directory
-            } else if file.is_symlink() {
-                BrowserEntryKind::Symlink
-            } else {
-                BrowserEntryKind::File
-            };
-
-            let comment = file.comment();
-            let comment_opt = (!comment.is_empty()).then(|| comment.to_owned());
-
-            entries.push(EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
-                path: file.name().to_owned(),
-                kind,
-                size: Some(file.size()),
-                compressed_size: Some(file.compressed_size()),
-                modified: file.last_modified().map(|m| m.to_string()),
-                mode: file.unix_mode(),
-                encrypted: Some(file.encrypted()),
-                method: Some(file.compression().to_string()),
-                crc: Some(file.crc32()),
-                comment: comment_opt,
-                link_target: None,
-                ..EngineEntry::default()
-            });
+    fn test(&mut self, options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        if options.is_cancelled() {
+            return Err(ArchiveError::usable(ErrorKind::Cancelled, "ZIP test was cancelled").with_path(&self.path));
         }
-
-        Ok(ArchiveListing { entries })
-    }
-
-    fn test(&self, archive: &DetectedArchive, open_options: &OpenOptions, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        if test_options.is_cancelled() {
-            return Err(ArchiveError::usable(ErrorKind::Cancelled, "ZIP test was cancelled").with_path(path));
-        }
-        let report = crate::zip_backend::test_zip_with_password_filter(path, open_options.password.as_deref(), |entry_path| test_options.selects(entry_path))
-            .map_err(|error| {
-            let kind = match error {
-                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
-                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
-                ZipBackendError::Cancelled => ErrorKind::Cancelled,
-                ZipBackendError::Io { .. } => ErrorKind::Io,
-                ZipBackendError::UnsupportedSplitZip { .. } => ErrorKind::InvalidFormat,
-                _ => ErrorKind::CorruptData,
-            };
-            let disposition = if matches!(kind, ErrorKind::CorruptData) {
-                crate::engine::types::SessionDisposition::Unusable
-            } else {
-                crate::engine::types::SessionDisposition::Usable
-            };
-            ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
-        })?;
+        let report = crate::zip_backend::test_zip_archive(&mut self.archive, &self.path, self.password.as_deref(), |path| options.selects(path))
+            .map_err(|error| zip_archive_error(&self.path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
             skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
@@ -141,97 +120,63 @@ impl ReadAdapterFactory for ZipListAdapter {
         })
     }
 
-    fn extract<'a>(&self, archive: &DetectedArchive, open_options: &OpenOptions, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
-            crate::zip_backend::extract_zip_with_overwrite_resolver_and_password(
-                path,
-                &options.destination,
-                options.policy.clone(),
-                open_options.password.as_deref(),
-                resolver,
-            )
-        } else {
-            crate::zip_backend::extract_zip_with_password(path, &options.destination, options.policy.clone(), open_options.password.as_deref())
-        }
-        .map_err(|error| {
-            let kind = match error {
-                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
-                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
-                ZipBackendError::Cancelled => ErrorKind::Cancelled,
-                ZipBackendError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
-                ZipBackendError::Io { .. } => ErrorKind::Io,
-                ZipBackendError::UnsupportedSplitZip { .. } => ErrorKind::UnsupportedOperation,
-                _ => ErrorKind::CorruptData,
-            };
-            ArchiveError {
-                kind,
-                message: error.to_string(),
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
-        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
-    }
-
-    fn selected_extract<'a>(
-        &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
-        entry_id: EntryId,
-        options: &'a mut SelectedExtractOptions<'a>,
-    ) -> Result<ExtractReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let entry_index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "ZIP entry ID is not representable"))?;
-        let report = crate::zip_backend::extract_zip_entry_by_index(
-            path,
+    fn extract<'a>(&mut self, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let report = crate::zip_backend::extract_zip_archive(
+            &mut self.archive,
+            &self.path,
             &options.destination,
             options.policy.clone(),
-            open_options.password.as_deref(),
-            entry_index,
+            self.password.as_deref(),
+            None,
             options.overwrite_resolver.as_deref_mut(),
+            None,
         )
-        .map_err(|error| {
-            let kind = match error {
-                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
-                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
-                ZipBackendError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
-                ZipBackendError::Io { .. } => ErrorKind::Io,
-                _ => ErrorKind::CorruptData,
-            };
-            ArchiveError {
-                kind,
-                message: error.to_string(),
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
+        .map_err(|error| zip_archive_error(&self.path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
-    fn copy_to_writer(
-        &self,
-        archive: &DetectedArchive,
-        open_options: &OpenOptions,
-        entry_id: EntryId,
-        writer: &mut dyn std::io::Write,
-    ) -> Result<CopyReport, ArchiveError> {
-        let path = archive.source.primary_path();
-        let entry_index = usize::try_from(entry_id.0).map_err(|_| ArchiveError::usable(ErrorKind::InvalidFormat, "ZIP entry ID is not representable"))?;
-        let written_bytes = crate::zip_backend::copy_zip_entry_by_index(path, open_options.password.as_deref(), entry_index, writer).map_err(|error| {
-            let kind = match error {
-                ZipBackendError::PasswordRequired => ErrorKind::PasswordRequired,
-                ZipBackendError::InvalidPassword => ErrorKind::WrongPassword,
-                ZipBackendError::Io { .. } => ErrorKind::Io,
-                _ => ErrorKind::CorruptData,
-            };
-            ArchiveError {
-                kind,
-                message: error.to_string(),
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
+    fn selected_extract<'a>(&mut self, entry_id: EntryId, options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let entry_index = self
+            .retained_entries
+            .iter()
+            .find_map(|(retained_id, index)| (*retained_id == entry_id).then_some(*index))
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("ZIP entry ID {entry_id} is not present in the session listing")))?;
+        let report = crate::zip_backend::extract_zip_archive(
+            &mut self.archive,
+            &self.path,
+            &options.destination,
+            options.policy.clone(),
+            self.password.as_deref(),
+            None,
+            options.overwrite_resolver.as_deref_mut(),
+            Some(entry_index),
+        )
+        .map_err(|error| zip_archive_error(&self.path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn copy_to_writer(&mut self, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let entry_index = self
+            .retained_entries
+            .iter()
+            .find_map(|(retained_id, index)| (*retained_id == entry_id).then_some(*index))
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("ZIP entry ID {entry_id} is not present in the session listing")))?;
+        let written_bytes = crate::zip_backend::copy_zip_entry_from_archive(&mut self.archive, &self.path, self.password.as_deref(), entry_index, writer)
+            .map_err(|error| zip_archive_error(&self.path, &error))?;
         Ok(CopyReport { written_bytes })
+    }
+}
+
+impl ReadAdapterFactory for ZipListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        if self.format == FormatId::SPLIT_ZIP { &SPLIT_ZIP_LIST_DESCRIPTOR } else { &ZIP_LIST_DESCRIPTOR }
+    }
+
+    fn open(self: Arc<Self>, archive: DetectedArchive, options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
+        let path = archive.source.primary_path().to_path_buf();
+        let reader = crate::zip_split::open_zip_reader_from_paths(archive.source.paths()).map_err(|error| zip_archive_error(&path, &error))?;
+        let zip_archive = ZipArchive::new(reader)
+            .map_err(|error| ArchiveError::unusable(ErrorKind::CorruptData, format!("Failed to parse ZIP central directory: {error}")).with_path(&path))?;
+        Ok(Box::new(ZipReadSession { archive: zip_archive, path, password: options.password, retained_entries: Vec::new() }))
     }
 }

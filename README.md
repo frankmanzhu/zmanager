@@ -202,8 +202,9 @@ the core suite is deterministic and should pass without network access.
 
 - `crates/zmanager-cli`: user-facing `zm` command.
 - `crates/zmanager-core`: archive planning, creation, extraction, listing,
-  testing, safety checks, and backend routing.
-- `crates/zmanager-ffi`: C ABI consumed by the desktop GUI app.
+  testing, safety checks, and the engine-owned adapter/session registry.
+- `crates/zmanager-ffi`: UniFFI-generated archive/session/job bridge consumed by
+  the desktop and mobile GUI apps.
 - `crates/zmanager-unrar`: bundled extraction-only UnRAR bridge for passworded
   RAR extraction.
 - `fixtures/`: committed compatibility fixtures used by integration tests.

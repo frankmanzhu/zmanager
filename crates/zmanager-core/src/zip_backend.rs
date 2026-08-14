@@ -87,6 +87,12 @@ pub struct ZipListEntry {
     pub encrypted: bool,
     /// Unix mode bits when available.
     pub unix_mode: Option<u32>,
+    /// Compression method name.
+    pub method: String,
+    /// Entry CRC-32 from the ZIP central directory.
+    pub crc: u32,
+    /// Entry comment, when present.
+    pub comment: Option<String>,
 }
 
 /// ZIP entry type.
@@ -327,6 +333,11 @@ pub fn list_zip(path: impl AsRef<Path>) -> Result<ZipListing, ZipBackendError> {
     let path = path.as_ref();
     let reader = open_zip_reader(path)?;
     let mut archive = ZipArchive::new(reader)?;
+    list_zip_archive(&mut archive)
+}
+
+/// Lists entries from an already opened ZIP reader.
+pub(crate) fn list_zip_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<ZipListing, ZipBackendError> {
     let mut entries = Vec::with_capacity(archive.len());
 
     for index in 0..archive.len() {
@@ -338,6 +349,9 @@ pub fn list_zip(path: impl AsRef<Path>) -> Result<ZipListing, ZipBackendError> {
             compressed_size: file.compressed_size(),
             encrypted: file.encrypted(),
             unix_mode: file.unix_mode(),
+            method: format!("{:?}", file.compression()),
+            crc: file.crc32(),
+            comment: (!file.comment().is_empty()).then(|| file.comment().to_owned()),
         });
     }
 
@@ -354,11 +368,21 @@ pub fn list_zip(path: impl AsRef<Path>) -> Result<ZipListing, ZipBackendError> {
 pub fn test_zip_with_password_filter(
     path: impl AsRef<Path>,
     password: Option<&str>,
-    mut selected: impl FnMut(&str) -> bool,
+    selected: impl FnMut(&str) -> bool,
 ) -> Result<ZipTestReport, ZipBackendError> {
     let path = path.as_ref();
     let reader = open_zip_reader(path)?;
     let mut archive = ZipArchive::new(reader)?;
+    test_zip_archive(&mut archive, path, password, selected)
+}
+
+/// Tests selected entries in an already opened ZIP reader.
+pub(crate) fn test_zip_archive<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    archive_path: &Path,
+    password: Option<&str>,
+    mut selected: impl FnMut(&str) -> bool,
+) -> Result<ZipTestReport, ZipBackendError> {
     let mut tested_entries = 0;
     let mut skipped_entries = 0;
     let mut tested_bytes = 0;
@@ -378,7 +402,7 @@ pub fn test_zip_with_password_filter(
             tested_entries += 1;
             continue;
         }
-        let copied = io::copy(&mut file, &mut io::sink()).map_err(|source| ZipBackendError::Io { path: PathBuf::from(file.name()), source })?;
+        let copied = io::copy(&mut file, &mut io::sink()).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
         tested_entries += 1;
         tested_bytes += copied;
     }
@@ -438,14 +462,25 @@ pub fn copy_zip_entry_by_index<W: Write + ?Sized>(
     let archive_path = archive_path.as_ref();
     let reader = open_zip_reader(archive_path)?;
     let mut archive = ZipArchive::new(reader)?;
+    copy_zip_entry_from_archive(&mut archive, archive_path, password, entry_index, output)
+}
+
+/// Copies one entry from an already opened ZIP reader.
+pub(crate) fn copy_zip_entry_from_archive<R: Read + Seek, W: Write + ?Sized>(
+    archive: &mut ZipArchive<R>,
+    archive_path: &Path,
+    password: Option<&str>,
+    entry_index: usize,
+    output: &mut W,
+) -> Result<u64, ZipBackendError> {
     let mut file = archive.by_index_with_options(entry_index, ZipReadOptions::new().password(password_bytes(password))).map_err(map_zip_error)?;
     if zip_entry_kind(&file) != ZipEntryKind::File {
         return Err(ZipBackendError::Io {
-            path: PathBuf::from(file.name()),
+            path: archive_path.to_path_buf(),
             source: io::Error::new(io::ErrorKind::InvalidInput, "retained ZIP entry is not a regular file"),
         });
     }
-    io::copy(&mut file, output).map_err(|source| ZipBackendError::Io { path: PathBuf::from(file.name()), source })
+    io::copy(&mut file, output).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })
 }
 
 /// Extracts a ZIP archive with an optional password while emitting job events.
@@ -462,7 +497,10 @@ pub fn extract_zip_with_context_and_password(
     password: Option<&str>,
     context: &mut JobContext<'_>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, Some(context), None, None)
+    let archive_path = archive_path.as_ref();
+    let reader = open_zip_reader(archive_path)?;
+    let mut archive = ZipArchive::new(reader)?;
+    extract_zip_archive(&mut archive, archive_path, destination, policy, password, Some(context), None, None)
 }
 
 /// Extracts a ZIP archive without job progress callbacks.
@@ -472,7 +510,10 @@ pub fn extract_zip_with_password(
     policy: ExtractionPolicy,
     password: Option<&str>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, None, None, None)
+    let archive_path = archive_path.as_ref();
+    let reader = open_zip_reader(archive_path)?;
+    let mut archive = ZipArchive::new(reader)?;
+    extract_zip_archive(&mut archive, archive_path, destination, policy, password, None, None, None)
 }
 
 /// Extracts a ZIP archive with an overwrite resolver and optional password.
@@ -489,7 +530,10 @@ pub fn extract_zip_with_overwrite_resolver_and_password(
     password: Option<&str>,
     overwrite_resolver: &mut dyn OverwriteResolver,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, None, Some(overwrite_resolver), None)
+    let archive_path = archive_path.as_ref();
+    let reader = open_zip_reader(archive_path)?;
+    let mut archive = ZipArchive::new(reader)?;
+    extract_zip_archive(&mut archive, archive_path, destination, policy, password, None, Some(overwrite_resolver), None)
 }
 
 /// Extracts exactly one ZIP entry by its retained central-directory index.
@@ -501,11 +545,17 @@ pub fn extract_zip_entry_by_index(
     entry_index: usize,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    extract_zip_inner(archive_path, destination, policy, password, None, overwrite_resolver, Some(entry_index))
+    let archive_path = archive_path.as_ref();
+    let reader = open_zip_reader(archive_path)?;
+    let mut archive = ZipArchive::new(reader)?;
+    extract_zip_archive(&mut archive, archive_path, destination, policy, password, None, overwrite_resolver, Some(entry_index))
 }
 
-fn extract_zip_inner(
-    archive_path: impl AsRef<Path>,
+/// Extracts from an already opened ZIP reader without reopening its source.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn extract_zip_archive<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    archive_path: &Path,
     destination: impl AsRef<Path>,
     policy: ExtractionPolicy,
     password: Option<&str>,
@@ -513,13 +563,10 @@ fn extract_zip_inner(
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
     selected_index: Option<usize>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
-    let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
     let destination_root =
         crate::safety::prepare_destination_root(destination).map_err(|source| ZipBackendError::Io { path: destination.to_path_buf(), source })?;
 
-    let reader = open_zip_reader(archive_path)?;
-    let mut archive = ZipArchive::new(reader)?;
     let password = password_bytes(password);
     if selected_index.is_some_and(|selected| selected >= archive.len()) {
         return Err(ZipBackendError::Io {

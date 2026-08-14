@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use sevenz_rust2::{ArchiveEntry, ArchiveWriter};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
+use zmanager_core::backend_test_support::sevenz_backend::extract_7z;
+use zmanager_core::backend_test_support::tar_zst_backend::extract_tar_zst;
+use zmanager_core::backend_test_support::zip_backend::{ZipBackendError, ZipExtractReport, extract_zip_with_context_and_password, list_zip};
 use zmanager_core::jobs::{CancellationToken, JobContext, JobEvent};
 use zmanager_core::safety::{ExtractionLimits, ExtractionPolicy, ExtractionSafetyError};
-use zmanager_core::sevenz_backend::extract_7z;
-use zmanager_core::tar_zst_backend::extract_tar_zst;
-use zmanager_core::zip_backend::{ZipBackendError, ZipExtractReport, extract_zip_with_context_and_password, list_zip};
 
 fn extract_zip_default(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>, policy: ExtractionPolicy) -> Result<ZipExtractReport, ZipBackendError> {
     let token = CancellationToken::new();
@@ -92,7 +92,7 @@ fn lzma_high_memory_exhaustion_is_rejected() {
 
     let error = extract_7z(&archive, temp.path("out"), None, policy).unwrap_err();
 
-    assert!(matches!(error, zmanager_core::sevenz_backend::SevenZError::Safety(ExtractionSafetyError::ExpandedSizeLimitExceeded { .. })));
+    assert!(matches!(error, zmanager_core::backend_test_support::sevenz_backend::SevenZError::Safety(ExtractionSafetyError::ExpandedSizeLimitExceeded { .. })));
     assert!(!temp.path("out/bomb.bin").exists());
 }
 

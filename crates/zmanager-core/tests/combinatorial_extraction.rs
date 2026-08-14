@@ -9,18 +9,20 @@ use std::fs;
 use std::path::Path;
 
 use zmanager_core::archive_browser::{BrowserExtractOptions, extract_entry, extract_entry_with_options};
+use zmanager_core::backend_test_support::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
+use zmanager_core::backend_test_support::tar_gz_backend::{TarGzCreateOptions, create_tar_gz_from_path};
+use zmanager_core::backend_test_support::tar_zst_backend::{TarZstdCreateOptions, create_tar_zst_from_path};
+use zmanager_core::backend_test_support::tzap::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
+use zmanager_core::backend_test_support::zip_backend::{ZipCompression, ZipCreateOptions, create_zip_from_manifest};
 use zmanager_core::jobs::{CancellationToken, JobContext, JobEvent};
 use zmanager_core::manifest::{PlanOptions, plan_archive};
 use zmanager_core::safety::{archive_entry_matches_selected, archive_pattern_matches};
 use zmanager_core::secrets::SecretString;
-use zmanager_core::sevenz_backend::{SevenZCreateOptions, create_7z_from_path};
-use zmanager_core::tar_gz_backend::{TarGzCreateOptions, create_tar_gz_from_path};
-use zmanager_core::tar_zst_backend::{TarZstdCreateOptions, create_tar_zst_from_path};
-use zmanager_core::tzap_backend::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
-use zmanager_core::zip_backend::{ZipCompression, ZipCreateOptions, create_zip_from_manifest};
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use zmanager_core::apple_archive_backend::{AppleArchiveCompression, AppleArchiveCreateOptions, create_apple_archive_from_path, extract_apple_archive};
+use zmanager_core::backend_test_support::apple_archive_backend::{
+    AppleArchiveCompression, AppleArchiveCreateOptions, create_apple_archive_from_path, extract_apple_archive,
+};
 
 fn create_nested_tree(root: &Path) {
     fs::create_dir_all(root.join("folder/sub1/sub2")).unwrap();

@@ -153,7 +153,7 @@ pub fn verify_tzap_contact_card(card: &Value, options: &TzapContactCardImportOpt
 /// `missing_status_caveat` records whether an online certificate-status check
 /// was not performed for this card. Callers should pass `false` only when
 /// they independently performed a status lookup (for example via
-/// [`crate::status_client`]) and it succeeded; `true` (the default, used by
+/// the status verifier and it succeeded; `true` (the default, used by
 /// [`verify_tzap_contact_card`]) is the honest value for any verification
 /// that does not include such a check, so downstream consumers never mistake
 /// a card whose status is unknown for one that was checked.
