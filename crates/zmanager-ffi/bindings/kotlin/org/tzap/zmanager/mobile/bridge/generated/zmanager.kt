@@ -787,6 +787,16 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -806,9 +816,13 @@ internal interface IntegrityCheckingUniffiLib : Library {
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_clearsensitivestate(
 ): Short
+fun uniffi_zmanager_ffi_checksum_func_closearchivesession(
+): Short
 fun uniffi_zmanager_ffi_checksum_func_createtzapselfsignedidentity(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_detectarchive(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_extractarchivesessionentry(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_healthcheck(
 ): Short
@@ -818,7 +832,13 @@ fun uniffi_zmanager_ffi_checksum_func_inspecttzapx509signer(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_listarchive(
 ): Short
+fun uniffi_zmanager_ffi_checksum_func_listarchivesession(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_listformats(
+): Short
 fun uniffi_zmanager_ffi_checksum_func_materializepreview(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_openarchivesession(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_plancreate(
 ): Short
@@ -927,9 +947,13 @@ internal interface UniffiLib : Library {
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_clearsensitivestate(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_closearchivesession(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_createtzapselfsignedidentity(`identityPath`: RustBuffer.ByValue,`publicCertificatePath`: RustBuffer.ByValue,`commonName`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_detectarchive(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_extractarchivesessionentry(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_healthcheck(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -939,7 +963,13 @@ fun uniffi_zmanager_ffi_fn_func_inspecttzapx509signer(`archivePath`: RustBuffer.
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_listarchive(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_listarchivesession(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_listformats(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_materializepreview(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_openarchivesession(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_plancreate(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1131,10 +1161,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_zmanager_ffi_checksum_func_clearsensitivestate() != 62689.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_zmanager_ffi_checksum_func_closearchivesession() != 49129.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_zmanager_ffi_checksum_func_createtzapselfsignedidentity() != 32200.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_detectarchive() != 9520.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_extractarchivesessionentry() != 53568.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_healthcheck() != 6081.toShort()) {
@@ -1149,7 +1185,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_zmanager_ffi_checksum_func_listarchive() != 51788.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_zmanager_ffi_checksum_func_listarchivesession() != 24799.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_listformats() != 4246.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_zmanager_ffi_checksum_func_materializepreview() != 28909.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_openarchivesession() != 27088.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_plancreate() != 56403.toShort()) {
@@ -1517,6 +1562,302 @@ public object FfiConverterTypeArchiveEntry: FfiConverterRustBuffer<ArchiveEntry>
 
 
 
+data class ArchiveSessionCloseRequest (
+    var `sessionId`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionCloseRequest: FfiConverterRustBuffer<ArchiveSessionCloseRequest> {
+    override fun read(buf: ByteBuffer): ArchiveSessionCloseRequest {
+        return ArchiveSessionCloseRequest(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionCloseRequest) = (
+            FfiConverterString.allocationSize(value.`sessionId`)
+    )
+
+    override fun write(value: ArchiveSessionCloseRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionCloseResult (
+    var `sessionId`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionCloseResult: FfiConverterRustBuffer<ArchiveSessionCloseResult> {
+    override fun read(buf: ByteBuffer): ArchiveSessionCloseResult {
+        return ArchiveSessionCloseResult(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionCloseResult) = (
+            FfiConverterString.allocationSize(value.`sessionId`)
+    )
+
+    override fun write(value: ArchiveSessionCloseResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionEntry (
+    var `entryId`: kotlin.ULong, 
+    var `path`: kotlin.String, 
+    var `kind`: ArchiveEntryKind, 
+    var `size`: kotlin.ULong?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionEntry: FfiConverterRustBuffer<ArchiveSessionEntry> {
+    override fun read(buf: ByteBuffer): ArchiveSessionEntry {
+        return ArchiveSessionEntry(
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeArchiveEntryKind.read(buf),
+            FfiConverterOptionalULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionEntry) = (
+            FfiConverterULong.allocationSize(value.`entryId`) +
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterTypeArchiveEntryKind.allocationSize(value.`kind`) +
+            FfiConverterOptionalULong.allocationSize(value.`size`)
+    )
+
+    override fun write(value: ArchiveSessionEntry, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`entryId`, buf)
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterTypeArchiveEntryKind.write(value.`kind`, buf)
+            FfiConverterOptionalULong.write(value.`size`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionExtractRequest (
+    var `sessionId`: kotlin.String, 
+    var `entryId`: kotlin.ULong, 
+    var `destinationRoot`: kotlin.String, 
+    var `collisionPolicy`: ExtractionCollisionPolicy
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionExtractRequest: FfiConverterRustBuffer<ArchiveSessionExtractRequest> {
+    override fun read(buf: ByteBuffer): ArchiveSessionExtractRequest {
+        return ArchiveSessionExtractRequest(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeExtractionCollisionPolicy.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionExtractRequest) = (
+            FfiConverterString.allocationSize(value.`sessionId`) +
+            FfiConverterULong.allocationSize(value.`entryId`) +
+            FfiConverterString.allocationSize(value.`destinationRoot`) +
+            FfiConverterTypeExtractionCollisionPolicy.allocationSize(value.`collisionPolicy`)
+    )
+
+    override fun write(value: ArchiveSessionExtractRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+            FfiConverterULong.write(value.`entryId`, buf)
+            FfiConverterString.write(value.`destinationRoot`, buf)
+            FfiConverterTypeExtractionCollisionPolicy.write(value.`collisionPolicy`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionExtractResult (
+    var `sessionId`: kotlin.String, 
+    var `entryId`: kotlin.ULong, 
+    var `writtenBytes`: kotlin.ULong, 
+    var `warnings`: List<BridgeError>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionExtractResult: FfiConverterRustBuffer<ArchiveSessionExtractResult> {
+    override fun read(buf: ByteBuffer): ArchiveSessionExtractResult {
+        return ArchiveSessionExtractResult(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceTypeBridgeError.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionExtractResult) = (
+            FfiConverterString.allocationSize(value.`sessionId`) +
+            FfiConverterULong.allocationSize(value.`entryId`) +
+            FfiConverterULong.allocationSize(value.`writtenBytes`) +
+            FfiConverterSequenceTypeBridgeError.allocationSize(value.`warnings`)
+    )
+
+    override fun write(value: ArchiveSessionExtractResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+            FfiConverterULong.write(value.`entryId`, buf)
+            FfiConverterULong.write(value.`writtenBytes`, buf)
+            FfiConverterSequenceTypeBridgeError.write(value.`warnings`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionListRequest (
+    var `sessionId`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionListRequest: FfiConverterRustBuffer<ArchiveSessionListRequest> {
+    override fun read(buf: ByteBuffer): ArchiveSessionListRequest {
+        return ArchiveSessionListRequest(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionListRequest) = (
+            FfiConverterString.allocationSize(value.`sessionId`)
+    )
+
+    override fun write(value: ArchiveSessionListRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionListResult (
+    var `sessionId`: kotlin.String, 
+    var `entries`: List<ArchiveSessionEntry>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionListResult: FfiConverterRustBuffer<ArchiveSessionListResult> {
+    override fun read(buf: ByteBuffer): ArchiveSessionListResult {
+        return ArchiveSessionListResult(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeArchiveSessionEntry.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionListResult) = (
+            FfiConverterString.allocationSize(value.`sessionId`) +
+            FfiConverterSequenceTypeArchiveSessionEntry.allocationSize(value.`entries`)
+    )
+
+    override fun write(value: ArchiveSessionListResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+            FfiConverterSequenceTypeArchiveSessionEntry.write(value.`entries`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionOpenRequest (
+    var `archivePath`: kotlin.String, 
+    var `password`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionOpenRequest: FfiConverterRustBuffer<ArchiveSessionOpenRequest> {
+    override fun read(buf: ByteBuffer): ArchiveSessionOpenRequest {
+        return ArchiveSessionOpenRequest(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionOpenRequest) = (
+            FfiConverterString.allocationSize(value.`archivePath`) +
+            FfiConverterOptionalString.allocationSize(value.`password`)
+    )
+
+    override fun write(value: ArchiveSessionOpenRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`archivePath`, buf)
+            FfiConverterOptionalString.write(value.`password`, buf)
+    }
+}
+
+
+
+data class ArchiveSessionOpenResult (
+    var `sessionId`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeArchiveSessionOpenResult: FfiConverterRustBuffer<ArchiveSessionOpenResult> {
+    override fun read(buf: ByteBuffer): ArchiveSessionOpenResult {
+        return ArchiveSessionOpenResult(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ArchiveSessionOpenResult) = (
+            FfiConverterString.allocationSize(value.`sessionId`)
+    )
+
+    override fun write(value: ArchiveSessionOpenResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+    }
+}
+
+
+
 data class BridgeError (
     var `code`: kotlin.String, 
     var `message`: kotlin.String, 
@@ -1849,6 +2190,74 @@ public object FfiConverterTypeExtractionPlanEntry: FfiConverterRustBuffer<Extrac
 
 
 
+data class FormatDescriptor (
+    var `kind`: kotlin.String, 
+    var `label`: kotlin.String, 
+    var `extensions`: List<kotlin.String>, 
+    var `canList`: kotlin.Boolean, 
+    var `canExtract`: kotlin.Boolean, 
+    var `canCreate`: kotlin.Boolean, 
+    var `recognized`: kotlin.Boolean, 
+    var `platformAvailable`: kotlin.Boolean, 
+    var `unavailableReason`: kotlin.String?, 
+    var `sourceAccess`: kotlin.String?, 
+    var `encryptionSupported`: kotlin.Boolean
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFormatDescriptor: FfiConverterRustBuffer<FormatDescriptor> {
+    override fun read(buf: ByteBuffer): FormatDescriptor {
+        return FormatDescriptor(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FormatDescriptor) = (
+            FfiConverterString.allocationSize(value.`kind`) +
+            FfiConverterString.allocationSize(value.`label`) +
+            FfiConverterSequenceString.allocationSize(value.`extensions`) +
+            FfiConverterBoolean.allocationSize(value.`canList`) +
+            FfiConverterBoolean.allocationSize(value.`canExtract`) +
+            FfiConverterBoolean.allocationSize(value.`canCreate`) +
+            FfiConverterBoolean.allocationSize(value.`recognized`) +
+            FfiConverterBoolean.allocationSize(value.`platformAvailable`) +
+            FfiConverterOptionalString.allocationSize(value.`unavailableReason`) +
+            FfiConverterOptionalString.allocationSize(value.`sourceAccess`) +
+            FfiConverterBoolean.allocationSize(value.`encryptionSupported`)
+    )
+
+    override fun write(value: FormatDescriptor, buf: ByteBuffer) {
+            FfiConverterString.write(value.`kind`, buf)
+            FfiConverterString.write(value.`label`, buf)
+            FfiConverterSequenceString.write(value.`extensions`, buf)
+            FfiConverterBoolean.write(value.`canList`, buf)
+            FfiConverterBoolean.write(value.`canExtract`, buf)
+            FfiConverterBoolean.write(value.`canCreate`, buf)
+            FfiConverterBoolean.write(value.`recognized`, buf)
+            FfiConverterBoolean.write(value.`platformAvailable`, buf)
+            FfiConverterOptionalString.write(value.`unavailableReason`, buf)
+            FfiConverterOptionalString.write(value.`sourceAccess`, buf)
+            FfiConverterBoolean.write(value.`encryptionSupported`, buf)
+    }
+}
+
+
+
 data class HealthcheckResult (
     var `status`: kotlin.String, 
     var `engine`: kotlin.String, 
@@ -2040,6 +2449,34 @@ public object FfiConverterTypeListArchiveResult: FfiConverterRustBuffer<ListArch
             FfiConverterULong.write(value.`entryCount`, buf)
             FfiConverterOptionalULong.write(value.`totalSize`, buf)
             FfiConverterSequenceTypeBridgeError.write(value.`warnings`, buf)
+    }
+}
+
+
+
+data class ListFormatsResult (
+    var `formats`: List<FormatDescriptor>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeListFormatsResult: FfiConverterRustBuffer<ListFormatsResult> {
+    override fun read(buf: ByteBuffer): ListFormatsResult {
+        return ListFormatsResult(
+            FfiConverterSequenceTypeFormatDescriptor.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ListFormatsResult) = (
+            FfiConverterSequenceTypeFormatDescriptor.allocationSize(value.`formats`)
+    )
+
+    override fun write(value: ListFormatsResult, buf: ByteBuffer) {
+            FfiConverterSequenceTypeFormatDescriptor.write(value.`formats`, buf)
     }
 }
 
@@ -2413,7 +2850,8 @@ data class PlanExtractResult (
     var `blockedEntries`: kotlin.ULong, 
     var `estimatedBytes`: kotlin.ULong?, 
     var `canStart`: kotlin.Boolean, 
-    var `warnings`: List<BridgeError>
+    var `warnings`: List<BridgeError>, 
+    var `planToken`: kotlin.String
 ) {
     
     companion object
@@ -2437,6 +2875,7 @@ public object FfiConverterTypePlanExtractResult: FfiConverterRustBuffer<PlanExtr
             FfiConverterOptionalULong.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterSequenceTypeBridgeError.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
@@ -2452,7 +2891,8 @@ public object FfiConverterTypePlanExtractResult: FfiConverterRustBuffer<PlanExtr
             FfiConverterULong.allocationSize(value.`blockedEntries`) +
             FfiConverterOptionalULong.allocationSize(value.`estimatedBytes`) +
             FfiConverterBoolean.allocationSize(value.`canStart`) +
-            FfiConverterSequenceTypeBridgeError.allocationSize(value.`warnings`)
+            FfiConverterSequenceTypeBridgeError.allocationSize(value.`warnings`) +
+            FfiConverterString.allocationSize(value.`planToken`)
     )
 
     override fun write(value: PlanExtractResult, buf: ByteBuffer) {
@@ -2468,6 +2908,7 @@ public object FfiConverterTypePlanExtractResult: FfiConverterRustBuffer<PlanExtr
             FfiConverterOptionalULong.write(value.`estimatedBytes`, buf)
             FfiConverterBoolean.write(value.`canStart`, buf)
             FfiConverterSequenceTypeBridgeError.write(value.`warnings`, buf)
+            FfiConverterString.write(value.`planToken`, buf)
     }
 }
 
@@ -2667,7 +3108,8 @@ data class StartExtractRequest (
     var `password`: kotlin.String?, 
     var `selectedPaths`: List<kotlin.String>, 
     var `stripComponents`: kotlin.ULong, 
-    var `collisionPolicy`: ExtractionCollisionPolicy
+    var `collisionPolicy`: ExtractionCollisionPolicy, 
+    var `planToken`: kotlin.String
 ) {
     
     companion object
@@ -2685,6 +3127,7 @@ public object FfiConverterTypeStartExtractRequest: FfiConverterRustBuffer<StartE
             FfiConverterSequenceString.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterTypeExtractionCollisionPolicy.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
@@ -2694,7 +3137,8 @@ public object FfiConverterTypeStartExtractRequest: FfiConverterRustBuffer<StartE
             FfiConverterOptionalString.allocationSize(value.`password`) +
             FfiConverterSequenceString.allocationSize(value.`selectedPaths`) +
             FfiConverterULong.allocationSize(value.`stripComponents`) +
-            FfiConverterTypeExtractionCollisionPolicy.allocationSize(value.`collisionPolicy`)
+            FfiConverterTypeExtractionCollisionPolicy.allocationSize(value.`collisionPolicy`) +
+            FfiConverterString.allocationSize(value.`planToken`)
     )
 
     override fun write(value: StartExtractRequest, buf: ByteBuffer) {
@@ -2704,6 +3148,7 @@ public object FfiConverterTypeStartExtractRequest: FfiConverterRustBuffer<StartE
             FfiConverterSequenceString.write(value.`selectedPaths`, buf)
             FfiConverterULong.write(value.`stripComponents`, buf)
             FfiConverterTypeExtractionCollisionPolicy.write(value.`collisionPolicy`, buf)
+            FfiConverterString.write(value.`planToken`, buf)
     }
 }
 
@@ -3489,6 +3934,34 @@ public object FfiConverterSequenceTypeArchiveEntry: FfiConverterRustBuffer<List<
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeArchiveSessionEntry: FfiConverterRustBuffer<List<ArchiveSessionEntry>> {
+    override fun read(buf: ByteBuffer): List<ArchiveSessionEntry> {
+        val len = buf.getInt()
+        return List<ArchiveSessionEntry>(len) {
+            FfiConverterTypeArchiveSessionEntry.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ArchiveSessionEntry>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeArchiveSessionEntry.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ArchiveSessionEntry>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeArchiveSessionEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeBridgeError: FfiConverterRustBuffer<List<BridgeError>> {
     override fun read(buf: ByteBuffer): List<BridgeError> {
         val len = buf.getInt()
@@ -3573,6 +4046,34 @@ public object FfiConverterSequenceTypeExtractionPlanEntry: FfiConverterRustBuffe
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeFormatDescriptor: FfiConverterRustBuffer<List<FormatDescriptor>> {
+    override fun read(buf: ByteBuffer): List<FormatDescriptor> {
+        val len = buf.getInt()
+        return List<FormatDescriptor>(len) {
+            FfiConverterTypeFormatDescriptor.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FormatDescriptor>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFormatDescriptor.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FormatDescriptor>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFormatDescriptor.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<List<MobileJobEvent>> {
     override fun read(buf: ByteBuffer): List<MobileJobEvent> {
         val len = buf.getInt()
@@ -3612,6 +4113,16 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     )
     }
     
+
+    @Throws(ZmanagerGuiException::class) fun `closeArchiveSession`(`request`: ArchiveSessionCloseRequest): ArchiveSessionCloseResult {
+            return FfiConverterTypeArchiveSessionCloseResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_closearchivesession(
+        FfiConverterTypeArchiveSessionCloseRequest.lower(`request`),_status)
+}
+    )
+    }
+    
  fun `createTzapSelfSignedIdentity`(`identityPath`: kotlin.String, `publicCertificatePath`: kotlin.String, `commonName`: kotlin.String, `password`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
@@ -3627,6 +4138,16 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     uniffiRustCallWithError(ZmanagerGuiException) { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_detectarchive(
         FfiConverterTypeDetectArchiveRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `extractArchiveSessionEntry`(`request`: ArchiveSessionExtractRequest): ArchiveSessionExtractResult {
+            return FfiConverterTypeArchiveSessionExtractResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_extractarchivesessionentry(
+        FfiConverterTypeArchiveSessionExtractRequest.lower(`request`),_status)
 }
     )
     }
@@ -3669,11 +4190,40 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     }
     
 
+    @Throws(ZmanagerGuiException::class) fun `listArchiveSession`(`request`: ArchiveSessionListRequest): ArchiveSessionListResult {
+            return FfiConverterTypeArchiveSessionListResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_listarchivesession(
+        FfiConverterTypeArchiveSessionListRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+ fun `listFormats`(): ListFormatsResult {
+            return FfiConverterTypeListFormatsResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_listformats(
+        _status)
+}
+    )
+    }
+    
+
     @Throws(ZmanagerGuiException::class) fun `materializePreview`(`request`: MaterializePreviewRequest): MaterializePreviewResult {
             return FfiConverterTypeMaterializePreviewResult.lift(
     uniffiRustCallWithError(ZmanagerGuiException) { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_materializepreview(
         FfiConverterTypeMaterializePreviewRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `openArchiveSession`(`request`: ArchiveSessionOpenRequest): ArchiveSessionOpenResult {
+            return FfiConverterTypeArchiveSessionOpenResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_openarchivesession(
+        FfiConverterTypeArchiveSessionOpenRequest.lower(`request`),_status)
 }
     )
     }
