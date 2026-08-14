@@ -5,11 +5,11 @@ set -euo pipefail
 
 for package in zmanager-core zmanager-cli zmanager-ffi; do
     for profile in default no-default-features; do
-        profile_args=()
         if [[ "$profile" == "no-default-features" ]]; then
-            profile_args+=(--no-default-features)
+            graph=$(cargo tree -e normal -p "$package" --no-default-features)
+        else
+            graph=$(cargo tree -e normal -p "$package")
         fi
-        graph=$(cargo tree -e normal -p "$package" "${profile_args[@]}")
         forbidden='libarchive|bsdtar'
         if [[ "$profile" == "no-default-features" && "$package" == "zmanager-cli" ]]; then
             forbidden+='|reqwest'

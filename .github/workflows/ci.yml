@@ -32,6 +32,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install Bash on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix)/bin/bash" --version | head -n 1
+
       - name: Clone tzap
         run: |
           TZAP_REV=$(cat tzap-rev.txt 2>/dev/null || echo "main")
