@@ -41,10 +41,12 @@ mod multi_volume;
 mod segmented_reader;
 mod sevenz_volume;
 mod strings;
+#[cfg(unix)]
+pub(crate) use backend_impl::mtree_backend;
 pub(crate) use backend_impl::{
-    apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend, mtree_backend,
-    rar_backend, raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend, warc_backend,
-    xar_backend, zip_backend,
+    apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend, rar_backend,
+    raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend, warc_backend, xar_backend,
+    zip_backend,
 };
 mod tar_metadata;
 mod temp_names;
@@ -98,10 +100,12 @@ pub mod x509_format;
 /// generated API documentation and is not a supported product contract.
 #[doc(hidden)]
 pub mod backend_test_support {
+    #[cfg(unix)]
+    pub use super::backend_impl::mtree_backend;
     pub use super::backend_impl::{
-        apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend,
-        mtree_backend, rar_backend, raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend,
-        warc_backend, xar_backend, zip_backend,
+        apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend, rar_backend,
+        raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend, warc_backend, xar_backend,
+        zip_backend,
     };
     pub mod tzap {
         pub use crate::tzap::*;

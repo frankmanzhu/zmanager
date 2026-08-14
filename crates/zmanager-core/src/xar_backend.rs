@@ -163,6 +163,11 @@ pub fn extract(
                 report.bytes = report.bytes.saturating_add(bytes);
             }
             ExtractionEntryKind::Symlink { target } => {
+                if target.as_os_str().is_empty() {
+                    report.skipped_entries = report.skipped_entries.saturating_add(1);
+                    report.warnings.push(format!("skipped symlink {}: XAR symlink target is empty", entry.path));
+                    continue;
+                }
                 if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
                     report.skipped_entries = report.skipped_entries.saturating_add(1);
                     report.warnings.push(crate::safety::unsupported_symlink_warning(&entry.path));

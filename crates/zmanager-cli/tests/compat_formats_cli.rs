@@ -1119,6 +1119,7 @@ fn competitor_warc_format_extract_with_zm() {
     assert_zm_extracts_payload("bsdtar-created warc", &archive_warc, payload);
 }
 
+#[cfg(unix)]
 #[test]
 fn competitor_mtree_format_list_and_test_with_zm() {
     let Some(bsdtar) = find_on_path("bsdtar") else {

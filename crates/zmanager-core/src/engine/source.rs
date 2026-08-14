@@ -75,14 +75,7 @@ fn source_file_identity(metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
         Some((metadata.dev(), metadata.ino()))
     }
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-
-        Some((u64::from(metadata.volume_serial_number()?), metadata.file_index()?))
-    }
-
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(unix))]
     {
         let _ = metadata;
         None
@@ -370,9 +363,9 @@ mod tests {
 
         let fingerprint = ArchiveSource::Path(path.clone()).fingerprint().unwrap();
 
-        #[cfg(any(unix, windows))]
+        #[cfg(unix)]
         assert!(fingerprint.files[0].identity.is_some());
-        #[cfg(not(any(unix, windows)))]
+        #[cfg(not(unix))]
         assert!(fingerprint.files[0].identity.is_none());
 
         std::fs::remove_file(path).unwrap();
