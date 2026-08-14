@@ -184,7 +184,7 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
     FormatCapability { kind: ArchiveFormatKind::Lha, extensions: LHA_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Ar, extensions: AR_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Warc, extensions: WARC_EXTENSIONS, status: BackendStatus::Available },
-    FormatCapability { kind: ArchiveFormatKind::Mtree, extensions: MTREE_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Mtree, extensions: MTREE_EXTENSIONS, status: mtree_status() },
     FormatCapability { kind: ArchiveFormatKind::Tzap, extensions: &[], status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::AppleArchive, extensions: APPLE_ARCHIVE_EXTENSIONS, status: apple_archive_status() },
     FormatCapability { kind: ArchiveFormatKind::Deb, extensions: DEB_EXTENSIONS, status: BackendStatus::Available },
@@ -197,6 +197,11 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
 /// Availability of the native Apple Archive backend on this target.
 const fn apple_archive_status() -> BackendStatus {
     if cfg!(any(target_os = "macos", target_os = "ios")) { BackendStatus::Available } else { BackendStatus::UnsupportedPlatform }
+}
+
+/// Availability of the native MTREE backend on this target.
+const fn mtree_status() -> BackendStatus {
+    if cfg!(unix) { BackendStatus::Available } else { BackendStatus::UnsupportedPlatform }
 }
 
 /// Returns whether the backend for `kind` is available on this platform.
@@ -332,6 +337,12 @@ mod tests {
     fn apple_archive_status_matches_platform() {
         let expected = if cfg!(any(target_os = "macos", target_os = "ios")) { BackendStatus::Available } else { BackendStatus::UnsupportedPlatform };
         assert_eq!(format_status(ArchiveFormatKind::AppleArchive), expected);
+    }
+
+    #[test]
+    fn mtree_status_matches_platform() {
+        let expected = if cfg!(unix) { BackendStatus::Available } else { BackendStatus::UnsupportedPlatform };
+        assert_eq!(format_status(ArchiveFormatKind::Mtree), expected);
     }
 
     #[test]

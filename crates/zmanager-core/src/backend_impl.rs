@@ -18,6 +18,7 @@ pub mod deb_backend;
 pub mod lha_backend;
 #[path = "msi_backend.rs"]
 pub mod msi_backend;
+#[cfg(unix)]
 #[path = "mtree_backend.rs"]
 pub mod mtree_backend;
 #[path = "rar_backend.rs"]

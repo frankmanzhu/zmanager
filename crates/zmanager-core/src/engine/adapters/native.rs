@@ -485,6 +485,7 @@ static WARC_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+#[cfg(unix)]
 static MTREE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_mtree_adapter",
     format: FormatId::MTREE,
@@ -966,9 +967,11 @@ fn warc_error(path: &std::path::Path, error: &crate::warc_backend::WarcError) ->
 }
 
 /// Native MTREE manifest adapter backed by the `mtree` parser.
+#[cfg(unix)]
 #[derive(Debug, Default)]
 pub struct MtreeListAdapter;
 
+#[cfg(unix)]
 impl NativeReadAdapter for MtreeListAdapter {
     fn descriptor(&self) -> &'static AdapterDescriptor {
         &MTREE_DESCRIPTOR
@@ -992,6 +995,7 @@ impl NativeReadAdapter for MtreeListAdapter {
     }
 }
 
+#[cfg(unix)]
 fn map_mtree_entries(entries: Vec<crate::mtree_backend::MtreeEntry>) -> Vec<EngineEntry> {
     entries
         .into_iter()
@@ -1008,6 +1012,7 @@ fn map_mtree_entries(entries: Vec<crate::mtree_backend::MtreeEntry>) -> Vec<Engi
         .collect()
 }
 
+#[cfg(unix)]
 fn mtree_error(path: &std::path::Path, error: &crate::mtree_backend::MtreeError) -> ArchiveError {
     let kind = match error {
         crate::mtree_backend::MtreeError::Io { .. } => ErrorKind::Io,

@@ -193,9 +193,14 @@ pub fn extract(
                 report.bytes = report.bytes.saturating_add(copied);
             }
             ExtractionEntryKind::Symlink { target } => {
-                crate::extract_materialize::write_symlink(&target, &destination_path).map_err(|source| io_error(&destination_path, source))?;
-                crate::extract_materialize::apply_symlink_mtime(&destination_path, entry.mtime()).map_err(|source| io_error(&destination_path, source))?;
-                report.entries = report.entries.saturating_add(1);
+                if crate::safety::should_skip_symlink_materialization(&ExtractionEntryKind::Symlink { target: target.clone() }) {
+                    report.skipped_entries = report.skipped_entries.saturating_add(1);
+                    report.warnings.push(crate::safety::unsupported_symlink_warning(&entry.public.path));
+                } else {
+                    crate::extract_materialize::write_symlink(&target, &destination_path).map_err(|source| io_error(&destination_path, source))?;
+                    crate::extract_materialize::apply_symlink_mtime(&destination_path, entry.mtime()).map_err(|source| io_error(&destination_path, source))?;
+                    report.entries = report.entries.saturating_add(1);
+                }
             }
             ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
                 return Err(CpioError::Io {

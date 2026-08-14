@@ -57,10 +57,13 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
         assert_eq!(capabilities.source_access, source_access, "{format} advertised the wrong source access");
     }
-    let mtree = engine.registry().capabilities_for_format(FormatId::MTREE).expect("missing MTREE capabilities");
-    assert!(mtree.operations.contains(&ArchiveOperation::List));
-    assert!(mtree.operations.contains(&ArchiveOperation::Test));
-    assert!(!mtree.operations.contains(&ArchiveOperation::Extract));
+    #[cfg(unix)]
+    {
+        let mtree = engine.registry().capabilities_for_format(FormatId::MTREE).expect("missing MTREE capabilities");
+        assert!(mtree.operations.contains(&ArchiveOperation::List));
+        assert!(mtree.operations.contains(&ArchiveOperation::Test));
+        assert!(!mtree.operations.contains(&ArchiveOperation::Extract));
+    }
     for format in
         [FormatId::ZIP, FormatId::SPLIT_ZIP, FormatId::SEVEN_Z, FormatId::TAR_ZST, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM, FormatId::APPLE_ARCHIVE]
     {
@@ -117,7 +120,13 @@ fn capability_snapshot_reports_registration_and_platform_state() {
 
     let apple_archive = snapshot.iter().find(|capability| capability.format == FormatId::APPLE_ARCHIVE).expect("Apple Archive capability should be present");
     assert!(apple_archive.recognized);
-    assert!(apple_archive.platform_available);
+    if cfg!(any(target_os = "macos", target_os = "ios")) {
+        assert!(apple_archive.platform_available);
+        assert!(apple_archive.unavailable_reason.is_none());
+    } else {
+        assert!(!apple_archive.platform_available);
+        assert_eq!(apple_archive.unavailable_reason.as_deref(), Some("unsupported platform"));
+    }
 
     let package = snapshot.iter().find(|capability| capability.format == FormatId::PKG).expect("PKG capability should be present");
     assert_eq!(package.role, Some(ArchivePluginRole::Extraction));
@@ -538,6 +547,7 @@ fn native_mtree_adapter_lists_and_verifies_manifest_metadata_without_materializi
 }
 
 #[test]
+#[cfg(unix)]
 fn native_mtree_adapter_rejects_unsupported_unset_directives_without_panicking() {
     let temp = TestDir::new("engine-conformance-mtree-unset");
     let archive = temp.path("unsupported.mtree");
