@@ -83,7 +83,6 @@ jobs:
             libbz2-dev \
             liblz4-dev \
             liblzma-dev \
-            libssl-dev \
             libxml2-dev \
             libzstd-dev \
             dpkg-dev \

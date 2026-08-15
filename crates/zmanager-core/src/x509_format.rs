@@ -23,7 +23,7 @@ fn attribute_string_value(attribute: &x509_parser::x509::AttributeTypeAndValue<'
     let any = attribute.attr_value();
     match any.tag() {
         x509_parser::asn1_rs::Tag::BmpString => decode_bmp_string(any.data),
-        x509_parser::asn1_rs::Tag::TeletexString => Some(String::from_utf8_lossy(any.data).into_owned()),
+        x509_parser::asn1_rs::Tag::TeletexString => Some(decode_teletex_string(any.data)),
         _ => None,
     }
 }
@@ -35,6 +35,12 @@ fn decode_bmp_string(bytes: &[u8]) -> Option<String> {
         units.push(u16::from_be_bytes([pair[0], pair[1]]));
     }
     String::from_utf16(&units).ok()
+}
+
+/// Decodes a TeletexString as Latin-1, matching OpenSSL's
+/// `ASN1_STRING_to_UTF8` treatment of bytes ≥ 0x80.
+fn decode_teletex_string(bytes: &[u8]) -> String {
+    bytes.iter().map(|&byte| char::from(byte)).collect()
 }
 
 /// Short names for the common DN attribute OIDs, matching the OpenSSL NID
@@ -75,4 +81,22 @@ fn oid_short_name(oid: &str) -> Option<&'static str> {
 #[must_use]
 pub fn hex_lower(bytes: &[u8]) -> String {
     crate::hex::hex_lower(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use x509_parser::prelude::FromDer;
+
+    /// `CN=José` with the value in TeletexString (Latin-1), the way older
+    /// non-ASCII DNs encode it.
+    const TELETEX_RDN_DER: &[u8] = &[
+        0x30, 0x0f, 0x31, 0x0d, 0x30, 0x0b, 0x06, 0x03, 0x55, 0x04, 0x03, 0x14, 0x04, b'J', b'o', b's', 0xe9,
+    ];
+
+    #[test]
+    fn teletex_string_decodes_as_latin1() {
+        let (_, name) = X509Name::from_der(TELETEX_RDN_DER).unwrap();
+        assert_eq!(x509_name_to_string(&name), "CN=José");
+    }
 }

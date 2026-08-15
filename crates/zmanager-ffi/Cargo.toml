@@ -42,5 +42,7 @@ all = "warn"
 uniffi = { version = "0.29", features = ["build"] }
 
 [dev-dependencies]
-tzap-core = "0.2.2"
-tzap-plugin-signing = "0.2.2"
+# OpenSSL-removal branch (OR-102): keep one copy of each tzap crate by
+# matching zmanager-core's git pins; revert to crates.io on release.
+tzap-core = { git = "https://github.com/tzap-org/tzap", branch = "openssl-removal", version = "0.2.2" }
+tzap-plugin-signing = { git = "https://github.com/tzap-org/tzap", branch = "openssl-removal", version = "0.2.2" }

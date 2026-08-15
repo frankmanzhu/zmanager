@@ -164,8 +164,7 @@ function Ensure-Vcpkg {
             "bzip2:$Triplet",
             "liblzma:$Triplet",
             "zstd:$Triplet",
-            "lz4:$Triplet",
-            "openssl:$Triplet"
+            "lz4:$Triplet"
         )
 
     [Environment]::SetEnvironmentVariable(
