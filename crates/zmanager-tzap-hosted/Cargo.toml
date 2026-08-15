@@ -12,14 +12,30 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = "0.22.1"
+ecdsa = { version = "0.17", features = ["der"] }
 num-bigint = "0.4.6"
-openssl = "0.10.80"
+# PKCS#12 container export remains the single allow-listed OpenSSL surface in
+# this crate (the RustCrypto `pkcs12` crate is a pre-release skeleton without
+# PBE — ADR 2026-08-15). Certificates and keys are RustCrypto; the OpenSSL
+# types here are parse-only wrappers for the PKCS#12 builder.
+openssl = { version = "0.10.80", features = ["vendored"] }
+p256 = { version = "0.14", features = ["ecdsa", "pkcs8"] }
+pkcs8 = { version = "0.11", features = ["std"] }
+# rsa 0.9's pkcs8 integration line (SPKI encoding for the RSA identity).
+pkcs8_010 = { package = "pkcs8", version = "0.10", features = ["std"] }
+# rsa 0.9's rand_core line for RSA keygen and the PKCS#12 bridge.
 rand = "0.9.0"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rsa = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.140"
-sha2 = "0.10.8"
+# `oid` is required by the `rsa` crate's digest-associated signing keys.
+sha2 = { version = "0.10.8", features = ["oid"] }
+signature = "2"
 time = { version = "0.3.47", features = ["parsing"] }
+x509-cert = "0.2.5"
 x509-parser = "0.18.1"
+x509-verify = "0.4"
 zmanager-core = { workspace = true }
 
 [lints]
@@ -27,7 +43,7 @@ workspace = true
 
 [dev-dependencies]
 base64 = "0.22.1"
-openssl = "0.10.80"
+openssl = { version = "0.10.80", features = ["vendored"] }
 serde_json = "1.0.140"
 sha2 = "0.10.8"
 serde_json_canonicalizer = "0.3.2"

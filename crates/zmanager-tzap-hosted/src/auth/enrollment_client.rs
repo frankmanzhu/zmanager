@@ -15,7 +15,6 @@ use base64::{
     Engine as _,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
-use openssl::pkey::{PKey, Private};
 use serde_json::{Map, Number, Value, json};
 use std::fmt::{self, Write as _};
 use x509_parser::prelude::{FromDer as _, X509Certificate};
@@ -471,7 +470,7 @@ pub(crate) fn sign_p256_challenge<E: ChallengeCryptoError>(
     secret_der: &SecretBytes,
     canonical_bytes: &[u8],
 ) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], E> {
-    let private_key = PKey::<Private>::private_key_from_der(secret_der.expose_secret()).map_err(|error| E::crypto(error.to_string()))?;
+    let private_key = p256_signature::parse_p256_private_key_der(secret_der.expose_secret()).map_err(|error| E::crypto(format!("{error:?}")))?;
     p256_signature::sign_p256_sha256_p1363(&private_key, canonical_bytes).map_err(|error| E::crypto(format!("{error:?}")))
 }
 

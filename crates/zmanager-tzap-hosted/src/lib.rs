@@ -14,6 +14,8 @@
 mod hex;
 mod json_util;
 mod wire_profile;
+#[path = "auth/x509_build.rs"]
+mod x509_build;
 
 pub use zmanager_core::{
     contact_card, device_identity, document_envelope, document_signing, document_verification, engine, identity_catalog, jcs, jobs, local_identity_store,

@@ -5,29 +5,53 @@
 
 use crate::json_util::{json_object, required_string};
 use crate::status_client::{TzapCrlManifestEntry, TzapStatusClientError};
-use openssl::x509::{X509, X509Crl};
 use serde_json::{Map, Value};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
-use x509_parser::prelude::FromDer as _;
+use x509_parser::prelude::{FromDer as _, X509Certificate};
 use x509_parser::revocation_list::CertificateRevocationList;
 
 pub fn validate_crl_der_against_manifest(entry: &TzapCrlManifestEntry, crl_der: &[u8], issuer_certificate_der: &[u8]) -> Result<(), TzapStatusClientError> {
     if crate::trust::sha256_identifier(crl_der) != entry.crl_sha256 {
         return Err(TzapStatusClientError::CrlValidation { reason: "DER SHA-256 does not match manifest".to_owned() });
     }
-    let crl = X509Crl::from_der(crl_der).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
     let parsed_crl = parse_crl_der(crl_der)?;
     validate_crl_manifest_fields(entry, &parsed_crl)?;
-    let issuer = X509::from_der(issuer_certificate_der).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
-    let name_order = crl.issuer_name().try_cmp(issuer.subject_name()).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
-    if name_order != std::cmp::Ordering::Equal {
+    let (remaining, issuer) =
+        X509Certificate::from_der(issuer_certificate_der).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
+    if !remaining.is_empty() {
+        return Err(TzapStatusClientError::CrlValidation { reason: "issuer certificate has trailing DER bytes".to_owned() });
+    }
+    if parsed_crl.tbs_cert_list.issuer != *issuer.subject() {
         return Err(TzapStatusClientError::CrlValidation { reason: "CRL issuer does not match issuer certificate subject".to_owned() });
     }
-    let issuer_key = issuer.public_key().map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
-    if !crl.verify(&issuer_key).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })? {
-        return Err(TzapStatusClientError::CrlValidation { reason: "CRL signature did not verify".to_owned() });
-    }
+    verify_crl_signature(&parsed_crl, issuer.tbs_certificate.subject_pki.raw)?;
     Ok(())
+}
+
+/// Verifies the CRL signature over its TBS DER with the issuer's SPKI
+/// (the RustCrypto `x509-verify` replacement for OpenSSL's `X509Crl::verify`).
+fn verify_crl_signature(crl: &CertificateRevocationList<'_>, issuer_spki_raw: &[u8]) -> Result<(), TzapStatusClientError> {
+    let key_info = x509_cert::spki::SubjectPublicKeyInfoRef::try_from(issuer_spki_raw)
+        .map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
+    let key = x509_verify::VerifyingKey::new(key_info).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
+
+    let signature_algorithm = crl.signature_algorithm.clone();
+    let algorithm = x509_cert::spki::AlgorithmIdentifierOwned {
+        oid: x509_cert::spki::ObjectIdentifier::try_from(signature_algorithm.algorithm.as_bytes())
+            .map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?,
+        parameters: signature_algorithm.parameters.as_ref().and_then(x509_parser_any_to_der_any),
+    };
+    let signature = x509_verify::Signature::new(&algorithm, crl.signature_value.data.as_ref().to_vec());
+    let message = x509_verify::Message::new(crl.tbs_cert_list.as_ref());
+    let verify_info = x509_verify::VerifyInfo::new(message, signature);
+    key.verify(&verify_info).map_err(|_| TzapStatusClientError::CrlValidation { reason: "CRL signature did not verify".to_owned() })
+}
+
+/// Converts an `x509-parser` `Any` parameter value to a `der` crate `Any`.
+fn x509_parser_any_to_der_any(any: &x509_parser::asn1_rs::Any<'_>) -> Option<x509_cert::der::asn1::Any> {
+    let tag = x509_cert::der::Tag::try_from(u8::try_from(any.tag().0).ok()?).ok()?;
+    let any_ref = x509_cert::der::asn1::AnyRef::new(tag, any.data).ok()?;
+    x509_cert::der::asn1::Any::encode_from(&any_ref).ok()
 }
 
 fn parse_crl_der(crl_der: &[u8]) -> Result<CertificateRevocationList<'_>, TzapStatusClientError> {
@@ -36,10 +60,25 @@ fn parse_crl_der(crl_der: &[u8]) -> Result<CertificateRevocationList<'_>, TzapSt
 }
 
 pub(crate) fn crl_download_to_der(bytes: &[u8]) -> Result<Vec<u8>, TzapStatusClientError> {
-    if let Ok(crl) = X509Crl::from_pem(bytes) {
-        crl.to_der().map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })
+    if bytes.windows(b"-----BEGIN".len()).any(|window| window == b"-----BEGIN") {
+        for pem in x509_parser::pem::Pem::iter_from_buffer(bytes) {
+            let pem = pem.map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
+            if pem.label != "X509 CRL" {
+                continue;
+            }
+            let (remaining, _) =
+                CertificateRevocationList::from_der(&pem.contents).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
+            if !remaining.is_empty() {
+                return Err(TzapStatusClientError::CrlValidation { reason: "CRL has trailing DER bytes".to_owned() });
+            }
+            return Ok(pem.contents);
+        }
+        Err(TzapStatusClientError::CrlValidation { reason: "CRL PEM file is empty".to_owned() })
     } else {
-        X509Crl::from_der(bytes).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
+        let (remaining, _) = CertificateRevocationList::from_der(bytes).map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;
+        if !remaining.is_empty() {
+            return Err(TzapStatusClientError::CrlValidation { reason: "CRL has trailing DER bytes".to_owned() });
+        }
         Ok(bytes.to_vec())
     }
 }

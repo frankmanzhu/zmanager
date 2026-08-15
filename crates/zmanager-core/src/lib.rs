@@ -37,7 +37,7 @@ mod backend_impl;
 mod extract_loop;
 mod extract_materialize;
 mod gitignore;
-mod os_rng;
+pub mod os_rng;
 mod segmented_reader;
 mod sevenz_volume;
 mod strings;

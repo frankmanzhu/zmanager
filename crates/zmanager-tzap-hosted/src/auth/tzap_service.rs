@@ -9,15 +9,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use openssl::asn1::{Asn1Integer, Asn1Time};
-use openssl::bn::{BigNum, MsbOption};
-use openssl::hash::MessageDigest;
+// PKCS#12 container export is the single allow-listed OpenSSL surface in this
+// crate (ADR 2026-08-15); the certificate and key below it are RustCrypto.
 use openssl::pkcs12::Pkcs12;
-use openssl::pkey::{PKey, Private};
-use openssl::rsa::Rsa;
-use openssl::x509::extension::{BasicConstraints, KeyUsage};
-use openssl::x509::{X509, X509NameBuilder};
+use openssl::pkey::PKey;
+use openssl::x509::X509;
+use pkcs8_010::EncodePublicKey as _;
+use rand::RngCore as _;
+use rsa::pkcs1::EncodeRsaPrivateKey as _;
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
+use x509_cert::der::Encode as _;
+use x509_parser::prelude::FromDer as _;
 
 use crate::trust;
 use crate::tzap_service_auth::{
@@ -271,83 +274,99 @@ fn create_self_signed_tzap_identity(
     common_name: &str,
     password: &SecretString,
 ) -> Result<Value, String> {
-    let key = PKey::from_rsa(Rsa::generate(SELF_SIGNED_IDENTITY_RSA_BITS).map_err(|source| format!("could not generate signing key: {source}"))?)
+    let key =
+        rsa::RsaPrivateKey::new(&mut rand_core::OsRng, usize::try_from(SELF_SIGNED_IDENTITY_RSA_BITS).map_err(|_| "RSA bit size out of range".to_owned())?)
+            .map_err(|source| format!("could not generate signing key: {source}"))?;
+    let certificate_der = create_self_signed_certificate(common_name, &key)?;
+    // PKCS#12 export: parse the RustCrypto DER into OpenSSL types for the
+    // container builder (the RustCrypto pkcs12 crate cannot export yet).
+    let openssl_key = PKey::private_key_from_der(&key.to_pkcs1_der().map_err(|source| format!("could not encode signing key: {source}"))?.as_bytes())
         .map_err(|source| format!("could not prepare signing key: {source}"))?;
-    let certificate = create_self_signed_certificate(common_name, &key)?;
+    let openssl_certificate = X509::from_der(&certificate_der).map_err(|source| format!("could not prepare certificate: {source}"))?;
     let identity = Pkcs12::builder()
         .name(common_name)
-        .pkey(&key)
-        .cert(&certificate)
+        .pkey(&openssl_key)
+        .cert(&openssl_certificate)
         .build2(password.expose_secret())
         .map_err(|source| format!("could not create PKCS#12 identity: {source}"))?;
 
     write_output_file(identity_path, &identity.to_der().map_err(|source| format!("could not encode PKCS#12 identity: {source}"))?)?;
     if let Some(path) = public_certificate_path {
-        write_output_file(path, &certificate.to_pem().map_err(|source| format!("could not encode public certificate: {source}"))?)?;
+        write_output_file(path, crate::x509_build::pem_encode("CERTIFICATE", &certificate_der).as_bytes())?;
     }
 
-    x509_certificate_summary_json(&certificate)
+    x509_certificate_summary_json(&certificate_der)
 }
 
-fn create_self_signed_certificate(common_name: &str, key: &PKey<Private>) -> Result<X509, String> {
-    let mut name = X509NameBuilder::new().map_err(|source| format!("could not create certificate name: {source}"))?;
-    name.append_entry_by_text("CN", common_name).map_err(|source| format!("could not set certificate name: {source}"))?;
-    let name = name.build();
-
-    let mut builder = X509::builder().map_err(|source| format!("could not create certificate: {source}"))?;
-    builder.set_version(2).map_err(|source| format!("could not set certificate version: {source}"))?;
-    let serial = random_certificate_serial()?;
-    builder.set_serial_number(&serial).map_err(|source| format!("could not set certificate serial number: {source}"))?;
-    builder.set_subject_name(&name).map_err(|source| format!("could not set certificate subject: {source}"))?;
-    builder.set_issuer_name(&name).map_err(|source| format!("could not set certificate issuer: {source}"))?;
-    builder.set_pubkey(key).map_err(|source| format!("could not set certificate public key: {source}"))?;
-    let not_before = Asn1Time::days_from_now(0).map_err(|source| format!("could not set certificate start date: {source}"))?;
-    builder.set_not_before(&not_before).map_err(|source| format!("could not set certificate start date: {source}"))?;
-    let not_after = Asn1Time::days_from_now(SELF_SIGNED_IDENTITY_VALID_DAYS).map_err(|source| format!("could not set certificate expiry: {source}"))?;
-    builder.set_not_after(&not_after).map_err(|source| format!("could not set certificate expiry: {source}"))?;
-    builder
-        .append_extension(BasicConstraints::new().critical().ca().build().map_err(|source| format!("could not set certificate constraints: {source}"))?)
-        .map_err(|source| format!("could not set certificate constraints: {source}"))?;
-    builder
-        .append_extension(
-            KeyUsage::new()
-                .critical()
-                .digital_signature()
-                .key_cert_sign()
-                .crl_sign()
-                .build()
-                .map_err(|source| format!("could not set certificate key usage: {source}"))?,
-        )
-        .map_err(|source| format!("could not set certificate key usage: {source}"))?;
-    builder.sign(key, MessageDigest::sha256()).map_err(|source| format!("could not sign certificate: {source}"))?;
-
-    Ok(builder.build())
+fn create_self_signed_certificate(common_name: &str, key: &rsa::RsaPrivateKey) -> Result<Vec<u8>, String> {
+    let subject = crate::x509_build::common_name_name(common_name)?;
+    let spki_der = key.to_public_key().to_public_key_der().map_err(|source| format!("could not encode certificate public key: {source}"))?.as_bytes().to_vec();
+    let basic_constraints = crate::x509_build::basic_constraints_der(true, None)?;
+    let key_usage = x509_cert::ext::pkix::KeyUsage(
+        x509_cert::ext::pkix::KeyUsages::DigitalSignature | x509_cert::ext::pkix::KeyUsages::KeyCertSign | x509_cert::ext::pkix::KeyUsages::CRLSign,
+    )
+    .to_der()
+    .map_err(|source| format!("could not encode certificate key usage: {source}"))?;
+    let extensions = vec![
+        crate::x509_build::raw_der_extension("2.5.29.19", true, &basic_constraints)?,
+        crate::x509_build::raw_der_extension("2.5.29.15", true, &key_usage)?,
+        crate::x509_build::subject_key_identifier_extension(&spki_der)?,
+    ];
+    let not_before = time::OffsetDateTime::now_utc().unix_timestamp();
+    let not_after = not_before + i64::from(SELF_SIGNED_IDENTITY_VALID_DAYS) * 86_400;
+    let spec = crate::x509_build::CertificateSpec {
+        subject_cn: common_name,
+        issuer: subject,
+        subject_spki_der: spki_der,
+        serial: random_certificate_serial()?,
+        not_before_unix: not_before,
+        not_after_unix: not_after,
+        extensions,
+    };
+    crate::x509_build::assemble_rsa_certificate(&spec, key)
 }
 
-fn random_certificate_serial() -> Result<Asn1Integer, String> {
-    let mut serial = BigNum::new().map_err(|source| format!("could not create serial number: {source}"))?;
-    serial.rand(SELF_SIGNED_IDENTITY_SERIAL_BITS, MsbOption::MAYBE_ZERO, false).map_err(|source| format!("could not create serial number: {source}"))?;
-    serial.to_asn1_integer().map_err(|source| format!("could not encode serial number: {source}"))
+fn random_certificate_serial() -> Result<u64, String> {
+    let mut bytes = [0u8; 8];
+    rand::rng().fill_bytes(&mut bytes);
+    let value = u64::from_le_bytes(bytes) & ((1u64 << 63) - 1);
+    Ok(value.max(1))
 }
 
-fn x509_certificate_summary_json(certificate: &X509) -> Result<Value, String> {
-    let fingerprint = certificate.digest(MessageDigest::sha256()).map_err(|source| format!("could not fingerprint certificate: {source}"))?;
-    let serial_number = certificate
-        .serial_number()
-        .to_bn()
-        .map_err(|source| format!("could not read certificate serial number: {source}"))?
-        .to_hex_str()
-        .map_err(|source| format!("could not encode certificate serial number: {source}"))?
-        .to_string();
+fn x509_certificate_summary_json(certificate_der: &[u8]) -> Result<Value, String> {
+    let (remaining, certificate) =
+        x509_parser::certificate::X509Certificate::from_der(certificate_der).map_err(|source| format!("could not parse certificate: {source}"))?;
+    if !remaining.is_empty() {
+        return Err("could not parse certificate: trailing DER bytes".to_owned());
+    }
+    let fingerprint = Sha256::digest(certificate_der);
+    let serial_number = certificate.serial.to_str_radix(16);
 
     Ok(json!({
-        "subject": x509_name_to_string(certificate.subject_name()),
-        "issuer": x509_name_to_string(certificate.issuer_name()),
+        "subject": x509_name_to_string(certificate.subject()),
+        "issuer": x509_name_to_string(certificate.issuer()),
         "serial_number": serial_number,
         "certificate_sha256": hex_lower(fingerprint.as_ref()),
-        "not_before": certificate.not_before().to_string(),
-        "not_after": certificate.not_after().to_string(),
+        "not_before": openssl_style_time(&certificate.validity().not_before)?,
+        "not_after": openssl_style_time(&certificate.validity().not_after)?,
     }))
+}
+
+/// Formats an ASN.1 time the way OpenSSL's `ASN1_TIME_print` does:
+/// `Aug 15 09:00:00 2026 GMT`.
+fn openssl_style_time(value: &x509_parser::time::ASN1Time) -> Result<String, String> {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let time = time::OffsetDateTime::from_unix_timestamp(value.timestamp()).map_err(|source| source.to_string())?;
+    let month = u8::from(time.month()) as usize;
+    Ok(format!(
+        "{} {:2} {:02}:{:02}:{:02} {} GMT",
+        MONTHS.get(month - 1).ok_or("invalid month")?,
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second(),
+        time.year()
+    ))
 }
 
 fn write_output_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
