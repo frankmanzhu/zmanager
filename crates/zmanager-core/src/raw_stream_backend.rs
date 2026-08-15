@@ -1,16 +1,14 @@
 use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver,
 };
-use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
+use crate::temp_names::TempDirAllocError;
+use crate::{lzop_decoder::LzopReader, unix_compress_decoder::UnixCompressReader, uu_decoder::UuDecoder};
 use std::fmt;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, BufReader, Read, Write};
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::UNIX_EPOCH;
-
-const RAW_STREAM_TEMP_EXTENSION: &str = "tmp.Z";
 
 type ProgressCallback<'a> = Option<&'a mut dyn FnMut(u64)>;
 
@@ -18,7 +16,8 @@ type ProgressCallback<'a> = Option<&'a mut dyn FnMut(u64)>;
 /// [`RAW_STREAM_FORMATS`] order.
 ///
 /// Derived from [`RawStreamFormat::suffixes`] so the two lists cannot drift;
-/// every format has exactly one suffix, hence the `[0]` indexing.
+/// the only multi-suffix format is [`RawStreamFormat::Uu`] (`.uu` and
+/// `.b64`), which contributes both entries.
 pub const RAW_STREAM_SUFFIXES: &[&str] = &[
     RawStreamFormat::Zstd.suffixes()[0],
     RawStreamFormat::Gzip.suffixes()[0],
@@ -30,7 +29,8 @@ pub const RAW_STREAM_SUFFIXES: &[&str] = &[
     RawStreamFormat::Lz4.suffixes()[0],
     RawStreamFormat::Lzo.suffixes()[0],
     RawStreamFormat::UnixCompress.suffixes()[0],
-    RawStreamFormat::Lrzip.suffixes()[0],
+    RawStreamFormat::Uu.suffixes()[0],
+    RawStreamFormat::Uu.suffixes()[1],
 ];
 
 /// A raw single-file compression stream.
@@ -56,8 +56,8 @@ pub enum RawStreamFormat {
     Lzo,
     /// Unix compress `.Z`.
     UnixCompress,
-    /// LRZIP `.lrz`.
-    Lrzip,
+    /// uuencode `.uu` / base64 `.b64`.
+    Uu,
 }
 
 impl RawStreamFormat {
@@ -75,7 +75,7 @@ impl RawStreamFormat {
             Self::Lz4 => "lz4",
             Self::Lzo => "lzop",
             Self::UnixCompress => "compress",
-            Self::Lrzip => "lrzip",
+            Self::Uu => "uuencode",
         }
     }
 
@@ -92,7 +92,7 @@ impl RawStreamFormat {
             Self::Lz4 => &[".lz4"],
             Self::Lzo => &[".lzo"],
             Self::UnixCompress => &[".Z"],
-            Self::Lrzip => &[".lrz"],
+            Self::Uu => &[".uu", ".b64"],
         }
     }
 }
@@ -108,7 +108,7 @@ pub const RAW_STREAM_FORMATS: &[RawStreamFormat] = &[
     RawStreamFormat::Lz4,
     RawStreamFormat::Lzo,
     RawStreamFormat::UnixCompress,
-    RawStreamFormat::Lrzip,
+    RawStreamFormat::Uu,
 ];
 
 /// Extraction report for a raw single-file stream.
@@ -135,10 +135,6 @@ pub enum RawStreamError {
     Safety(ExtractionSafetyError),
     /// The archive file name cannot produce a safe output file name.
     MissingOutputName { archive_path: PathBuf },
-    /// A tool-backed decoder could not be started.
-    ExternalToolUnavailable { tool: &'static str, source: io::Error },
-    /// A tool-backed decoder exited unsuccessfully.
-    ExternalToolFailed { tool: &'static str, archive_path: PathBuf, status: Option<i32>, message: String },
 }
 
 impl fmt::Display for RawStreamError {
@@ -149,16 +145,6 @@ impl fmt::Display for RawStreamError {
             Self::MissingOutputName { archive_path } => {
                 write!(f, "could not derive raw stream output name from {}", archive_path.display())
             }
-            Self::ExternalToolUnavailable { tool, source } => {
-                write!(f, "required decoder tool {tool} is not available: {source}")
-            }
-            Self::ExternalToolFailed { tool, archive_path, status, message } => write!(
-                f,
-                "{tool} failed to decode {} with status {}{}",
-                archive_path.display(),
-                status.map_or_else(|| "unknown".to_owned(), |status| status.to_string()),
-                if message.is_empty() { String::new() } else { format!(": {message}") }
-            ),
         }
     }
 }
@@ -166,9 +152,9 @@ impl fmt::Display for RawStreamError {
 impl std::error::Error for RawStreamError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io { source, .. } | Self::ExternalToolUnavailable { source, .. } => Some(source),
+            Self::Io { source, .. } => Some(source),
             Self::Safety(source) => Some(source),
-            Self::MissingOutputName { .. } | Self::ExternalToolFailed { .. } => None,
+            Self::MissingOutputName { .. } => None,
         }
     }
 }
@@ -238,7 +224,7 @@ pub fn estimate_raw_stream_uncompressed_size(archive_path: impl AsRef<Path>, for
         | RawStreamFormat::Lz4
         | RawStreamFormat::Lzo
         | RawStreamFormat::UnixCompress
-        | RawStreamFormat::Lrzip => None,
+        | RawStreamFormat::Uu => None,
     }
 }
 
@@ -258,11 +244,12 @@ pub fn extract_raw_stream_with_overwrite_resolver(
     extract_raw_stream_inner(archive_path, format, destination, policy, Some(overwrite_resolver), None, false)
 }
 
-/// Returns `true` when raw stream extraction can report input-stream byte
-/// progress independently from output bytes.
+/// Returns whether raw stream extraction can report input-stream byte
+/// progress independently from output bytes. Every registered raw-stream
+/// decoder is a streaming reader, so this is always true.
 #[must_use]
-pub const fn can_track_source_progress(format: RawStreamFormat) -> bool {
-    !matches!(format, RawStreamFormat::Lzo | RawStreamFormat::UnixCompress | RawStreamFormat::Lrzip)
+pub const fn can_track_source_progress(_format: RawStreamFormat) -> bool {
+    true
 }
 
 fn extract_raw_stream_inner(
@@ -330,15 +317,6 @@ pub fn copy_raw_stream_to_writer_with_progress<W: Write + ?Sized>(
     track_source_progress: bool,
 ) -> Result<u64, RawStreamError> {
     let archive_path = archive_path.as_ref();
-    if format == RawStreamFormat::Lrzip {
-        return copy_lrzip_to_writer(archive_path, output, on_progress);
-    }
-    if format == RawStreamFormat::UnixCompress {
-        return copy_unix_compress_to_writer(archive_path, output, on_progress);
-    }
-    if let Some(tool) = external_stream_tool(format) {
-        return copy_external_tool_to_writer(tool, archive_path, output, on_progress);
-    }
 
     if track_source_progress && let Some(on_progress) = on_progress {
         let file = File::open(archive_path).map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })?;
@@ -396,12 +374,13 @@ pub(crate) fn open_decoder_from_reader<'a, R: Read + 'a>(
         RawStreamFormat::Lzip => Ok(Box::new(lzma_rust2::LzipReader::new(reader))),
         RawStreamFormat::Brotli => Ok(Box::new(brotli::Decompressor::new(reader, crate::DEFAULT_IO_BUFFER_BYTES))),
         RawStreamFormat::Lz4 => Ok(Box::new(lz4_flex::frame::FrameDecoder::new(reader))),
-        RawStreamFormat::Lzo | RawStreamFormat::UnixCompress | RawStreamFormat::Lrzip => Err(RawStreamError::ExternalToolFailed {
-            tool: format.name(),
-            archive_path: archive_path.to_path_buf(),
-            status: None,
-            message: "format is handled by a streaming tool adapter".to_owned(),
-        }),
+        RawStreamFormat::Lzo => LzopReader::new(reader)
+            .map(|decoder| Box::new(decoder) as Box<dyn Read + 'a>)
+            .map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source }),
+        RawStreamFormat::UnixCompress => UnixCompressReader::new(reader)
+            .map(|decoder| Box::new(decoder) as Box<dyn Read + 'a>)
+            .map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source }),
+        RawStreamFormat::Uu => Ok(Box::new(UuDecoder::new(reader))),
     }
 }
 
@@ -496,13 +475,6 @@ pub(crate) fn open_decoder(archive_path: &Path, format: RawStreamFormat) -> Resu
     open_decoder_from_reader(reader, format, archive_path)
 }
 
-fn external_stream_tool(format: RawStreamFormat) -> Option<ExternalStreamTool> {
-    match format {
-        RawStreamFormat::Lzo => Some(ExternalStreamTool { name: "lzop", args: &["-q", "-d", "-c"] }),
-        _ => None,
-    }
-}
-
 struct SizeLimitWriter<'a, W> {
     inner: &'a mut W,
     max_bytes: Option<u64>,
@@ -541,119 +513,6 @@ fn expanded_size_limit_error(max_bytes: u64, written_bytes: u64) -> io::Error {
     io::Error::other(format!("expanded stream reached {written_bytes} bytes, exceeding the {max_bytes} byte limit"))
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ExternalStreamTool {
-    name: &'static str,
-    args: &'static [&'static str],
-}
-
-fn copy_external_tool_to_writer<W: Write + ?Sized>(
-    tool: ExternalStreamTool,
-    archive_path: &Path,
-    output: &mut W,
-    on_progress: ProgressCallback<'_>,
-) -> Result<u64, RawStreamError> {
-    let mut child = Command::new(tool.name)
-        .args(tool.args)
-        .arg(archive_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| RawStreamError::ExternalToolUnavailable { tool: tool.name, source })?;
-    let mut stdout = child.stdout.take().ok_or_else(|| RawStreamError::ExternalToolFailed {
-        tool: tool.name,
-        archive_path: archive_path.to_path_buf(),
-        status: None,
-        message: "decoder stdout was not available".to_owned(),
-    })?;
-    let written_bytes =
-        copy_bytes_with_progress(&mut stdout, output, on_progress).map_err(|source| RawStreamError::Io { path: archive_path.to_path_buf(), source })?;
-    let process_output = child.wait_with_output().map_err(|source| RawStreamError::ExternalToolUnavailable { tool: tool.name, source })?;
-
-    if !process_output.status.success() {
-        return Err(RawStreamError::ExternalToolFailed {
-            tool: tool.name,
-            archive_path: archive_path.to_path_buf(),
-            status: process_output.status.code(),
-            message: String::from_utf8_lossy(&process_output.stderr).trim().to_owned(),
-        });
-    }
-
-    Ok(written_bytes)
-}
-
-fn copy_lrzip_to_writer<W: Write + ?Sized>(archive_path: &Path, output: &mut W, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
-    let temp_dir = TemporaryDirectory::new("lrzip")?;
-    let temp_path = temp_dir.path().join("decoded");
-    let process_output = Command::new("lrzip")
-        .env("LRZIP", "NOCONFIG")
-        .arg("-d")
-        .arg("-q")
-        .arg("-f")
-        .arg("-o")
-        .arg(&temp_path)
-        .arg(archive_path)
-        .output()
-        .map_err(|source| RawStreamError::ExternalToolUnavailable { tool: "lrzip", source })?;
-
-    if !process_output.status.success() {
-        let _ = fs::remove_file(&temp_path);
-        return Err(RawStreamError::ExternalToolFailed {
-            tool: "lrzip",
-            archive_path: archive_path.to_path_buf(),
-            status: process_output.status.code(),
-            message: external_process_message(&process_output),
-        });
-    }
-
-    let mut decoded = File::open(&temp_path).map_err(|source| {
-        let _ = fs::remove_file(&temp_path);
-        RawStreamError::Io { path: temp_path.clone(), source }
-    })?;
-    let written_bytes = copy_reader_to_writer_with_progress(&mut decoded, output, &temp_path, on_progress).inspect_err(|_source| {
-        let _ = fs::remove_file(&temp_path);
-    })?;
-    fs::remove_file(&temp_path).map_err(|source| RawStreamError::Io { path: temp_path, source })?;
-
-    Ok(written_bytes)
-}
-
-fn copy_unix_compress_to_writer<W: Write + ?Sized>(archive_path: &Path, output: &mut W, on_progress: ProgressCallback<'_>) -> Result<u64, RawStreamError> {
-    let temp_dir = TemporaryDirectory::new("compress")?;
-    let temp_input = temp_dir.path().join(format!("input.{RAW_STREAM_TEMP_EXTENSION}"));
-    let temp_output = temp_input.with_extension("");
-    fs::copy(archive_path, &temp_input).map_err(|source| RawStreamError::Io { path: temp_input.clone(), source })?;
-
-    let process_output = Command::new("uncompress")
-        .arg("-f")
-        .arg(&temp_input)
-        .output()
-        .map_err(|source| RawStreamError::ExternalToolUnavailable { tool: "uncompress", source })?;
-
-    if !process_output.status.success() {
-        let _ = fs::remove_file(&temp_input);
-        let _ = fs::remove_file(&temp_output);
-        return Err(RawStreamError::ExternalToolFailed {
-            tool: "uncompress",
-            archive_path: archive_path.to_path_buf(),
-            status: process_output.status.code(),
-            message: external_process_message(&process_output),
-        });
-    }
-
-    let mut decoded = File::open(&temp_output).map_err(|source| {
-        let _ = fs::remove_file(&temp_input);
-        let _ = fs::remove_file(&temp_output);
-        RawStreamError::Io { path: temp_output.clone(), source }
-    })?;
-    let written_bytes = copy_reader_to_writer_with_progress(&mut decoded, output, &temp_output, on_progress).inspect_err(|_source| {
-        let _ = fs::remove_file(&temp_output);
-    })?;
-    fs::remove_file(&temp_output).map_err(|source| RawStreamError::Io { path: temp_output, source })?;
-
-    Ok(written_bytes)
-}
-
 fn estimate_gzip_uncompressed_size(archive_path: &Path) -> Option<u64> {
     let mut archive = File::open(archive_path).ok()?;
 
@@ -682,15 +541,6 @@ fn estimate_gzip_uncompressed_size(archive_path: &Path) -> Option<u64> {
     Some(u64::from(u32::from_le_bytes([trailer[4], trailer[5], trailer[6], trailer[7]])))
 }
 
-fn external_process_message(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if !stderr.is_empty() {
-        return stderr;
-    }
-
-    String::from_utf8_lossy(&output.stdout).trim().to_owned()
-}
-
 fn is_compressed_archive_container(name: &str) -> bool {
     [
         ".tar.zst",
@@ -713,8 +563,8 @@ fn is_compressed_archive_container(name: &str) -> bool {
         ".tz",
         ".tar.lz4",
         ".tlz4",
-        ".tar.lrz",
-        ".tlrz",
+        ".tar.uu",
+        ".tar.b64",
         ".tar.br",
         ".tbr",
         ".cpio.gz",
@@ -727,7 +577,6 @@ fn is_compressed_archive_container(name: &str) -> bool {
         ".cpio.lzo",
         ".cpio.z",
         ".cpio.lz4",
-        ".cpio.lrz",
         ".cpio.br",
     ]
     .iter()
@@ -761,7 +610,6 @@ mod tests {
         assert_eq!(detect_raw_stream_format("payload.tar.lzo"), None);
         assert_eq!(detect_raw_stream_format("payload.tar.Z"), None);
         assert_eq!(detect_raw_stream_format("payload.tar.lz4"), None);
-        assert_eq!(detect_raw_stream_format("payload.tar.lrz"), None);
         assert_eq!(detect_raw_stream_format("payload.cpgz"), None);
     }
 

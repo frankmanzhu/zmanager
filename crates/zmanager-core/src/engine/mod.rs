@@ -139,9 +139,9 @@ impl ArchivePlugin for DefaultArchivePlugin {
             "lz4",
         )))?;
         builder.register_read_adapter(Arc::new(adapters::native::FilteredTarAdapter::new(
-            FormatId::TAR_LRZ,
-            crate::raw_stream_backend::RawStreamFormat::Lrzip,
-            "lrzip",
+            FormatId::TAR_UU,
+            crate::raw_stream_backend::RawStreamFormat::Uu,
+            "uuencode",
         )))?;
         builder.register_read_adapter(Arc::new(adapters::native::ArListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::CpioListAdapter))?;

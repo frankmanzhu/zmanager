@@ -31,7 +31,7 @@ impl FormatId {
     pub const TAR_LZO: FormatId = FormatId("tar.lzo");
     pub const TAR_COMPRESS: FormatId = FormatId("tar.compress");
     pub const TAR_LZ4: FormatId = FormatId("tar.lz4");
-    pub const TAR_LRZ: FormatId = FormatId("tar.lrz");
+    pub const TAR_UU: FormatId = FormatId("tar.uu");
     pub const ISO: FormatId = FormatId("iso");
     pub const CAB: FormatId = FormatId("cab");
     pub const CPIO: FormatId = FormatId("cpio");
@@ -71,7 +71,7 @@ impl FormatId {
             ArchiveFormatKind::TarLzo => Some(Self::TAR_LZO),
             ArchiveFormatKind::TarCompress => Some(Self::TAR_COMPRESS),
             ArchiveFormatKind::TarLz4 => Some(Self::TAR_LZ4),
-            ArchiveFormatKind::TarLrz => Some(Self::TAR_LRZ),
+            ArchiveFormatKind::TarUu => Some(Self::TAR_UU),
             ArchiveFormatKind::Iso => Some(Self::ISO),
             ArchiveFormatKind::Cab => Some(Self::CAB),
             ArchiveFormatKind::Cpio => Some(Self::CPIO),
