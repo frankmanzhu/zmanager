@@ -171,10 +171,11 @@ else
   tar -C "$STAGE" -czf "$OUT_ABS/$ARCHIVE" "$BINARY" README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md third-party-licenses completions man
 fi
 
-# Offline (no-auth) variant: the same build without the `auth` feature —
-# a trimmed binary with no online/identity code (the `zm auth` command is a
+# Offline variant: the same build without the `tzap-online` feature — a
+# trimmed binary with no network/identity code (the `zm auth` command is a
 # stub pointing at the full build). Distributed as a separate release
-# artifact; brew/winget/install.sh keep installing the full build.
+# artifact; install.sh --offline and the zmanager-offline brew/winget
+# packages install it, while the default installers keep the full build.
 OFFLINE_BINARY="zm-offline"
 if [[ "$TARGET" == *windows* ]]; then
   OFFLINE_BINARY="zm-offline.exe"

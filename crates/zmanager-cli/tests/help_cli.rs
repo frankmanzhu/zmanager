@@ -651,7 +651,7 @@ fn package_preview_uploads_artifacts_without_publishing_release() {
         "scripts/package-release.sh",
         "powershell -ExecutionPolicy Bypass -File scripts/ci-windows.ps1",
         "actions/upload-artifact@v6",
-        "name: zm-preview-${{ matrix.target }}-online",
+        "name: zm-preview-${{ matrix.target }}-full",
         "path: dist/zm-${{ matrix.target }}.*",
         "name: zm-preview-${{ matrix.target }}-offline",
         "path: dist/zm-offline-${{ matrix.target }}.*",

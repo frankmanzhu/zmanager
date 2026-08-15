@@ -6,6 +6,37 @@ VERSION="${ZMANAGER_VERSION:-latest}"
 INSTALL_DIR="${ZMANAGER_INSTALL_DIR:-$HOME/.local/bin}"
 TMPDIR="${TMPDIR:-/tmp}"
 
+# Default: the full build (online identity features). --offline installs the
+# offline build (no network features); `zm --version` reports which flavor.
+OFFLINE=0
+
+usage() {
+  cat <<'EOF'
+zmanager install script
+
+Usage: sh install.sh [--offline]
+
+Options:
+  --offline   install the offline build (no online identity features)
+  --help      show this help
+
+With a piped install, pass the flag after sh -s --:
+  curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --offline
+EOF
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --offline) OFFLINE=1 ;;
+    --help | -h) usage; exit 0 ;;
+    *)
+      printf 'zmanager install: unknown argument: %s\n' "$arg" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
 say() {
   printf '%s\n' "$*"
 }
@@ -123,7 +154,13 @@ print_success() {
 
 download_release() {
   target="$1"
-  asset="zm-$target.tar.gz"
+  if [ "$OFFLINE" = "1" ]; then
+    asset="zm-offline-$target.tar.gz"
+    binary="zm-offline"
+  else
+    asset="zm-$target.tar.gz"
+    binary="zm"
+  fi
 
   if [ "$VERSION" = "latest" ]; then
     base="$REPO_URL/releases/latest/download"
@@ -144,8 +181,8 @@ download_release() {
   [ "$actual" = "$expected" ] || fail "checksum mismatch for $asset"
 
   tar -xzf "$asset"
-  [ -x zm ] || fail "release archive did not contain executable zm"
-  install_binary zm
+  [ -x "$binary" ] || fail "release archive did not contain executable $binary"
+  install_binary "$binary"
 }
 
 build_from_source() {
@@ -165,7 +202,11 @@ build_from_source() {
 
   (
     cd source
-    cargo build --locked --release -p zmanager-cli --bin zm
+    if [ "$OFFLINE" = "1" ]; then
+      cargo build --locked --release -p zmanager-cli --bin zm --no-default-features
+    else
+      cargo build --locked --release -p zmanager-cli --bin zm
+    fi
   )
 
   install_binary source/target/release/zm

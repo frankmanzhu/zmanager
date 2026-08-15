@@ -29,6 +29,14 @@ ASSET_X86_64_UNKNOWN_LINUX_MUSL="zm-$TARGET_X86_64_UNKNOWN_LINUX_MUSL.tar.gz"
 ASSET_AARCH64_PC_WINDOWS_MSVC="zm-$TARGET_AARCH64_PC_WINDOWS_MSVC.zip"
 ASSET_X86_64_PC_WINDOWS_MSVC="zm-$TARGET_X86_64_PC_WINDOWS_MSVC.zip"
 
+# Offline (no online identity features) variants of the same six targets.
+ASSET_OFFLINE_AARCH64_APPLE_DARWIN="zm-offline-$TARGET_AARCH64_APPLE_DARWIN.tar.gz"
+ASSET_OFFLINE_X86_64_APPLE_DARWIN="zm-offline-$TARGET_X86_64_APPLE_DARWIN.tar.gz"
+ASSET_OFFLINE_AARCH64_UNKNOWN_LINUX_MUSL="zm-offline-$TARGET_AARCH64_UNKNOWN_LINUX_MUSL.tar.gz"
+ASSET_OFFLINE_X86_64_UNKNOWN_LINUX_MUSL="zm-offline-$TARGET_X86_64_UNKNOWN_LINUX_MUSL.tar.gz"
+ASSET_OFFLINE_AARCH64_PC_WINDOWS_MSVC="zm-offline-$TARGET_AARCH64_PC_WINDOWS_MSVC.zip"
+ASSET_OFFLINE_X86_64_PC_WINDOWS_MSVC="zm-offline-$TARGET_X86_64_PC_WINDOWS_MSVC.zip"
+
 checksum_for() {
   local asset=$1
   awk -v asset="$asset" '
@@ -71,6 +79,12 @@ render_template() {
     -e "s|__SHA_X86_64_UNKNOWN_LINUX_MUSL__|$SHA_X86_64_UNKNOWN_LINUX_MUSL|g" \
     -e "s|__SHA_AARCH64_PC_WINDOWS_MSVC__|$SHA_AARCH64_PC_WINDOWS_MSVC|g" \
     -e "s|__SHA_X86_64_PC_WINDOWS_MSVC__|$SHA_X86_64_PC_WINDOWS_MSVC|g" \
+    -e "s|__SHA_OFFLINE_AARCH64_APPLE_DARWIN__|$SHA_OFFLINE_AARCH64_APPLE_DARWIN|g" \
+    -e "s|__SHA_OFFLINE_X86_64_APPLE_DARWIN__|$SHA_OFFLINE_X86_64_APPLE_DARWIN|g" \
+    -e "s|__SHA_OFFLINE_AARCH64_UNKNOWN_LINUX_MUSL__|$SHA_OFFLINE_AARCH64_UNKNOWN_LINUX_MUSL|g" \
+    -e "s|__SHA_OFFLINE_X86_64_UNKNOWN_LINUX_MUSL__|$SHA_OFFLINE_X86_64_UNKNOWN_LINUX_MUSL|g" \
+    -e "s|__SHA_OFFLINE_AARCH64_PC_WINDOWS_MSVC__|$SHA_OFFLINE_AARCH64_PC_WINDOWS_MSVC|g" \
+    -e "s|__SHA_OFFLINE_X86_64_PC_WINDOWS_MSVC__|$SHA_OFFLINE_X86_64_PC_WINDOWS_MSVC|g" \
     "$template" > "$destination"
 }
 
@@ -80,11 +94,20 @@ SHA_AARCH64_UNKNOWN_LINUX_MUSL=$(checksum_for "$ASSET_AARCH64_UNKNOWN_LINUX_MUSL
 SHA_X86_64_UNKNOWN_LINUX_MUSL=$(checksum_for "$ASSET_X86_64_UNKNOWN_LINUX_MUSL")
 SHA_AARCH64_PC_WINDOWS_MSVC=$(checksum_for "$ASSET_AARCH64_PC_WINDOWS_MSVC")
 SHA_X86_64_PC_WINDOWS_MSVC=$(checksum_for "$ASSET_X86_64_PC_WINDOWS_MSVC")
+SHA_OFFLINE_AARCH64_APPLE_DARWIN=$(checksum_for "$ASSET_OFFLINE_AARCH64_APPLE_DARWIN")
+SHA_OFFLINE_X86_64_APPLE_DARWIN=$(checksum_for "$ASSET_OFFLINE_X86_64_APPLE_DARWIN")
+SHA_OFFLINE_AARCH64_UNKNOWN_LINUX_MUSL=$(checksum_for "$ASSET_OFFLINE_AARCH64_UNKNOWN_LINUX_MUSL")
+SHA_OFFLINE_X86_64_UNKNOWN_LINUX_MUSL=$(checksum_for "$ASSET_OFFLINE_X86_64_UNKNOWN_LINUX_MUSL")
+SHA_OFFLINE_AARCH64_PC_WINDOWS_MSVC=$(checksum_for "$ASSET_OFFLINE_AARCH64_PC_WINDOWS_MSVC")
+SHA_OFFLINE_X86_64_PC_WINDOWS_MSVC=$(checksum_for "$ASSET_OFFLINE_X86_64_PC_WINDOWS_MSVC")
 
 HOMEBREW_OUT="$OUT_DIR/homebrew/Formula/zmanager.rb"
+HOMEBREW_OFFLINE_OUT="$OUT_DIR/homebrew/Formula/zmanager-offline.rb"
 WINGET_OUT="$OUT_DIR/winget/TzapOrg.ZManagerCLI/$VERSION"
+WINGET_OFFLINE_OUT="$OUT_DIR/winget/TzapOrg.ZManagerCLI.Offline/$VERSION"
 
 render_template "$TEMPLATE_DIR/homebrew/zmanager.rb.template" "$HOMEBREW_OUT"
+render_template "$TEMPLATE_DIR/homebrew/zmanager-offline.rb.template" "$HOMEBREW_OFFLINE_OUT"
 render_template \
   "$TEMPLATE_DIR/winget/TzapOrg.ZManagerCLI.yaml.template" \
   "$WINGET_OUT/TzapOrg.ZManagerCLI.yaml"
@@ -94,6 +117,17 @@ render_template \
 render_template \
   "$TEMPLATE_DIR/winget/TzapOrg.ZManagerCLI.installer.yaml.template" \
   "$WINGET_OUT/TzapOrg.ZManagerCLI.installer.yaml"
+render_template \
+  "$TEMPLATE_DIR/winget/TzapOrg.ZManagerCLI.Offline.yaml.template" \
+  "$WINGET_OFFLINE_OUT/TzapOrg.ZManagerCLI.Offline.yaml"
+render_template \
+  "$TEMPLATE_DIR/winget/TzapOrg.ZManagerCLI.Offline.locale.en-US.yaml.template" \
+  "$WINGET_OFFLINE_OUT/TzapOrg.ZManagerCLI.Offline.locale.en-US.yaml"
+render_template \
+  "$TEMPLATE_DIR/winget/TzapOrg.ZManagerCLI.Offline.installer.yaml.template" \
+  "$WINGET_OFFLINE_OUT/TzapOrg.ZManagerCLI.Offline.installer.yaml"
 
 echo "$HOMEBREW_OUT"
+echo "$HOMEBREW_OFFLINE_OUT"
 echo "$WINGET_OUT"
+echo "$WINGET_OFFLINE_OUT"

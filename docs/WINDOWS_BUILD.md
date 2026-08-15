@@ -49,4 +49,4 @@ DLLs beside `zm.exe`; normal Windows system DLLs remain supplied by the OS.
 The CI workflow covers macOS, Linux, and both supported Windows targets. The
 Windows jobs call `scripts/ci-windows.ps1`, which initializes Visual Studio,
 installs the target triplet, runs the workspace tests, and builds both the
-online and offline release packages.
+full and offline release packages.

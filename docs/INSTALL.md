@@ -30,6 +30,18 @@ curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
   | sudo env ZMANAGER_VERSION=v2.0.1 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
 ```
 
+The default installs the **full** build (with online identity features such as
+`zm auth`). To install the **offline** build — the same archive commands with no
+network features — pass `--offline`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
+  | sh -s -- --offline
+```
+
+`zm --version` reports which flavor is installed: `zm 2.0.1 (full)` or
+`zm 2.0.1 (offline)`.
+
 If no matching binary exists, the installer falls back to building from source.
 Source fallback requires `git`, Rust/Cargo, and the target platform's native
 compression and cryptography development libraries.

@@ -48,10 +48,11 @@ pub fn run_from_env() -> ExitCode {
             }
             let version = env!("CARGO_PKG_VERSION");
             let rev = option_env!("ZMANAGER_BUILD_REV").unwrap_or("");
+            let flavor = if cfg!(feature = "tzap-online") { "full" } else { "offline" };
             if rev.is_empty() {
-                println!("zm {version}");
+                println!("zm {version} ({flavor})");
             } else {
-                println!("zm {version} ({rev})");
+                println!("zm {version} ({flavor}, {rev})");
             }
             ExitCode::SUCCESS
         }
