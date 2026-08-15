@@ -453,3 +453,39 @@ fn local_sign_device_id(public_key_fingerprint: &str) -> String {
     let suffix = public_key_fingerprint.strip_prefix("sha256:").unwrap_or(public_key_fingerprint).chars().take(16).collect::<String>();
     format!("{LOCAL_SIGN_DEVICE_ID_PREFIX}{suffix}")
 }
+
+#[cfg(test)]
+mod differential_tests {
+    //! OR-204 differential checks: the RustCrypto-assembled local chain must
+    //! parse and verify under OpenSSL (the pre-migration implementation).
+
+    use super::certificate_chain_for_leaf_key;
+    use ecdsa::elliptic_curve::Generate as _;
+    use openssl::x509::X509;
+
+    #[test]
+    fn rustcrypto_local_chain_verifies_under_openssl() {
+        let leaf_key = p256::SecretKey::generate_from_rng(&mut zmanager_core::os_rng::OsRng);
+        let chain = certificate_chain_for_leaf_key(&leaf_key, 1_700_000_000).unwrap();
+
+        let root = X509::from_der(&chain.root_der).unwrap();
+        let platform = X509::from_der(&chain.platform_der).unwrap();
+        let leaf = X509::from_der(&chain.leaf_der).unwrap();
+
+        // Names agree across both parsers (the x509-parser side is what the
+        // product consumes).
+        let parsed_root = super::parse_certificate(&chain.root_der, "root").unwrap();
+        let parsed_platform = super::parse_certificate(&chain.platform_der, "platform").unwrap();
+        let parsed_leaf = super::parse_certificate(&chain.leaf_der, "leaf").unwrap();
+        assert_eq!(crate::x509_format::x509_name_to_string(parsed_root.subject()), format!("CN={}", super::LOCAL_ROOT_CN));
+        assert_eq!(crate::x509_format::x509_name_to_string(parsed_platform.subject()), format!("CN={}", super::LOCAL_PLATFORM_CN));
+        assert_eq!(crate::x509_format::x509_name_to_string(parsed_leaf.subject()), format!("CN={}", super::LOCAL_SIGNER_CN));
+        assert!(platform.verify(root.public_key().unwrap().as_ref()).unwrap());
+        assert!(leaf.verify(platform.public_key().unwrap().as_ref()).unwrap());
+        assert!(root.verify(root.public_key().unwrap().as_ref()).unwrap());
+
+        // The extension-level profile checks run through x509-parser in the
+        // product tests (certificate_profile); this differential test pins the
+        // signature chain under OpenSSL.
+    }
+}
