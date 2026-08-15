@@ -14,6 +14,7 @@ build/
 
 # Local scratch outputs
 /dist/
+/dist-musl/
 /tmp/
 /third-party-licenses/
 /*.profraw

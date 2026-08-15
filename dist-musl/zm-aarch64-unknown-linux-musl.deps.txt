@@ -1,9 +1,0 @@
-target: aarch64-unknown-linux-musl
-binary: target/aarch64-unknown-linux-musl/release/zm
-generated_at_utc: 2026-08-12T14:00:16Z
-
-tool: file + readelf -d
-
-/workspace/target/aarch64-unknown-linux-musl/release/zm: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=5774e5d5b5fccdf795cd7b54010dd0c2cd65393f, not stripped
-
-no ELF NEEDED entries
