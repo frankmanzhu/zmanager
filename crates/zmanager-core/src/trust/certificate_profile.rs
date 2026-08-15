@@ -10,9 +10,6 @@ use crate::trust::{
     TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TZAP_OID_ORGANIZATION_POLICY, TzapIdentityAssurance,
     TzapRootPinSet, TzapTrustAnchorType, format_certificate_sha256, is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id,
 };
-use openssl::asn1::Asn1Object;
-use openssl::nid::Nid;
-use openssl::x509::X509;
 use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 use std::fmt;
@@ -20,6 +17,8 @@ use x509_parser::extensions::{GeneralName, ParsedExtension};
 use x509_parser::prelude::{FromDer as _, X509Certificate};
 
 const OID_ECDSA_WITH_SHA256: &str = "1.2.840.10045.4.3.2";
+const OID_EC_PUBLIC_KEY: &str = "1.2.840.10045.2.1";
+const OID_EC_P256: &str = "1.2.840.10045.3.1.7";
 const OID_ANY_EXTENDED_KEY_USAGE: &str = "2.5.29.37.0";
 const OID_EXTENDED_KEY_USAGE_EXTENSION: &str = "2.5.29.37";
 const OID_SERVER_AUTH_EKU: &str = "1.3.6.1.5.5.7.3.1";
@@ -207,9 +206,8 @@ fn validate_tzap_certificate_chain_der(
     }
 
     let parsed = parse_x509_chain(chain_der)?;
-    let openssl = parse_openssl_chain(chain_der)?;
-    validate_chain_order_and_signatures(&parsed, &openssl)?;
-    validate_chain_algorithms(&parsed, &openssl)?;
+    validate_chain_order_and_signatures(chain_der)?;
+    validate_chain_algorithms(&parsed)?;
 
     let root_index = parsed.len() - 1;
     let mut root_digest = [0_u8; 32];
@@ -246,15 +244,8 @@ fn parse_x509_chain(chain_der: &[Vec<u8>]) -> Result<Vec<X509Certificate<'_>>, T
         .collect()
 }
 
-fn parse_openssl_chain(chain_der: &[Vec<u8>]) -> Result<Vec<X509>, TzapCertificateProfileError> {
-    chain_der
-        .iter()
-        .enumerate()
-        .map(|(index, der)| X509::from_der(der).map_err(|source| TzapCertificateProfileError::CertificateParse { index, detail: source.to_string() }))
-        .collect()
-}
-
-fn validate_chain_order_and_signatures(parsed: &[X509Certificate<'_>], openssl: &[X509]) -> Result<(), TzapCertificateProfileError> {
+fn validate_chain_order_and_signatures(chain_der: &[Vec<u8>]) -> Result<(), TzapCertificateProfileError> {
+    let parsed = parse_x509_chain(chain_der)?;
     for (index, pair) in parsed.windows(2).enumerate() {
         if pair[0].issuer() != pair[1].subject() {
             return Err(TzapCertificateProfileError::ChainOrder { child_index: index });
@@ -266,35 +257,47 @@ fn validate_chain_order_and_signatures(parsed: &[X509Certificate<'_>], openssl: 
         return Err(TzapCertificateProfileError::RootNotSelfSigned);
     }
 
-    for (index, pair) in openssl.windows(2).enumerate() {
-        let issuer_key =
-            pair[1].public_key().map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: index, detail: source.to_string() })?;
-        let verified = pair[0]
-            .verify(&issuer_key)
-            .map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: index, detail: source.to_string() })?;
-        if !verified {
-            return Err(TzapCertificateProfileError::SignatureValidation {
-                subject_index: index,
-                detail: "issuer public key did not verify certificate signature".to_owned(),
-            });
-        }
+    // Signature checks use `x509-verify` over the `x509-parser` parses: each
+    // certificate's signature is verified against the issuer's SubjectPublicKeyInfo
+    // (the RustCrypto replacement for the OpenSSL `X509::verify` calls).
+    for (index, pair) in parsed.windows(2).enumerate() {
+        verify_certificate_signature(&pair[0], pair[1].tbs_certificate.subject_pki.raw)
+            .map_err(|detail| TzapCertificateProfileError::SignatureValidation { subject_index: index, detail })?;
     }
 
-    let root_index = openssl.len() - 1;
-    let root_key = openssl[root_index]
-        .public_key()
-        .map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: root_index, detail: source.to_string() })?;
-    if !openssl[root_index]
-        .verify(&root_key)
-        .map_err(|source| TzapCertificateProfileError::SignatureValidation { subject_index: root_index, detail: source.to_string() })?
-    {
+    let root_index = parsed.len() - 1;
+    if verify_certificate_signature(&parsed[root_index], parsed[root_index].tbs_certificate.subject_pki.raw).is_err() {
         return Err(TzapCertificateProfileError::RootNotSelfSigned);
     }
 
     Ok(())
 }
 
-fn validate_chain_algorithms(parsed: &[X509Certificate<'_>], openssl: &[X509]) -> Result<(), TzapCertificateProfileError> {
+/// Verifies a certificate's signature over its TBS DER with the issuer's SPKI.
+fn verify_certificate_signature(certificate: &X509Certificate<'_>, issuer_spki_raw: &[u8]) -> Result<(), String> {
+    let key_info = x509_cert::spki::SubjectPublicKeyInfoRef::try_from(issuer_spki_raw).map_err(|error| error.to_string())?;
+    let key = x509_verify::VerifyingKey::new(key_info).map_err(|error| error.to_string())?;
+
+    let signature_algorithm = certificate.signature_algorithm.clone();
+    let algorithm = x509_cert::spki::AlgorithmIdentifierOwned {
+        oid: x509_cert::spki::ObjectIdentifier::try_from(signature_algorithm.algorithm.as_bytes()).map_err(|error| error.to_string())?,
+        parameters: signature_algorithm.parameters.as_ref().and_then(x509_parser_any_to_der_any),
+    };
+    let signature = x509_verify::Signature::new(&algorithm, certificate.signature_value.data.as_ref().to_vec());
+    let message = x509_verify::Message::new(certificate.tbs_certificate.as_ref());
+    let verify_info = x509_verify::VerifyInfo::new(message, signature);
+    key.verify(&verify_info).map_err(|_| "issuer public key did not verify certificate signature".to_owned())
+}
+
+/// Converts an `x509-parser` `Any` parameter value to a `der` crate `Any`,
+/// preserving the tag (e.g. OID or NULL parameters).
+fn x509_parser_any_to_der_any(any: &x509_parser::asn1_rs::Any<'_>) -> Option<x509_cert::der::asn1::Any> {
+    let tag = x509_cert::der::Tag::try_from(u8::try_from(any.tag().0).ok()?).ok()?;
+    let any_ref = x509_cert::der::asn1::AnyRef::new(tag, any.data).ok()?;
+    x509_cert::der::asn1::Any::encode_from(&any_ref).ok()
+}
+
+fn validate_chain_algorithms(parsed: &[X509Certificate<'_>]) -> Result<(), TzapCertificateProfileError> {
     for (index, certificate) in parsed.iter().enumerate() {
         if certificate.signature_algorithm.oid().to_id_string() != OID_ECDSA_WITH_SHA256
             || certificate.tbs_certificate.signature.oid().to_id_string() != OID_ECDSA_WITH_SHA256
@@ -302,13 +305,12 @@ fn validate_chain_algorithms(parsed: &[X509Certificate<'_>], openssl: &[X509]) -
             return Err(TzapCertificateProfileError::UnsupportedAlgorithm { index, reason: "certificate signature must be ECDSA P-256 with SHA-256" });
         }
 
-        let key = openssl[index].public_key().map_err(|source| TzapCertificateProfileError::UnsupportedAlgorithm {
-            index,
-            reason: if source.errors().is_empty() { "certificate public key is unreadable" } else { "certificate public key is unsupported" },
-        })?;
-        let ec_key =
-            key.ec_key().map_err(|_| TzapCertificateProfileError::UnsupportedAlgorithm { index, reason: "certificate public key must be ECDSA P-256" })?;
-        if ec_key.group().curve_name() != Some(Nid::X9_62_PRIME256V1) {
+        let spki = &certificate.tbs_certificate.subject_pki;
+        if spki.algorithm.algorithm.to_id_string() != OID_EC_PUBLIC_KEY {
+            return Err(TzapCertificateProfileError::UnsupportedAlgorithm { index, reason: "certificate public key must be ECDSA P-256" });
+        }
+        let parameters_oid = spki.algorithm.parameters.as_ref().and_then(|parameters| parameters.as_oid().ok().map(|oid| oid.to_id_string()));
+        if parameters_oid.as_deref() != Some(OID_EC_P256) {
             return Err(TzapCertificateProfileError::UnsupportedAlgorithm { index, reason: "certificate public key must use prime256v1" });
         }
     }
@@ -641,7 +643,7 @@ fn is_numeric_dotted_oid(value: &str) -> bool {
 }
 
 fn certificate_has_policy(certificate: &X509Certificate<'_>, oid: &str) -> bool {
-    let Ok(target_oid) = Asn1Object::from_str(oid) else {
+    let Some(target_oid) = oid_value_bytes(oid) else {
         return false;
     };
     let target_oid = target_oid.as_slice();
@@ -741,8 +743,75 @@ fn der_sequence_of_oids(mut input: &[u8]) -> Option<Vec<Vec<u8>>> {
     Some(values)
 }
 
+/// DER-encodes a numeric dotted OID (the OpenSSL `Asn1Object::from_str`
+/// replacement). TZAP's UUID-derived arcs exceed `u64`, so the tail arcs are
+/// encoded with decimal-string long division by 128.
 fn oid_value_bytes(oid: &str) -> Option<Vec<u8>> {
-    Asn1Object::from_str(oid).ok().map(|oid| oid.as_slice().to_vec())
+    let mut arcs = oid.split('.');
+    let first = arcs.next()?.parse::<u64>().ok()?;
+    let second = arcs.next()?.parse::<u64>().ok()?;
+    let mut out = Vec::new();
+    push_base128(&mut out, first.checked_mul(40)?.checked_add(second)?);
+    for arc in arcs {
+        if arc.is_empty() {
+            return None;
+        }
+        encode_big_base128(&mut out, arc.as_bytes());
+    }
+    Some(out)
+}
+
+fn push_base128(out: &mut Vec<u8>, value: u64) {
+    let mut buffer = [0u8; 10];
+    let mut index = 0;
+    let mut remaining = value;
+    loop {
+        buffer[index] = (remaining & 0x7f) as u8;
+        remaining >>= 7;
+        if remaining == 0 {
+            break;
+        }
+        index += 1;
+    }
+    while index > 0 {
+        out.push(buffer[index] | 0x80);
+        index -= 1;
+    }
+    out.push(buffer[0]);
+}
+
+/// Encodes a decimal digit string as big-endian base-128 OID groups.
+fn encode_big_base128(out: &mut Vec<u8>, decimal: &[u8]) {
+    let mut digits: Vec<u8> = decimal.iter().map(|digit| *digit - b'0').collect();
+    let mut groups: Vec<u8> = Vec::new();
+    loop {
+        let mut remainder = 0u16;
+        let mut next: Vec<u8> = Vec::with_capacity(digits.len());
+        let mut started = false;
+        for digit in &digits {
+            let value = remainder * 10 + u16::from(*digit);
+            let quotient = value / 128;
+            remainder = value % 128;
+            if started || quotient != 0 {
+                started = true;
+                next.push(quotient as u8);
+            }
+        }
+        groups.push(remainder as u8);
+        if next.is_empty() {
+            break;
+        }
+        digits = next;
+    }
+    // Emit most-significant group first; every byte except the final
+    // (least-significant) group carries the continuation bit.
+    for (index, group) in groups.iter().enumerate().rev() {
+        if index == 0 {
+            out.push(*group);
+        } else {
+            out.push(*group | 0x80);
+        }
+    }
 }
 
 fn extension_oid_matches(extension: &x509_parser::extensions::X509Extension<'_>, oid: &str) -> bool {

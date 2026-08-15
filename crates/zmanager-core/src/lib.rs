@@ -37,15 +37,16 @@ mod backend_impl;
 mod extract_loop;
 mod extract_materialize;
 mod gitignore;
+mod os_rng;
 mod segmented_reader;
 mod sevenz_volume;
 mod strings;
 #[cfg(unix)]
 pub(crate) use backend_impl::mtree_backend;
 pub(crate) use backend_impl::{
-    apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend, rar_backend,
-    raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend, warc_backend, xar_backend,
-    zip_backend,
+    apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, lzop_decoder, msi_backend,
+    rar_backend, raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, unix_compress_decoder, uu_decoder,
+    virtual_disk_backend, warc_backend, xar_backend, zip_backend,
 };
 mod tar_metadata;
 mod temp_names;

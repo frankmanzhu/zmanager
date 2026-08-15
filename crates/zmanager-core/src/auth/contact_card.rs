@@ -9,8 +9,6 @@ use crate::local_identity_store::{
 use crate::p256_signature;
 use crate::trust::{self, TzapCertificateProfileOptions, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use openssl::pkey::{PKey, Private};
-use openssl::x509::X509;
 use serde_json::{Map, Value, json};
 use std::fmt;
 
@@ -196,8 +194,7 @@ pub fn verify_tzap_contact_card_with_missing_status_caveat(
     }
 
     let canonical_payload = jcs::canonicalize_json_bytes(&payload).map_err(|error| TzapContactCardError::Canonicalization(format!("{error:?}")))?;
-    let public_key =
-        X509::from_der(&leaf_der).and_then(|certificate| certificate.public_key()).map_err(|error| TzapContactCardError::Crypto(error.to_string()))?;
+    let public_key = p256_signature::parse_p256_public_key_cert_der(&leaf_der).map_err(|error| TzapContactCardError::Crypto(format!("{error:?}")))?;
     let verified = p256_signature::verify_p256_sha256_p1363(&public_key, &canonical_payload, &signature)
         .map_err(|error| TzapContactCardError::Crypto(format!("{error:?}")))?;
     if !verified {
@@ -350,8 +347,8 @@ fn sign_contact_card_payload(
     signing_key: &TzapDeviceSigningKeyRecord,
     payload: &Value,
 ) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], TzapContactCardError> {
-    let private_key =
-        PKey::<Private>::private_key_from_der(signing_key.private_key_der.expose_secret()).map_err(|error| TzapContactCardError::Crypto(error.to_string()))?;
+    let private_key = p256_signature::parse_p256_private_key_der(signing_key.private_key_der.expose_secret())
+        .map_err(|error| TzapContactCardError::Crypto(format!("{error:?}")))?;
     let canonical_payload = jcs::canonicalize_json_bytes(payload).map_err(|error| TzapContactCardError::Canonicalization(format!("{error:?}")))?;
     p256_signature::sign_p256_sha256_p1363(&private_key, &canonical_payload).map_err(|error| TzapContactCardError::Crypto(format!("{error:?}")))
 }

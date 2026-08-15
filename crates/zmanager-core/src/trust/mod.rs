@@ -6,8 +6,9 @@
 //! this module re-exports their public items so the crate's API surface is
 //! unchanged (CR-137).
 
-use openssl::x509::X509;
 use sha2::{Digest as _, Sha256};
+use x509_parser::certificate::X509Certificate;
+use x509_parser::prelude::FromDer as _;
 
 mod certificate_profile;
 mod identifiers;
@@ -284,12 +285,33 @@ pub const OFFICIAL_TZAP_ROOT_PINS: TzapRootPinSet =
     TzapRootPinSet { current: &[TZAP_PRODUCTION_ROOT_SHA256, TZAP_STAGING_ROOT_SHA256], planned_successors: &[] };
 
 pub fn certificate_pem_or_der_to_der(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    if let Ok(certificate) = X509::from_pem(bytes) {
-        certificate.to_der().map_err(|error| error.to_string())
+    if looks_like_pem(bytes) {
+        let mut certificates = Vec::new();
+        for pem in x509_parser::pem::Pem::iter_from_buffer(bytes) {
+            let pem = pem.map_err(|error| error.to_string())?;
+            if pem.label != "CERTIFICATE" {
+                continue;
+            }
+            let (remaining, _) = X509Certificate::from_der(&pem.contents).map_err(|error| error.to_string())?;
+            if !remaining.is_empty() {
+                return Err("certificate DER has trailing bytes".to_owned());
+            }
+            certificates.push(pem.contents);
+        }
+        // Multi-certificate PEM bundles take the first certificate, matching
+        // the pre-migration OpenSSL `X509::from_pem` behavior.
+        certificates.into_iter().next().ok_or_else(|| "certificate PEM file is empty".to_owned())
     } else {
-        X509::from_der(bytes).map_err(|error| error.to_string())?;
+        let (remaining, _) = X509Certificate::from_der(bytes).map_err(|error| error.to_string())?;
+        if !remaining.is_empty() {
+            return Err("certificate DER has trailing bytes".to_owned());
+        }
         Ok(bytes.to_vec())
     }
+}
+
+fn looks_like_pem(bytes: &[u8]) -> bool {
+    bytes.windows(b"-----BEGIN".len()).any(|window| window == b"-----BEGIN")
 }
 
 #[must_use]

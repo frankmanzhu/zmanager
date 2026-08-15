@@ -15,30 +15,53 @@ path = "src/lib.rs"
 default = []
 
 [dependencies]
+# Already reachable through the `zip`/`flate2` trees; direct deps for the
+# lzop decoder's header/block checksums.
+adler2 = "2.0.1"
 base64 = "0.22.1"
 brotli = "8.0.2"
+crc32fast = "1.5.0"
 bzip2 = "0.6.1"
 cab = "0.6.0"
 msi = "0.10.0"
+der = "0.8"
+# RustCrypto signing stack (OpenSSL removal OR-200/201): the 0.14 curve line
+# pairs with ecdsa 0.17 / signature 3.x, matching tzap-plugin-signing.
+ecdsa = { version = "0.17", features = ["der"] }
 filetime = "0.2.29"
 flate2 = "1.1.9"
+getrandom = "0.3"
 hex = "0.4"
 lz4_flex = "0.14.0"
 lzma-rust2 = { version = "0.16.2", default-features = false, features = ["lzip", "std", "xz"] }
+# Pure-Rust LZO1X block decompressor (SecurityRonin family, Apache-2.0);
+# the lzop container framing around the blocks lives in `lzop_decoder.rs`.
+lzo = "0.1.3"
 num-bigint = "0.4.6"
-openssl = "0.10.80"
+openssl = { version = "0.10.80", features = ["vendored"] }
+p256 = { version = "0.14", features = ["ecdsa", "pkcs8"] }
+pkcs8 = { version = "0.11", features = ["std"] }
 rand = "0.9.0"
+rand_core = "0.10"
+signature3 = { package = "signature", version = "3" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.140"
 serde_json_canonicalizer = "0.3.2"
 sha2 = "0.10.8"
 time = { version = "0.3.47", features = ["parsing"] }
+x509-cert = "0.2.5"
 x509-parser = "0.18.1"
+x509-verify = "0.4"
 sevenz-rust2 = { version = "0.21.0", default-features = false, features = ["aes256", "compress", "util"] }
 tar = "0.4.45"
-tzap-core = "0.2.2"
-tzap-plugin-keywrap = "0.2.2"
-tzap-plugin-signing = "0.2.2"
+# OpenSSL-removal branch (OR-102): the tzap crates are pinned to the
+# `openssl-removal` branch until it merges upstream and releases. tzap-core is
+# pinned to the same source so the git plugins and zmanager share one copy
+# (cargo resolves the plugins' workspace path-dep to the git source). Switch
+# back to crates.io versions at release time (the dpp fork precedent).
+tzap-core = { git = "https://github.com/tzap-org/tzap", branch = "openssl-removal", version = "0.2.2" }
+tzap-plugin-keywrap = { git = "https://github.com/tzap-org/tzap", branch = "openssl-removal", version = "0.2.2" }
+tzap-plugin-signing = { git = "https://github.com/tzap-org/tzap", branch = "openssl-removal", version = "0.2.2" }
 zip = "8.6.0"
 zeroize = "1.8.2"
 zmanager-unrar = { workspace = true }

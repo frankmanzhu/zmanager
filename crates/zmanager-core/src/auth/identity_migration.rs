@@ -16,6 +16,7 @@ use crate::local_identity_store::{
 };
 use crate::secrets::SecretBytes;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use pkcs8::EncodePublicKey;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -359,10 +360,10 @@ fn commit_migration(
 /// Computes the `sha256:` public-key fingerprint of a private key, in the
 /// same form the legacy inventory stores on its key records.
 pub(crate) fn public_key_fingerprint_from_private_key(private_key: &SecretBytes) -> Result<String, TzapIdentityCatalogError> {
-    let key = openssl::pkey::PKey::private_key_from_der(private_key.expose_secret())
+    let key = crate::p256_signature::parse_p256_private_key_der(private_key.expose_secret())
         .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
-    let public_der = key.public_key_to_der().map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
-    let digest: [u8; 32] = Sha256::digest(public_der).into();
+    let public_der = key.public_key().to_public_key_der().map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
+    let digest: [u8; 32] = Sha256::digest(public_der.as_bytes()).into();
     Ok(crate::trust::format_certificate_sha256(&digest))
 }
 
@@ -610,10 +611,10 @@ pub(crate) fn load_inventory_from_catalog(
 }
 
 fn verify_private_matches_public_key(private_key: &SecretBytes, public_key_der: &[u8]) -> Result<(), TzapIdentityCatalogError> {
-    let key = openssl::pkey::PKey::private_key_from_der(private_key.expose_secret())
+    let key = crate::p256_signature::parse_p256_private_key_der(private_key.expose_secret())
         .map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
-    let derived = key.public_key_to_der().map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
-    if derived != public_key_der {
+    let derived = key.public_key().to_public_key_der().map_err(|_| TzapIdentityCatalogError::InvalidCatalog { field: "private_key_der" })?;
+    if derived.as_bytes() != public_key_der {
         return Err(TzapIdentityCatalogError::InvalidCatalog { field: "private_key_public_key_match" });
     }
     Ok(())

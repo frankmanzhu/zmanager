@@ -4,7 +4,6 @@ use crate::document_envelope::{self, TzapDocumentEnvelope};
 use crate::p256_signature;
 use crate::trust::{self, TzapCertificateProfileOptions, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use openssl::x509::X509;
 use std::fmt;
 use x509_parser::extensions::ParsedExtension;
 use x509_parser::prelude::{FromDer as _, X509Certificate};
@@ -99,7 +98,6 @@ fn verify_offline_inner(
     options: &TzapOfflineVerificationOptions<'_>,
 ) -> Result<TzapDocumentVerificationResult, TzapOfflineVerificationError> {
     let embedded_chain_der = envelope_chain_der(envelope);
-    let leaf = X509::from_der(&envelope.leaf_certificate_der).map_err(|error| TzapOfflineVerificationError::CertificateParse(error.to_string()))?;
     let parsed_leaf = parse_certificate(&envelope.leaf_certificate_der, "leaf")?;
     let parsed_issuer = envelope
         .intermediate_chain_der
@@ -109,7 +107,7 @@ fn verify_offline_inner(
 
     validate_certificate_references(envelope, &parsed_leaf, &parsed_issuer)?;
     validate_leaf_current_validity(&parsed_leaf, options.verifier_time_unix_seconds)?;
-    verify_document_signature(envelope, &leaf)?;
+    verify_document_signature(envelope)?;
     verify_chain_trust(&embedded_chain_der, options)
 }
 
@@ -163,8 +161,9 @@ fn validate_leaf_current_validity(leaf: &X509Certificate<'_>, verifier_time_unix
     Ok(())
 }
 
-fn verify_document_signature(envelope: &TzapDocumentEnvelope, leaf: &X509) -> Result<(), TzapOfflineVerificationError> {
-    let public_key = leaf.public_key().map_err(|error| TzapOfflineVerificationError::Signature(error.to_string()))?;
+fn verify_document_signature(envelope: &TzapDocumentEnvelope) -> Result<(), TzapOfflineVerificationError> {
+    let public_key = p256_signature::parse_p256_public_key_cert_der(&envelope.leaf_certificate_der)
+        .map_err(|error| TzapOfflineVerificationError::Signature(format!("{error:?}")))?;
     let verified = p256_signature::verify_p256_sha256_p1363(&public_key, &envelope.canonical_signed_payload, &envelope.signature)
         .map_err(|error| TzapOfflineVerificationError::Signature(format!("{error:?}")))?;
     if verified { Ok(()) } else { Err(TzapOfflineVerificationError::Signature("signature did not verify".to_owned())) }
@@ -365,7 +364,8 @@ mod tests {
                 "certificate_serial_number": trust::canonical_serial_hex(leaf.raw_serial()).unwrap(),
             });
             let canonical_signed_payload = jcs::canonicalize_json_bytes(&signed_payload).unwrap();
-            let signature = sign_p256_sha256_p1363(&chain.leaf_key, &canonical_signed_payload).unwrap();
+            let leaf_private_key = crate::p256_signature::parse_p256_private_key_der(&chain.leaf_key.private_key_to_der().unwrap()).unwrap();
+            let signature = sign_p256_sha256_p1363(&leaf_private_key, &canonical_signed_payload).unwrap();
             let envelope = json!({
                 "document_payload": payload,
                 "signed_payload": signed_payload,

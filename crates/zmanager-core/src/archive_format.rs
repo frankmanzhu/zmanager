@@ -26,7 +26,7 @@ pub const TAR_LZ_EXTENSIONS: &[&str] = &[".tar.lz"];
 pub const TAR_LZO_EXTENSIONS: &[&str] = &[".tar.lzo"];
 pub const TAR_COMPRESS_EXTENSIONS: &[&str] = &[".tar.z", ".taz"];
 pub const TAR_LZ4_EXTENSIONS: &[&str] = &[".tar.lz4"];
-pub const TAR_LRZ_EXTENSIONS: &[&str] = &[".tar.lrz"];
+pub const TAR_UU_EXTENSIONS: &[&str] = &[".tar.uu", ".tar.b64"];
 pub const ISO_EXTENSIONS: &[&str] = &[".iso"];
 pub const CAB_EXTENSIONS: &[&str] = &[".cab"];
 pub const CPIO_EXTENSIONS: &[&str] = &[".cpio", ".cpio.gz", ".cpgz", ".cpio.bz2", ".cpio.xz", ".cpio.lzma", ".cpio.zst"];
@@ -93,8 +93,8 @@ pub enum ArchiveFormatKind {
     TarCompress,
     /// `.tar.lz4` / LZ4-compressed TAR.
     TarLz4,
-    /// `.tar.lrz` / LRZIP-compressed TAR.
-    TarLrz,
+    /// `.tar.uu` / `.tar.b64` / uuencode- or base64-encoded TAR.
+    TarUu,
     /// ISO disk image (`.iso`).
     Iso,
     /// Windows Cabinet (`.cab`).
@@ -173,7 +173,7 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
     FormatCapability { kind: ArchiveFormatKind::TarLzo, extensions: TAR_LZO_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::TarCompress, extensions: TAR_COMPRESS_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::TarLz4, extensions: TAR_LZ4_EXTENSIONS, status: BackendStatus::Available },
-    FormatCapability { kind: ArchiveFormatKind::TarLrz, extensions: TAR_LRZ_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::TarUu, extensions: TAR_UU_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Iso, extensions: ISO_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Cab, extensions: CAB_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Cpio, extensions: CPIO_EXTENSIONS, status: BackendStatus::Available },
@@ -307,7 +307,6 @@ mod tests {
             ArchiveFormatKind::TarLzo,
             ArchiveFormatKind::TarCompress,
             ArchiveFormatKind::TarLz4,
-            ArchiveFormatKind::TarLrz,
             ArchiveFormatKind::Iso,
             ArchiveFormatKind::Cab,
             ArchiveFormatKind::Cpio,
@@ -369,7 +368,7 @@ mod tests {
         assert_eq!(detect("archive.tar.lzo"), ArchiveFormatKind::TarLzo);
         assert_eq!(detect("archive.tar.Z"), ArchiveFormatKind::TarCompress);
         assert_eq!(detect("archive.tar.lz4"), ArchiveFormatKind::TarLz4);
-        assert_eq!(detect("archive.tar.lrz"), ArchiveFormatKind::TarLrz);
+        assert_eq!(detect("archive.tar.lrz"), ArchiveFormatKind::Unknown);
         assert_eq!(detect("archive.pax"), ArchiveFormatKind::Tar);
         assert_eq!(detect("archive.ustar"), ArchiveFormatKind::Tar);
         assert_eq!(detect("archive.zip"), ArchiveFormatKind::Zip);

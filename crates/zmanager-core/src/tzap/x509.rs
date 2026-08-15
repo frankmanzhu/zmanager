@@ -3,20 +3,21 @@
 //! inspection, and raw authenticator parsing.
 
 use super::TzapError;
+use crate::os_rng::OsRng;
+use crate::p256_signature::parse_p256_private_key_der;
 use crate::secrets::{SecretBytes, SecretString};
 use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_recipient_key, read_tzap_input_volume_bytes};
 use crate::tzap::write::TzapCreateOptions;
 use crate::x509_format::x509_name_to_string;
-use openssl::asn1::Asn1Time;
-use openssl::bn::BigNum;
-use openssl::ec::{EcGroup, EcKey};
-use openssl::hash::MessageDigest;
-use openssl::nid::Nid;
+use base64::Engine as _;
+use ecdsa::elliptic_curve::Generate as _;
+use ecdsa::signature::SignatureEncoding as _;
+use ecdsa::signature::hazmat::RandomizedPrehashSigner;
 use openssl::pkcs12::Pkcs12;
-use openssl::pkey::{PKey, Public};
-use openssl::x509::X509;
-use openssl::x509::extension::{BasicConstraints, KeyUsage, SubjectKeyIdentifier};
+use p256::ecdsa::SigningKey;
+use pkcs8::EncodePublicKey;
 use rand::RngCore as _;
+use sha2::{Digest as _, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,12 +32,29 @@ use tzap_plugin_keywrap::{
     dispatch_key_wrap_record, wrap_master_key_for_recipient,
 };
 use tzap_plugin_signing::x509_chain::{
-    X509_AUTHENTICATOR_ID, X509RootAuthReport, X509RootAuthSigner, certificate_der_from_pem_or_der, certificates_der_from_pem_or_der, verify_root_auth_footer,
-    verify_root_auth_signature,
+    X509_AUTHENTICATOR_ID, X509RootAuthReport, X509RootAuthSigner, X509SigningKey, certificate_der_from_pem_or_der, certificates_der_from_pem_or_der,
+    verify_root_auth_footer, verify_root_auth_signature,
 };
+use x509_cert::attr::AttributeTypeAndValue;
+use x509_cert::certificate::Version;
+use x509_cert::der::DateTime as DerDateTime;
+use x509_cert::der::Encode as _;
+use x509_cert::der::asn1::{BitString, ObjectIdentifier, OctetString, UtcTime, Utf8StringRef};
+use x509_cert::ext::Extension;
+use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages, SubjectKeyIdentifier};
+use x509_cert::name::{Name, RelativeDistinguishedName};
+use x509_cert::serial_number::SerialNumber;
+use x509_cert::spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned};
+use x509_cert::time::{Time, Validity};
+use x509_cert::{Certificate, TbsCertificate};
+use x509_parser::prelude::FromDer as _;
 
 // The official root literals live in `trust::` (pinned there too), so the
 // pin set and the embedded certificates cannot drift.
+const OID_COMMON_NAME: &str = "2.5.4.3";
+const OID_ECDSA_WITH_SHA256: &str = "1.2.840.10045.4.3.2";
+const SYNTHETIC_RECIPIENT_CN: &str = "ZManager Contact Recipient";
+
 const OFFICIAL_TZAP_ROOT_CERT_SHA256: &str = crate::trust::TZAP_PRODUCTION_ROOT_SHA256;
 const OFFICIAL_TZAP_ROOT_CERT_PEM: &[u8] = include_bytes!("../trust/tzap-production-root-ca-2026.pem");
 const OFFICIAL_TZAP_STAGING_ROOT_PEM: &[u8] = include_bytes!("../trust/tzap-staging-root-ca-2026.pem");
@@ -233,6 +251,13 @@ fn load_x509_signer_from_certificate_files(
         .map_err(|source| TzapError::X509RootAuth(source.to_string()))
 }
 
+/// PKCS#12 identity import — the one allow-listed OpenSSL surface left in
+/// this module. The RustCrypto `pkcs12` crate is a pre-release container
+/// skeleton with no PBE decryption yet, so PKCS#12 parsing stays on vendored
+/// OpenSSL per the §6 gap decision recorded in
+/// `implementation-docs/adr/2026-08-15-chain-verification-backend.md`
+/// (and the plan's "PKCS12 leniency" note). Everything else in this file is
+/// RustCrypto.
 fn load_x509_signer_from_pkcs12(identity: &Path, password: &SecretString) -> Result<X509RootAuthSigner, TzapError> {
     let identity_bytes = read_x509_input_file(identity)?;
     let pkcs12 = Pkcs12::from_der(&identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
@@ -247,9 +272,11 @@ fn load_x509_signer_from_pkcs12(identity: &Path, password: &SecretString) -> Res
         .transpose()?
         .unwrap_or_default();
 
+    let signing_key = X509SigningKey::from_der(&private_key.private_key_to_der().map_err(|source| TzapError::X509RootAuth(source.to_string()))?)
+        .map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
     X509RootAuthSigner::new(
         certificate.to_der().map_err(|source| TzapError::X509RootAuth(source.to_string()))?,
-        private_key,
+        signing_key,
         chain_der,
         current_unix_seconds_i64()?,
     )
@@ -331,41 +358,98 @@ pub(crate) fn build_recipient_wrap_record_from_certificate_der(
 /// `adr/2026-08-06-synthetic-recipient-certificate.md` in the private
 /// implementation-docs repo; revisit when the plugin accepts raw SPKI.
 pub(crate) fn synthetic_recipient_certificate_der(public_key_spki_der: &[u8]) -> Result<Vec<u8>, TzapError> {
-    let public_key =
-        PKey::<Public>::public_key_from_der(public_key_spki_der).map_err(|source| TzapError::KeyWrap(format!("recipient public key is invalid: {source}")))?;
-    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?;
-    let issuer_key = PKey::from_ec_key(EcKey::generate(&group).map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?)
-        .map_err(|source| TzapError::KeyWrap(format!("recipient certificate key failed: {source}")))?;
-    let mut name = openssl::x509::X509NameBuilder::new().map_err(|source| TzapError::KeyWrap(format!("recipient certificate name failed: {source}")))?;
-    name.append_entry_by_text("CN", "ZManager Contact Recipient")
-        .map_err(|source| TzapError::KeyWrap(format!("recipient certificate name failed: {source}")))?;
-    let name = name.build();
-    let mut builder = X509::builder().map_err(|source| TzapError::KeyWrap(format!("recipient certificate failed: {source}")))?;
-    builder.set_version(2).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    let serial = BigNum::from_u32(1)
-        .and_then(|number| number.to_asn1_integer())
-        .map_err(|source| TzapError::KeyWrap(format!("recipient certificate serial failed: {source}")))?;
-    builder.set_serial_number(&serial).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder.set_subject_name(&name).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder.set_issuer_name(&name).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder.set_pubkey(&public_key).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    let not_before = Asn1Time::days_from_now(0).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    let not_after = Asn1Time::days_from_now(365).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder.set_not_before(&not_before).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder.set_not_after(&not_after).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder
-        .append_extension(BasicConstraints::new().critical().build().map_err(|source| TzapError::KeyWrap(source.to_string()))?)
-        .map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder
-        .append_extension(KeyUsage::new().critical().key_agreement().build().map_err(|source| TzapError::KeyWrap(source.to_string()))?)
-        .map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    let subject_key_identifier = {
-        let context = builder.x509v3_context(None, None);
-        SubjectKeyIdentifier::new().build(&context).map_err(|source| TzapError::KeyWrap(source.to_string()))?
+    let wrap = |detail: String| TzapError::KeyWrap(format!("recipient certificate failed: {detail}"));
+    let subject_public_key_info =
+        SubjectPublicKeyInfoOwned::try_from(public_key_spki_der).map_err(|source| wrap(format!("recipient public key is invalid: {source}")))?;
+
+    // Throwaway P-256 issuer key: the certificate is self-issued but not
+    // self-signed with the recipient's (unknown) private key.
+    let issuer_key = p256::SecretKey::generate_from_rng(&mut OsRng);
+
+    let subject = synthetic_recipient_name().map_err(|source| wrap(format!("recipient certificate name failed: {source}")))?;
+    let not_before = utc_time_from_now(0).map_err(|source| wrap(format!("recipient certificate time failed: {source}")))?;
+    let not_after = utc_time_from_now(365).map_err(|source| wrap(format!("recipient certificate time failed: {source}")))?;
+
+    let basic_constraints = Extension {
+        extn_id: ObjectIdentifier::new_unwrap("2.5.29.19"),
+        critical: true,
+        extn_value: OctetString::new(BasicConstraints { ca: false, path_len_constraint: None }.to_der().map_err(|source| wrap(source.to_string()))?)
+            .map_err(|source| wrap(source.to_string()))?,
     };
-    builder.append_extension(subject_key_identifier).map_err(|source| TzapError::KeyWrap(source.to_string()))?;
-    builder.sign(&issuer_key, MessageDigest::sha256()).map_err(|source| TzapError::KeyWrap(format!("recipient certificate signing failed: {source}")))?;
-    builder.build().to_der().map_err(|source| TzapError::KeyWrap(format!("recipient certificate DER failed: {source}")))
+    let key_usage = Extension {
+        extn_id: ObjectIdentifier::new_unwrap("2.5.29.15"),
+        critical: true,
+        extn_value: OctetString::new(KeyUsage(KeyUsages::KeyAgreement.into()).to_der().map_err(|source| wrap(source.to_string()))?)
+            .map_err(|source| wrap(source.to_string()))?,
+    };
+    // OpenSSL's default SKI derivation is SHA-1 over the public-key BIT STRING;
+    // SHA-256 over the same content is used here (the identifier is not
+    // referenced by anything in the keywrap protocol).
+    let ski_bytes = Sha256::digest(subject_public_key_info.subject_public_key.raw_bytes());
+    let subject_key_identifier = Extension {
+        extn_id: ObjectIdentifier::new_unwrap("2.5.29.14"),
+        critical: false,
+        extn_value: OctetString::new(
+            SubjectKeyIdentifier(OctetString::new(ski_bytes.as_slice()).map_err(|source| wrap(source.to_string()))?)
+                .to_der()
+                .map_err(|source| wrap(source.to_string()))?,
+        )
+        .map_err(|source| wrap(source.to_string()))?,
+    };
+
+    let signature_algorithm = AlgorithmIdentifierOwned { oid: ObjectIdentifier::new_unwrap(OID_ECDSA_WITH_SHA256), parameters: None };
+    let tbs = TbsCertificate {
+        version: Version::V3,
+        serial_number: SerialNumber::from(1u64),
+        signature: signature_algorithm.clone(),
+        issuer: subject.clone(),
+        validity: Validity { not_before: Time::UtcTime(not_before), not_after: Time::UtcTime(not_after) },
+        subject,
+        subject_public_key_info,
+        issuer_unique_id: None,
+        subject_unique_id: None,
+        extensions: Some(vec![basic_constraints, key_usage, subject_key_identifier]),
+    };
+    let tbs_der = tbs.to_der().map_err(|source| wrap(format!("recipient certificate DER failed: {source}")))?;
+    let signing_key = SigningKey::from(issuer_key);
+    let fixed: ecdsa::Signature<p256::NistP256> = signing_key
+        .sign_prehash_with_rng(&mut OsRng, &Sha256::digest(&tbs_der))
+        .map_err(|source| wrap(format!("recipient certificate signing failed: {source}")))?;
+    let signature = ecdsa::der::Signature::<p256::NistP256>::from(fixed.normalize_s());
+    let certificate = Certificate {
+        tbs_certificate: tbs,
+        signature_algorithm,
+        signature: BitString::from_bytes(&signature.to_vec()).map_err(|source| wrap(format!("recipient certificate DER failed: {source}")))?,
+    };
+    certificate.to_der().map_err(|source| wrap(format!("recipient certificate DER failed: {source}")))
+}
+
+fn synthetic_recipient_name() -> Result<Name, String> {
+    let mut rdn = RelativeDistinguishedName::default();
+    rdn.0
+        .insert(AttributeTypeAndValue {
+            oid: ObjectIdentifier::new_unwrap(OID_COMMON_NAME),
+            value: x509_cert::der::asn1::Any::encode_from(&Utf8StringRef::new(SYNTHETIC_RECIPIENT_CN).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?,
+        })
+        .map_err(|error| error.to_string())?;
+    let mut name = Name::default();
+    name.0.push(rdn);
+    Ok(name)
+}
+
+fn utc_time_from_now(days: i64) -> Result<UtcTime, String> {
+    let time = time::OffsetDateTime::now_utc() + time::Duration::days(days);
+    let datetime = DerDateTime::new(
+        u16::try_from(time.year()).map_err(|_| "certificate year out of range".to_owned())?,
+        u8::from(time.month()),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second(),
+    )
+    .map_err(|error| error.to_string())?;
+    UtcTime::from_date_time(datetime).map_err(|error| error.to_string())
 }
 
 pub(crate) fn load_single_x509_certificate_file(label: &'static str, path: &Path) -> Result<Vec<u8>, TzapError> {
@@ -419,8 +503,11 @@ impl PrivateKeyLookup for TzapRecipientPrivateKeyLookup {
         recipient_identity_bytes: &[u8],
     ) -> Option<Vec<u8>> {
         if let Some(private_key_spki_der) = self.private_key_spki_der.as_ref() {
-            let certificate = X509::from_der(recipient_identity_bytes).ok()?;
-            let certificate_spki_der = certificate.public_key().ok()?.public_key_to_der().ok()?;
+            let (remaining, certificate) = x509_parser::parse_x509_certificate(recipient_identity_bytes).ok()?;
+            if !remaining.is_empty() {
+                return None;
+            }
+            let certificate_spki_der = certificate.tbs_certificate.subject_pki.raw;
             if certificate_spki_der != *private_key_spki_der {
                 return None;
             }
@@ -438,12 +525,43 @@ pub(crate) fn load_recipient_private_key_lookup_from_bytes(bytes: &[u8], descrip
     if bytes.len() == 32 {
         return Ok(TzapRecipientPrivateKeyLookup { private_key_bytes: bytes.to_vec(), private_key_spki_der: None });
     }
-    let private_key = if bytes.starts_with(b"-----BEGIN") { PKey::private_key_from_pem(bytes) } else { PKey::private_key_from_der(bytes) }
-        .map_err(|source| TzapError::KeyWrap(format!("failed to parse recipient private key {description}: {source}")))?;
-    let private_key_bytes =
-        private_key.private_key_to_der().map_err(|source| TzapError::KeyWrap(format!("failed to normalize recipient private key {description}: {source}")))?;
-    let private_key_spki_der = private_key.public_key_to_der().ok();
-    Ok(TzapRecipientPrivateKeyLookup { private_key_bytes, private_key_spki_der })
+    let key_der = if bytes.starts_with(b"-----BEGIN") {
+        pem_payload_der(bytes).ok_or_else(|| TzapError::KeyWrap(format!("failed to parse recipient private key {description}: invalid PEM")))?
+    } else {
+        bytes.to_vec()
+    };
+    match parse_p256_private_key_der(&key_der) {
+        Ok(private_key) => {
+            let private_key_bytes = private_key
+                .to_sec1_der()
+                .map_err(|source| TzapError::KeyWrap(format!("failed to normalize recipient private key {description}: {source}")))?
+                .to_vec();
+            let private_key_spki_der = private_key.public_key().to_public_key_der().ok().map(|document| document.as_bytes().to_vec());
+            Ok(TzapRecipientPrivateKeyLookup { private_key_bytes, private_key_spki_der })
+        }
+        Err(_) => {
+            // Non-P-256 keys (e.g. X25519 PKCS#8) pass through raw: the keywrap
+            // plugin parses them itself; SPKI pre-matching is disabled for these.
+            Ok(TzapRecipientPrivateKeyLookup { private_key_bytes: key_der, private_key_spki_der: None })
+        }
+    }
+}
+
+/// Decodes the first PEM block of the input to its DER payload.
+fn pem_payload_der(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut rest = bytes;
+    while let Some(start) = rest.windows(b"-----BEGIN".len()).position(|window| window == b"-----BEGIN") {
+        let block = &rest[start..];
+        let end = block.windows(b"-----END".len()).position(|window| window == b"-----END")?;
+        let body_start = block[..end].iter().position(|byte| *byte == b'\n').map_or(0, |position| position + 1);
+        let body = &block[body_start..end];
+        let encoded: Vec<u8> = body.iter().copied().filter(|byte| !byte.is_ascii_whitespace()).collect();
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&encoded) {
+            return Some(decoded);
+        }
+        rest = &block[end + b"-----END".len()..];
+    }
+    None
 }
 
 #[derive(Debug, Default)]
@@ -799,21 +917,20 @@ pub(crate) fn inspect_x509_root_auth_footer(footer: &RootAuthFooterV1, archive_r
     // (scheme-aware: RSA-PKCS1 / ECDSA / RSA-PSS). This wrapper only adds the
     // display fields derived from the embedded leaf certificate.
     let report = verify_root_auth_signature(footer, archive_root).map_err(|error| TzapError::X509RootAuth(error.to_string()))?;
-    let leaf_certificate = X509::from_der(&footer.signer_identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
+    let (remaining, leaf_certificate) = x509_parser::certificate::X509Certificate::from_der(&footer.signer_identity_bytes)
+        .map_err(|source| TzapError::X509RootAuth(format!("invalid X.509 signer identity: {source}")))?;
+    if !remaining.is_empty() {
+        return Err(TzapError::X509RootAuth("invalid X.509 signer identity: trailing DER bytes".to_owned()));
+    }
     Ok(TzapX509SignerInspection {
         archive_root: *archive_root,
         authenticator_id: footer.authenticator_id,
         signer_identity_type: footer.signer_identity_type,
         total_data_block_count: footer.total_data_block_count,
         signed_at_unix_seconds: report.signed_at_unix_seconds,
-        subject: x509_name_to_string(leaf_certificate.subject_name()),
-        issuer: x509_name_to_string(leaf_certificate.issuer_name()),
-        serial_number_hex: leaf_certificate
-            .serial_number()
-            .to_bn()
-            .and_then(|serial| serial.to_hex_str())
-            .map_err(|source| TzapError::X509RootAuth(source.to_string()))?
-            .to_string(),
+        subject: x509_name_to_string(leaf_certificate.subject()),
+        issuer: x509_name_to_string(leaf_certificate.issuer()),
+        serial_number_hex: leaf_certificate.serial.to_str_radix(16),
         certificate_sha256: report.certificate_sha256,
         diagnostics: Vec::new(),
     })
@@ -822,7 +939,8 @@ pub(crate) fn inspect_x509_root_auth_footer(footer: &RootAuthFooterV1, archive_r
 #[cfg(test)]
 mod tests {
     use super::{TzapX509TrustOptions, load_x509_trusted_roots};
-    use openssl::x509::X509;
+    use x509_parser::certificate::X509Certificate;
+    use x509_parser::prelude::FromDer as _;
 
     #[test]
     fn x509_trust_options_can_include_embedded_official_root() {
@@ -833,9 +951,9 @@ mod tests {
         assert_eq!(roots.len(), 2);
         assert_eq!(crate::trust::certificate_sha256_identifier_for_der(&roots[0]), crate::trust::TZAP_PRODUCTION_ROOT_SHA256);
         assert_eq!(crate::trust::certificate_sha256_identifier_for_der(&roots[1]), crate::trust::TZAP_STAGING_ROOT_SHA256);
-        let root = X509::from_der(&roots[0]).unwrap();
-        assert_eq!(crate::x509_format::x509_name_to_string(root.subject_name()), "CN=TZAP Production Root CA 2026, O=TZAP, C=AU");
-        let staging = X509::from_der(&roots[1]).unwrap();
-        assert_eq!(crate::x509_format::x509_name_to_string(staging.subject_name()), "CN=TZAP Staging Root CA 2026, O=TZAP, C=AU");
+        let root = X509Certificate::from_der(&roots[0]).unwrap().1;
+        assert_eq!(crate::x509_format::x509_name_to_string(root.subject()), "CN=TZAP Production Root CA 2026, O=TZAP, C=AU");
+        let staging = X509Certificate::from_der(&roots[1]).unwrap().1;
+        assert_eq!(crate::x509_format::x509_name_to_string(staging.subject()), "CN=TZAP Staging Root CA 2026, O=TZAP, C=AU");
     }
 }

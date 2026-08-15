@@ -16,6 +16,8 @@ pub mod cpio_backend;
 pub mod deb_backend;
 #[path = "lha_backend.rs"]
 pub mod lha_backend;
+#[path = "lzop_decoder.rs"]
+pub mod lzop_decoder;
 #[path = "msi_backend.rs"]
 pub mod msi_backend;
 #[cfg(unix)]
@@ -35,6 +37,10 @@ pub mod tar_backend;
 pub mod tar_gz_backend;
 #[path = "tar_zst_backend.rs"]
 pub mod tar_zst_backend;
+#[path = "unix_compress_decoder.rs"]
+pub mod unix_compress_decoder;
+#[path = "uu_decoder.rs"]
+pub mod uu_decoder;
 #[path = "virtual_disk_backend.rs"]
 pub mod virtual_disk_backend;
 #[path = "warc_backend.rs"]

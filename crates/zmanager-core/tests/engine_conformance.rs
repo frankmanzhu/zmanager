@@ -46,7 +46,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         (FormatId::TAR_LZO, SourceAccess::Seekable),
         (FormatId::TAR_COMPRESS, SourceAccess::Seekable),
         (FormatId::TAR_LZ4, SourceAccess::Seekable),
-        (FormatId::TAR_LRZ, SourceAccess::Seekable),
+        (FormatId::TAR_UU, SourceAccess::Seekable),
         (FormatId::LHA, SourceAccess::Seekable),
         (FormatId::WARC, SourceAccess::Seekable),
     ];
@@ -56,6 +56,13 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         assert!(capabilities.operations.contains(&ArchiveOperation::List), "{format} must claim listing");
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
         assert_eq!(capabilities.source_access, source_access, "{format} advertised the wrong source access");
+    }
+
+    // Formats removed from the supported list are absent from the registry:
+    // detection reports them as unknown and the engine rejects them with the
+    // explicit unrecognized-format error instead of probing.
+    for format in ["tar.lrz", "tar.grz"] {
+        assert!(engine.registry().capabilities_for_format(FormatId(format)).is_none(), "{format} must not be registered");
     }
     #[cfg(unix)]
     {
@@ -85,7 +92,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         FormatId::TAR_LZO,
         FormatId::TAR_COMPRESS,
         FormatId::TAR_LZ4,
-        FormatId::TAR_LRZ,
+        FormatId::TAR_UU,
     ] {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");

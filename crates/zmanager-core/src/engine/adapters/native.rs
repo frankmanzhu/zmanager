@@ -553,10 +553,8 @@ fn deb_error(path: &std::path::Path, error: &crate::deb_backend::DebError) -> Ar
         },
         crate::deb_backend::DebError::RawStream(source) => match source {
             crate::raw_stream_backend::RawStreamError::Safety(safety) => crate::engine::adapters::safety_error_kind(safety),
-            crate::raw_stream_backend::RawStreamError::Io { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolUnavailable { .. } => ErrorKind::Io,
-            crate::raw_stream_backend::RawStreamError::MissingOutputName { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolFailed { .. } => {
-                ErrorKind::CorruptData
-            }
+            crate::raw_stream_backend::RawStreamError::Io { .. } => ErrorKind::Io,
+            crate::raw_stream_backend::RawStreamError::MissingOutputName { .. } => ErrorKind::CorruptData,
         },
         crate::deb_backend::DebError::Io { .. } => ErrorKind::Io,
         crate::deb_backend::DebError::MissingMember { .. } => ErrorKind::CorruptData,
@@ -624,10 +622,8 @@ fn rpm_error(path: &std::path::Path, error: &crate::rpm_backend::RpmError) -> Ar
         },
         crate::rpm_backend::RpmError::RawStream(source) => match source {
             crate::raw_stream_backend::RawStreamError::Safety(safety) => crate::engine::adapters::safety_error_kind(safety),
-            crate::raw_stream_backend::RawStreamError::Io { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolUnavailable { .. } => ErrorKind::Io,
-            crate::raw_stream_backend::RawStreamError::MissingOutputName { .. } | crate::raw_stream_backend::RawStreamError::ExternalToolFailed { .. } => {
-                ErrorKind::CorruptData
-            }
+            crate::raw_stream_backend::RawStreamError::Io { .. } => ErrorKind::Io,
+            crate::raw_stream_backend::RawStreamError::MissingOutputName { .. } => ErrorKind::CorruptData,
         },
     };
     crate::engine::adapters::adapter_error(path, kind, error.to_string())
@@ -1277,9 +1273,9 @@ static TAR_LZ4_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
-static TAR_LRZ_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
-    name: "native_tar_lrz_adapter",
-    format: FormatId::TAR_LRZ,
+static TAR_UU_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_tar_uu_adapter",
+    format: FormatId::TAR_UU,
     operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
@@ -1301,38 +1297,9 @@ impl FilteredTarAdapter {
     }
 
     fn open_reader(&self, archive: &NativeReadContext) -> Result<Box<dyn Read>, ArchiveError> {
-        let path = archive.primary_path();
-        if matches!(
-            self.decoder,
-            raw_stream_backend::RawStreamFormat::Lzo | raw_stream_backend::RawStreamFormat::UnixCompress | raw_stream_backend::RawStreamFormat::Lrzip
-        ) {
-            // Tool-backed decoders spawn external processes that read the
-            // source by path, so this branch is path-based by design.
-            let temporary = crate::temp_names::TemporaryDirectory::new("tar-filter")
-                .map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
-            let decoded_path = temporary.path().join("decoded.tar");
-            let mut decoded = File::create(&decoded_path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
-            raw_stream_backend::copy_raw_stream_to_writer(path, self.decoder, &mut decoded)
-                .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
-            drop(decoded);
-            let reader = File::open(&decoded_path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
-            return Ok(Box::new(TemporaryTarReader { _temporary: temporary, reader }));
-        }
-
         let file = archive.open_primary_file()?;
-        raw_stream_backend::open_decoder_from_reader(file, self.decoder, path)
-            .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))
-    }
-}
-
-struct TemporaryTarReader {
-    _temporary: crate::temp_names::TemporaryDirectory,
-    reader: File,
-}
-
-impl Read for TemporaryTarReader {
-    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        self.reader.read(buffer)
+        raw_stream_backend::open_decoder_from_reader(file, self.decoder, archive.primary_path())
+            .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(archive.primary_path()))
     }
 }
 
@@ -1346,7 +1313,7 @@ impl NativeReadAdapter for FilteredTarAdapter {
             FormatId::TAR_LZO => &TAR_LZO_DESCRIPTOR,
             FormatId::TAR_COMPRESS => &TAR_COMPRESS_DESCRIPTOR,
             FormatId::TAR_LZ4 => &TAR_LZ4_DESCRIPTOR,
-            FormatId::TAR_LRZ => &TAR_LRZ_DESCRIPTOR,
+            FormatId::TAR_UU => &TAR_UU_DESCRIPTOR,
             _ => unreachable!("filtered TAR adapter format is not a supported native TAR filter"),
         }
     }
@@ -1496,8 +1463,6 @@ fn raw_stream_error(path: &std::path::Path, error: &raw_stream_backend::RawStrea
         raw_stream_backend::RawStreamError::Io { .. } => ErrorKind::Io,
         raw_stream_backend::RawStreamError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         raw_stream_backend::RawStreamError::MissingOutputName { .. } => ErrorKind::InvalidFormat,
-        raw_stream_backend::RawStreamError::ExternalToolUnavailable { .. } => ErrorKind::UnsupportedOperation,
-        raw_stream_backend::RawStreamError::ExternalToolFailed { .. } => ErrorKind::CorruptData,
     };
     crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }

@@ -6,7 +6,6 @@ use crate::local_identity_store::{TzapDeviceSigningKeyRecord, TzapEnrolledCertif
 use crate::p256_signature;
 use crate::trust::{self, TzapCertificateStatus};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use openssl::pkey::{PKey, Private};
 use serde_json::{Value, json};
 use std::fmt;
 
@@ -167,8 +166,8 @@ fn sign_signed_payload(
     signing_key: &TzapDeviceSigningKeyRecord,
     canonical_signed_payload: &[u8],
 ) -> Result<[u8; p256_signature::P256_P1363_SIGNATURE_LENGTH], TzapDocumentSigningError> {
-    let private_key = PKey::<Private>::private_key_from_der(signing_key.private_key_der.expose_secret())
-        .map_err(|error| TzapDocumentSigningError::Crypto(error.to_string()))?;
+    let private_key = p256_signature::parse_p256_private_key_der(signing_key.private_key_der.expose_secret())
+        .map_err(|error| TzapDocumentSigningError::Crypto(format!("{error:?}")))?;
     p256_signature::sign_p256_sha256_p1363(&private_key, canonical_signed_payload).map_err(|error| TzapDocumentSigningError::Crypto(format!("{error:?}")))
 }
 
@@ -182,10 +181,9 @@ mod tests {
         TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore,
         TzapRecipientEncryptionKeyRecord, TzapSignDeviceRouting,
     };
-    use crate::p256_signature::verify_p256_sha256_p1363;
+    use crate::p256_signature::{parse_p256_public_key_spki_der, verify_p256_sha256_p1363};
     use crate::secrets::SecretBytes;
     use crate::trust::{self, TzapCertificatePublicMetadata, TzapCertificateStatus};
-    use openssl::pkey::PKey;
     use serde_json::{Value, json};
 
     #[test]
@@ -200,7 +198,7 @@ mod tests {
 
         let envelope = sign_tzap_document_payload(&store, &SigningFixture::request(), payload).unwrap();
         let parsed = validate_tzap_document_envelope_value(&envelope).unwrap();
-        let public_key = PKey::public_key_from_der(&fixture.public_key_spki_der).unwrap();
+        let public_key = parse_p256_public_key_spki_der(&fixture.public_key_spki_der).unwrap();
         assert!(verify_p256_sha256_p1363(&public_key, &parsed.canonical_signed_payload, &parsed.signature).unwrap());
         assert!(envelope["document_payload"].get("signature").is_none());
         assert!(envelope["document_payload"].get("leaf_certificate_der").is_none());

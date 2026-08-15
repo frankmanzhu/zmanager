@@ -4,18 +4,18 @@
 //! not precomputed digests. They perform SHA-256 internally so callers do not
 //! need to choose between raw and prehashed APIs.
 
-use openssl::bn::{BigNum, BigNumContext, BigNumRef};
-use openssl::ec::EcKey;
-use openssl::ecdsa::EcdsaSig;
-use openssl::error::ErrorStack;
-use openssl::nid::Nid;
-use openssl::pkey::{HasPublic, PKey, Private, Public};
+use ecdsa::elliptic_curve::scalar::IsHigh as _;
+use ecdsa::signature::hazmat::{PrehashVerifier, RandomizedPrehashSigner};
+use p256::SecretKey;
+use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
+use pkcs8::{DecodePrivateKey, DecodePublicKey};
 use sha2::{Digest, Sha256};
+use x509_parser::prelude::FromDer as _;
+
+use crate::os_rng::OsRng;
 
 /// Fixed-width signature length for P-1363 `(r || s)` on P-256.
 pub const P256_P1363_SIGNATURE_LENGTH: usize = 64;
-const P256_COORDINATE_LENGTH: usize = 32;
-const P256_COORDINATE_LENGTH_I32: i32 = 32;
 
 /// Errors returned by the P-256 helpers.
 #[derive(Debug)]
@@ -24,216 +24,168 @@ pub enum P256SignatureError {
     InvalidSignatureLength { actual: usize },
     /// Signature rejected because `s` is not canonical low-S.
     NonCanonicalLowS,
-    /// Unexpected curve for the provided key.
-    UnsupportedCurve,
-    /// OpenSSL rejected an operation.
-    Crypto(ErrorStack),
-}
-
-impl From<ErrorStack> for P256SignatureError {
-    fn from(err: ErrorStack) -> Self {
-        Self::Crypto(err)
-    }
+    /// The RustCrypto stack rejected an operation.
+    Crypto(String),
 }
 
 /// Signs `payload` bytes with SHA-256 + P-256 and returns fixed-width P-1363 bytes.
 ///
 /// The SHA-256 hashing step is intentionally inside this helper to avoid callers
-/// accidentally hashing payloads twice.
-pub fn sign_p256_sha256_p1363(private_key: &PKey<Private>, payload: &[u8]) -> Result<[u8; P256_P1363_SIGNATURE_LENGTH], P256SignatureError> {
-    let private_key = private_key.ec_key()?;
-    ensure_p256_key(&private_key)?;
-
+/// accidentally hashing payloads twice. Nonces are provider-RNG backed
+/// (randomized signing, not RFC 6979), matching the pre-migration OpenSSL
+/// behavior; `s` is normalized to canonical low-S.
+pub fn sign_p256_sha256_p1363(private_key: &SecretKey, payload: &[u8]) -> Result<[u8; P256_P1363_SIGNATURE_LENGTH], P256SignatureError> {
+    let signing_key = SigningKey::from(private_key.clone());
     let digest = sha256_digest(payload);
-    let signature = EcdsaSig::sign(&digest, &private_key)?;
-
-    let (order, half_order) = curve_orders(&private_key)?;
-    let s = normalize_low_s(signature.s(), &order, &half_order)?;
-    let signature = EcdsaSig::from_private_components(signature.r().to_owned()?, s)?;
-    encode_p256_p1363_signature(&signature)
+    let signature: ecdsa::Signature<p256::NistP256> =
+        signing_key.sign_prehash_with_rng(&mut OsRng, &digest).map_err(|error| P256SignatureError::Crypto(error.to_string()))?;
+    Ok(encode_p256_p1363_signature(&signature.normalize_s()))
 }
 
 /// Verifies a SHA-256 + P-256 P-1363 signature.
 ///
 /// The SHA-256 hashing step is intentionally inside this helper to avoid callers
 /// accidentally hashing payloads twice.
-pub fn verify_p256_sha256_p1363(public_key: &PKey<Public>, payload: &[u8], signature: &[u8]) -> Result<bool, P256SignatureError> {
-    let public_key = public_key.ec_key()?;
-    ensure_p256_key(&public_key)?;
-
-    let (order, half_order) = curve_orders(&public_key)?;
+pub fn verify_p256_sha256_p1363(public_key: &VerifyingKey, payload: &[u8], signature: &[u8]) -> Result<bool, P256SignatureError> {
     let signature = decode_p256_p1363_signature(signature)?;
 
-    if !is_low_s(signature.s(), &order, &half_order) {
+    if signature.s().is_high().into() {
         return Err(P256SignatureError::NonCanonicalLowS);
     }
 
     let digest = sha256_digest(payload);
-    Ok(signature.verify(&digest, &public_key)?)
+    Ok(public_key.verify_prehash(&digest, &signature).is_ok())
 }
 
-/// Encodes an OpenSSL ECDSA signature as fixed-width P-1363 `r || s` bytes.
-pub fn encode_p256_p1363_signature(signature: &EcdsaSig) -> Result<[u8; P256_P1363_SIGNATURE_LENGTH], P256SignatureError> {
+/// Encodes an ECDSA P-256 signature as fixed-width P-1363 `r || s` bytes.
+pub fn encode_p256_p1363_signature(signature: &Signature) -> [u8; P256_P1363_SIGNATURE_LENGTH] {
+    let bytes = signature.to_bytes();
     let mut out = [0_u8; P256_P1363_SIGNATURE_LENGTH];
-    out[..P256_COORDINATE_LENGTH].copy_from_slice(&signature.r().to_vec_padded(P256_COORDINATE_LENGTH_I32)?);
-    out[P256_COORDINATE_LENGTH..].copy_from_slice(&signature.s().to_vec_padded(P256_COORDINATE_LENGTH_I32)?);
-    Ok(out)
+    out.copy_from_slice(&bytes);
+    out
 }
 
-/// Decodes fixed-width P-1363 `r || s` bytes into an OpenSSL ECDSA signature.
+/// Decodes fixed-width P-1363 `r || s` bytes into an ECDSA P-256 signature.
 ///
-/// This only enforces the fixed-width encoding. Verification helpers perform
-/// canonical low-S policy checks before asking OpenSSL to verify.
-pub fn decode_p256_p1363_signature(signature: &[u8]) -> Result<EcdsaSig, P256SignatureError> {
+/// This enforces the fixed-width encoding and rejects scalars outside the
+/// curve order. Verification helpers perform canonical low-S policy checks
+/// before asking the verifying key to verify.
+pub fn decode_p256_p1363_signature(signature: &[u8]) -> Result<Signature, P256SignatureError> {
     if signature.len() != P256_P1363_SIGNATURE_LENGTH {
         return Err(P256SignatureError::InvalidSignatureLength { actual: signature.len() });
     }
 
-    let r = BigNum::from_slice(&signature[..P256_COORDINATE_LENGTH])?;
-    let s = BigNum::from_slice(&signature[P256_COORDINATE_LENGTH..])?;
-    Ok(EcdsaSig::from_private_components(r, s)?)
+    Signature::from_slice(signature).map_err(|error| P256SignatureError::Crypto(error.to_string()))
 }
 
 fn sha256_digest(payload: &[u8]) -> [u8; 32] {
     Sha256::digest(payload).into()
 }
 
-fn ensure_p256_key<T: HasPublic>(key: &EcKey<T>) -> Result<(), P256SignatureError> {
-    let curve = key.group().curve_name().ok_or(P256SignatureError::UnsupportedCurve)?;
-    if curve == Nid::X9_62_PRIME256V1 { Ok(()) } else { Err(P256SignatureError::UnsupportedCurve) }
+/// Parses a stored device signing key into a P-256 secret key.
+///
+/// Identity-store records hold OpenSSL `private_key_to_der()` output, which is
+/// SEC1 for EC keys; PKCS#8 is also accepted for converted or future records.
+pub fn parse_p256_private_key_der(der: &[u8]) -> Result<SecretKey, P256SignatureError> {
+    SecretKey::from_pkcs8_der(der).or_else(|_| SecretKey::from_sec1_der(der)).map_err(|error| P256SignatureError::Crypto(error.to_string()))
 }
 
-fn curve_orders<T: HasPublic>(key: &EcKey<T>) -> Result<(BigNum, BigNum), P256SignatureError> {
-    let mut order = BigNum::new()?;
-    let mut half_order = BigNum::new()?;
-    let mut context = BigNumContext::new()?;
-    key.group().order(&mut order, &mut context)?;
-    half_order.rshift1(&order)?;
-    Ok((order, half_order))
+/// Parses a SubjectPublicKeyInfo DER blob into a P-256 verifying key.
+pub fn parse_p256_public_key_spki_der(spki_der: &[u8]) -> Result<VerifyingKey, P256SignatureError> {
+    let public_key = p256::PublicKey::from_public_key_der(spki_der).map_err(|error| P256SignatureError::Crypto(error.to_string()))?;
+    Ok(public_key.into())
 }
 
-fn normalize_low_s(s: &BigNumRef, order: &BigNumRef, half_order: &BigNumRef) -> Result<BigNum, P256SignatureError> {
-    if is_low_s(s, order, half_order) {
-        Ok(s.to_owned()?)
-    } else {
-        let mut normalized = order.to_owned()?;
-        normalized.checked_sub(order, s)?;
-        Ok(normalized)
+/// Extracts the P-256 verifying key from a DER X.509 certificate.
+///
+/// The SPKI algorithm must be `id-ecPublicKey` with the P-256 namedCurve;
+/// `DecodePublicKey` enforces both, matching the pre-migration OpenSSL
+/// `ec_key()`/`curve_name() == prime256v1` checks.
+pub fn parse_p256_public_key_cert_der(cert_der: &[u8]) -> Result<VerifyingKey, P256SignatureError> {
+    let (remaining, certificate) = x509_parser::certificate::X509Certificate::from_der(cert_der)
+        .map_err(|error| P256SignatureError::Crypto(format!("certificate parse failed: {error}")))?;
+    if !remaining.is_empty() {
+        return Err(P256SignatureError::Crypto("certificate DER has trailing bytes".to_owned()));
     }
-}
-
-fn is_low_s(s: &BigNumRef, order: &BigNumRef, half_order: &BigNumRef) -> bool {
-    if s.ucmp(order) != std::cmp::Ordering::Less {
-        return false;
-    }
-
-    matches!(s.ucmp(half_order), std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    let public_key =
+        p256::PublicKey::from_public_key_der(certificate.tbs_certificate.subject_pki.raw).map_err(|error| P256SignatureError::Crypto(error.to_string()))?;
+    Ok(public_key.into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::P256SignatureError;
-    use super::{
-        P256_P1363_SIGNATURE_LENGTH, curve_orders, decode_p256_p1363_signature, encode_p256_p1363_signature, sign_p256_sha256_p1363, verify_p256_sha256_p1363,
-    };
-    use openssl::bn::BigNum;
-    use openssl::ec::EcGroup;
-    use openssl::ec::EcKey;
-    use openssl::nid::Nid;
-    use openssl::pkey::{PKey, Private, Public};
+    use super::verify_p256_sha256_p1363;
+    use super::{P256_P1363_SIGNATURE_LENGTH, P256SignatureError, decode_p256_p1363_signature, encode_p256_p1363_signature, sign_p256_sha256_p1363};
+    use ecdsa::elliptic_curve::Generate as _;
+    use p256::SecretKey;
+    use p256::ecdsa::VerifyingKey;
     use sha2::{Digest, Sha256};
 
-    fn test_keys() -> Result<(PKey<Private>, PKey<Public>), openssl::error::ErrorStack> {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-        let private = EcKey::generate(&group)?;
-        let public = EcKey::from_public_key(&group, private.public_key())?;
-        Ok((PKey::from_ec_key(private)?, PKey::from_ec_key(public)?))
+    fn test_keys() -> (SecretKey, VerifyingKey) {
+        let private = SecretKey::generate_from_rng(&mut crate::os_rng::OsRng);
+        let public = private.public_key().into();
+        (private, public)
     }
 
     #[test]
-    fn p256_signature_is_64_bytes_and_rejects_wrong_key_or_tamper() -> Result<(), P256SignatureError> {
-        let (private, public) = test_keys()?;
+    fn p256_signature_is_64_bytes_and_rejects_wrong_key_or_tamper() {
+        let (private, public) = test_keys();
         let payload = b"deterministic payload";
 
-        let signature = sign_p256_sha256_p1363(&private, payload)?;
+        let signature = sign_p256_sha256_p1363(&private, payload).unwrap();
         assert_eq!(signature.len(), P256_P1363_SIGNATURE_LENGTH);
 
-        assert!(verify_p256_sha256_p1363(&public, payload, &signature)?);
-        assert!(!verify_p256_sha256_p1363(&public, &Sha256::digest(payload), &signature)?);
+        assert!(verify_p256_sha256_p1363(&public, payload, &signature).unwrap());
+        assert!(!verify_p256_sha256_p1363(&public, &Sha256::digest(payload), &signature).unwrap());
 
         let tampered_payload = b"tampered payload";
-        assert!(!verify_p256_sha256_p1363(&public, tampered_payload, &signature)?);
+        assert!(!verify_p256_sha256_p1363(&public, tampered_payload, &signature).unwrap());
 
-        let (_other_private, other_public) = test_keys()?;
-        assert!(!verify_p256_sha256_p1363(&other_public, payload, &signature)?);
-
-        Ok(())
+        let (_other_private, other_public) = test_keys();
+        assert!(!verify_p256_sha256_p1363(&other_public, payload, &signature).unwrap());
     }
 
     #[test]
-    fn p256_p1363_decode_requires_fixed_width() -> Result<(), P256SignatureError> {
-        let (private, _public) = test_keys()?;
-        let signature = sign_p256_sha256_p1363(&private, b"p1363 payload")?;
-        let decoded = decode_p256_p1363_signature(&signature)?;
+    fn p256_p1363_decode_requires_fixed_width() {
+        let (private, _public) = test_keys();
+        let signature = sign_p256_sha256_p1363(&private, b"p1363 payload").unwrap();
+        let decoded = decode_p256_p1363_signature(&signature).unwrap();
 
-        assert_eq!(encode_p256_p1363_signature(&decoded)?, signature);
+        assert_eq!(encode_p256_p1363_signature(&decoded), signature);
         assert!(matches!(
             decode_p256_p1363_signature(&signature[..P256_P1363_SIGNATURE_LENGTH - 1]),
             Err(P256SignatureError::InvalidSignatureLength { actual })
                 if actual == P256_P1363_SIGNATURE_LENGTH - 1
         ));
-
-        Ok(())
     }
 
     #[test]
-    fn p256_signature_nonces_are_csprng_non_deterministic() -> Result<(), P256SignatureError> {
-        let (private, _public) = test_keys()?;
+    fn p256_signature_nonces_are_csprng_non_deterministic() {
+        let (private, _public) = test_keys();
         let payload = b"nonce check payload";
 
-        let first = sign_p256_sha256_p1363(&private, payload)?;
-        let second = sign_p256_sha256_p1363(&private, payload)?;
+        let first = sign_p256_sha256_p1363(&private, payload).unwrap();
+        let second = sign_p256_sha256_p1363(&private, payload).unwrap();
 
-        // OpenSSL does not expose RFC 6979 selection for this API path, so
-        // nonces are provider-RNG backed; two signatures must differ.
+        // Signing is randomized (provider-RNG backed, no RFC 6979 selection),
+        // so two signatures must differ — the pre-migration OpenSSL behavior.
         assert_ne!(first, second);
-
-        Ok(())
     }
 
     #[test]
-    fn p256_verification_rejects_high_s_signature() -> Result<(), P256SignatureError> {
-        let (private, public) = test_keys()?;
+    fn p256_verification_rejects_high_s_signature() {
+        let (private, public) = test_keys();
         let payload = b"high-s check payload";
 
-        let signature = sign_p256_sha256_p1363(&private, payload)?;
+        let signature = sign_p256_sha256_p1363(&private, payload).unwrap();
+        let decoded = decode_p256_p1363_signature(&signature).unwrap();
 
-        let ec_private = private.ec_key()?;
-        let (order, half_order) = curve_orders(&ec_private)?;
-        let low_s = BigNum::from_slice(&signature[P256_P1363_SIGNATURE_LENGTH / 2..])?;
-        let mut high_s = BigNum::new()?;
-        high_s.checked_sub(&order, &low_s)?;
-        assert_eq!(high_s.ucmp(&half_order), std::cmp::Ordering::Greater);
-
+        // Invert s: order - s is necessarily high for a low-S input.
         let mut high_signature = signature;
-        high_signature[P256_P1363_SIGNATURE_LENGTH / 2..].copy_from_slice(&high_s.to_vec_padded(32)?);
+        let high_s = -decoded.s();
+        high_signature[P256_P1363_SIGNATURE_LENGTH / 2..].copy_from_slice(&high_s.to_bytes());
 
         let result = verify_p256_sha256_p1363(&public, payload, &high_signature);
         assert!(matches!(result, Err(P256SignatureError::NonCanonicalLowS)));
-
-        Ok(())
-    }
-
-    #[test]
-    fn p256_helpers_reject_non_p256_keys() {
-        let group = EcGroup::from_curve_name(Nid::SECP384R1).unwrap();
-        let private = EcKey::generate(&group).unwrap();
-        let public = EcKey::from_public_key(&group, private.public_key()).unwrap();
-        let private_key = PKey::from_ec_key(private).unwrap();
-        let public_key = PKey::from_ec_key(public).unwrap();
-
-        let signature = [0_u8; P256_P1363_SIGNATURE_LENGTH];
-        assert!(matches!(super::sign_p256_sha256_p1363(&private_key, b"payload"), Err(P256SignatureError::UnsupportedCurve)));
-        assert!(matches!(super::verify_p256_sha256_p1363(&public_key, b"payload", &signature), Err(P256SignatureError::UnsupportedCurve)));
     }
 }
