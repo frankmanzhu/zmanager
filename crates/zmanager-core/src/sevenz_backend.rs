@@ -526,31 +526,6 @@ pub fn extract_7z(
     extract_7z_inner(archive_path, destination, password, policy, None, None, None)
 }
 
-/// Extracts exactly one `.7z` entry by its archive-order index.
-pub fn extract_7z_entry_by_index(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    password: Option<&str>,
-    policy: ExtractionPolicy,
-    entry_index: usize,
-    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
-) -> Result<SevenZExtractReport, SevenZError> {
-    let archive_path = archive_path.as_ref();
-    let listing = list_7z(archive_path, password)?;
-    let entry = listing.entries.get(entry_index).ok_or_else(|| SevenZError::Io {
-        path: archive_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::NotFound, "retained 7z entry ID is not present in this archive"),
-    })?;
-    let occurrence = listing.entries[..entry_index].iter().filter(|candidate| candidate.name == entry.name).count();
-    // The shared planner still receives the archive metadata needed for link
-    // validation, but only this retained path may reserve a destination.
-    // Without this narrowing, repeated retained-entry operations treat files
-    // selected by earlier calls as future collisions.
-    let mut selected_policy = policy;
-    selected_policy.include_patterns = vec![entry.name.clone()];
-    extract_7z_inner(archive_path, destination, password, selected_policy, overwrite_resolver, None, Some((entry.name.as_str(), occurrence)))
-}
-
 /// Extracts one retained 7z entry by its stable archive path and duplicate
 /// occurrence.  Unlike the legacy index wrapper, this does not list the
 /// archive again before opening the extraction reader.
@@ -686,70 +661,6 @@ fn extract_7z_inner(
     apply_deferred_sevenz_directory_metadata(&deferred_directories)?;
 
     Ok(report)
-}
-
-/// Copies selected regular `.7z` file entries to a writer in archive order.
-///
-/// # Errors
-///
-/// Returns [`SevenZError`] when the archive cannot be read, a password is
-/// missing/incorrect, or output writing fails.
-pub fn copy_7z_files_to_writer<W: Write>(
-    archive_path: impl AsRef<Path>,
-    password: Option<&str>,
-    mut selected: impl FnMut(&str) -> bool,
-    output: &mut W,
-) -> Result<SevenZExtractReport, SevenZError> {
-    let archive_path = archive_path.as_ref();
-    let password = archive_password(password);
-    let source = open_7z_reader(archive_path)?;
-    let mut reader = ArchiveReader::new(source, password)?;
-    let mut report = SevenZExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
-    let mut callback_error = None;
-
-    let result = reader.for_each_entries(|entry, entry_reader| {
-        if entry.is_anti_item() || !selected(entry.name()) || entry.is_directory() {
-            if let Err(error) = drain_reader(entry_reader, entry.name()) {
-                return Err(callback_failed_with(&mut callback_error, error));
-            }
-            report.skipped_entries += 1;
-            return Ok(true);
-        }
-
-        match io::copy(entry_reader, output) {
-            Ok(copied) => {
-                report.written_entries += 1;
-                report.written_bytes += copied;
-                Ok(true)
-            }
-            Err(source) => Err(callback_failed_with(&mut callback_error, SevenZError::Io { path: PathBuf::from(entry.name()), source })),
-        }
-    });
-
-    if let Some(error) = callback_error {
-        return Err(error);
-    }
-    result?;
-
-    Ok(report)
-}
-
-/// Copies exactly one regular `.7z` entry by archive-order index.
-pub fn copy_7z_entry_by_index<W: Write + ?Sized>(
-    archive_path: impl AsRef<Path>,
-    password: Option<&str>,
-    entry_index: usize,
-    output: &mut W,
-) -> Result<u64, SevenZError> {
-    let archive_path = archive_path.as_ref();
-    let listing = list_7z(archive_path, password)?;
-    let target = listing.entries.get(entry_index).ok_or_else(|| SevenZError::Io {
-        path: archive_path.to_path_buf(),
-        source: io::Error::new(io::ErrorKind::NotFound, "retained 7z entry ID is not present in this archive"),
-    })?;
-    let target_occurrence = listing.entries[..entry_index].iter().filter(|candidate| candidate.name == target.name).count();
-    let target_name = target.name.clone();
-    copy_7z_entry_by_name_occurrence(archive_path, password, &target_name, target_occurrence, output)
 }
 
 /// Copies one retained regular 7z entry by its stable archive path and

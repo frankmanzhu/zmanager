@@ -58,6 +58,14 @@ check_absent "core exposes adapter implementation modules publicly" \
 check_absent "adapter descriptors allocate leaked metadata" \
     'Box::leak\(Box::new\(AdapterDescriptor' \
     "${repo_root}/crates/zmanager-core/src/engine"
+check_absent "production code masks dead code" \
+    '#\[allow\(dead_code\)\]' \
+    --glob '!test_support.rs' \
+    "${repo_root}/crates/zmanager-core/src" "${repo_root}/crates/zmanager-cli/src"
+check_absent "adapter error mapping bypasses the shared disposition rule" \
+    'SessionDisposition::Unusable' \
+    --glob '!mod.rs' \
+    "${repo_root}/crates/zmanager-core/src/engine/adapters"
 
 if [[ -d "${mobile_root}" ]]; then
     check_absent_any_file "mobile bridge scripts still request the removed auth feature" \

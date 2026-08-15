@@ -107,16 +107,6 @@ pub fn extract_pkg(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>
     extract_pkg_inner(archive_path, destination, policy, None, None)
 }
 
-/// Extracts a `.pkg` archive with context.
-pub fn extract_pkg_with_context(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    context: &mut JobContext<'_>,
-) -> Result<PkgExtractReport, PkgBackendError> {
-    extract_pkg_inner(archive_path, destination, policy, Some(context), None)
-}
-
 /// Decodes a component `Payload` into its underlying CPIO archive.
 ///
 /// Apple's `pkgbuild` produces a Payload compressed with one of several

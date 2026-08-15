@@ -68,7 +68,7 @@ pub(crate) trait ReadSeek: Read + Seek + Send {}
 impl<T: Read + Seek + Send> ReadSeek for T {}
 
 pub(crate) fn open_zip_reader(path: &Path) -> Result<Box<dyn ReadSeek>, ZipBackendError> {
-    let paths = crate::multi_volume::discover_multi_volume_paths(path);
+    let paths = crate::engine::source::discover_split_zip_volumes(path).unwrap_or_else(|| vec![path.to_path_buf()]);
     open_zip_reader_from_paths(&paths)
 }
 
@@ -630,18 +630,12 @@ fn unsupported_split_zip(reason: impl Into<String>) -> ZipBackendError {
 #[cfg(test)]
 mod tests {
     use super::{MIN_ZIP_VOLUME_SIZE_BYTES, ZIP_SPLIT_SIGNATURE};
-    use crate::manifest::{PlanOptions, plan_archive};
     use crate::safety::ExtractionPolicy;
     use crate::secrets::SecretString;
     use crate::test_support::TestDir;
-    use crate::zip_backend::{ZipBackendError, ZipCompression, ZipCreateOptions, ZipCreateReport, create_zip_from_manifest};
+    use crate::test_support::create_zip_fixture;
+    use crate::zip_backend::{ZipBackendError, ZipCompression, ZipCreateOptions};
     use std::fs;
-    use std::path::Path;
-
-    fn create_zip_fixture(source: impl AsRef<Path>, destination: impl AsRef<Path>, options: &ZipCreateOptions) -> Result<ZipCreateReport, ZipBackendError> {
-        let manifest = plan_archive(source, &PlanOptions::default())?;
-        create_zip_from_manifest(&manifest, destination, options)
-    }
 
     #[test]
     fn split_zip_round_trips_through_native_engine() {
@@ -784,14 +778,6 @@ mod tests {
     }
 
     fn deterministic_bytes(len: usize) -> Vec<u8> {
-        let mut state = 0x1234_5678_9abc_def0_u64;
-        (0..len)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                state.to_le_bytes()[0]
-            })
-            .collect()
+        crate::test_support::deterministic_bytes(len)
     }
 }

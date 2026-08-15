@@ -100,11 +100,6 @@ pub(crate) fn is_zip_family_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::Zip | ArchiveFormatKind::SplitZip)
 }
 
-#[allow(dead_code)]
-pub(crate) fn is_rar_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::Rar)
-}
-
 pub(crate) fn is_tar_zst_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::TarZst)
 }
@@ -119,36 +114,6 @@ pub(crate) fn is_tzap_archive(path: &str) -> bool {
 
 pub(crate) fn is_apple_archive(path: &str) -> bool {
     matches!(detect_archive_format(path), ArchiveFormatKind::AppleArchive)
-}
-
-#[allow(dead_code)]
-pub(crate) fn is_dmg_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::Dmg)
-}
-
-#[allow(dead_code)]
-pub(crate) fn is_pkg_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::Pkg)
-}
-
-#[allow(dead_code)]
-pub(crate) fn is_msi_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::Msi)
-}
-
-#[allow(dead_code)]
-pub(crate) fn is_vhd_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::Vhd)
-}
-
-#[allow(dead_code)]
-pub(crate) fn is_vmdk_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::Vmdk)
-}
-
-#[allow(dead_code)]
-pub(crate) fn is_udf_archive(path: &str) -> bool {
-    matches!(detect_archive_format(path), ArchiveFormatKind::Udf)
 }
 
 pub(crate) fn is_deb_archive(path: &str) -> bool {

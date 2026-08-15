@@ -4,8 +4,6 @@
 //! facade paths are private implementation aliases; consumers use the
 //! engine-owned protocol seam.
 
-#![allow(unused_imports)]
-
 mod display;
 mod extract;
 mod listing;
@@ -18,19 +16,17 @@ mod x509;
 mod tests;
 
 pub use display::{TzapPublicDisplaySummary, TzapPublicSignatureStatus, inspect_tzap_public_footer_signature, summarize_tzap_public_display};
+pub(crate) use extract::extract_tzap_file_to_destination;
 pub use extract::{
-    TzapExtractKeySource, TzapExtractReport, TzapExtractRequest, TzapFileExtractReport, TzapRestoreOptions, TzapRestorePolicy, copy_tzap_file_to_writer,
-    copy_tzap_files_to_writer, extract_tzap, extract_tzap_file_to_destination,
+    TzapExtractKeySource, TzapExtractReport, TzapExtractRequest, TzapRestoreOptions, TzapRestorePolicy, copy_tzap_file_to_writer, copy_tzap_files_to_writer,
+    extract_tzap,
 };
-pub use listing::{
-    TzapEntry, TzapEntryKind, TzapIndexEntry, TzapIndexListing, TzapListing, list_tzap_directory_with_optional_password,
-    list_tzap_index_with_optional_password, list_tzap_index_with_recipient_key, list_tzap_with_optional_password, list_tzap_with_password,
-    list_tzap_with_recipient_key,
-};
+pub use listing::{TzapEntryKind, TzapListing, list_tzap_with_optional_password, list_tzap_with_password, list_tzap_with_recipient_key};
+pub(crate) use listing::{list_tzap_index_with_optional_password, list_tzap_index_with_recipient_key};
 pub(crate) use open::discover_tzap_input_volume_paths;
 pub use open::is_tzap_archive_path;
-pub use open::{TzapPublicFormatSummary, TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume, summarize_tzap_public_metadata};
-pub use write::{TzapCreateOptions, TzapCreateReport, TzapKeySource, create_tzap_from_manifest_with_context};
+pub use open::{TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume, summarize_tzap_public_metadata};
+pub use write::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context};
 pub use x509::tzap_x509_signing_options_from_inventory;
 pub use x509::{
     TzapTestReport, TzapX509SignerInspection, TzapX509SigningOptions, TzapX509TrustOptions, TzapX509VerificationReport, inspect_tzap_x509_public_no_key_signer,

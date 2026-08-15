@@ -100,6 +100,27 @@ impl FormatId {
     pub const fn as_str(self) -> &'static str {
         self.0
     }
+
+    /// Maps this format to the extraction job-kind label used by product
+    /// progress surfaces.
+    ///
+    /// Pure display data: consumers never use the result for backend
+    /// selection or dispatch, so the format→label knowledge lives once on
+    /// the engine identity instead of being re-derived per consumer.
+    #[must_use]
+    pub fn extract_job_kind(self) -> crate::jobs::JobKind {
+        use crate::jobs::JobKind;
+        match self {
+            Self::ZIP | Self::SPLIT_ZIP => JobKind::ZipExtract,
+            Self::SEVEN_Z => JobKind::SevenZExtract,
+            Self::TAR_ZST => JobKind::TarZstdExtract,
+            Self::TZAP => JobKind::TzapExtract,
+            Self::RAR => JobKind::RarExtract,
+            Self::APPLE_ARCHIVE => JobKind::AppleArchiveExtract,
+            Self::RAW_STREAM => JobKind::RawStreamExtract,
+            _ => JobKind::ArchiveExtract,
+        }
+    }
 }
 
 impl fmt::Debug for FormatId {
@@ -116,42 +137,6 @@ impl fmt::Display for FormatId {
 
 impl From<ArchiveFormatKind> for Option<FormatId> {
     fn from(kind: ArchiveFormatKind) -> Self {
-        match kind {
-            ArchiveFormatKind::Zip => Some(FormatId::ZIP),
-            ArchiveFormatKind::SplitZip => Some(FormatId::SPLIT_ZIP),
-            ArchiveFormatKind::SevenZ => Some(FormatId::SEVEN_Z),
-            ArchiveFormatKind::TarZst => Some(FormatId::TAR_ZST),
-            ArchiveFormatKind::TarGz => Some(FormatId::TAR_GZ),
-            ArchiveFormatKind::Tar => Some(FormatId::TAR),
-            ArchiveFormatKind::TarBz2 => Some(FormatId::TAR_BZ2),
-            ArchiveFormatKind::TarXz => Some(FormatId::TAR_XZ),
-            ArchiveFormatKind::TarLzma => Some(FormatId::TAR_LZMA),
-            ArchiveFormatKind::TarLz => Some(FormatId::TAR_LZ),
-            ArchiveFormatKind::TarLzo => Some(FormatId::TAR_LZO),
-            ArchiveFormatKind::TarCompress => Some(FormatId::TAR_COMPRESS),
-            ArchiveFormatKind::TarLz4 => Some(FormatId::TAR_LZ4),
-            ArchiveFormatKind::TarLrz => Some(FormatId::TAR_LRZ),
-            ArchiveFormatKind::Iso => Some(FormatId::ISO),
-            ArchiveFormatKind::Cab => Some(FormatId::CAB),
-            ArchiveFormatKind::Cpio => Some(FormatId::CPIO),
-            ArchiveFormatKind::Rpm => Some(FormatId::RPM),
-            ArchiveFormatKind::Xar => Some(FormatId::XAR),
-            ArchiveFormatKind::Pkg => Some(FormatId::PKG),
-            ArchiveFormatKind::Dmg => Some(FormatId::DMG),
-            ArchiveFormatKind::Lha => Some(FormatId::LHA),
-            ArchiveFormatKind::Ar => Some(FormatId::AR),
-            ArchiveFormatKind::Warc => Some(FormatId::WARC),
-            ArchiveFormatKind::Mtree => Some(FormatId::MTREE),
-            ArchiveFormatKind::Tzap => Some(FormatId::TZAP),
-            ArchiveFormatKind::Rar => Some(FormatId::RAR),
-            ArchiveFormatKind::AppleArchive => Some(FormatId::APPLE_ARCHIVE),
-            ArchiveFormatKind::Deb => Some(FormatId::DEB),
-            ArchiveFormatKind::Msi => Some(FormatId::MSI),
-            ArchiveFormatKind::Vhd => Some(FormatId::VHD),
-            ArchiveFormatKind::Vmdk => Some(FormatId::VMDK),
-            ArchiveFormatKind::Udf => Some(FormatId::UDF),
-            ArchiveFormatKind::RawStream => Some(FormatId::RAW_STREAM),
-            ArchiveFormatKind::Unknown => None,
-        }
+        FormatId::from_archive_format_kind(kind)
     }
 }

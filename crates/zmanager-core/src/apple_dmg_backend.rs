@@ -158,16 +158,6 @@ pub fn extract_dmg(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>
     extract_dmg_inner(archive_path, destination, policy, None, None)
 }
 
-/// Extracts a `.dmg` archive with context.
-pub fn extract_dmg_with_context(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    context: &mut JobContext<'_>,
-) -> Result<DmgExtractReport, DmgBackendError> {
-    extract_dmg_inner(archive_path, destination, policy, Some(context), None)
-}
-
 fn extract_dmg_inner(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,

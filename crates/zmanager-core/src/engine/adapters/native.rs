@@ -17,7 +17,7 @@ use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory, ReadAdapter
 use crate::engine::source::{SourceAccess, SourceCursorFactory};
 use crate::engine::types::{
     ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
-    SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
+    SelectedExtractOptions, TestOptions, TestReport,
 };
 use crate::msi_backend;
 use crate::rar_backend;
@@ -391,7 +391,7 @@ fn map_tar_entries(entries: Vec<crate::tar_backend::TarEntry>, method: &str) -> 
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: entry.kind,
             size: entry.size,
@@ -413,12 +413,7 @@ fn tar_error(path: &std::path::Path, error: &crate::tar_backend::TarError) -> Ar
         crate::tar_backend::TarError::Io { .. } => ErrorKind::Io,
         crate::tar_backend::TarError::MissingLinkTarget { .. } => ErrorKind::CorruptData,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 static AR_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
@@ -566,12 +561,7 @@ fn deb_error(path: &std::path::Path, error: &crate::deb_backend::DebError) -> Ar
         crate::deb_backend::DebError::Io { .. } => ErrorKind::Io,
         crate::deb_backend::DebError::MissingMember { .. } => ErrorKind::CorruptData,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native RPM container adapter composing the bounded RPM reader with CPIO.
@@ -640,12 +630,7 @@ fn rpm_error(path: &std::path::Path, error: &crate::rpm_backend::RpmError) -> Ar
             }
         },
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native single-cabinet adapter backed by the maintained CAB reader.
@@ -700,7 +685,7 @@ fn map_cab_entries(entries: Vec<crate::cab_backend::CabEntry>) -> Vec<EngineEntr
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: BrowserEntryKind::File,
             size: Some(entry.size),
@@ -721,12 +706,7 @@ fn cab_error(path: &std::path::Path, error: &crate::cab_backend::CabError) -> Ar
         crate::cab_backend::CabError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::cab_backend::CabError::Cancelled => ErrorKind::Cancelled,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native XAR adapter backed by the standalone `xara` reader.
@@ -781,7 +761,7 @@ fn map_xar_entries(entries: Vec<crate::xar_backend::XarEntry>) -> Vec<EngineEntr
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: entry.kind,
             size: Some(entry.size),
@@ -800,12 +780,7 @@ fn xar_error(path: &std::path::Path, error: &crate::xar_backend::XarError) -> Ar
         crate::xar_backend::XarError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::xar_backend::XarError::Cancelled => ErrorKind::Cancelled,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native LHA/LZH adapter backed by `delharc`.
@@ -860,7 +835,7 @@ fn map_lha_entries(entries: Vec<crate::lha_backend::LhaEntry>) -> Vec<EngineEntr
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: entry.kind,
             size: Some(entry.size),
@@ -879,12 +854,7 @@ fn lha_error(path: &std::path::Path, error: &crate::lha_backend::LhaError) -> Ar
         crate::lha_backend::LhaError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::lha_backend::LhaError::Cancelled => ErrorKind::Cancelled,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native WARC adapter backed by the streaming `warc` reader.
@@ -939,7 +909,7 @@ fn map_warc_entries(entries: Vec<crate::warc_backend::WarcEntry>) -> Vec<EngineE
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: BrowserEntryKind::File,
             size: Some(entry.size),
@@ -958,12 +928,7 @@ fn warc_error(path: &std::path::Path, error: &crate::warc_backend::WarcError) ->
         crate::warc_backend::WarcError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::warc_backend::WarcError::Cancelled => ErrorKind::Cancelled,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native MTREE manifest adapter backed by the `mtree` parser.
@@ -1000,7 +965,7 @@ fn map_mtree_entries(entries: Vec<crate::mtree_backend::MtreeEntry>) -> Vec<Engi
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: entry.kind,
             size: entry.size,
@@ -1020,12 +985,7 @@ fn mtree_error(path: &std::path::Path, error: &crate::mtree_backend::MtreeError)
         crate::mtree_backend::MtreeError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
         crate::mtree_backend::MtreeError::Cancelled => ErrorKind::Cancelled,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native CPIO reader adapter.
@@ -1039,14 +999,14 @@ impl NativeReadAdapter for CpioListAdapter {
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let path = archive.primary_path();
-        let (_temporary, source) = cpio_source(path)?;
+        let (_temporary, source) = cpio_source(archive)?;
         let entries = crate::cpio_backend::list(&source).map_err(|error| cpio_error(path, &error))?;
         Ok(ArchiveListing { entries: map_cpio_entries(entries) })
     }
 
     fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
         let path = archive.primary_path();
-        let (_temporary, source) = cpio_source(path)?;
+        let (_temporary, source) = cpio_source(archive)?;
         let report = crate::cpio_backend::test(&source, test_options).map_err(|error| cpio_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
@@ -1058,7 +1018,7 @@ impl NativeReadAdapter for CpioListAdapter {
 
     fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
-        let (_temporary, source) = cpio_source(path)?;
+        let (_temporary, source) = cpio_source(archive)?;
         let report = crate::cpio_backend::extract(
             &source,
             &options.destination,
@@ -1079,7 +1039,7 @@ impl NativeReadAdapter for CpioListAdapter {
     ) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let (_temporary, source) = cpio_source(path)?;
+        let (_temporary, source) = cpio_source(archive)?;
         let report = crate::cpio_backend::extract_by_path_occurrence(
             &source,
             &options.destination,
@@ -1096,22 +1056,26 @@ impl NativeReadAdapter for CpioListAdapter {
     fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let (_temporary, source) = cpio_source(path)?;
+        let (_temporary, source) = cpio_source(archive)?;
         let written_bytes =
             crate::cpio_backend::copy_by_path_occurrence(&source, &selector.path, selector.occurrence, writer).map_err(|error| cpio_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
 
-fn cpio_source(path: &std::path::Path) -> Result<(Option<crate::temp_names::TemporaryDirectory>, std::path::PathBuf), ArchiveError> {
+fn cpio_source(archive: &NativeReadContext) -> Result<(Option<crate::temp_names::TemporaryDirectory>, std::path::PathBuf), ArchiveError> {
+    let path = archive.primary_path();
     let Some(format) = cpio_compression(path) else {
         return Ok((None, path.to_path_buf()));
     };
     let temporary =
         crate::temp_names::TemporaryDirectory::new("cpio-decode").map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
     let decoded_path = temporary.path().join("payload.cpio");
-    let mut decoder =
-        raw_stream_backend::open_decoder(path, format).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+    let mut decoder = {
+        let file = archive.open_primary_file()?;
+        raw_stream_backend::open_decoder_from_reader(file, format, path)
+            .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?
+    };
     let mut output = File::create(&decoded_path).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
     std::io::copy(&mut decoder, &mut output).map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
     output.flush().map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
@@ -1139,7 +1103,7 @@ fn map_cpio_entries(entries: Vec<crate::cpio_backend::CpioEntry>) -> Vec<EngineE
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: entry.kind,
             size: Some(entry.size),
@@ -1159,12 +1123,7 @@ fn cpio_error(path: &std::path::Path, error: &crate::cpio_backend::CpioError) ->
         crate::cpio_backend::CpioError::Io { .. } => ErrorKind::Io,
         crate::cpio_backend::CpioError::Invalid { .. } => ErrorKind::CorruptData,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 /// Native AR reader adapter.
@@ -1241,7 +1200,7 @@ fn map_ar_entries(entries: Vec<crate::ar_backend::ArEntry>) -> Vec<EngineEntry> 
     entries
         .into_iter()
         .map(|entry| EngineEntry {
-            id: EntryId(u64::try_from(entry.index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(entry.index),
             path: entry.path,
             kind: BrowserEntryKind::File,
             size: Some(entry.size),
@@ -1259,12 +1218,7 @@ fn ar_error(path: &std::path::Path, error: &crate::ar_backend::ArError) -> Archi
         crate::ar_backend::ArError::Io { .. } => ErrorKind::Io,
         crate::ar_backend::ArError::Invalid { .. } => ErrorKind::CorruptData,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 static TAR_BZ2_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
@@ -1346,11 +1300,14 @@ impl FilteredTarAdapter {
         Self { format, decoder, method }
     }
 
-    fn open_reader(&self, path: &std::path::Path) -> Result<Box<dyn Read>, ArchiveError> {
+    fn open_reader(&self, archive: &NativeReadContext) -> Result<Box<dyn Read>, ArchiveError> {
+        let path = archive.primary_path();
         if matches!(
             self.decoder,
             raw_stream_backend::RawStreamFormat::Lzo | raw_stream_backend::RawStreamFormat::UnixCompress | raw_stream_backend::RawStreamFormat::Lrzip
         ) {
+            // Tool-backed decoders spawn external processes that read the
+            // source by path, so this branch is path-based by design.
             let temporary = crate::temp_names::TemporaryDirectory::new("tar-filter")
                 .map_err(|error| ArchiveError::usable(ErrorKind::Io, error.to_string()).with_path(path))?;
             let decoded_path = temporary.path().join("decoded.tar");
@@ -1362,7 +1319,9 @@ impl FilteredTarAdapter {
             return Ok(Box::new(TemporaryTarReader { _temporary: temporary, reader }));
         }
 
-        raw_stream_backend::open_decoder(path, self.decoder).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))
+        let file = archive.open_primary_file()?;
+        raw_stream_backend::open_decoder_from_reader(file, self.decoder, path)
+            .map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))
     }
 }
 
@@ -1394,14 +1353,14 @@ impl NativeReadAdapter for FilteredTarAdapter {
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let path = archive.primary_path();
-        let reader = self.open_reader(path)?;
+        let reader = self.open_reader(archive)?;
         let entries = crate::tar_backend::list(reader, path).map_err(|error| tar_error(path, &error))?;
         Ok(ArchiveListing { entries: map_tar_entries(entries, self.method) })
     }
 
     fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
         let path = archive.primary_path();
-        let reader = self.open_reader(path)?;
+        let reader = self.open_reader(archive)?;
         let report = crate::tar_backend::test(reader, path, |entry_path| test_options.selects(entry_path), || test_options.is_cancelled())
             .map_err(|error| tar_error(path, &error))?;
         Ok(TestReport {
@@ -1414,7 +1373,7 @@ impl NativeReadAdapter for FilteredTarAdapter {
 
     fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
-        let reader = self.open_reader(path)?;
+        let reader = self.open_reader(archive)?;
         let report = crate::tar_backend::extract(
             reader,
             path,
@@ -1436,7 +1395,7 @@ impl NativeReadAdapter for FilteredTarAdapter {
     ) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let reader = self.open_reader(path)?;
+        let reader = self.open_reader(archive)?;
         let report = crate::tar_backend::extract_by_path_occurrence(
             reader,
             path,
@@ -1453,7 +1412,7 @@ impl NativeReadAdapter for FilteredTarAdapter {
     fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let reader = self.open_reader(path)?;
+        let reader = self.open_reader(archive)?;
         let written_bytes = crate::tar_backend::copy_by_path_occurrence(
             reader,
             path,
@@ -1482,24 +1441,114 @@ fn tzap_timestamp_string(seconds: i64, nanoseconds: u32) -> Option<String> {
 }
 
 fn sevenz_archive_error(error: sevenz_backend::SevenZError, path: &std::path::Path) -> ArchiveError {
-    match error {
-        sevenz_backend::SevenZError::PasswordRequired => {
-            ArchiveError::usable(ErrorKind::PasswordRequired, "password required to decrypt 7z data").with_path(path)
-        }
-        sevenz_backend::SevenZError::InvalidPassword => ArchiveError::usable(ErrorKind::WrongPassword, "provided 7z password is incorrect").with_path(path),
-        sevenz_backend::SevenZError::Io { path, source } => ArchiveError::usable(ErrorKind::Io, source.to_string()).with_path(path),
+    let (kind, message) = match error {
+        sevenz_backend::SevenZError::PasswordRequired => (ErrorKind::PasswordRequired, "password required to decrypt 7z data".to_string()),
+        sevenz_backend::SevenZError::InvalidPassword => (ErrorKind::WrongPassword, "provided 7z password is incorrect".to_string()),
+        sevenz_backend::SevenZError::Io { source, .. } => (ErrorKind::Io, source.to_string()),
         sevenz_backend::SevenZError::Safety(source) => {
             let kind = crate::engine::adapters::safety_error_kind(&source);
-            ArchiveError::usable(kind, source.to_string()).with_path(path)
+            (kind, source.to_string())
         }
-        sevenz_backend::SevenZError::Cancelled => ArchiveError::usable(ErrorKind::Cancelled, "7z operation was cancelled").with_path(path),
+        sevenz_backend::SevenZError::Cancelled => (ErrorKind::Cancelled, "7z operation was cancelled".to_string()),
         sevenz_backend::SevenZError::VolumeSizeTooSmall { size, minimum } => {
-            ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("7z volume size {size} bytes is smaller than the minimum {minimum} bytes"))
-                .with_path(path)
+            (ErrorKind::CorruptData, format!("7z volume size {size} bytes is smaller than the minimum {minimum} bytes"))
         }
-        sevenz_backend::SevenZError::Plan(source) => ArchiveError::usable(ErrorKind::InvalidFormat, source.to_string()).with_path(path),
-        sevenz_backend::SevenZError::SevenZ(source) => ArchiveError::usable(ErrorKind::InvalidFormat, source.to_string()).with_path(path),
-    }
+        sevenz_backend::SevenZError::Plan(source) => (ErrorKind::InvalidFormat, source.to_string()),
+        sevenz_backend::SevenZError::SevenZ(source) => (ErrorKind::CorruptData, source.to_string()),
+    };
+    crate::engine::adapters::adapter_error(path, kind, message)
+}
+
+fn tzap_error(path: &std::path::Path, error: &crate::tzap::TzapError) -> ArchiveError {
+    let kind = match error {
+        crate::tzap::TzapError::PasswordRequired | crate::tzap::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
+        crate::tzap::TzapError::Cancelled => ErrorKind::Cancelled,
+        crate::tzap::TzapError::Io { .. } => ErrorKind::Io,
+        crate::tzap::TzapError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        _ => ErrorKind::CorruptData,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
+}
+
+fn rar_error(path: &std::path::Path, error: &rar_backend::RarBackendError) -> ArchiveError {
+    let message = error.to_string();
+    // The existing RAR bridge intentionally reports both a missing and a
+    // rejected password through the same message path; preserve that
+    // compatibility while keeping the typed distinction for formats whose
+    // backends expose it.
+    let kind = if message.to_lowercase().contains("password") {
+        ErrorKind::WrongPassword
+    } else {
+        match error {
+            rar_backend::RarBackendError::Io { .. } => ErrorKind::Io,
+            rar_backend::RarBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+            rar_backend::RarBackendError::Unrar(_)
+            | rar_backend::RarBackendError::MissingLinkTarget { .. }
+            | rar_backend::RarBackendError::InvalidLinkTarget { .. }
+            | rar_backend::RarBackendError::DictionaryTooLarge { .. } => ErrorKind::CorruptData,
+        }
+    };
+    crate::engine::adapters::adapter_error(path, kind, message)
+}
+
+fn raw_stream_error(path: &std::path::Path, error: &raw_stream_backend::RawStreamError) -> ArchiveError {
+    let kind = match error {
+        raw_stream_backend::RawStreamError::Io { .. } => ErrorKind::Io,
+        raw_stream_backend::RawStreamError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        raw_stream_backend::RawStreamError::MissingOutputName { .. } => ErrorKind::InvalidFormat,
+        raw_stream_backend::RawStreamError::ExternalToolUnavailable { .. } => ErrorKind::UnsupportedOperation,
+        raw_stream_backend::RawStreamError::ExternalToolFailed { .. } => ErrorKind::CorruptData,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
+}
+
+fn apple_archive_error(path: &std::path::Path, error: &apple_archive_backend::AppleArchiveError) -> ArchiveError {
+    let kind = match error {
+        apple_archive_backend::AppleArchiveError::Unsupported => ErrorKind::UnsupportedOperation,
+        apple_archive_backend::AppleArchiveError::Cancelled => ErrorKind::Cancelled,
+        apple_archive_backend::AppleArchiveError::Io { .. } => ErrorKind::Io,
+        apple_archive_backend::AppleArchiveError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        apple_archive_backend::AppleArchiveError::Plan(_) => ErrorKind::InvalidFormat,
+        apple_archive_backend::AppleArchiveError::Native(_)
+        | apple_archive_backend::AppleArchiveError::MissingLinkTarget { .. }
+        | apple_archive_backend::AppleArchiveError::MissingFileData { .. }
+        | apple_archive_backend::AppleArchiveError::EntryNotFound { .. }
+        | apple_archive_backend::AppleArchiveError::StdoutSelectionNotSingleFile { .. } => ErrorKind::CorruptData,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
+}
+
+fn dmg_error(path: &std::path::Path, error: &apple_dmg_backend::DmgBackendError) -> ArchiveError {
+    let kind = match error {
+        apple_dmg_backend::DmgBackendError::Plan(_) => ErrorKind::InvalidFormat,
+        apple_dmg_backend::DmgBackendError::Io { .. } => ErrorKind::Io,
+        apple_dmg_backend::DmgBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        apple_dmg_backend::DmgBackendError::Cancelled => ErrorKind::Cancelled,
+        apple_dmg_backend::DmgBackendError::Dpp(_) => ErrorKind::CorruptData,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
+}
+
+fn pkg_error(path: &std::path::Path, error: &apple_pkg_backend::PkgBackendError) -> ArchiveError {
+    let kind = match error {
+        apple_pkg_backend::PkgBackendError::Plan(_) => ErrorKind::InvalidFormat,
+        apple_pkg_backend::PkgBackendError::Io { .. } => ErrorKind::Io,
+        apple_pkg_backend::PkgBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        apple_pkg_backend::PkgBackendError::Cancelled => ErrorKind::Cancelled,
+        apple_pkg_backend::PkgBackendError::Xara(_) | apple_pkg_backend::PkgBackendError::Pbzx(_) => ErrorKind::CorruptData,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
+}
+
+fn msi_error(path: &std::path::Path, error: &msi_backend::MsiBackendError) -> ArchiveError {
+    let kind = match error {
+        msi_backend::MsiBackendError::Plan(_) => ErrorKind::InvalidFormat,
+        msi_backend::MsiBackendError::Io { .. } => ErrorKind::Io,
+        msi_backend::MsiBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        msi_backend::MsiBackendError::Cancelled => ErrorKind::Cancelled,
+        msi_backend::MsiBackendError::Msi(_) | msi_backend::MsiBackendError::Cab(_) => ErrorKind::CorruptData,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 // --- 7z ---
@@ -1529,7 +1578,7 @@ impl NativeReadAdapter for SevenZListAdapter {
             .into_iter()
             .enumerate()
             .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.name,
                 kind: match entry.kind {
                     sevenz_backend::SevenZEntryKind::File => BrowserEntryKind::File,
@@ -1577,22 +1626,7 @@ impl NativeReadAdapter for SevenZListAdapter {
         } else {
             sevenz_backend::extract_7z(path, &options.destination, archive.options().password.as_deref(), options.policy.clone())
         }
-        .map_err(|error| {
-            let kind = match error {
-                sevenz_backend::SevenZError::PasswordRequired => ErrorKind::PasswordRequired,
-                sevenz_backend::SevenZError::InvalidPassword => ErrorKind::WrongPassword,
-                sevenz_backend::SevenZError::Io { .. } => ErrorKind::Io,
-                sevenz_backend::SevenZError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
-                sevenz_backend::SevenZError::Cancelled => ErrorKind::Cancelled,
-                _ => ErrorKind::CorruptData,
-            };
-            ArchiveError {
-                kind,
-                message: error.to_string(),
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
+        .map_err(|error| sevenz_archive_error(error, path))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -1752,7 +1786,7 @@ impl NativeReadAdapter for TzapListAdapter {
             Some(recipient_key) => tzap::list_tzap_index_with_recipient_key(primary_path, recipient_key),
             None => tzap::list_tzap_index_with_optional_password(primary_path, archive.options().password.as_deref()),
         }
-        .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
+        .map_err(|error| tzap_error(primary_path, &error))?;
 
         let encrypted = listing.encrypted;
         let method = if encrypted {
@@ -1769,7 +1803,7 @@ impl NativeReadAdapter for TzapListAdapter {
             .into_iter()
             .enumerate()
             .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
                 kind: match entry.kind {
                     tzap::TzapEntryKind::File => BrowserEntryKind::File,
@@ -1815,16 +1849,7 @@ impl NativeReadAdapter for TzapListAdapter {
                 trust.as_ref(),
             )
         }
-        .map_err(|error| {
-            let kind = match error {
-                tzap::TzapError::PasswordRequired | tzap::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
-                tzap::TzapError::Cancelled => ErrorKind::Cancelled,
-                tzap::TzapError::Io { .. } => ErrorKind::Io,
-                _ => ErrorKind::CorruptData,
-            };
-            let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
-            ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
-        })?;
+        .map_err(|error| tzap_error(path, &error))?;
         let mut warnings = Vec::new();
         if let Some(root_auth) = report.x509_root_auth {
             warnings.push(format!("TZAP root-auth verified for {}", root_auth.subject));
@@ -1861,20 +1886,7 @@ impl NativeReadAdapter for TzapListAdapter {
             path,
             &options.destination,
         )
-        .map_err(|error| {
-            let kind = match error {
-                tzap::TzapError::PasswordRequired | tzap::TzapError::RecipientKeyRequired => ErrorKind::PasswordRequired,
-                tzap::TzapError::Cancelled => ErrorKind::Cancelled,
-                tzap::TzapError::Io { .. } => ErrorKind::Io,
-                _ => ErrorKind::CorruptData,
-            };
-            ArchiveError {
-                kind,
-                message: error.to_string(),
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
+        .map_err(|error| tzap_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -1886,7 +1898,7 @@ impl NativeReadAdapter for TzapListAdapter {
     ) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let destination_path = options.destination.join(selector.path.replace('\\', "/").trim_matches('/'));
+        let destination_path = options.destination.join(&selector.path);
         // The retained selector comes from the original engine listing.  The
         // TZAP file operation resolves that exact path inside a newly opened
         // reader without re-listing or treating the engine ID as a fresh index.
@@ -1913,7 +1925,7 @@ impl NativeReadAdapter for TzapListAdapter {
             options.policy.overwrite == crate::safety::OverwritePolicy::Replace,
             options.tzap_restore_options.unwrap_or_default().into(),
         )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| tzap_error(path, &error))?;
         let Some(report) = report else {
             return Ok(ExtractReport { skipped_entries: 1, ..ExtractReport::default() });
         };
@@ -1927,7 +1939,7 @@ impl NativeReadAdapter for TzapListAdapter {
             || tzap::TzapExtractKeySource::Password(archive.options().password.as_deref().unwrap_or("")),
             tzap::TzapExtractKeySource::RecipientKeyPath,
         );
-        let report = tzap::copy_tzap_file_to_writer(path, key, &selector.path, writer).map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        let report = tzap::copy_tzap_file_to_writer(path, key, &selector.path, writer).map_err(|error| tzap_error(path, &error))?;
         Ok(CopyReport { written_bytes: report.written_bytes })
     }
 }
@@ -1952,27 +1964,15 @@ impl NativeReadAdapter for RarListAdapter {
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
-        let listing = rar_backend::list_rar_with_password(primary_path, archive.options().password.as_deref()).map_err(|err| {
-            let msg = err.to_string();
-            let lower = msg.to_lowercase();
-            if lower.contains("password") {
-                // The existing RAR bridge intentionally reports both a missing
-                // and a rejected password as invalid_password; preserve that
-                // compatibility while keeping the distinction for formats
-                // whose backends expose it.
-                ArchiveError::usable(ErrorKind::WrongPassword, msg)
-            } else {
-                ArchiveError::usable(ErrorKind::InvalidFormat, msg)
-            }
-            .with_path(primary_path)
-        })?;
+        let listing =
+            rar_backend::list_rar_with_password(primary_path, archive.options().password.as_deref()).map_err(|error| rar_error(primary_path, &error))?;
 
         let entries = listing
             .entries
             .into_iter()
             .enumerate()
             .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
                 kind: match entry.kind {
                     rar_backend::RarListEntryKind::File => BrowserEntryKind::File,
@@ -2001,18 +2001,7 @@ impl NativeReadAdapter for RarListAdapter {
     fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
         let path = archive.primary_path();
         let report = rar_backend::test_rar_with_password_filter(path, archive.options().password.as_deref(), |entry_path| test_options.selects(entry_path))
-            .map_err(|error| {
-                let message = error.to_string();
-                let kind = if message.to_lowercase().contains("password") {
-                    ErrorKind::WrongPassword
-                } else if matches!(error, rar_backend::RarBackendError::Io { .. }) {
-                    ErrorKind::Io
-                } else {
-                    ErrorKind::CorruptData
-                };
-                let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
-                ArchiveError { kind, message, disposition, path: Some(path.to_path_buf()) }
-            })?;
+            .map_err(|error| rar_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
             skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
@@ -2034,23 +2023,7 @@ impl NativeReadAdapter for RarListAdapter {
         } else {
             rar_backend::extract_rar_with_password(path, &options.destination, options.policy.clone(), archive.options().password.as_deref())
         }
-        .map_err(|error| {
-            let message = error.to_string();
-            let lower = message.to_lowercase();
-            let kind = if lower.contains("password") {
-                ErrorKind::WrongPassword
-            } else if matches!(error, rar_backend::RarBackendError::Io { .. }) {
-                ErrorKind::Io
-            } else {
-                ErrorKind::CorruptData
-            };
-            ArchiveError {
-                kind,
-                message,
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
+        .map_err(|error| rar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -2071,22 +2044,7 @@ impl NativeReadAdapter for RarListAdapter {
             selector.occurrence,
             options.overwrite_resolver.as_deref_mut(),
         )
-        .map_err(|error| {
-            let message = error.to_string();
-            let kind = if message.to_lowercase().contains("password") {
-                ErrorKind::WrongPassword
-            } else if matches!(error, rar_backend::RarBackendError::Io { .. }) {
-                ErrorKind::Io
-            } else {
-                ErrorKind::CorruptData
-            };
-            ArchiveError {
-                kind,
-                message,
-                disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
+        .map_err(|error| rar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -2095,7 +2053,7 @@ impl NativeReadAdapter for RarListAdapter {
         let selector = archive.selected_entry_selector(entry_id)?;
         let written_bytes =
             rar_backend::copy_rar_entry_by_path_occurrence(path, archive.options().password.as_deref(), &selector.path, selector.occurrence, writer)
-                .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+                .map_err(|error| rar_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -2126,7 +2084,7 @@ impl NativeReadAdapter for RawStreamListAdapter {
         let payload_name = raw_stream_backend::output_name_for_raw_stream(primary_path, format)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Could not determine raw stream output name").with_path(primary_path))?;
 
-        let metadata = std::fs::metadata(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::Io, err.to_string()).with_path(primary_path))?;
+        let metadata = archive.open_primary_file()?.metadata().map_err(|err| ArchiveError::usable(ErrorKind::Io, err.to_string()).with_path(primary_path))?;
 
         let entry = EngineEntry {
             id: EntryId(0),
@@ -2156,12 +2114,7 @@ impl NativeReadAdapter for RawStreamListAdapter {
         if !test_options.selects(&payload_name) {
             return Ok(TestReport { tested_entries: 0, skipped_entries: 1, tested_bytes: 0, warnings: Vec::new() });
         }
-        let tested_bytes = raw_stream_backend::test_raw_stream(path, format).map_err(|error| ArchiveError {
-            kind: ErrorKind::CorruptData,
-            message: error.to_string(),
-            disposition: SessionDisposition::Unusable,
-            path: Some(path.to_path_buf()),
-        })?;
+        let tested_bytes = raw_stream_backend::test_raw_stream(path, format).map_err(|error| raw_stream_error(path, &error))?;
         Ok(TestReport { tested_entries: 1, skipped_entries: 0, tested_bytes, warnings: Vec::new() })
     }
 
@@ -2174,19 +2127,7 @@ impl NativeReadAdapter for RawStreamListAdapter {
         } else {
             raw_stream_backend::extract_raw_stream(path, format, &options.destination, options.policy.clone())
         }
-        .map_err(|error| {
-            let kind = match error {
-                raw_stream_backend::RawStreamError::Safety(ref source) => crate::engine::adapters::safety_error_kind(source),
-                raw_stream_backend::RawStreamError::Io { .. } => ErrorKind::Io,
-                _ => ErrorKind::CorruptData,
-            };
-            ArchiveError {
-                kind,
-                message: error.to_string(),
-                disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-                path: Some(path.to_path_buf()),
-            }
-        })?;
+        .map_err(|error| raw_stream_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -2208,7 +2149,7 @@ impl NativeReadAdapter for RawStreamListAdapter {
         } else {
             raw_stream_backend::extract_raw_stream(path, format, &options.destination, options.policy.clone())
         }
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| raw_stream_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -2220,8 +2161,7 @@ impl NativeReadAdapter for RawStreamListAdapter {
         let path = archive.primary_path();
         let format = raw_stream_backend::detect_raw_stream_format(path)
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, "Not a recognized raw compression stream").with_path(path))?;
-        let written_bytes =
-            raw_stream_backend::copy_raw_stream_to_writer(path, format, writer).map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        let written_bytes = raw_stream_backend::copy_raw_stream_to_writer(path, format, writer).map_err(|error| raw_stream_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
 }
@@ -2247,14 +2187,14 @@ impl NativeReadAdapter for AppleArchiveListAdapter {
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
         let listing = apple_archive_backend::list_apple_archive(primary_path, archive.options().password.as_deref())
-            .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
+            .map_err(|error| apple_archive_error(primary_path, &error))?;
 
         let entries = listing
             .entries
             .into_iter()
             .enumerate()
             .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
                 kind: match entry.kind {
                     apple_archive_backend::AppleArchiveEntryKind::File => BrowserEntryKind::File,
@@ -2282,16 +2222,7 @@ impl NativeReadAdapter for AppleArchiveListAdapter {
         let path = archive.primary_path();
         let report =
             apple_archive_backend::test_apple_archive_filter(path, |entry_path| test_options.selects(entry_path), archive.options().password.as_deref())
-                .map_err(|error| {
-                    let kind = match error {
-                        apple_archive_backend::AppleArchiveError::Unsupported => ErrorKind::UnsupportedOperation,
-                        apple_archive_backend::AppleArchiveError::Cancelled => ErrorKind::Cancelled,
-                        apple_archive_backend::AppleArchiveError::Io { .. } => ErrorKind::Io,
-                        _ => ErrorKind::CorruptData,
-                    };
-                    let disposition = if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable };
-                    ArchiveError { kind, message: error.to_string(), disposition, path: Some(path.to_path_buf()) }
-                })?;
+                .map_err(|error| apple_archive_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
             skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
@@ -2313,7 +2244,7 @@ impl NativeReadAdapter for AppleArchiveListAdapter {
         } else {
             apple_archive_backend::extract_apple_archive(path, &options.destination, options.policy.clone(), archive.options().password.as_deref())
         }
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| apple_archive_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -2332,7 +2263,7 @@ impl NativeReadAdapter for AppleArchiveListAdapter {
             options.policy.clone(),
             archive.options().password.as_deref(),
         )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| apple_archive_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -2354,7 +2285,7 @@ impl NativeReadAdapter for AppleArchiveListAdapter {
             writer,
             archive.options().password.as_deref(),
         )
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| apple_archive_error(path, &error))?;
         Ok(CopyReport { written_bytes: report.written_bytes })
     }
 }
@@ -2379,14 +2310,13 @@ impl NativeReadAdapter for DmgListAdapter {
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
-        let raw_entries =
-            apple_dmg_backend::list_dmg(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
+        let raw_entries = apple_dmg_backend::list_dmg(primary_path).map_err(|error| dmg_error(primary_path, &error))?;
 
         let entries = raw_entries
             .into_iter()
             .enumerate()
             .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
                 kind: BrowserEntryKind::File,
                 size: Some(entry.size),
@@ -2412,7 +2342,7 @@ impl NativeReadAdapter for DmgListAdapter {
         } else {
             apple_dmg_backend::extract_dmg(path, &options.destination, options.policy.clone())
         }
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| dmg_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 }
@@ -2437,14 +2367,13 @@ impl NativeReadAdapter for PkgListAdapter {
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
-        let raw_entries =
-            apple_pkg_backend::list_pkg(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
+        let raw_entries = apple_pkg_backend::list_pkg(primary_path).map_err(|error| pkg_error(primary_path, &error))?;
 
         let entries = raw_entries
             .into_iter()
             .enumerate()
             .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
                 kind: BrowserEntryKind::File,
                 size: Some(entry.size),
@@ -2470,7 +2399,7 @@ impl NativeReadAdapter for PkgListAdapter {
         } else {
             apple_pkg_backend::extract_pkg(path, &options.destination, options.policy.clone())
         }
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| pkg_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 }
@@ -2495,14 +2424,13 @@ impl NativeReadAdapter for MsiListAdapter {
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
-        let raw_entries =
-            msi_backend::list_msi(primary_path).map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err.to_string()).with_path(primary_path))?;
+        let raw_entries = msi_backend::list_msi(primary_path).map_err(|error| msi_error(primary_path, &error))?;
 
         let entries = raw_entries
             .into_iter()
             .enumerate()
             .map(|(index, entry)| EngineEntry {
-                id: EntryId(u64::try_from(index).unwrap_or(0)),
+                id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
                 kind: BrowserEntryKind::File,
                 size: Some(entry.size),
@@ -2528,7 +2456,7 @@ impl NativeReadAdapter for MsiListAdapter {
         } else {
             msi_backend::extract_msi(path, &options.destination, options.policy.clone())
         }
-        .map_err(|error| crate::engine::adapters::extract_error(path, error))?;
+        .map_err(|error| msi_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 }
@@ -2602,34 +2530,31 @@ impl NativeReadAdapter for VirtualDiskListAdapter {
             return Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) });
         }
         let raw_entries = match self.format {
-            FormatId::VHD => virtual_disk_backend::list_vhd(primary_path).map_err(|err| err.to_string()),
-            FormatId::VMDK => virtual_disk_backend::list_vmdk(primary_path).map_err(|err| err.to_string()),
-            FormatId::UDF => virtual_disk_backend::list_udf(primary_path).map_err(|err| err.to_string()),
-            FormatId::ISO => virtual_disk_backend::list_iso(primary_path).map_err(|err| err.to_string()),
-            _ => Err(format!("Unsupported virtual disk format '{}'", self.format)),
+            FormatId::VHD => virtual_disk_backend::list_vhd(primary_path),
+            FormatId::VMDK => virtual_disk_backend::list_vmdk(primary_path),
+            FormatId::UDF => virtual_disk_backend::list_udf(primary_path),
+            FormatId::ISO => virtual_disk_backend::list_iso(primary_path),
+            _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
         }
-        .map_err(|err| ArchiveError::usable(ErrorKind::InvalidFormat, err).with_path(primary_path))?;
+        .map_err(|error| virtual_disk_error(primary_path, &error))?;
 
         Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) })
     }
 
     fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
-        let report =
-            if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
-                match self.format {
-                    FormatId::VHD => virtual_disk_backend::extract_vhd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                    FormatId::VMDK => virtual_disk_backend::extract_vmdk_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                    FormatId::UDF => virtual_disk_backend::extract_udf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                    FormatId::ISO => virtual_disk_backend::extract_iso_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                    _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
-                }
-            } else {
-                virtual_disk_backend::extract_virtual_disk(path, &options.destination, options.policy.clone())
+        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
+            match self.format {
+                FormatId::VHD => virtual_disk_backend::extract_vhd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::VMDK => virtual_disk_backend::extract_vmdk_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::UDF => virtual_disk_backend::extract_udf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::ISO => virtual_disk_backend::extract_iso_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
             }
-            .map_err(|error| {
-                if self.format == FormatId::ISO { virtual_disk_error(path, &error) } else { crate::engine::adapters::extract_error(path, error) }
-            })?;
+        } else {
+            virtual_disk_backend::extract_virtual_disk(path, &options.destination, options.policy.clone())
+        }
+        .map_err(|error| virtual_disk_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
@@ -2658,7 +2583,7 @@ fn map_virtual_disk_entries(entries: Vec<virtual_disk_backend::VirtualDiskListEn
         .into_iter()
         .enumerate()
         .map(|(index, entry)| EngineEntry {
-            id: EntryId(u64::try_from(index).unwrap_or(0)),
+            id: crate::engine::adapters::listing_entry_id(index),
             path: entry.path,
             kind: match entry.kind {
                 virtual_disk_backend::VirtualDiskEntryKind::File => BrowserEntryKind::File,
@@ -2687,12 +2612,7 @@ fn virtual_disk_error(path: &std::path::Path, error: &virtual_disk_backend::Virt
         virtual_disk_backend::VirtualDiskBackendError::Plan(_) => ErrorKind::InvalidFormat,
         virtual_disk_backend::VirtualDiskBackendError::Vfs(_) | virtual_disk_backend::VirtualDiskBackendError::NotDiskImage(_) => ErrorKind::CorruptData,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if kind == ErrorKind::CorruptData { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 #[cfg(test)]

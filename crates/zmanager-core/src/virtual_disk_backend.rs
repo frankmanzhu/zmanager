@@ -420,39 +420,6 @@ pub fn extract_virtual_disk(
     extract_virtual_disk_inner(archive_path, destination, policy, None, None)
 }
 
-/// Extracts a `.vhd` archive into `destination`, reporting progress and
-/// cancellation through `context`.
-pub fn extract_vhd_with_context(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    context: &mut JobContext<'_>,
-) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
-    extract_virtual_disk_inner(archive_path, destination, policy, Some(context), None)
-}
-
-/// Extracts a `.vmdk` archive into `destination`, reporting progress and
-/// cancellation through `context`.
-pub fn extract_vmdk_with_context(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    context: &mut JobContext<'_>,
-) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
-    extract_virtual_disk_inner(archive_path, destination, policy, Some(context), None)
-}
-
-/// Extracts a `.udf` archive into `destination`, reporting progress and
-/// cancellation through `context`.
-pub fn extract_udf_with_context(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    context: &mut JobContext<'_>,
-) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
-    extract_virtual_disk_inner(archive_path, destination, policy, Some(context), None)
-}
-
 /// Streaming writer that checks cancellation and reports bytes through the
 /// job context on every write (mirrors the MSI backend's `ProgressWriter`).
 struct ProgressWriter<'a, 'b, W: io::Write> {

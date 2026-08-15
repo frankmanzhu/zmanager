@@ -262,7 +262,7 @@ pub(crate) fn format_capabilities(format: ArchiveFormat) -> (bool, bool, bool) {
     }
 }
 
-fn kind_for_format(format: ArchiveFormat) -> zmanager_core::archive_format::ArchiveFormatKind {
+pub(crate) fn kind_for_format(format: ArchiveFormat) -> zmanager_core::archive_format::ArchiveFormatKind {
     use zmanager_core::archive_format::ArchiveFormatKind;
     match format {
         ArchiveFormat::Zip => ArchiveFormatKind::Zip,

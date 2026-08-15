@@ -410,61 +410,6 @@ pub(crate) fn test_zip_archive<R: Read + Seek>(
     Ok(ZipTestReport { tested_entries, skipped_entries, tested_bytes })
 }
 
-/// Copies selected regular ZIP file entries to a writer in archive order.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read, a selected entry
-/// requires a missing/incorrect password, or the output writer fails.
-pub fn copy_zip_files_to_writer<W: Write>(
-    archive_path: impl AsRef<Path>,
-    password: Option<&str>,
-    mut selected: impl FnMut(&str) -> bool,
-    output: &mut W,
-) -> Result<ZipExtractReport, ZipBackendError> {
-    let archive_path = archive_path.as_ref();
-    let reader = open_zip_reader(archive_path)?;
-    let mut archive = ZipArchive::new(reader)?;
-    let password = password_bytes(password);
-    let mut report = ZipExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
-
-    for index in 0..archive.len() {
-        let name = {
-            let file = archive.by_index_raw(index).map_err(map_zip_error)?;
-            file.name().to_owned()
-        };
-        if !selected(&name) {
-            report.skipped_entries += 1;
-            continue;
-        }
-
-        let mut file = archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(map_zip_error)?;
-        if zip_entry_kind(&file) != ZipEntryKind::File {
-            report.skipped_entries += 1;
-            continue;
-        }
-
-        let copied = io::copy(&mut file, output).map_err(|source| ZipBackendError::Io { path: PathBuf::from(file.name()), source })?;
-        report.written_entries += 1;
-        report.written_bytes += copied;
-    }
-
-    Ok(report)
-}
-
-/// Copies exactly one regular ZIP entry by its retained central-directory index.
-pub fn copy_zip_entry_by_index<W: Write + ?Sized>(
-    archive_path: impl AsRef<Path>,
-    password: Option<&str>,
-    entry_index: usize,
-    output: &mut W,
-) -> Result<u64, ZipBackendError> {
-    let archive_path = archive_path.as_ref();
-    let reader = open_zip_reader(archive_path)?;
-    let mut archive = ZipArchive::new(reader)?;
-    copy_zip_entry_from_archive(&mut archive, archive_path, password, entry_index, output)
-}
-
 /// Copies one entry from an already opened ZIP reader.
 pub(crate) fn copy_zip_entry_from_archive<R: Read + Seek, W: Write + ?Sized>(
     archive: &mut ZipArchive<R>,
@@ -501,54 +446,6 @@ pub fn extract_zip_with_context_and_password(
     let reader = open_zip_reader(archive_path)?;
     let mut archive = ZipArchive::new(reader)?;
     extract_zip_archive(&mut archive, archive_path, destination, policy, password, Some(context), None, None)
-}
-
-/// Extracts a ZIP archive without job progress callbacks.
-pub fn extract_zip_with_password(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-) -> Result<ZipExtractReport, ZipBackendError> {
-    let archive_path = archive_path.as_ref();
-    let reader = open_zip_reader(archive_path)?;
-    let mut archive = ZipArchive::new(reader)?;
-    extract_zip_archive(&mut archive, archive_path, destination, policy, password, None, None, None)
-}
-
-/// Extracts a ZIP archive with an overwrite resolver and optional password.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read, a password is
-/// required/incorrect, an entry is unsafe, filesystem writes fail, or the
-/// resolver aborts extraction.
-pub fn extract_zip_with_overwrite_resolver_and_password(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    overwrite_resolver: &mut dyn OverwriteResolver,
-) -> Result<ZipExtractReport, ZipBackendError> {
-    let archive_path = archive_path.as_ref();
-    let reader = open_zip_reader(archive_path)?;
-    let mut archive = ZipArchive::new(reader)?;
-    extract_zip_archive(&mut archive, archive_path, destination, policy, password, None, Some(overwrite_resolver), None)
-}
-
-/// Extracts exactly one ZIP entry by its retained central-directory index.
-pub fn extract_zip_entry_by_index(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    password: Option<&str>,
-    entry_index: usize,
-    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
-) -> Result<ZipExtractReport, ZipBackendError> {
-    let archive_path = archive_path.as_ref();
-    let reader = open_zip_reader(archive_path)?;
-    let mut archive = ZipArchive::new(reader)?;
-    extract_zip_archive(&mut archive, archive_path, destination, policy, password, None, overwrite_resolver, Some(entry_index))
 }
 
 /// Extracts from an already opened ZIP reader without reopening its source.
@@ -942,24 +839,19 @@ fn write_hardlink(source_path: &Path, destination_path: &Path) -> Result<(), Zip
 #[cfg(test)]
 mod tests {
     use super::{
-        ZipBackendError, ZipCompression, ZipCreateOptions, ZipCreateReport, ZipEntryKind, ZipExtractReport, ZipTestReport, create_zip_from_manifest,
-        extract_zip_with_context_and_password, list_zip, needs_zip64, test_zip_with_password_filter,
+        ZipBackendError, ZipCompression, ZipCreateOptions, ZipEntryKind, ZipExtractReport, ZipTestReport, extract_zip_with_context_and_password, list_zip,
+        needs_zip64, test_zip_with_password_filter,
     };
     use crate::jobs::{CancellationToken, JobContext, JobEvent};
-    use crate::manifest::{PlanOptions, plan_archive};
     use crate::safety::{ExtractionPolicy, ExtractionSafetyError};
     use crate::secrets::SecretString;
     use crate::test_support::TestDir;
+    use crate::test_support::create_zip_fixture;
     use std::fs::{self, File};
     use std::io::{self, Read, Write};
     use std::path::Path;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
-
-    fn create_zip_fixture(source: impl AsRef<Path>, destination: impl AsRef<Path>, options: &ZipCreateOptions) -> Result<ZipCreateReport, ZipBackendError> {
-        let manifest = plan_archive(source, &PlanOptions::default())?;
-        create_zip_from_manifest(&manifest, destination, options)
-    }
 
     fn extract_zip_fixture(
         archive_path: impl AsRef<Path>,

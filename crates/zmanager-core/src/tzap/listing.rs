@@ -22,7 +22,7 @@ pub struct TzapListing {
 /// This intentionally omits portable metadata that requires decoding every tar
 /// member group. It is suitable for responsive browsing and exact-path lookup.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TzapIndexListing {
+pub(crate) struct TzapIndexListing {
     /// Indexed entries.
     pub entries: Vec<TzapIndexEntry>,
     /// Whether the archive is encrypted.
@@ -33,7 +33,7 @@ pub struct TzapIndexListing {
 
 /// One `.tzap` entry described by authenticated index metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TzapIndexEntry {
+pub(crate) struct TzapIndexEntry {
     /// Archive path.
     pub path: String,
     /// Entry kind. Ambiguous zero-byte leaves are decoded individually.
@@ -155,20 +155,11 @@ pub fn list_tzap_with_optional_password(archive: impl AsRef<Path>, password: Opt
 /// # Errors
 ///
 /// Returns [`TzapError`] when the archive cannot be opened or indexed.
-pub fn list_tzap_index_with_optional_password(archive: impl AsRef<Path>, password: Option<&str>) -> Result<TzapIndexListing, TzapError> {
+pub(crate) fn list_tzap_index_with_optional_password(archive: impl AsRef<Path>, password: Option<&str>) -> Result<TzapIndexListing, TzapError> {
     let archive_path = archive.as_ref();
     let opened = open_tzap_archive(archive_path, password)?;
     let encrypted = password.is_some() || opened.crypto_header.kdf_algo != KdfAlgo::None;
     let indexed = opened.list_index_entries()?;
-    Ok(map_index_entries(indexed, opened.observed_archive_bytes(), encrypted, opened.crypto_header.kdf_algo))
-}
-
-/// Lists only the immediate children of the requested directory.
-pub fn list_tzap_directory_with_optional_password(archive: impl AsRef<Path>, dir_path: &str, password: Option<&str>) -> Result<TzapIndexListing, TzapError> {
-    let archive_path = archive.as_ref();
-    let opened = open_tzap_archive(archive_path, password)?;
-    let encrypted = password.is_some() || opened.crypto_header.kdf_algo != KdfAlgo::None;
-    let indexed = opened.list_directory_contents(dir_path)?;
     Ok(map_index_entries(indexed, opened.observed_archive_bytes(), encrypted, opened.crypto_header.kdf_algo))
 }
 
@@ -182,7 +173,7 @@ pub fn list_tzap_with_recipient_key(archive: impl AsRef<Path>, recipient_private
     list_opened_tzap_archive(&opened, true)
 }
 
-pub fn list_tzap_index_with_recipient_key(archive: impl AsRef<Path>, recipient_private_key: impl AsRef<Path>) -> Result<TzapIndexListing, TzapError> {
+pub(crate) fn list_tzap_index_with_recipient_key(archive: impl AsRef<Path>, recipient_private_key: impl AsRef<Path>) -> Result<TzapIndexListing, TzapError> {
     let opened = open_tzap_archive_with_recipient_key(archive, recipient_private_key)?;
     let indexed = opened.list_index_entries()?;
     Ok(map_index_entries(indexed, opened.observed_archive_bytes(), true, opened.crypto_header.kdf_algo))

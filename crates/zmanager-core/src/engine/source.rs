@@ -14,15 +14,6 @@ pub enum SourceAccess {
     MultiVolumeSet,
 }
 
-/// Provenance of an engine-owned archive source.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub enum SourceProvenance {
-    /// A caller supplied one path and the engine owns its reopenable file source.
-    Path,
-    /// A caller supplied an ordered set of physical volume paths.
-    ExplicitVolumeSet,
-}
-
 /// A session-owned cursor capability for path-backed and explicit-volume
 /// sources. The source module owns how a cursor is created; adapters only
 /// receive the capability and never rediscover source paths themselves.
@@ -101,15 +92,6 @@ impl ArchiveSource {
         }
     }
 
-    /// Captures the current metadata of every explicitly owned source path.
-    ///
-    /// Missing paths are represented as missing entries so callers can use
-    /// the fingerprint for source-change detection while retaining the
-    /// existing format-specific handling for sidecar-based inputs.
-    pub fn fingerprint(&self) -> std::io::Result<SourceFingerprint> {
-        self.fingerprint_with_additional_paths(&[])
-    }
-
     /// Captures the source paths plus format-owned sibling paths discovered
     /// while opening a path-backed multi-volume format.
     pub(crate) fn fingerprint_with_additional_paths(&self, additional_paths: &[PathBuf]) -> std::io::Result<SourceFingerprint> {
@@ -141,12 +123,6 @@ impl ArchiveSource {
         Ok(SourceFingerprint { files })
     }
 
-    /// Returns whether the explicitly owned source paths still match a
-    /// previously captured fingerprint.
-    pub fn matches_fingerprint(&self, expected: &SourceFingerprint) -> std::io::Result<bool> {
-        Ok(self.fingerprint()? == *expected)
-    }
-
     /// Returns whether the source and its format-owned sibling paths still
     /// match a previously captured fingerprint.
     pub(crate) fn matches_fingerprint_with_additional_paths(&self, expected: &SourceFingerprint, additional_paths: &[PathBuf]) -> std::io::Result<bool> {
@@ -169,30 +145,6 @@ impl ArchiveSource {
             Self::Path(_) => SourceAccess::Seekable,
             Self::VolumeSet(_) => SourceAccess::MultiVolumeSet,
         }
-    }
-
-    /// Returns how the caller supplied this source.
-    #[must_use]
-    pub const fn provenance(&self) -> SourceProvenance {
-        match self {
-            Self::Path(_) => SourceProvenance::Path,
-            Self::VolumeSet(_) => SourceProvenance::ExplicitVolumeSet,
-        }
-    }
-
-    /// Returns a stable display-name hint derived from the primary path.
-    #[must_use]
-    pub fn name_hint(&self) -> Option<&str> {
-        self.primary_path().file_name().and_then(|name| name.to_str())
-    }
-
-    /// Returns the aggregate byte length when every owned source path exists.
-    ///
-    /// `None` means that at least one source path is not present yet. This is
-    /// intentionally a hint; the engine still performs its normal source
-    /// existence and format validation before opening an adapter.
-    pub fn length_hint(&self) -> std::io::Result<Option<u64>> {
-        self.length_hint_with_additional_paths(&[])
     }
 
     /// Returns the aggregate byte length including format-owned sibling paths.
@@ -230,15 +182,6 @@ impl ArchiveSource {
         Ok(Some(length))
     }
 
-    /// Returns whether this source can create another independent cursor.
-    #[must_use]
-    pub const fn is_reopenable(&self) -> bool {
-        // All source forms currently supported by the product are path-backed
-        // and can be reopened through SourceCursorFactory. A future
-        // sequential stream source must add an explicit non-reopenable form.
-        true
-    }
-
     /// Returns the session-owned cursor capability for this source.
     pub(crate) fn cursor_factory(&self) -> SourceCursorFactory {
         SourceCursorFactory::new(self)
@@ -257,90 +200,39 @@ impl ArchiveSource {
     }
 }
 
-/// Returns true if `path` points to a split-ZIP volume or the final `.zip` of a split set (ARC-102).
+/// Returns true if `path` points to a split-ZIP volume or the final `.zip`
+/// of a split set (ARC-102).
 ///
-/// This consolidated predicate is shared by core and CLI.
+/// This consolidated predicate is the single split-ZIP identity rule shared
+/// by format detection and source ownership. Sidecar volumes match `.z`
+/// followed by at least two digits (`.z01`, `.z001`, ...); numbered raw
+/// segments match a base ending in `.zip` plus a three-digit suffix
+/// (`.zip.001`); a final `.zip` qualifies when a `.z01` sibling exists.
 #[must_use]
 pub fn is_split_zip_archive_path(path: &Path) -> bool {
     let filename = match path.file_name().and_then(|n| n.to_str()) {
         Some(name) => name.to_lowercase(),
         None => return false,
     };
-
-    if crate::multi_volume::is_split_zip_path(path) {
+    if is_split_zip_sidecar_extension(&filename) || is_numbered_zip_volume_name(&filename) {
         return true;
     }
-
-    // Case 1: sidecar volume like archive.z01, archive.z02
-    if is_split_zip_sidecar_extension(&filename) {
-        return true;
-    }
-
-    if is_numbered_zip_volume_name(&filename) {
-        return true;
-    }
-
-    // Case 2: final .zip with sibling .z01 present
     if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("zip")) {
         let parent = path.parent().unwrap_or_else(|| Path::new(""));
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let z01 = parent.join(format!("{stem}.z01"));
-        if z01.is_file() {
+        if parent.join(format!("{stem}.z01")).is_file() {
             return true;
         }
     }
-
     false
 }
 
+/// A `.z`-style sidecar volume name, e.g. `archive.z01` or `archive.z001`.
 fn is_split_zip_sidecar_extension(filename: &str) -> bool {
-    if let Some(dot_idx) = filename.rfind('.') {
-        let ext = &filename[dot_idx + 1..];
-        if ext.len() == 3 && (ext.starts_with('z') || ext.starts_with('Z')) {
-            let digits = &ext[1..];
-            return digits.chars().all(|c| c.is_ascii_digit());
-        }
-    }
-    false
-}
-
-/// Discovers ordered volumes for a split-ZIP set ending in `.zip`.
-#[must_use]
-pub fn discover_split_zip_volumes(path: &Path) -> Option<Vec<PathBuf>> {
-    let discovered = crate::multi_volume::discover_multi_volume_paths(path);
-    if discovered.len() > 1
-        && discovered.iter().any(|volume| volume.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.to_ascii_lowercase().contains(".zip")))
-    {
-        return Some(discovered);
-    }
-
-    let parent = path.parent().unwrap_or_else(|| Path::new(""));
-    let stem = path.file_stem()?.to_str()?;
-
-    let mut volumes = Vec::new();
-    let mut index = 1u32;
-    loop {
-        let sidecar = parent.join(format!("{stem}.z{index:02}"));
-        if sidecar.is_file() {
-            volumes.push(sidecar);
-            index += 1;
-        } else {
-            break;
-        }
-    }
-
-    if volumes.is_empty() {
-        return None;
-    }
-
-    // Append final .zip
-    let final_zip = parent.join(format!("{stem}.zip"));
-    if final_zip.is_file() {
-        volumes.push(final_zip);
-        Some(volumes)
-    } else {
-        None
-    }
+    let Some((base, extension)) = filename.rsplit_once('.') else {
+        return false;
+    };
+    !base.is_empty() && extension.len() >= 3 && (extension.starts_with('z') || extension.starts_with('Z')) && extension[1..].chars().all(|c| c.is_ascii_digit())
 }
 
 fn is_numbered_zip_volume_name(filename: &str) -> bool {
@@ -350,9 +242,91 @@ fn is_numbered_zip_volume_name(filename: &str) -> bool {
     base.to_ascii_lowercase().ends_with(".zip") && suffix.len() == 3 && suffix.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum SplitZipPart {
+    Sidecar(u32),
+    Numbered(u32),
+    Final,
+}
+
+/// Parses one candidate split-ZIP volume name into its set base and part.
+fn parse_split_zip_part(name: &str) -> Option<(&str, SplitZipPart)> {
+    let (base, extension) = name.rsplit_once('.')?;
+    if extension == "zip" {
+        return Some((base, SplitZipPart::Final));
+    }
+    if is_split_zip_sidecar_extension(name) {
+        let index = extension[1..].parse().ok()?;
+        return (index > 0).then_some((base, SplitZipPart::Sidecar(index)));
+    }
+    if extension.len() == 3 && extension.bytes().all(|byte| byte.is_ascii_digit()) && base.to_ascii_lowercase().ends_with(".zip") {
+        let index = extension.parse().ok()?;
+        return (index > 0).then_some((base, SplitZipPart::Numbered(index)));
+    }
+    None
+}
+
+/// Discovers the ordered split-ZIP volume set for a member path.
+///
+/// Covers both `.zNN` sidecar sets (with their final `.zip`) and numbered
+/// `.zip.NNN` raw-segment sets. Parts must be contiguous from index 1;
+/// otherwise the set is considered incomplete and `None` is returned.
+#[must_use]
+pub fn discover_split_zip_volumes(path: &Path) -> Option<Vec<PathBuf>> {
+    let file_name = path.file_name()?.to_str()?;
+    let lower_name = file_name.to_ascii_lowercase();
+    let (base, _) = parse_split_zip_part(&lower_name)?;
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    let entries = std::fs::read_dir(directory).ok()?;
+
+    let mut sidecars = std::collections::BTreeMap::new();
+    let mut numbered = std::collections::BTreeMap::new();
+    let mut final_zip = None;
+    for entry in entries.flatten() {
+        let candidate_name = entry.file_name();
+        let Some(candidate_name) = candidate_name.to_str() else {
+            continue;
+        };
+        let candidate_lower = candidate_name.to_ascii_lowercase();
+        let Some((candidate_base, part)) = parse_split_zip_part(&candidate_lower) else {
+            continue;
+        };
+        if candidate_base != base {
+            continue;
+        }
+        match part {
+            SplitZipPart::Sidecar(index) => {
+                sidecars.insert(index, entry.path());
+            }
+            SplitZipPart::Numbered(index) => {
+                numbered.insert(index, entry.path());
+            }
+            SplitZipPart::Final => final_zip = Some(entry.path()),
+        }
+    }
+
+    if !numbered.is_empty() {
+        let max = *numbered.keys().last()?;
+        for expected in 1..=max {
+            numbered.get(&expected)?;
+        }
+        return Some(numbered.into_values().collect());
+    }
+    if !sidecars.is_empty() {
+        let max = *sidecars.keys().last()?;
+        for expected in 1..=max {
+            sidecars.get(&expected)?;
+        }
+        let mut volumes = sidecars.into_values().collect::<Vec<_>>();
+        volumes.push(final_zip?);
+        return Some(volumes);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ArchiveSource, SourceProvenance};
+    use super::ArchiveSource;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -361,7 +335,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("zmanager-source-fingerprint-{unique}"));
         std::fs::write(&path, b"source").unwrap();
 
-        let fingerprint = ArchiveSource::Path(path.clone()).fingerprint().unwrap();
+        let fingerprint = ArchiveSource::Path(path.clone()).fingerprint_with_additional_paths(&[]).unwrap();
 
         #[cfg(unix)]
         assert!(fingerprint.files[0].identity.is_some());
@@ -391,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn source_exposes_provenance_name_length_and_reopenability() {
+    fn source_aggregate_length_includes_format_owned_sibling_paths() {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let primary = std::env::temp_dir().join(format!("zmanager-source-metadata-primary-{unique}"));
         let sibling = std::env::temp_dir().join(format!("zmanager-source-metadata-sibling-{unique}"));
@@ -399,16 +373,11 @@ mod tests {
         std::fs::write(&sibling, b"sibling").unwrap();
 
         let path_source = ArchiveSource::Path(primary.clone());
-        assert_eq!(path_source.provenance(), SourceProvenance::Path);
-        assert_eq!(path_source.name_hint(), primary.file_name().and_then(|name| name.to_str()));
-        assert_eq!(path_source.length_hint().unwrap(), Some(7));
+        assert_eq!(path_source.length_hint_with_additional_paths(&[]).unwrap(), Some(7));
         assert_eq!(path_source.length_hint_with_additional_paths(std::slice::from_ref(&sibling)).unwrap(), Some(14));
-        assert!(path_source.is_reopenable());
 
         let volume_source = ArchiveSource::VolumeSet(vec![primary.clone(), sibling.clone()]);
-        assert_eq!(volume_source.provenance(), SourceProvenance::ExplicitVolumeSet);
-        assert_eq!(volume_source.length_hint().unwrap(), Some(14));
-        assert!(volume_source.is_reopenable());
+        assert_eq!(volume_source.length_hint_with_additional_paths(&[]).unwrap(), Some(14));
 
         std::fs::remove_file(primary).unwrap();
         std::fs::remove_file(sibling).unwrap();

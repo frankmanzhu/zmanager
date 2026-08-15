@@ -3,11 +3,6 @@
 use crate::ffi::error::existing_archive_path_or_tzap_error;
 use crate::ffi::util::password_ref;
 
-#[cfg(not(feature = "tzap-online"))]
-fn hosted_unavailable(operation: &str) -> String {
-    format!(r#"{{"ok":false,"error":"tzap-online feature not enabled in this build","operation":"{operation}"}}"#)
-}
-
 #[allow(non_snake_case)]
 pub fn tzapPublicMetadataSummary(archive_path: String) -> String {
     let archive_path = match existing_archive_path_or_tzap_error(archive_path) {
@@ -71,37 +66,22 @@ pub fn createTzapSelfSignedIdentity(identity_path: String, public_certificate_pa
 }
 
 pub fn tzap_auth_login_json(_request_json: String) -> String {
-    #[cfg(not(feature = "tzap-online"))]
-    return hosted_unavailable("tzap_auth_login_json");
-    #[cfg(feature = "tzap-online")]
     zmanager_tzap_hosted::tzap_service::tzap_auth_login_json(&_request_json)
 }
 
 pub fn tzap_auth_callback_json(_request_json: String) -> String {
-    #[cfg(not(feature = "tzap-online"))]
-    return hosted_unavailable("tzap_auth_callback_json");
-    #[cfg(feature = "tzap-online")]
     zmanager_tzap_hosted::tzap_service::tzap_auth_callback_json(&_request_json)
 }
 
 pub fn tzap_auth_status_json(_request_json: String) -> String {
-    #[cfg(not(feature = "tzap-online"))]
-    return hosted_unavailable("tzap_auth_status_json");
-    #[cfg(feature = "tzap-online")]
     zmanager_tzap_hosted::tzap_service::tzap_auth_status_json(&_request_json)
 }
 
 pub fn tzap_auth_forget_json(_request_json: String) -> String {
-    #[cfg(not(feature = "tzap-online"))]
-    return hosted_unavailable("tzap_auth_forget_json");
-    #[cfg(feature = "tzap-online")]
     zmanager_tzap_hosted::tzap_service::tzap_auth_forget_json(&_request_json)
 }
 
 pub fn tzap_auth_account_url_json(_request_json: String) -> String {
-    #[cfg(not(feature = "tzap-online"))]
-    return hosted_unavailable("tzap_auth_account_url_json");
-    #[cfg(feature = "tzap-online")]
     zmanager_tzap_hosted::tzap_service::tzap_auth_account_url_json(&_request_json)
 }
 

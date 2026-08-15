@@ -25,6 +25,19 @@ zmanager-tzap-hosted = { workspace = true, optional = true }
 default = ["tzap-online"]
 tzap-online = ["dep:zmanager-tzap-hosted"]
 
+# The bridge crate inherits the workspace lint policy by spelling it out:
+# Cargo forbids overriding a lint group while `workspace = true`.
+[lints.rust]
+# UniFFI-generated scaffolding uses `#[unsafe(no_mangle)]`; the handwritten
+# bridge code contains no `unsafe` (enforced by review and grep audits).
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "warn"
+# Pedantic parity with the workspace is tracked separately (CR-176): the
+# bridge crate historically had no [lints] section, so enabling pedantic here
+# surfaces a ~112-warning backlog in one step.
+
 [build-dependencies]
 uniffi = { version = "0.29", features = ["build"] }
 

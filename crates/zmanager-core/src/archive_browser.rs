@@ -244,7 +244,9 @@ pub fn supports_on_demand_directories(path: impl AsRef<Path>) -> bool {
 
 /// Lists only the immediate children of a given directory path.
 ///
-/// If `dir_path` is empty, lists the root directory.
+/// If `dir_path` is empty, lists the root directory. The engine has no
+/// progressive directory API, so this helper lists the complete archive once
+/// and filters client-side to the requested prefix.
 pub fn list_directory_with_options(path: impl AsRef<Path>, dir_path: &str, options: BrowserListOptions<'_>) -> Result<BrowserListing, ArchiveBrowserError> {
     let path = path.as_ref();
     if !is_tzap_archive_path(path) {
@@ -281,11 +283,12 @@ pub fn list_directory_from_engine_handle(handle: &mut crate::engine::ArchiveHand
     Ok(BrowserListing { entries })
 }
 
-/// Visits archive entries without requiring the caller to retain a complete listing.
+/// Visits archive entries through one engine handle.
 ///
-/// ZIP entries are delivered directly from the central directory. Adapters that
-/// do not expose a progressive iterator use an explicit collect-then-publish
-/// path. Returning `false` from `visitor` cancels at the next entry boundary.
+/// The engine exposes no progressive iterator, so this helper lists the
+/// complete archive first and then visits each entry from the retained
+/// listing. Returning `false` from `visitor` cancels at the next entry
+/// boundary.
 ///
 /// # Errors
 ///

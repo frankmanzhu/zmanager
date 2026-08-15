@@ -786,28 +786,17 @@ pub(crate) fn mobile_extract_job_kind(path: &Path, format: ArchiveFormat) -> Mob
     mobile_job_kind_from_core(core_extract_job_kind(path, format))
 }
 
-fn maybe_apple_extract_job_kind(format: ArchiveFormat) -> Option<CoreJobKind> {
-    matches!(format, ArchiveFormat::AppleArchive).then_some(CoreJobKind::AppleArchiveExtract)
-}
-
 fn core_extract_job_kind(path: &Path, format: ArchiveFormat) -> CoreJobKind {
-    if matches!(format, ArchiveFormat::Zip) {
-        CoreJobKind::ZipExtract
-    } else if matches!(format, ArchiveFormat::SevenZ) {
-        CoreJobKind::SevenZExtract
-    } else if matches!(format, ArchiveFormat::Rar | ArchiveFormat::MultipartRar) {
-        CoreJobKind::RarExtract
-    } else if matches!(format, ArchiveFormat::TarZst) {
-        CoreJobKind::TarZstdExtract
-    } else if matches!(format, ArchiveFormat::Tzap) {
-        CoreJobKind::TzapExtract
-    } else if let Some(kind) = maybe_apple_extract_job_kind(format) {
-        kind
-    } else if zmanager_core::engine::is_raw_stream_path(path) {
-        CoreJobKind::RawStreamExtract
+    // The engine identity owns the format→job-kind label mapping; the bridge
+    // only translates its display enum into the engine kind first.
+    let kind = if matches!(format, ArchiveFormat::Other) {
+        // Unknown at the bridge level: fall back to core path detection so
+        // raw-stream files keep their progress kind.
+        zmanager_core::archive_format::detect_archive_format(path)
     } else {
-        CoreJobKind::ArchiveExtract
-    }
+        crate::ffi::util::kind_for_format(format)
+    };
+    zmanager_core::engine::FormatId::from_archive_format_kind(kind).map_or(CoreJobKind::ArchiveExtract, zmanager_core::engine::FormatId::extract_job_kind)
 }
 
 pub(crate) fn mobile_job_kind_from_core(kind: CoreJobKind) -> MobileJobKind {

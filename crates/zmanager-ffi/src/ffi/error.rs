@@ -60,9 +60,8 @@ pub(crate) fn map_archive_browser_error(error: ArchiveBrowserError) -> ZmanagerG
         ArchiveBrowserError::UnsupportedEntry { path, .. } => {
             bridge_error(ERROR_UNSUPPORTED_FORMAT, format!("Entry cannot be extracted or previewed here: {path}"), None, BridgeSeverity::Warning, false)
         }
-        ArchiveBrowserError::Cancelled | ArchiveBrowserError::UnsupportedOperation(_) => {
-            bridge_error(ERROR_OPERATION_FAILED, "Operation cancelled or unsupported.".to_string(), None, BridgeSeverity::Warning, false)
-        }
+        ArchiveBrowserError::Cancelled => bridge_error(ERROR_OPERATION_FAILED, "Operation cancelled.".to_string(), None, BridgeSeverity::Warning, true),
+        ArchiveBrowserError::UnsupportedOperation(message) => bridge_error(ERROR_UNSUPPORTED_FORMAT, message, None, BridgeSeverity::Warning, false),
     }
 }
 

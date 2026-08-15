@@ -36,7 +36,7 @@ pub struct TzapExtractReport {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TzapFileExtractReport {
+pub(crate) struct TzapFileExtractReport {
     /// Number of payload bytes written.
     pub written_bytes: u64,
     /// Structured metadata restoration diagnostics rendered for application clients.
@@ -313,7 +313,7 @@ fn tzap_extract_error(path: &str, source: ExtractError) -> TzapError {
 ///
 /// Returns [`TzapError`] when the archive cannot be opened, the requested
 /// restoration policy cannot be satisfied, or the destination cannot be committed.
-pub fn extract_tzap_file_to_destination(
+pub(crate) fn extract_tzap_file_to_destination(
     archive: impl AsRef<Path>,
     key: TzapExtractKeySource<'_>,
     entry_path: &str,

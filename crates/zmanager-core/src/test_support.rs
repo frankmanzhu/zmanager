@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Shared test-support utilities for the core crate.
 //!
 //! Only compiled when the crate is built for testing. Consolidated from the
@@ -253,4 +252,27 @@ pub mod x509_factory {
         }))
         .unwrap()
     }
+}
+
+/// Deterministic xorshift byte stream for reproducible fixture payloads.
+pub(crate) fn deterministic_bytes(len: usize) -> Vec<u8> {
+    let mut state = 0x1234_5678_9abc_def0_u64;
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state.to_le_bytes()[0]
+        })
+        .collect()
+}
+
+/// Builds a ZIP fixture through the shared manifest/create path.
+pub(crate) fn create_zip_fixture(
+    source: impl AsRef<std::path::Path>,
+    destination: impl AsRef<std::path::Path>,
+    options: &crate::zip_backend::ZipCreateOptions,
+) -> Result<crate::zip_backend::ZipCreateReport, crate::zip_backend::ZipBackendError> {
+    let manifest = crate::manifest::plan_archive(source, &crate::manifest::PlanOptions::default())?;
+    crate::zip_backend::create_zip_from_manifest(&manifest, destination, options)
 }

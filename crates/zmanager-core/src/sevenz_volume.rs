@@ -373,14 +373,6 @@ mod tests {
     }
 
     fn deterministic_bytes(len: usize) -> Vec<u8> {
-        let mut state = 0x1234_5678_9abc_def0_u64;
-        (0..len)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                state.to_le_bytes()[0]
-            })
-            .collect()
+        crate::test_support::deterministic_bytes(len)
     }
 }

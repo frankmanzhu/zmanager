@@ -184,7 +184,8 @@ fn run_engine_extract(
 ) -> ExitCode {
     let archive_path = archive.as_ref().to_path_buf();
     let destination_path = destination.as_ref().to_path_buf();
-    let format_label = match detect_archive_format(&archive_path) {
+    let format_kind = detect_archive_format(&archive_path);
+    let format_label = match format_kind {
         ArchiveFormatKind::Zip | ArchiveFormatKind::SplitZip => "zip",
         ArchiveFormatKind::SevenZ => "7z",
         ArchiveFormatKind::TarZst => "tar.zst",
@@ -203,16 +204,10 @@ fn run_engine_extract(
         _ => "archive",
     };
     let mut progress = crate::cli::app::ProgressReporter::from_global(Some(global));
-    let progress_kind = match format_label {
-        "zip" => zmanager_core::jobs::JobKind::ZipExtract,
-        "7z" => zmanager_core::jobs::JobKind::SevenZExtract,
-        "tar.zst" => zmanager_core::jobs::JobKind::TarZstdExtract,
-        "tzap" => zmanager_core::jobs::JobKind::TzapExtract,
-        "rar" => zmanager_core::jobs::JobKind::RarExtract,
-        "aar" => zmanager_core::jobs::JobKind::AppleArchiveExtract,
-        "raw-stream" => zmanager_core::jobs::JobKind::RawStreamExtract,
-        _ => zmanager_core::jobs::JobKind::ArchiveExtract,
-    };
+    // The engine identity owns the format→job-kind label mapping; the CLI
+    // only renders it.
+    let progress_kind = zmanager_core::engine::FormatId::from_archive_format_kind(format_kind)
+        .map_or(zmanager_core::jobs::JobKind::ArchiveExtract, zmanager_core::engine::FormatId::extract_job_kind);
     progress.emit(zmanager_core::jobs::JobEvent::Started { kind: progress_kind, total_bytes: None });
     let mut options = zmanager_core::engine::ExtractOptions {
         destination: destination_path.clone(),

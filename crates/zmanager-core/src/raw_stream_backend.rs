@@ -218,23 +218,6 @@ pub fn extract_raw_stream(
     extract_raw_stream_inner(archive_path, format, destination, policy, None, None, false)
 }
 
-/// Extracts a raw single-file compression stream with progress reporting.
-///
-/// # Errors
-///
-/// Returns [`RawStreamError`] when the stream cannot be decoded, the output
-/// name is unsafe, filesystem writes fail, or the resolver aborts extraction.
-pub fn extract_raw_stream_with_progress(
-    archive_path: impl AsRef<Path>,
-    format: RawStreamFormat,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    on_progress: ProgressCallback<'_>,
-    track_source_progress: bool,
-) -> Result<RawStreamExtractReport, RawStreamError> {
-    extract_raw_stream_inner(archive_path, format, destination, policy, None, on_progress, track_source_progress)
-}
-
 /// Attempts to return the uncompressed byte size for a raw stream before
 /// extraction.
 ///
@@ -395,7 +378,11 @@ where
     }
 }
 
-fn open_decoder_from_reader<'a, R: Read + 'a>(reader: R, format: RawStreamFormat, archive_path: &Path) -> Result<Box<dyn Read + 'a>, RawStreamError> {
+pub(crate) fn open_decoder_from_reader<'a, R: Read + 'a>(
+    reader: R,
+    format: RawStreamFormat,
+    archive_path: &Path,
+) -> Result<Box<dyn Read + 'a>, RawStreamError> {
     match format {
         RawStreamFormat::Zstd => zstd::stream::read::Decoder::new(reader)
             .map(|decoder| Box::new(decoder) as Box<dyn Read + 'a>)

@@ -10,7 +10,6 @@ use sevenz_rust2::{ArchiveEntry, ArchiveWriter};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 use zmanager_core::backend_test_support::sevenz_backend::extract_7z;
-use zmanager_core::backend_test_support::tar_zst_backend::extract_tar_zst;
 use zmanager_core::backend_test_support::zip_backend::{ZipBackendError, ZipExtractReport, extract_zip_with_context_and_password, list_zip};
 use zmanager_core::jobs::{CancellationToken, JobContext, JobEvent};
 use zmanager_core::safety::{ExtractionLimits, ExtractionPolicy, ExtractionSafetyError};
@@ -20,6 +19,16 @@ fn extract_zip_default(archive_path: impl AsRef<Path>, destination: impl AsRef<P
     let mut sink = |_event: JobEvent| {};
     let mut context = JobContext::new(&token, &mut sink);
     extract_zip_with_context_and_password(archive_path, destination, policy, None, &mut context)
+}
+
+/// Extracts a `.tar.zst` hostile fixture through the engine seam.
+fn extract_tar_zst_via_engine(archive: &Path, destination: &Path) -> Result<(), zmanager_core::engine::ArchiveError> {
+    let mut handle = zmanager_core::engine::create_default_engine()
+        .unwrap()
+        .open(zmanager_core::engine::ArchiveSource::Path(archive.to_path_buf()), zmanager_core::engine::OpenOptions::default())
+        .unwrap();
+    let mut options = zmanager_core::engine::ExtractOptions { destination: destination.to_path_buf(), ..zmanager_core::engine::ExtractOptions::default() };
+    handle.extract(&mut options).map(|_| ())
 }
 
 #[test]
@@ -53,7 +62,7 @@ fn tar_zst_hostile_fixtures_are_rejected() {
     ];
 
     for archive in cases {
-        let error = extract_tar_zst(&archive, temp.path("out"), ExtractionPolicy::default());
+        let error = extract_tar_zst_via_engine(&archive, &temp.path("out"));
         assert!(error.is_err(), "{} should be rejected", archive.display());
     }
 
@@ -132,7 +141,7 @@ fn truncated_and_corrupt_archives_fail_closed() {
     fs::write(temp.path("corrupt.tar"), b"not a tar archive").unwrap();
 
     assert!(extract_zip_default(&truncated_zip, temp.path("zip-out"), ExtractionPolicy::default()).is_err());
-    assert!(extract_tar_zst(temp.path("corrupt.tar.zst"), temp.path("tar-zst-out"), ExtractionPolicy::default()).is_err());
+    assert!(extract_tar_zst_via_engine(&temp.path("corrupt.tar.zst"), &temp.path("tar-zst-out")).is_err());
     assert!(extract_7z(temp.path("corrupt.7z"), temp.path("seven-out"), None, ExtractionPolicy::default()).is_err());
     let engine = zmanager_core::engine::create_default_engine().unwrap();
     let mut handle = engine

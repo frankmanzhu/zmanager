@@ -10,7 +10,7 @@ use crate::engine::registry::{AdapterDescriptor, ReadAdapterFactory, ReadAdapter
 use crate::engine::source::SourceAccess;
 use crate::engine::types::{
     ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
-    SelectedExtractOptions, SessionDisposition, TestOptions, TestReport,
+    SelectedExtractOptions, TestOptions, TestReport,
 };
 use crate::zip_backend::ZipBackendError;
 
@@ -68,12 +68,7 @@ fn zip_archive_error(path: &std::path::Path, error: &ZipBackendError) -> Archive
         ZipBackendError::Zip(_) | ZipBackendError::InvalidSymlinkTarget { .. } | ZipBackendError::VolumeSizeTooSmall { .. } => ErrorKind::CorruptData,
         ZipBackendError::Plan(_) => ErrorKind::InvalidFormat,
     };
-    ArchiveError {
-        kind,
-        message: error.to_string(),
-        disposition: if matches!(kind, ErrorKind::CorruptData) { SessionDisposition::Unusable } else { SessionDisposition::Usable },
-        path: Some(path.to_path_buf()),
-    }
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
 }
 
 impl ReadAdapterSession for ZipReadSession {
@@ -82,7 +77,7 @@ impl ReadAdapterSession for ZipReadSession {
             let mut entries = Vec::with_capacity(listing.entries.len());
             self.retained_entries.clear();
             for (index, entry) in listing.entries.into_iter().enumerate() {
-                let id = EntryId(u64::try_from(index).unwrap_or(0));
+                let id = crate::engine::adapters::listing_entry_id(index);
                 self.retained_entries.push((id, index));
                 entries.push(EngineEntry {
                     id,
@@ -174,7 +169,21 @@ impl ReadAdapterFactory for ZipListAdapter {
 
     fn open(self: Arc<Self>, archive: DetectedArchive, options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
         let path = archive.source.primary_path().to_path_buf();
-        let reader = crate::zip_split::open_zip_reader_from_paths(archive.source.paths()).map_err(|error| zip_archive_error(&path, &error))?;
+        let reader: Box<dyn crate::zip_split::ReadSeek> = if archive.source.paths().len() == 1 {
+            // Single-file source: the cursor comes from the session-owned
+            // source capability, never a caller-side path open.
+            let file = archive
+                .source
+                .cursor_factory()
+                .open_primary_file()
+                .map_err(|source| zip_archive_error(&path, &ZipBackendError::Io { path: path.clone(), source }))?;
+            Box::new(file)
+        } else {
+            // Explicit caller-owned volume set: the split readers open the
+            // owned paths directly; the pre/post-operation source fingerprint
+            // guards membership and mutation of every volume.
+            crate::zip_split::open_zip_reader_from_paths(archive.source.paths()).map_err(|error| zip_archive_error(&path, &error))?
+        };
         let zip_archive = ZipArchive::new(reader)
             .map_err(|error| ArchiveError::unusable(ErrorKind::CorruptData, format!("Failed to parse ZIP central directory: {error}")).with_path(&path))?;
         Ok(Box::new(ZipReadSession { archive: zip_archive, path, password: options.password, retained_entries: Vec::new() }))

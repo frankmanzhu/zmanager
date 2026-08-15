@@ -7,7 +7,6 @@ use crate::jobs::CancellationToken;
 use crate::manifest::ArchiveManifest;
 use crate::safety::{ExtractionPolicy, OverwriteResolver};
 use std::fmt;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -792,12 +791,6 @@ impl ArchiveError {
 }
 
 impl std::error::Error for ArchiveError {}
-
-impl From<io::Error> for ArchiveError {
-    fn from(err: io::Error) -> Self {
-        Self::unusable(ErrorKind::Io, err.to_string())
-    }
-}
 
 /// Immutable capability summary reported by an engine handle or registry snapshot.
 #[derive(Debug, Clone, Eq, PartialEq)]

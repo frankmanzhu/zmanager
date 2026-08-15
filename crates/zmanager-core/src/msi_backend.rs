@@ -308,16 +308,6 @@ pub fn extract_msi(archive_path: impl AsRef<Path>, destination: impl AsRef<Path>
     extract_msi_inner(archive_path, destination, policy, None, None)
 }
 
-/// Extracts an `.msi` archive with context.
-pub fn extract_msi_with_context(
-    archive_path: impl AsRef<Path>,
-    destination: impl AsRef<Path>,
-    policy: ExtractionPolicy,
-    context: &mut JobContext<'_>,
-) -> Result<MsiExtractReport, MsiBackendError> {
-    extract_msi_inner(archive_path, destination, policy, Some(context), None)
-}
-
 fn extract_msi_inner(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,

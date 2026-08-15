@@ -1065,8 +1065,11 @@ fn engine_unusable_session_prevents_subsequent_operations() {
     let source = ArchiveSource::Path(corrupt_zip);
     let mut handle = engine.open(source, OpenOptions::default()).unwrap();
 
-    let res = handle.list();
-    assert!(res.is_err());
+    // Corruption surfaced by the first operation — even list — must mark the
+    // session unusable, per the single adapter disposition policy.
+    let error = handle.list().unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::CorruptData);
+    assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Unusable);
 
     // Second call should report session unusable
     let res2 = handle.list();

@@ -248,20 +248,6 @@ impl zmanager_tzap_hosted::auth_client::TzapAuthHttpTransport for CliHttpJsonTra
     }
 }
 
-#[cfg(not(feature = "tzap-online"))]
-#[derive(Debug, Clone, Copy)]
-pub(super) struct CliHttpJsonTransport;
-
-#[cfg(not(feature = "tzap-online"))]
-impl zmanager_tzap_hosted::auth_client::TzapAuthHttpTransport for CliHttpJsonTransport {
-    fn send(
-        &self,
-        _request: &zmanager_tzap_hosted::auth_client::TzapAuthHttpRequest,
-    ) -> Result<zmanager_tzap_hosted::auth_client::TzapAuthHttpResponse, zmanager_tzap_hosted::auth_client::TzapAuthError> {
-        Err(zmanager_tzap_hosted::auth_client::TzapAuthError::Transport { message: "tzap-online feature not enabled in this build".to_owned() })
-    }
-}
-
 #[cfg(feature = "tzap-online")]
 pub(super) fn http_json_request(
     method: &str,
