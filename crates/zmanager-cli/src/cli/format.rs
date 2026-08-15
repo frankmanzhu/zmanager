@@ -76,7 +76,7 @@ pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
     FormatDescriptor { name: FORMAT_TAR, extensions: zmanager_core::archive_format::TAR_LZO_EXTENSIONS, kind: ArchiveFormatKind::TarLzo },
     FormatDescriptor { name: FORMAT_TAR, extensions: zmanager_core::archive_format::TAR_COMPRESS_EXTENSIONS, kind: ArchiveFormatKind::TarCompress },
     FormatDescriptor { name: FORMAT_TAR, extensions: zmanager_core::archive_format::TAR_LZ4_EXTENSIONS, kind: ArchiveFormatKind::TarLz4 },
-    FormatDescriptor { name: FORMAT_TAR, extensions: zmanager_core::archive_format::TAR_LRZ_EXTENSIONS, kind: ArchiveFormatKind::TarLrz },
+    FormatDescriptor { name: FORMAT_TAR, extensions: zmanager_core::archive_format::TAR_UU_EXTENSIONS, kind: ArchiveFormatKind::TarUu },
     FormatDescriptor { name: FORMAT_ISO, extensions: ISO_EXTENSIONS, kind: ArchiveFormatKind::Iso },
     FormatDescriptor { name: FORMAT_CAB, extensions: CAB_EXTENSIONS, kind: ArchiveFormatKind::Cab },
     FormatDescriptor { name: FORMAT_CPIO, extensions: CPIO_EXTENSIONS, kind: ArchiveFormatKind::Cpio },

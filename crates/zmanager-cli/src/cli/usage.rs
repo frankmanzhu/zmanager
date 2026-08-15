@@ -304,7 +304,7 @@ Extract/List/Test:
   aar       .aar, .aea (macOS/iOS)
   7z        .7z
   tgz       .tgz, .tar.gz
-  raw       .zst, .gz, .bz2, .xz, .lzma, .lz, .br, .lz4, .lzo, .Z, .lrz
+  raw       .zst, .gz, .bz2, .xz, .lzma, .lz, .br, .lz4, .lzo, .Z, .uu, .b64
   rar       .rar, .cbr; passworded list/extract uses bundled UnRAR with --password-stdin
 raw single-file streams decompress to one file. TAR-wrapped streams such as
 project.tar.zst or project.tar.gz extract as archives.

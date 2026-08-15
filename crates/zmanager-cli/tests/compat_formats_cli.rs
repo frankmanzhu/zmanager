@@ -553,8 +553,21 @@ fn competitor_compressed_tar_filters_extract_with_zm() {
     if run_optional_tool("lrzip", "lrzip compresses tar", |command| {
         command.arg("-q").arg("-o").arg(&lrzip_archive).arg(&tar_archive);
     }) {
-        archives.push(("payload.tar.lrz".to_owned(), lrzip_archive));
+        // LRZIP was removed from the supported-format list; zm must reject
+        // the file as unrecognized rather than probing.
+        assert_zm_rejects_unrecognized_format("tar.lrz", &lrzip_archive);
     }
+
+    // uuencode / base64 filters are generated in-test: no universally
+    // installed external tool writes both framings (bsdtar writes
+    // `--uuencode` but has no base64 writer).
+    let tar_bytes = fs::read(&tar_archive).unwrap();
+    let uu_archive = temp.path("payload.tar.uu");
+    write_uuencode_stream(&tar_bytes, "payload.tar", &uu_archive);
+    archives.push(("payload.tar.uu".to_owned(), uu_archive));
+    let b64_archive = temp.path("payload.tar.b64");
+    write_base64_stream(&tar_bytes, "payload.tar", &b64_archive);
+    archives.push(("payload.tar.b64".to_owned(), b64_archive));
 
     if archives.is_empty() {
         eprintln!("skipping compressed tar compatibility cases: no creator tools are installed");
@@ -677,8 +690,16 @@ fn competitor_raw_single_file_streams_extract_with_zm() {
     if run_optional_tool("lrzip", "lrzip compresses raw file", |command| {
         command.arg("-q").arg("-o").arg(&lrzip_archive).arg(temp.path("payload.txt"));
     }) {
-        archives.push(("payload.txt.lrz".to_owned(), lrzip_archive.clone(), "payload.txt"));
+        // LRZIP was removed from the supported-format list; zm must reject
+        // the file as unrecognized rather than probing.
+        assert_zm_rejects_unrecognized_format("raw lrz", &lrzip_archive);
     }
+    let uu_raw = temp.path("payload.txt.uu");
+    write_uuencode_stream(PAYLOAD, "payload.txt", &uu_raw);
+    archives.push(("payload.txt.uu".to_owned(), uu_raw.clone(), "payload.txt"));
+    let b64_raw = temp.path("payload.txt.b64");
+    write_base64_stream(PAYLOAD, "payload.txt", &b64_raw);
+    archives.push(("payload.txt.b64".to_owned(), b64_raw.clone(), "payload.txt"));
 
     if archives.is_empty() {
         eprintln!("skipping raw stream compatibility cases: no creator tools are installed");
@@ -707,8 +728,9 @@ fn competitor_raw_single_file_streams_extract_with_zm() {
     }
     if lrzip_archive.exists() {
         let lrzip_stdout = Command::new(zm_path()).arg("extract").arg(&lrzip_archive).arg("--to-stdout").output().unwrap();
-        assert_success("zm extract raw lrz to stdout", &lrzip_stdout);
-        assert_eq!(lrzip_stdout.stdout, PAYLOAD);
+        assert!(!lrzip_stdout.status.success(), "zm extract raw lrz to stdout should fail");
+        let stderr = String::from_utf8_lossy(&lrzip_stdout.stderr);
+        assert!(stderr.contains("Unsupported or unrecognized archive format"), "unexpected stderr:\n{stderr}");
     }
 }
 
@@ -884,6 +906,60 @@ fn create_stdout_archive_with_optional_tool(binary: &str, label: &str, configure
     true
 }
 
+/// Writes a sharutils-style uuencode stream (`begin 644 <name>`, 45-byte
+/// body lines, ` `-padded final group, zero-count line, `end`).
+fn write_uuencode_stream(data: &[u8], name: &str, archive: &Path) {
+    let mut out = Vec::new();
+    out.extend_from_slice(format!("begin 644 {name}\n").as_bytes());
+    for chunk in data.chunks(45) {
+        out.push(u8::try_from(chunk.len()).unwrap_or(0) + 0x20);
+        for triple in chunk.chunks(3) {
+            let first = triple.first().copied().unwrap_or(0);
+            let second = triple.get(1).copied().unwrap_or(0);
+            let third = triple.get(2).copied().unwrap_or(0);
+            let value = u32::from(first) << 16 | u32::from(second) << 8 | u32::from(third);
+            for shift in [18_u32, 12, 6, 0] {
+                out.push(u8::try_from((value >> shift) & 0x3f).unwrap_or(0) + 0x20);
+            }
+        }
+        out.push(b'\n');
+    }
+    out.extend_from_slice(b" \nend\n");
+    fs::write(archive, out).unwrap();
+}
+
+/// Writes a MIME-style base64 stream with the `begin-base64` / `====`
+/// framing the libarchive filter expects.
+fn write_base64_stream(data: &[u8], name: &str, archive: &Path) {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    out.extend_from_slice(format!("begin-base64 644 {name}\n").as_bytes());
+    let mut line_len = 0_usize;
+    for chunk in data.chunks(3) {
+        let first = chunk.first().copied().unwrap_or(0);
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        let value = u32::from(first) << 16 | u32::from(second) << 8 | u32::from(third);
+        let quartet = [
+            ALPHABET[usize::try_from((value >> 18) & 0x3f).unwrap_or(0)],
+            ALPHABET[usize::try_from((value >> 12) & 0x3f).unwrap_or(0)],
+            if chunk.len() > 1 { ALPHABET[usize::try_from((value >> 6) & 0x3f).unwrap_or(0)] } else { b'=' },
+            if chunk.len() > 2 { ALPHABET[usize::try_from(value & 0x3f).unwrap_or(0)] } else { b'=' },
+        ];
+        out.extend_from_slice(&quartet);
+        line_len += 4;
+        if line_len >= 76 {
+            out.push(b'\n');
+            line_len = 0;
+        }
+    }
+    if line_len > 0 {
+        out.push(b'\n');
+    }
+    out.extend_from_slice(b"====\n");
+    fs::write(archive, out).unwrap();
+}
+
 fn run_optional_tool(binary: &str, label: &str, configure: impl FnOnce(&mut Command)) -> bool {
     let Some(mut command) = optional_tool_command(binary, label) else {
         return false;
@@ -949,6 +1025,16 @@ fn assert_zm_extracts_payload_with_password(label: &str, archive: &Path, expecte
     let output = run_zm_extract_with_password(archive, password);
     assert_success(&format!("zm extract {label}"), &output);
     assert!(tree_contains_file_with_contents(&out, expected), "extracted tree for {label} did not contain expected payload under {}", out.display());
+}
+
+/// Asserts that zm rejects the archive with the explicit unrecognized-format
+/// error: formats removed from the supported list (for example LRZIP) are
+/// rejected without probing.
+fn assert_zm_rejects_unrecognized_format(label: &str, archive: &Path) {
+    let output = Command::new(zm_path()).arg("list").arg(archive).output().unwrap();
+    assert!(!output.status.success(), "zm list {label} should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unsupported or unrecognized archive format"), "zm list {label} stderr was:\n{stderr}");
 }
 
 fn assert_zm_extracts_raw_file(label: &str, archive: &Path, output_name: &str, expected: &[u8]) {

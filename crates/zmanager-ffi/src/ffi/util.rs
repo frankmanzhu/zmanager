@@ -239,7 +239,7 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_rar_sidecar_extension(&extension) => ArchiveFormat::MultipartRar,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if extension == "xip" => ArchiveFormat::Xip,
         // Kinds with no dedicated FFI variant (TarLzma, TarLz, TarLzo,
-        // TarCompress, TarLz4, TarLrz, Iso, Cab, Cpio, Rpm, Xar, Pkg, Dmg,
+        // TarCompress, TarLz4, Iso, Cab, Cpio, Rpm, Xar, Pkg, Dmg,
         // Msi, Lha, Ar, Warc, Mtree, Deb) and unknown paths use the generic
         // product classification.
         _ => ArchiveFormat::Other,
@@ -322,7 +322,7 @@ pub(crate) fn kind_label(kind: zmanager_core::archive_format::ArchiveFormatKind)
         ArchiveFormatKind::TarLzo => "TAR.LZO",
         ArchiveFormatKind::TarCompress => "TAR.Z",
         ArchiveFormatKind::TarLz4 => "TAR.LZ4",
-        ArchiveFormatKind::TarLrz => "TAR.LRZ",
+        ArchiveFormatKind::TarUu => "TAR.UU",
         ArchiveFormatKind::Iso => "ISO",
         ArchiveFormatKind::Cab => "CAB",
         ArchiveFormatKind::Cpio => "CPIO",

@@ -672,10 +672,16 @@ fn backend_status_string(status: BackendStatus) -> &'static str {
     }
 }
 
-/// Annotation appended to recognized-but-unsupported format rows, for example
-/// Apple Archive on platforms without the native framework.
-fn unsupported_annotation(format: &FormatDescriptor) -> &'static str {
-    if format_status(format.kind) == BackendStatus::Available { "" } else { " (not supported on this platform)" }
+/// Annotation appended to recognized-but-unsupported format rows: the
+/// capability-table reason for placeholder formats (for example "native
+/// grzip decoder not implemented yet"), or the platform gate message for
+/// Apple Archive / MTREE outside their native targets.
+fn unsupported_annotation(format: &FormatDescriptor) -> String {
+    match format_status(format.kind) {
+        BackendStatus::Available => String::new(),
+        BackendStatus::UnsupportedPlatform => " (not supported on this platform)".to_owned(),
+        BackendStatus::Unavailable { reason } => format!(" ({reason})"),
+    }
 }
 
 fn print_formats_table(global: &GlobalOptions) {
