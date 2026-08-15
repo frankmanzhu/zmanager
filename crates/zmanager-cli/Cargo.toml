@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 readme = "README.md"
 build = "build.rs"
+default-run = "zm"
 
 [[bin]]
 name = "zmanager-cli"
