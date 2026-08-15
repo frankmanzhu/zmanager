@@ -9,25 +9,33 @@ TMPDIR="${TMPDIR:-/tmp}"
 # Default: the full build (online identity features). --offline installs the
 # offline build (no network features); `zm --version` reports which flavor.
 OFFLINE=0
+# --preview installs from the latest successful Package Preview CI run
+# instead of a release, for developers testing packages before release.
+PREVIEW=0
 
 usage() {
   cat <<'EOF'
 zmanager install script
 
-Usage: sh install.sh [--offline]
+Usage: sh install.sh [--offline] [--preview]
 
 Options:
   --offline   install the offline build (no online identity features)
+  --preview   install from the latest successful Package Preview CI run
+              instead of a release (requires the gh CLI; set
+              ZMANAGER_RUN_ID to install a specific run)
   --help      show this help
 
-With a piped install, pass the flag after sh -s --:
+With a piped install, pass the flags after sh -s --:
   curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --offline
+  curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --preview
 EOF
 }
 
 for arg in "$@"; do
   case "$arg" in
     --offline) OFFLINE=1 ;;
+    --preview) PREVIEW=1 ;;
     --help | -h) usage; exit 0 ;;
     *)
       printf 'zmanager install: unknown argument: %s\n' "$arg" >&2
@@ -185,6 +193,46 @@ download_release() {
   install_binary "$binary"
 }
 
+# Install from the Package Preview CI instead of a release. The preview
+# workflow (package-preview.yml) uploads each build as a GitHub Actions
+# artifact named zm-preview-<target>-full / zm-preview-<target>-offline,
+# containing the normal release tarball plus its .sha256 sidecar.
+download_preview() {
+  target="$1"
+  if [ "$OFFLINE" = "1" ]; then
+    artifact="zm-preview-$target-offline"
+    archive="zm-offline-$target.tar.gz"
+    binary="zm-offline"
+  else
+    artifact="zm-preview-$target-full"
+    archive="zm-$target.tar.gz"
+    binary="zm"
+  fi
+
+  need gh || fail "preview installs require the gh CLI (https://cli.github.com/)"
+
+  run_id="${ZMANAGER_RUN_ID:-}"
+  if [ -z "$run_id" ]; then
+    say "Finding the latest successful Package Preview run"
+    run_id="$(gh run list --repo "$REPO_URL" --workflow package-preview.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+    [ -n "$run_id" ] || fail "could not find a Package Preview run; run the package-preview workflow, or set ZMANAGER_RUN_ID"
+  fi
+
+  say "Downloading artifact $artifact from run $run_id"
+  gh run download "$run_id" --repo "$REPO_URL" -n "$artifact" -D "$PWD" \
+    || fail "artifact $artifact not found in run $run_id"
+
+  [ -f "$archive" ] || fail "artifact did not contain $archive"
+  [ -f "$archive.sha256" ] || fail "artifact did not contain $archive.sha256"
+  expected="$(awk '{print $1}' "$archive.sha256")"
+  actual="$(sha256_file "$archive")"
+  [ "$actual" = "$expected" ] || fail "checksum mismatch for $archive"
+
+  tar -xzf "$archive"
+  [ -x "$binary" ] || fail "release archive did not contain executable $binary"
+  install_binary "$binary"
+}
+
 build_from_source() {
   need git || fail "git is required for source install"
   need cargo || fail "Rust/Cargo is required for source install"
@@ -222,7 +270,11 @@ trap cleanup EXIT INT TERM
 
 cd "$work"
 
-if ! download_release "$target"; then
+if [ "$PREVIEW" = "1" ]; then
+  # Preview installs never fall back to a source build: the point of a
+  # preview is testing the packaged CI artifact.
+  download_preview "$target"
+elif ! download_release "$target"; then
   say "No matching release asset found; falling back to source build"
   build_from_source
 fi

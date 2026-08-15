@@ -1,0 +1,57 @@
+class ZmanagerOffline < Formula
+  desc "Universal file archiver (offline build: no online identity features)"
+  homepage "https://github.com/tzap-org/zmanager"
+  version "__PACKAGE_VERSION__"
+  license all_of: ["Apache-2.0", :cannot_represent]
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "__RELEASE_BASE_URL__/zm-offline-aarch64-apple-darwin.tar.gz"
+      sha256 "__SHA_OFFLINE_AARCH64_APPLE_DARWIN__"
+    else
+      url "__RELEASE_BASE_URL__/zm-offline-x86_64-apple-darwin.tar.gz"
+      sha256 "__SHA_OFFLINE_X86_64_APPLE_DARWIN__"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "__RELEASE_BASE_URL__/zm-offline-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "__SHA_OFFLINE_AARCH64_UNKNOWN_LINUX_MUSL__"
+    else
+      url "__RELEASE_BASE_URL__/zm-offline-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "__SHA_OFFLINE_X86_64_UNKNOWN_LINUX_MUSL__"
+    end
+  end
+
+  def install
+    # The offline release archive carries only the binary plus license files;
+    # completions and man pages live in the full formula (zmanager).
+    bin.install "zm-offline" => "zm"
+    doc.install "LICENSE", "NOTICE"
+  end
+
+  def caveats
+    <<~EOS
+      This is the offline build of ZManager CLI: all archive commands are
+      present, but online identity features (`zm auth` and friends) are not.
+      For the full build with online features, install with:
+        brew install zmanager
+
+      `zm auth` fails with instructions in the offline build; the full build
+      is a drop-in replacement.
+
+      Shell completions are available from the full build (`zm completions`).
+    EOS
+  end
+
+  test do
+    # `(offline` also covers builds that embed a build revision, which prints
+    # as `zm 2.0.1 (offline, <rev>)`.
+    assert_match "zm #{version} (offline", shell_output("#{bin}/zm --version")
+
+    (testpath/"payload.txt").write("hello from Homebrew\n")
+    system bin/"zm", "create", "payload.zip", "payload.txt"
+    system bin/"zm", "test", "payload.zip"
+  end
+end

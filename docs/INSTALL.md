@@ -164,6 +164,39 @@ curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
   | sudo env ZMANAGER_VERSION=v2.0.1 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
 ```
 
+## Preview Builds (developers)
+
+The [Package Preview workflow](.github/workflows/package-preview.yml) packages
+the latest `main` on every push and on manual dispatch, uploading the tarballs
+as GitHub Actions artifacts without publishing a release. To test a preview
+package with the install script instead of a release, pass `--preview`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
+  | sh -s -- --preview
+```
+
+`--preview` works on macOS and Linux, requires the
+[gh CLI](https://cli.github.com/) to be installed and authenticated, and does
+not fall back to a source build. The latest **successful** Package Preview run
+is used; pin a specific run with `ZMANAGER_RUN_ID`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
+  | ZMANAGER_RUN_ID=26042001498 sh -s -- --preview
+```
+
+Combine with `--offline` to test the offline preview package:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
+  | sh -s -- --preview --offline
+```
+
+`ZMANAGER_INSTALL_DIR`, `ZMANAGER_REPO_URL`, and the checksum verification
+steps behave the same as release installs. Preview artifacts are kept for
+14 days.
+
 ## Homebrew
 
 The Homebrew tap repository should be named `homebrew-zmanager`. After the

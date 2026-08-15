@@ -22,15 +22,28 @@ script archive workflows without opening a GUI.
 
 Release builds are published on the
 [latest release page](https://github.com/tzap-org/zmanager/releases/latest).
-For full installation details and checksum examples, see
-[docs/INSTALL.md](docs/INSTALL.md).
+Each release ships two flavors:
+
+- **full** — all commands, including the online identity features behind
+  `zm auth` (default install)
+- **offline** — the same archive commands with no network features
+
+`zm --version` reports which flavor is installed (`zm 2.0.1 (full)` or
+`zm 2.0.1 (offline)`). For full installation details and checksum examples,
+see [docs/INSTALL.md](docs/INSTALL.md).
 
 ### macOS
 
-Install from the Homebrew tap:
+Install the full build from the Homebrew tap:
 
 ```sh
 brew install tzap-org/zmanager/zmanager
+```
+
+For the offline build, install the offline formula:
+
+```sh
+brew install tzap-org/zmanager/zmanager-offline
 ```
 
 ### Linux
@@ -41,6 +54,12 @@ Install the latest matching release into `$HOME/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh
 ```
 
+Pass `--offline` for the offline build:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --offline
+```
+
 ### Windows
 
 Install with WinGet:
@@ -49,8 +68,29 @@ Install with WinGet:
 winget install FrankZhu.ZManagerCLI
 ```
 
+For the offline build:
+
+```powershell
+winget install TzapOrg.ZManagerCLI.Offline
+```
+
 Future version manifests will use `TzapOrg.ZManagerCLI`; new releases use the
 organization-scoped package identity.
+
+### Preview builds (developers)
+
+The
+[Package Preview workflow](https://github.com/tzap-org/zmanager/actions/workflows/package-preview.yml)
+builds packages from the latest `main` without publishing a release. Install a
+preview build with the install script (requires the
+[gh CLI](https://cli.github.com/)):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --preview
+```
+
+Combine with `--offline` for the offline preview build. The latest successful
+preview run is used; set `ZMANAGER_RUN_ID` to install a specific run.
 
 ## Quick Start
 

@@ -1,0 +1,23 @@
+PackageIdentifier: TzapOrg.ZManagerCLI.Offline
+PackageVersion: __PACKAGE_VERSION__
+PackageLocale: en-US
+Publisher: Tzap Org
+PublisherUrl: https://github.com/tzap-org
+PackageName: ZManager CLI (Offline)
+PackageUrl: https://github.com/tzap-org/zmanager
+License: Apache-2.0
+LicenseUrl: https://github.com/tzap-org/zmanager/blob/__TAG__/LICENSE
+ShortDescription: Universal file archiver (offline build, no online identity features).
+Description: ZManager CLI (Offline) is a universal file archiver for high-performance compression, safe extraction, and seamless handling of ZIP, 7z, TAR.ZST, TZAP, RAR, and many other archive formats. This build has no network features: online identity commands such as `zm auth` are unavailable. Install TzapOrg.ZManagerCLI for the full build.
+Tags:
+  - archive
+  - compression
+  - zip
+  - 7z
+  - tar
+  - zstd
+  - offline
+Commands:
+  - zm
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
