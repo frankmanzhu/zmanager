@@ -17,6 +17,12 @@ use crate::os_rng::OsRng;
 /// Fixed-width signature length for P-1363 `(r || s)` on P-256.
 pub const P256_P1363_SIGNATURE_LENGTH: usize = 64;
 
+/// The P-256 group order `n` (NIST secp256r1, big-endian).
+const P256_ORDER: [u8; 32] = [
+    0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9,
+    0xca, 0xc2, 0xfc, 0x63, 0x25, 0x51,
+];
+
 /// Errors returned by the P-256 helpers.
 #[derive(Debug)]
 pub enum P256SignatureError {
@@ -47,6 +53,16 @@ pub fn sign_p256_sha256_p1363(private_key: &SecretKey, payload: &[u8]) -> Result
 /// The SHA-256 hashing step is intentionally inside this helper to avoid callers
 /// accidentally hashing payloads twice.
 pub fn verify_p256_sha256_p1363(public_key: &VerifyingKey, payload: &[u8], signature: &[u8]) -> Result<bool, P256SignatureError> {
+    if signature.len() != P256_P1363_SIGNATURE_LENGTH {
+        return Err(P256SignatureError::InvalidSignatureLength { actual: signature.len() });
+    }
+    // The pre-migration check rejected `s >= n` (and `s > n/2`) as
+    // NonCanonicalLowS before verification; `Signature::from_slice` would
+    // classify the out-of-range scalar as a generic crypto error, so the
+    // range check is preserved here for parity.
+    if signature[P256_P1363_SIGNATURE_LENGTH / 2..] >= P256_ORDER[..] {
+        return Err(P256SignatureError::NonCanonicalLowS);
+    }
     let signature = decode_p256_p1363_signature(signature)?;
 
     if signature.s().is_high().into() {

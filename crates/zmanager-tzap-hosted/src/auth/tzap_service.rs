@@ -338,7 +338,8 @@ fn x509_certificate_summary_json(certificate_der: &[u8]) -> Result<Value, String
         return Err("could not parse certificate: trailing DER bytes".to_owned());
     }
     let fingerprint = Sha256::digest(certificate_der);
-    let serial_number = certificate.serial.to_str_radix(16);
+    // BN::to_hex_str parity: uppercase, no leading zeros.
+    let serial_number = certificate.serial.to_str_radix(16).to_uppercase();
 
     Ok(json!({
         "subject": x509_name_to_string(certificate.subject()),

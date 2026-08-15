@@ -930,7 +930,8 @@ pub(crate) fn inspect_x509_root_auth_footer(footer: &RootAuthFooterV1, archive_r
         signed_at_unix_seconds: report.signed_at_unix_seconds,
         subject: x509_name_to_string(leaf_certificate.subject()),
         issuer: x509_name_to_string(leaf_certificate.issuer()),
-        serial_number_hex: leaf_certificate.serial.to_str_radix(16),
+        // BN::to_hex_str parity: uppercase, no leading zeros.
+        serial_number_hex: leaf_certificate.serial.to_str_radix(16).to_uppercase(),
         certificate_sha256: report.certificate_sha256,
         diagnostics: Vec::new(),
     })

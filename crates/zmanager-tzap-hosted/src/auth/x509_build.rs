@@ -154,8 +154,8 @@ pub(crate) fn assemble_ecdsa_certificate_raw(spec: &RawCertificateSpec<'_>, issu
     let sig_alg = der_wrap_raw(0x30, &der_wrap_raw(0x06, &oid_der_bytes(OID_ECDSA_WITH_SHA256).ok_or("invalid OID")?));
 
     let mut tbs_elements = Vec::new();
-    // [0] EXPLICIT version (v3 = INTEGER 2)
-    tbs_elements.extend(der_wrap_raw(0xa0, &der_wrap_raw(0x02, &minimal_integer_bytes(spec.serial))));
+    // [0] EXPLICIT version — v3 (INTEGER 2)
+    tbs_elements.extend(der_wrap_raw(0xa0, &der_wrap_raw(0x02, &[2])));
     tbs_elements.extend(der_wrap_raw(0x02, &minimal_integer_bytes(spec.serial)));
     tbs_elements.extend(sig_alg.clone());
     tbs_elements.extend(spec.issuer_der.clone());

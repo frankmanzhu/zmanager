@@ -24,7 +24,6 @@ crc32fast = "1.5.0"
 bzip2 = "0.6.1"
 cab = "0.6.0"
 msi = "0.10.0"
-der = "0.8"
 # RustCrypto signing stack (OpenSSL removal OR-200/201): the 0.14 curve line
 # pairs with ecdsa 0.17 / signature 3.x, matching tzap-plugin-signing.
 ecdsa = { version = "0.17", features = ["der"] }

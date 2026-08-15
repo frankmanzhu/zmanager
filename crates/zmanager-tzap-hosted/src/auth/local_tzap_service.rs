@@ -484,6 +484,14 @@ mod differential_tests {
         assert!(leaf.verify(platform.public_key().unwrap().as_ref()).unwrap());
         assert!(root.verify(root.public_key().unwrap().as_ref()).unwrap());
 
+        // Regression: the raw TBS encoder must stamp X.509 version 3
+        // (INTEGER 2 in the [0] EXPLICIT slot) — an earlier draft wrote the
+        // serial number there and only lenient parsers tolerated it.
+        for (label, der) in [("root", &chain.root_der), ("platform", &chain.platform_der), ("leaf", &chain.leaf_der)] {
+            let parsed = super::parse_certificate(der, label).unwrap();
+            assert_eq!(parsed.version().0, 2, "{label} must be X.509 v3");
+        }
+
         // The extension-level profile checks run through x509-parser in the
         // product tests (certificate_profile); this differential test pins the
         // signature chain under OpenSSL.
