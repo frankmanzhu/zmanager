@@ -79,7 +79,7 @@ pub(crate) fn assemble_rsa_certificate(spec: &CertificateSpec<'_>, issuer_key: &
     let tbs_der = tbs.to_der().map_err(|error| error.to_string())?;
     let signing_key = pkcs1v15::SigningKey::<Sha256>::new(issuer_key.clone());
     let signature: rsa::pkcs1v15::Signature = signing_key.sign_digest(Sha256::new_with_prefix(&tbs_der));
-    assemble_certificate(tbs, signature_algorithm, signature.as_ref())
+    assemble_certificate(tbs, signature_algorithm, &signature.to_bytes())
 }
 
 fn build_tbs(spec: &CertificateSpec<'_>, signature_algorithm: &AlgorithmIdentifierOwned) -> Result<TbsCertificate, String> {
