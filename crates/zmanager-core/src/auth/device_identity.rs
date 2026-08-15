@@ -146,7 +146,7 @@ fn build_device_csr(private_key: &SecretKey, options: &TzapDeviceCsrOptions) -> 
     let mut subject = Name::default();
     subject.0.push(rdn);
 
-    let info = CertReqInfo { version: Version::V1, subject, public_key: spki, attributes: Default::default() };
+    let info = CertReqInfo { version: Version::V1, subject, public_key: spki, attributes: x509_cert::der::asn1::SetOfVec::default() };
     let info_der = info.to_der().map_err(|error| TzapDeviceIdentityError::Crypto(error.to_string()))?;
 
     // ECDSA P-256 with SHA-256 over the DER-encoded CertificationRequestInfo

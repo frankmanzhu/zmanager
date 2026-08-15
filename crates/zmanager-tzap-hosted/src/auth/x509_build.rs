@@ -79,7 +79,7 @@ pub(crate) fn assemble_rsa_certificate(spec: &CertificateSpec<'_>, issuer_key: &
     let tbs_der = tbs.to_der().map_err(|error| error.to_string())?;
     let signing_key = pkcs1v15::SigningKey::<Sha256>::new(issuer_key.clone());
     let signature: rsa::pkcs1v15::Signature = signing_key.sign_digest(Sha256::new_with_prefix(&tbs_der));
-    assemble_certificate(tbs, signature_algorithm, signature.to_vec())
+    assemble_certificate(tbs, signature_algorithm, signature.as_ref())
 }
 
 fn build_tbs(spec: &CertificateSpec<'_>, signature_algorithm: &AlgorithmIdentifierOwned) -> Result<TbsCertificate, String> {
@@ -98,9 +98,9 @@ fn build_tbs(spec: &CertificateSpec<'_>, signature_algorithm: &AlgorithmIdentifi
     })
 }
 
-fn assemble_certificate(tbs: TbsCertificate, signature_algorithm: AlgorithmIdentifierOwned, signature: Vec<u8>) -> Result<Vec<u8>, String> {
+fn assemble_certificate(tbs: TbsCertificate, signature_algorithm: AlgorithmIdentifierOwned, signature: &[u8]) -> Result<Vec<u8>, String> {
     let certificate =
-        Certificate { tbs_certificate: tbs, signature_algorithm, signature: BitString::from_bytes(&signature).map_err(|error| error.to_string())? };
+        Certificate { tbs_certificate: tbs, signature_algorithm, signature: BitString::from_bytes(signature).map_err(|error| error.to_string())? };
     certificate.to_der().map_err(|error| error.to_string())
 }
 
@@ -290,6 +290,7 @@ fn push_base128(out: &mut Vec<u8>, value: u64) {
     out.push(buffer[0]);
 }
 
+#[allow(clippy::cast_possible_truncation)] // base-128 groups and remainders are 0..=127 by construction
 fn encode_big_base128(out: &mut Vec<u8>, decimal: &[u8]) {
     let mut digits: Vec<u8> = decimal.iter().map(|digit| *digit - b'0').collect();
     let mut groups: Vec<u8> = Vec::new();
