@@ -38,6 +38,9 @@ lzma-rust2 = { version = "0.16.2", default-features = false, features = ["lzip",
 # the lzop container framing around the blocks lives in `lzop_decoder.rs`.
 lzo = "0.1.3"
 num-bigint = "0.4.6"
+# PKCS#12 import only: the single allow-listed OpenSSL surface in core
+# (implementation-docs/adr/2026-08-15-chain-verification-backend.md). Vendored,
+# so no system OpenSSL is required on any target.
 openssl = { version = "0.10.80", features = ["vendored"] }
 p256 = { version = "0.14", features = ["ecdsa", "pkcs8"] }
 pkcs8 = { version = "0.11", features = ["std"] }

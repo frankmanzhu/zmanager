@@ -47,3 +47,14 @@ its account UI uses hosted authentication.
 Adding a hosted operation requires an explicit `tzap-online` product-boundary
 decision. It must not be added to archive-engine selection or to the stable
 FFI type contract.
+
+## Cryptographic stack
+
+The cryptographic implementation is RustCrypto across the board: P-256 ECDSA
+(device signing, contact cards, document envelopes, recipient key-wrap),
+RSA (hosted self-signed identities), X.509 parsing and certificate assembly
+(`x509-parser`/`x509-cert`), chain and CRL signature verification
+(`x509-verify`), and HPKE key wrapping. OpenSSL is vendored and remains only
+where the RustCrypto ecosystem has no equivalent yet: X.509 chain
+path-validation in `tzap-plugin-signing` and PKCS#12 container import/export.
+No target requires a system OpenSSL installation.

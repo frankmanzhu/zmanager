@@ -24,7 +24,9 @@ COMMON_LICENSE_GLOBS = (
     "NOTICE",
     "NOTICE.*",
 )
-VCPKG_PORTS = ("zlib", "bzip2", "liblzma", "zstd", "lz4", "openssl")
+# OpenSSL is no longer a vcpkg port (OR-000): it arrives through cargo
+# (vendored openssl-src), whose license the cargo-tree scan picks up.
+VCPKG_PORTS = ("zlib", "bzip2", "liblzma", "zstd", "lz4")
 
 
 def parse_args() -> argparse.Namespace:
