@@ -1,8 +1,8 @@
-//! Operating-system randomness for the rand_core 0.10 trait line.
+//! Operating-system randomness for the `rand_core` 0.10 trait line.
 //!
-//! rand_core 0.10 ships only the trait core (no `OsRng`), and the ecosystem
+//! `rand_core` 0.10 ships only the trait core (no `OsRng`), and the ecosystem
 //! OS-RNG provider crates have not caught up. This minimal wrapper drives
-//! `getrandom` through the `TryRng`/`TryCryptoRng` markers so the RustCrypto
+//! `getrandom` through the `TryRng`/`TryCryptoRng` markers so the `RustCrypto`
 //! 0.14-curve crates and `signature` 3 randomized signers accept it.
 
 use core::convert::Infallible;

@@ -29,7 +29,7 @@ pub fn validate_crl_der_against_manifest(entry: &TzapCrlManifestEntry, crl_der: 
 }
 
 /// Verifies the CRL signature over its TBS DER with the issuer's SPKI
-/// (the RustCrypto `x509-verify` replacement for OpenSSL's `X509Crl::verify`).
+/// (the `RustCrypto` `x509-verify` replacement for OpenSSL's `X509Crl::verify`).
 fn verify_crl_signature(crl: &CertificateRevocationList<'_>, issuer_spki_raw: &[u8]) -> Result<(), TzapStatusClientError> {
     let key_info = x509_cert::spki::SubjectPublicKeyInfoRef::try_from(issuer_spki_raw)
         .map_err(|error| TzapStatusClientError::CrlValidation { reason: error.to_string() })?;

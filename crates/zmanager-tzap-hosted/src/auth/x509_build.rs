@@ -1,8 +1,8 @@
-//! RustCrypto X.509 certificate assembly shared by the hosted services
+//! `RustCrypto` X.509 certificate assembly shared by the hosted services
 //! (OR-300 self-signed identities, OR-302 local signer chains).
 //!
 //! Certificates are assembled with `x509-cert` types and signed with the
-//! RustCrypto stack (ECDSA P-256 SHA-256, or RSA PKCS#1v1.5 SHA-256); the
+//! `RustCrypto` stack (ECDSA P-256 SHA-256, or RSA PKCS#1v1.5 SHA-256); the
 //! OpenSSL surface in this crate is limited to PKCS#12 container export per
 //! the ADR 2026-08-15 gap decision.
 
@@ -18,7 +18,7 @@ use x509_cert::der::DateTime as DerDateTime;
 use x509_cert::der::Encode as _;
 use x509_cert::der::asn1::{Any, BitString, GeneralizedTime, ObjectIdentifier, OctetString, UtcTime, Utf8StringRef};
 use x509_cert::ext::Extension;
-use x509_cert::ext::pkix::{AuthorityKeyIdentifier, SubjectKeyIdentifier};
+use x509_cert::ext::pkix::SubjectKeyIdentifier;
 use x509_cert::name::{Name, RelativeDistinguishedName};
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned};
@@ -72,38 +72,6 @@ pub(crate) fn subject_key_identifier_extension(spki_der: &[u8]) -> Result<Extens
     })
 }
 
-/// Authority key identifier extension pointing at the issuer's SKI.
-pub(crate) fn authority_key_identifier_extension(issuer_spki_der: &[u8]) -> Result<Extension, String> {
-    let spki = SubjectPublicKeyInfoOwned::try_from(issuer_spki_der).map_err(|error| error.to_string())?;
-    let digest = Sha256::digest(spki.subject_public_key.raw_bytes());
-    Ok(Extension {
-        extn_id: ObjectIdentifier::new_unwrap("2.5.29.35"),
-        critical: false,
-        extn_value: OctetString::new(
-            AuthorityKeyIdentifier {
-                key_identifier: Some(OctetString::new(digest.as_slice()).map_err(|error| error.to_string())?),
-                authority_cert_issuer: None,
-                authority_cert_serial_number: None,
-            }
-            .to_der()
-            .map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?,
-    })
-}
-
-/// Assembles and signs a certificate with an ECDSA P-256 issuer key.
-pub(crate) fn assemble_ecdsa_certificate(spec: &CertificateSpec<'_>, issuer_key: &p256::SecretKey) -> Result<Vec<u8>, String> {
-    let signature_algorithm = AlgorithmIdentifierOwned { oid: ObjectIdentifier::new_unwrap(OID_ECDSA_WITH_SHA256), parameters: None };
-    let tbs = build_tbs(spec, &signature_algorithm)?;
-    let tbs_der = tbs.to_der().map_err(|error| error.to_string())?;
-    let signing_key = SigningKey::from(issuer_key.clone());
-    let fixed: ecdsa::Signature<p256::NistP256> =
-        signing_key.sign_prehash_with_rng(&mut zmanager_core::os_rng::OsRng, &Sha256::digest(&tbs_der)).map_err(|error| error.to_string())?;
-    let signature = ecdsa::der::Signature::<p256::NistP256>::from(fixed.normalize_s());
-    assemble_certificate(tbs, signature_algorithm, signature.to_vec())
-}
-
 /// Assembles and signs a certificate with an RSA issuer key (PKCS#1v1.5 SHA-256).
 pub(crate) fn assemble_rsa_certificate(spec: &CertificateSpec<'_>, issuer_key: &rsa::RsaPrivateKey) -> Result<Vec<u8>, String> {
     let signature_algorithm = AlgorithmIdentifierOwned { oid: ObjectIdentifier::new_unwrap(OID_SHA256_WITH_RSA), parameters: None };
@@ -136,7 +104,7 @@ fn assemble_certificate(tbs: TbsCertificate, signature_algorithm: AlgorithmIdent
     certificate.to_der().map_err(|error| error.to_string())
 }
 
-/// DER-encodes a BasicConstraints extension value.
+/// DER-encodes a `BasicConstraints` extension value.
 pub(crate) fn basic_constraints_der(ca: bool, path_len: Option<u8>) -> Result<Vec<u8>, String> {
     x509_cert::ext::pkix::BasicConstraints { ca, path_len_constraint: path_len }.to_der().map_err(|error| error.to_string())
 }
@@ -157,7 +125,7 @@ pub(crate) fn raw_der_extension(oid: &str, critical: bool, contents: &[u8]) -> R
 /// encoder instead of `x509-cert`'s typed extensions.
 pub(crate) struct RawCertificateSpec<'a> {
     pub(crate) subject_cn: &'a str,
-    /// Issuer name bytes (a DER-encoded RDNSequence).
+    /// Issuer name bytes (a DER-encoded `RDNSequence`).
     pub(crate) issuer_der: Vec<u8>,
     /// Subject public key SPKI DER.
     pub(crate) subject_spki_der: Vec<u8>,
@@ -229,7 +197,7 @@ fn minimal_integer_bytes(value: u64) -> Vec<u8> {
     }
 }
 
-/// UTCTime (through 2049) or GeneralizedTime DER content bytes.
+#[allow(clippy::cast_possible_truncation)] // month/day/hour/minute/second are bounded by construction
 fn utc_or_generalized_time_der(seconds: i64) -> Result<Vec<u8>, String> {
     let time = time::OffsetDateTime::from_unix_timestamp(seconds).map_err(|error| error.to_string())?;
     if time.year() >= 2050 {
@@ -253,6 +221,7 @@ fn der_wrap_raw(tag: u8, contents: &[u8]) -> Vec<u8> {
     out
 }
 
+#[allow(clippy::cast_possible_truncation)] // 0x80 | byte-count is 0x81..=0x84 by construction
 fn der_len_raw(length: usize) -> Vec<u8> {
     if length < 128 {
         vec![length as u8]
@@ -265,7 +234,7 @@ fn der_len_raw(length: usize) -> Vec<u8> {
     }
 }
 
-/// Encodes a Unix timestamp as UTCTime (or GeneralizedTime past 2049),
+/// Encodes a Unix timestamp as `UTCTime` (or `GeneralizedTime` past 2049),
 /// matching OpenSSL's `ASN1_TIME` normalization boundary.
 pub(crate) fn time_from_unix(seconds: i64) -> Result<Time, String> {
     let time = time::OffsetDateTime::from_unix_timestamp(seconds).map_err(|error| error.to_string())?;
@@ -355,13 +324,14 @@ fn encode_big_base128(out: &mut Vec<u8>, decimal: &[u8]) {
 /// Encodes DER bytes as a PEM block with 64-column base64 lines.
 pub(crate) fn pem_encode(label: &str, der: &[u8]) -> String {
     use base64::Engine as _;
+    use std::fmt::Write as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(der);
     let mut out = String::with_capacity(encoded.len() + encoded.len() / 64 + 64);
-    out.push_str(&format!("-----BEGIN {label}-----\n"));
+    let _ = writeln!(out, "-----BEGIN {label}-----");
     for chunk in encoded.as_bytes().chunks(64) {
         out.push_str(std::str::from_utf8(chunk).expect("base64 output is ASCII"));
         out.push('\n');
     }
-    out.push_str(&format!("-----END {label}-----\n"));
+    let _ = writeln!(out, "-----END {label}-----");
     out
 }

@@ -7,7 +7,7 @@ pub fn x509_name_to_string(name: &X509Name<'_>) -> String {
     let mut parts = Vec::new();
     for attribute in name.iter_attributes() {
         let key = oid_short_name(attribute.attr_type().to_id_string().as_str()).unwrap_or("OID");
-        let value = attribute.as_str().map(str::to_owned).unwrap_or_else(|_| hex_lower(attribute.as_slice()));
+        let value = attribute.as_str().map_or_else(|_| hex_lower(attribute.as_slice()), str::to_owned);
         parts.push(format!("{key}={value}"));
     }
     parts.join(", ")

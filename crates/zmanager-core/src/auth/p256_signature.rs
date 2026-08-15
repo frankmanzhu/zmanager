@@ -24,7 +24,7 @@ pub enum P256SignatureError {
     InvalidSignatureLength { actual: usize },
     /// Signature rejected because `s` is not canonical low-S.
     NonCanonicalLowS,
-    /// The RustCrypto stack rejected an operation.
+    /// The `RustCrypto` stack rejected an operation.
     Crypto(String),
 }
 
@@ -58,6 +58,7 @@ pub fn verify_p256_sha256_p1363(public_key: &VerifyingKey, payload: &[u8], signa
 }
 
 /// Encodes an ECDSA P-256 signature as fixed-width P-1363 `r || s` bytes.
+#[must_use]
 pub fn encode_p256_p1363_signature(signature: &Signature) -> [u8; P256_P1363_SIGNATURE_LENGTH] {
     let bytes = signature.to_bytes();
     let mut out = [0_u8; P256_P1363_SIGNATURE_LENGTH];
@@ -90,7 +91,7 @@ pub fn parse_p256_private_key_der(der: &[u8]) -> Result<SecretKey, P256Signature
     SecretKey::from_pkcs8_der(der).or_else(|_| SecretKey::from_sec1_der(der)).map_err(|error| P256SignatureError::Crypto(error.to_string()))
 }
 
-/// Parses a SubjectPublicKeyInfo DER blob into a P-256 verifying key.
+/// Parses a `SubjectPublicKeyInfo` DER blob into a P-256 verifying key.
 pub fn parse_p256_public_key_spki_der(spki_der: &[u8]) -> Result<VerifyingKey, P256SignatureError> {
     let public_key = p256::PublicKey::from_public_key_der(spki_der).map_err(|error| P256SignatureError::Crypto(error.to_string()))?;
     Ok(public_key.into())

@@ -781,6 +781,7 @@ fn push_base128(out: &mut Vec<u8>, value: u64) {
 }
 
 /// Encodes a decimal digit string as big-endian base-128 OID groups.
+#[allow(clippy::cast_possible_truncation)] // base-128 groups are 0..=127 by construction
 fn encode_big_base128(out: &mut Vec<u8>, decimal: &[u8]) {
     let mut digits: Vec<u8> = decimal.iter().map(|digit| *digit - b'0').collect();
     let mut groups: Vec<u8> = Vec::new();

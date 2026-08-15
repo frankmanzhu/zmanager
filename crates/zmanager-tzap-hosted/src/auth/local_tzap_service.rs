@@ -237,8 +237,8 @@ struct IssuedChain {
 }
 
 fn certificate_chain_for_leaf_key(leaf_key: &p256::SecretKey, now_unix_seconds: u64) -> Result<IssuedChain, TzapLocalServiceError> {
-    let root_key = p256_private_key()?;
-    let platform_key = p256_private_key()?;
+    let root_key = p256_private_key();
+    let platform_key = p256_private_key();
     let root_der = root_certificate(&root_key, now_unix_seconds)?;
     let platform_der = intermediate_certificate(&platform_key, &root_key, now_unix_seconds)?;
     let leaf_der = leaf_certificate(leaf_key, &platform_key, now_unix_seconds)?;
@@ -313,7 +313,7 @@ fn local_certificate(
     now_unix_seconds: u64,
 ) -> Result<Vec<u8>, TzapLocalServiceError> {
     let issuer_der = x509_build::common_name_name(issuer_cn)
-        .map_err(|error| TzapLocalServiceError::Crypto(error))?
+        .map_err(TzapLocalServiceError::Crypto)?
         .to_der()
         .map_err(|error| TzapLocalServiceError::Crypto(error.to_string()))?;
     let spec = RawCertificateSpec {
@@ -325,7 +325,7 @@ fn local_certificate(
         not_after_unix: not_after_unix(now_unix_seconds),
         extensions: extensions.to_vec(),
     };
-    x509_build::assemble_ecdsa_certificate_raw(&spec, issuer_key).map_err(|error| TzapLocalServiceError::Crypto(error))
+    x509_build::assemble_ecdsa_certificate_raw(&spec, issuer_key).map_err(TzapLocalServiceError::Crypto)
 }
 
 fn basic_constraints_extension(ca: bool, path_len: Option<u8>) -> Vec<u8> {
@@ -370,8 +370,8 @@ fn raw_extension_der(oid: &str, critical: bool, contents: &[u8]) -> Result<Vec<u
     Ok(x509_build::raw_extension_der(&der_oid(oid)?, critical, contents))
 }
 
-fn p256_private_key() -> Result<p256::SecretKey, TzapLocalServiceError> {
-    Ok(p256::SecretKey::generate_from_rng(&mut zmanager_core::os_rng::OsRng))
+fn p256_private_key() -> p256::SecretKey {
+    p256::SecretKey::generate_from_rng(&mut zmanager_core::os_rng::OsRng)
 }
 
 fn serial_number(now_unix_seconds: u64) -> u64 {

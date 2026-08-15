@@ -252,12 +252,12 @@ fn load_x509_signer_from_certificate_files(
 }
 
 /// PKCS#12 identity import — the one allow-listed OpenSSL surface left in
-/// this module. The RustCrypto `pkcs12` crate is a pre-release container
+/// this module. The `RustCrypto` `pkcs12` crate is a pre-release container
 /// skeleton with no PBE decryption yet, so PKCS#12 parsing stays on vendored
 /// OpenSSL per the §6 gap decision recorded in
 /// `implementation-docs/adr/2026-08-15-chain-verification-backend.md`
 /// (and the plan's "PKCS12 leniency" note). Everything else in this file is
-/// RustCrypto.
+/// `RustCrypto`.
 fn load_x509_signer_from_pkcs12(identity: &Path, password: &SecretString) -> Result<X509RootAuthSigner, TzapError> {
     let identity_bytes = read_x509_input_file(identity)?;
     let pkcs12 = Pkcs12::from_der(&identity_bytes).map_err(|source| TzapError::X509RootAuth(source.to_string()))?;

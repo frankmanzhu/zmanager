@@ -45,7 +45,6 @@ const TZAP_DEFAULT_RECOVERY_PERCENTAGE: u8 = 5;
 const TZAP_SINGLE_VOLUME_LOSS_TOLERANCE: u8 = 0;
 const SELF_SIGNED_IDENTITY_RSA_BITS: u32 = 3072;
 const SELF_SIGNED_IDENTITY_VALID_DAYS: u32 = 3_650;
-const SELF_SIGNED_IDENTITY_SERIAL_BITS: i32 = 159;
 const DEFAULT_TZAP_CLIENT_ID: &str = "zmanager-cli";
 const DEFAULT_TZAP_REDIRECT_URI: &str = "zmanager://auth/callback";
 const DEFAULT_TZAP_PROVIDER_ID: &str = "hosted";
@@ -280,7 +279,7 @@ fn create_self_signed_tzap_identity(
     let certificate_der = create_self_signed_certificate(common_name, &key)?;
     // PKCS#12 export: parse the RustCrypto DER into OpenSSL types for the
     // container builder (the RustCrypto pkcs12 crate cannot export yet).
-    let openssl_key = PKey::private_key_from_der(&key.to_pkcs1_der().map_err(|source| format!("could not encode signing key: {source}"))?.as_bytes())
+    let openssl_key = PKey::private_key_from_der(key.to_pkcs1_der().map_err(|source| format!("could not encode signing key: {source}"))?.as_bytes())
         .map_err(|source| format!("could not prepare signing key: {source}"))?;
     let openssl_certificate = X509::from_der(&certificate_der).map_err(|source| format!("could not prepare certificate: {source}"))?;
     let identity = Pkcs12::builder()
@@ -318,7 +317,7 @@ fn create_self_signed_certificate(common_name: &str, key: &rsa::RsaPrivateKey) -
         subject_cn: common_name,
         issuer: subject,
         subject_spki_der: spki_der,
-        serial: random_certificate_serial()?,
+        serial: random_certificate_serial(),
         not_before_unix: not_before,
         not_after_unix: not_after,
         extensions,
@@ -326,11 +325,10 @@ fn create_self_signed_certificate(common_name: &str, key: &rsa::RsaPrivateKey) -
     crate::x509_build::assemble_rsa_certificate(&spec, key)
 }
 
-fn random_certificate_serial() -> Result<u64, String> {
+fn random_certificate_serial() -> u64 {
     let mut bytes = [0u8; 8];
     rand::rng().fill_bytes(&mut bytes);
-    let value = u64::from_le_bytes(bytes) & ((1u64 << 63) - 1);
-    Ok(value.max(1))
+    (u64::from_le_bytes(bytes) & ((1u64 << 63) - 1)).max(1)
 }
 
 fn x509_certificate_summary_json(certificate_der: &[u8]) -> Result<Value, String> {
