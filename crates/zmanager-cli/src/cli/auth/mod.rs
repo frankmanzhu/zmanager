@@ -27,8 +27,6 @@ mod sign;
 mod support;
 #[cfg(all(test, feature = "tzap-online"))]
 mod tests;
-#[cfg(not(feature = "tzap-online"))]
-mod unavailable;
 
 #[cfg(feature = "tzap-online")]
 pub(crate) use auth::auth_command as hosted_auth_command;
@@ -113,14 +111,7 @@ impl Default for AuthEndpointOptions {
     }
 }
 
+#[cfg(feature = "tzap-online")]
 pub(crate) fn auth_command(args: &[String], global: crate::cli::options::GlobalOptions) -> std::process::ExitCode {
-    #[cfg(feature = "tzap-online")]
-    {
-        hosted_auth_command(args, global)
-    }
-
-    #[cfg(not(feature = "tzap-online"))]
-    {
-        unavailable::auth_command(args, global)
-    }
+    hosted_auth_command(args, global)
 }

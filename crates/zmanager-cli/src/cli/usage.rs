@@ -6,7 +6,25 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
 use zmanager_core::secrets::SecretString;
-pub(crate) const USAGE: &str = "\
+// The `auth` command line exists only in the full build; the offline build
+// has no online identity surface and its help must not advertise one.
+// concat!() requires string literals, so the line is supplied through a
+// cfg-selected macro instead of a runtime format.
+#[cfg(feature = "tzap-online")]
+macro_rules! auth_command_usage_line {
+    () => {
+        "  auth <command>                 Online identity, signing, and sharing\n"
+    };
+}
+#[cfg(not(feature = "tzap-online"))]
+macro_rules! auth_command_usage_line {
+    () => {
+        ""
+    };
+}
+
+pub(crate) const USAGE: &str = concat!(
+    "\
 ZManager is a universal file archiver built for high-performance compression,
 safe extraction, and seamless handling of virtually any archive format.
 
@@ -24,8 +42,9 @@ Commands:
   test <archive>                 Test archive readability
   plan <paths...>                Show planned archive entries
   formats                        Show supported formats
-  auth <command>                 Online identity, signing, and sharing
-  doctor                         Verify the archive engine
+",
+    auth_command_usage_line!(),
+    "  doctor                         Verify the archive engine
   completions <shell>            Print shell completion scripts
   help [command]                 Show help for a command
 
@@ -59,7 +78,8 @@ Examples:
 
 Run 'zm help <command>' for command-specific examples and flags.
 Run 'zm completions --help' to enable shell tab completion.
-";
+"
+);
 
 pub(crate) const CREATE_HELP: &str = "\
 Create ZIP, TAR.ZST, TZAP, AAR, 7Z, or TGZ archives
@@ -323,6 +343,7 @@ Examples:
 Use --json in scripts and bug reports.
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const AUTH_MENU_HELP: &str = "\
 Online identity and sharing operations
 
@@ -358,6 +379,7 @@ Options:
 `zm auth` commands manage your identity, sign documents, and share archives securely.
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const ME_HELP: &str = "\
 Show the local TZAP session summary
 
@@ -370,6 +392,7 @@ Options:
       --json                     Emit machine-readable JSON
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const CERT_HELP: &str = "\
 Manage local TZAP certificate inventory
 
@@ -394,6 +417,7 @@ Options:
 TZAP service profile by default for deterministic harness runs.
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const DEVICE_HELP: &str = "\
 Manage local TZAP device material
 
@@ -409,6 +433,7 @@ Options:
       --json                     Emit machine-readable JSON
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const SIGN_HELP: &str = "\
 Sign a TZAP document JSON payload
 
@@ -425,6 +450,7 @@ Options:
       --json                     Emit machine-readable JSON
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const VERIFY_HELP: &str = "\
 Verify a TZAP document envelope
 
@@ -446,6 +472,7 @@ valid-now status. `--status-response` enables explicit online-status
 verification. Custom trust is reported as custom trust, never official TZAP.
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const CONTACT_HELP: &str = "\
 Manage TZAP contact cards
 
@@ -473,6 +500,7 @@ Options:
       --json                     Emit machine-readable JSON
 ";
 
+#[cfg(feature = "tzap-online")]
 pub(crate) const SHARE_HELP: &str = "\
 Create a TZAP archive for accepted contacts
 
@@ -544,13 +572,21 @@ fn command_help(command: &str) -> Option<&'static str> {
         "test" => Some(TEST_HELP),
         "plan" => Some(PLAN_HELP),
         "formats" => Some(FORMATS_HELP),
+        #[cfg(feature = "tzap-online")]
         "auth" => Some(AUTH_MENU_HELP),
+        #[cfg(feature = "tzap-online")]
         "me" => Some(ME_HELP),
+        #[cfg(feature = "tzap-online")]
         "cert" => Some(CERT_HELP),
+        #[cfg(feature = "tzap-online")]
         "device" => Some(DEVICE_HELP),
+        #[cfg(feature = "tzap-online")]
         "sign" => Some(SIGN_HELP),
+        #[cfg(feature = "tzap-online")]
         "verify" => Some(VERIFY_HELP),
+        #[cfg(feature = "tzap-online")]
         "contact" => Some(CONTACT_HELP),
+        #[cfg(feature = "tzap-online")]
         "share" => Some(SHARE_HELP),
         "doctor" | "healthcheck" => Some(DOCTOR_HELP),
         "completions" | "completion" => Some(COMPLETIONS_HELP),

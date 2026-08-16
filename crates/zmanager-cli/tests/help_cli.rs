@@ -217,6 +217,7 @@ fn top_level_help_is_user_facing_and_hides_legacy_commands() {
     assert_contains(&stdout, "create");
     assert_contains(&stdout, "extract");
     assert_contains(&stdout, "formats");
+    #[cfg(feature = "tzap-online")]
     assert_contains(&stdout, "auth");
     assert_contains(&stdout, "completions");
     assert_contains(&stdout, "Run 'zm help <command>'");
@@ -341,7 +342,7 @@ fn every_public_command_has_targeted_help() {
 }
 
 // The auth subcommand surface only exists in the full build; the offline
-// binary's `zm auth` stub rejects everything.
+// binary has no `zm auth` command at all.
 #[cfg(feature = "tzap-online")]
 #[test]
 fn me_has_targeted_help_through_both_navigation_paths() {

@@ -34,12 +34,10 @@ class ZmanagerOffline < Formula
   def caveats
     <<~EOS
       This is the offline build of ZManager CLI: all archive commands are
-      present, but online identity features (`zm auth` and friends) are not.
-      For the full build with online features, install with:
+      present, and there is no `zm auth` command — online identity features
+      are not part of this build. For the full build with online features,
+      install with:
         brew install zmanager
-
-      `zm auth` fails with instructions in the offline build; the full build
-      is a drop-in replacement.
 
       Shell completions are available from the full build (`zm completions`).
     EOS

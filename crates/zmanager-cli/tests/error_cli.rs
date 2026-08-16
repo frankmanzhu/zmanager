@@ -28,10 +28,14 @@ fn test_missing_argument_value_does_not_panic() {
 
 #[cfg(not(feature = "tzap-online"))]
 #[test]
-fn reduced_profile_reports_hosted_auth_as_unavailable() {
+fn reduced_profile_has_no_auth_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_zm")).args(["auth", "login"]).output().expect("Failed to execute zm");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("does not include online identity features"));
+    // The reduced build has no auth surface at all: `zm auth` is an unknown
+    // command that falls through to the usage error, which must not
+    // advertise the auth command.
+    assert!(stderr.contains("Usage:"));
+    assert!(!stderr.contains("auth <command>"));
 }
