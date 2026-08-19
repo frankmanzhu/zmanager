@@ -36,3 +36,8 @@ zmanager-core = { path = "crates/zmanager-core", version = "2.0.1", default-feat
 zmanager-tzap-hosted = { path = "crates/zmanager-tzap-hosted", version = "2.0.1" }
 zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.0.1" }
 zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.0.1" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
