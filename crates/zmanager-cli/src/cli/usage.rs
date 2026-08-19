@@ -152,6 +152,8 @@ Output and safety:
       --signing-private-key <file>
                                   Private key for --signing-cert
       --signing-chain <file>     Extra intermediate certificate chain for --signing-cert
+      --sidecar                  Emit TZAP bootstrap recovery sidecar (.sidecar) file
+      --no-sidecar               Disable TZAP bootstrap recovery sidecar (default)
   TZAP without a password uses tzap's unencrypted mode.
   Use --encrypt or --password-stdin when confidentiality is required.
 ";

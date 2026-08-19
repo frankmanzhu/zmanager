@@ -178,6 +178,22 @@ fn create_validation_rejects_recipient_certificate_password_mode() {
 }
 
 #[test]
+fn create_validation_restricts_sidecar_to_tzap() {
+    let request = CreateRequest { archive: "archive.zip".to_owned(), sources: vec![PathBuf::from("src")], tzap_sidecar: true, ..CreateRequest::default() };
+
+    let error = validate_create_options(ArchiveFormat::Zip, &request).unwrap_err();
+    assert!(error.contains("--sidecar is supported only for TZAP archives"));
+}
+
+#[test]
+fn create_validation_rejects_sidecar_with_stdout() {
+    let request = CreateRequest { archive: "-".to_owned(), sources: vec![PathBuf::from("src")], tzap_sidecar: true, ..CreateRequest::default() };
+
+    let error = validate_create_options(ArchiveFormat::Tzap, &request).unwrap_err();
+    assert!(error.contains("--sidecar cannot be used with stdout archive output"));
+}
+
+#[test]
 fn open_parsers_accept_tzap_recipient_key() {
     let mut global = GlobalOptions::default();
 

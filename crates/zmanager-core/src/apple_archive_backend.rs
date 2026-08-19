@@ -862,7 +862,7 @@ mod imp {
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    #[allow(unused_variables)] // parameters mirror the Apple implementation's signatures
+    #[allow(unused_variables, clippy::needless_pass_by_value)] // parameters mirror the Apple implementation's signatures
     mod stub_impl {
         use super::super::{
             AppleArchiveCreateOptions, AppleArchiveCreateReport, AppleArchiveError, AppleArchiveExtractReport, AppleArchiveListing, AppleArchiveTestReport,

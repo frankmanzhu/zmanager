@@ -370,6 +370,7 @@ pub(crate) fn run_create_job(
                 recovery_percentage,
                 volume_loss_tolerance,
                 x509_signing,
+                emit_bootstrap_sidecar: false,
             };
             let report = jobs::run_engine_create_job_from_sources(
                 &input.source_paths,

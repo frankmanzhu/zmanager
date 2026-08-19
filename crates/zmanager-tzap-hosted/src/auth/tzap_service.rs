@@ -1095,6 +1095,7 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
             recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
             volume_loss_tolerance: TZAP_SINGLE_VOLUME_LOSS_TOLERANCE,
             x509_signing: x509_signing.map(Into::into),
+            emit_bootstrap_sidecar: false,
         };
         let manifest = crate::manifest::plan_archives(&sources, &PlanOptions::default()).map_err(|error| error.to_string())?;
         let token = CancellationToken::new();

@@ -207,6 +207,7 @@ impl From<crate::engine::types::TzapCreateOptions> for crate::tzap::TzapCreateOp
             recovery_percentage: value.recovery_percentage,
             volume_loss_tolerance: value.volume_loss_tolerance,
             x509_signing: value.x509_signing.map(Into::into),
+            emit_bootstrap_sidecar: value.emit_bootstrap_sidecar,
         }
     }
 }

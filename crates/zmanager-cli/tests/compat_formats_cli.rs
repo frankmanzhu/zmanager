@@ -1509,3 +1509,42 @@ fn assert_zm_extracts_virtual_disk_extra_entries(label: &str, archive: &Path, te
     assert_eq!(fs::read(out.join("project/unicode/こんにちは.txt")).unwrap(), b"unicode_content");
     assert_eq!(fs::read(out.join("project/file with spaces.txt")).unwrap(), b"spaces_content");
 }
+
+#[test]
+fn zm_create_tzap_sidecar_toggle_behavior() {
+    let temp = TestDir::new("zm_create_tzap_sidecar");
+    let source = temp.path("payload.txt");
+    fs::write(&source, b"test payload content").unwrap();
+
+    // 1. By default, zm create should NOT emit a .sidecar file
+    let default_archive = temp.path("default.tzap");
+    let default_sidecar = temp.path("default.sidecar");
+    let create_default =
+        Command::new(zm_path()).args(["create", default_archive.to_str().unwrap(), source.to_str().unwrap(), "--format", "tzap"]).output().unwrap();
+    assert_success("zm create tzap default", &create_default);
+    assert!(default_archive.exists(), "archive must exist");
+    assert!(!default_sidecar.exists(), "sidecar must NOT exist by default");
+
+    // 2. With --sidecar flag, zm create SHOULD emit a .sidecar file
+    let sidecar_archive = temp.path("with_sidecar.tzap");
+    let sidecar_file = temp.path("with_sidecar.sidecar");
+    let create_with_sidecar = Command::new(zm_path())
+        .args(["create", sidecar_archive.to_str().unwrap(), source.to_str().unwrap(), "--format", "tzap", "--sidecar"])
+        .output()
+        .unwrap();
+    assert_success("zm create tzap --sidecar", &create_with_sidecar);
+    assert!(sidecar_archive.exists(), "archive must exist");
+    assert!(sidecar_file.exists(), "sidecar MUST exist with --sidecar");
+    assert!(fs::metadata(&sidecar_file).unwrap().len() > 0, "sidecar must be non-empty");
+
+    // 3. With explicit --no-sidecar flag, sidecar is disabled
+    let no_sidecar_archive = temp.path("no_sidecar.tzap");
+    let no_sidecar_file = temp.path("no_sidecar.sidecar");
+    let create_no_sidecar = Command::new(zm_path())
+        .args(["create", no_sidecar_archive.to_str().unwrap(), source.to_str().unwrap(), "--format", "tzap", "--no-sidecar"])
+        .output()
+        .unwrap();
+    assert_success("zm create tzap --no-sidecar", &create_no_sidecar);
+    assert!(no_sidecar_archive.exists(), "archive must exist");
+    assert!(!no_sidecar_file.exists(), "sidecar must NOT exist with --no-sidecar");
+}

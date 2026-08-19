@@ -181,6 +181,14 @@ pub(crate) fn parse_create_request(args: &[String], global: &mut GlobalOptions, 
             "--signing-chain" => {
                 request.tzap_signing_chain.push(PathBuf::from(take_value(args, &mut index, arg)?));
             }
+            "--sidecar" => {
+                request.tzap_sidecar = true;
+                index += 1;
+            }
+            "--no-sidecar" => {
+                request.tzap_sidecar = false;
+                index += 1;
+            }
             "--dry-run" => {
                 request.dry_run = true;
                 index += 1;
@@ -307,11 +315,24 @@ fn run_create_request(request: &CreateRequest, global: &GlobalOptions) -> ExitCo
         Err(code) => return code,
     };
 
-    if !split_output && let Err(error) = publish_archive(&temp, &destination, request.force) {
-        let _ = fs::remove_file(&temp);
-        progress.emit(JobEvent::Failed { message: error.to_string() });
-        print_error_line(global, format_args!("create failed: failed to move {} to {}: {error}", temp.display(), destination.display()));
-        return ExitCode::FAILURE;
+    if !split_output {
+        let temp_sidecar = zmanager_core::engine::tzap::tzap_bootstrap_sidecar_path(&temp);
+        if let Err(error) = publish_archive(&temp, &destination, request.force) {
+            let _ = fs::remove_file(&temp);
+            let _ = fs::remove_file(&temp_sidecar);
+            progress.emit(JobEvent::Failed { message: error.to_string() });
+            print_error_line(global, format_args!("create failed: failed to move {} to {}: {error}", temp.display(), destination.display()));
+            return ExitCode::FAILURE;
+        }
+        if temp_sidecar.exists() {
+            let dest_sidecar = zmanager_core::engine::tzap::tzap_bootstrap_sidecar_path(&destination);
+            if let Err(error) = publish_archive(&temp_sidecar, &dest_sidecar, request.force) {
+                let _ = fs::remove_file(&temp_sidecar);
+                progress.emit(JobEvent::Failed { message: error.to_string() });
+                print_error_line(global, format_args!("create failed: failed to move {} to {}: {error}", temp_sidecar.display(), dest_sidecar.display()));
+                return ExitCode::FAILURE;
+            }
+        }
     }
     progress.emit(JobEvent::Completed { entries: outcome.entries, bytes: outcome.bytes });
     print_create_summary(&destination, &outcome, global);
@@ -384,6 +405,7 @@ fn build_engine_create_options(
                 recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
                 volume_loss_tolerance: tzap_default_volume_loss_tolerance(request.volume_size),
                 x509_signing,
+                emit_bootstrap_sidecar: request.tzap_sidecar,
             })
         }
         ArchiveFormat::AppleArchive => {
@@ -551,6 +573,15 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
             _ => {
                 return Err("--signing-cert and --signing-private-key must be used together".to_owned());
             }
+        }
+    }
+
+    if request.tzap_sidecar {
+        if format != ArchiveFormat::Tzap {
+            return Err("--sidecar is supported only for TZAP archives".to_owned());
+        }
+        if request.archive == "-" {
+            return Err("--sidecar cannot be used with stdout archive output".to_owned());
         }
     }
 

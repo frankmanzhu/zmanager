@@ -31,7 +31,7 @@ pub mod tzap {
     pub use crate::tzap::{
         TzapPublicDisplaySummary, TzapPublicMetadataSummary, TzapPublicSignatureStatus, TzapPublicVolumeSummary, TzapTestReport, TzapX509SignerInspection,
         TzapX509SigningOptions, TzapX509TrustOptions, TzapX509VerificationReport, inspect_tzap_x509_public_no_key_signer, inspect_tzap_x509_signer,
-        summarize_tzap_public_display, summarize_tzap_public_metadata, test_tzap_with_optional_password_filter_and_x509_trust,
+        summarize_tzap_public_display, summarize_tzap_public_metadata, test_tzap_with_optional_password_filter_and_x509_trust, tzap_bootstrap_sidecar_path,
         tzap_x509_signing_options_from_inventory, verify_tzap_x509_public_no_key,
     };
 }

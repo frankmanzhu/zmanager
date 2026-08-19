@@ -69,6 +69,7 @@ fn create_tzap_fixture(source: &Path, archive: &Path, recovery_percentage: u8) {
         recovery_percentage,
         volume_loss_tolerance: 0,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut sink = |_event: JobEvent| {};

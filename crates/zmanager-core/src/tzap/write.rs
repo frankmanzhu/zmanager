@@ -52,6 +52,8 @@ pub struct TzapCreateOptions {
     pub volume_loss_tolerance: u8,
     /// X.509 `RootAuth` signing configuration.
     pub x509_signing: Option<TzapX509SigningOptions>,
+    /// Emit bootstrap sidecar file beside output.
+    pub emit_bootstrap_sidecar: bool,
 }
 
 /// Key source for `.tzap` creation and opening.
@@ -120,7 +122,7 @@ pub fn create_tzap_from_manifest_with_context(
     let (master_key, kdf_params) = create_key_material(&options.key_source)?;
     let recipient_records = build_recipient_records(options, &master_key, &mut writer_options)?;
     let destination = destination.as_ref();
-    let mut sink = TzapArchiveFileSink::new(destination, options.replace_existing, context.cancellation_token())?;
+    let mut sink = TzapArchiveFileSink::new(destination, options.replace_existing, options.emit_bootstrap_sidecar, context.cancellation_token())?;
     let x509_signer = options.x509_signing.as_ref().map(load_x509_signer).transpose()?;
     let root_auth =
         x509_signer.as_ref().map(X509RootAuthSigner::root_auth_writer_config).transpose().map_err(|source| TzapError::X509RootAuth(source.to_string()))?;
@@ -610,6 +612,7 @@ const fn job_phase_from_tzap(phase: ArchiveWritePhase) -> JobPhase {
 struct TzapArchiveFileSink {
     destination: PathBuf,
     replace_existing: bool,
+    emit_bootstrap_sidecar: bool,
     existing_volume_paths: Vec<PathBuf>,
     volume_paths: Vec<PathBuf>,
     outputs: Vec<AtomicOutputFile>,
@@ -618,10 +621,11 @@ struct TzapArchiveFileSink {
 }
 
 impl TzapArchiveFileSink {
-    fn new(destination: &Path, replace_existing: bool, cancellation_token: CancellationToken) -> Result<Self, TzapError> {
+    fn new(destination: &Path, replace_existing: bool, emit_bootstrap_sidecar: bool, cancellation_token: CancellationToken) -> Result<Self, TzapError> {
         Ok(Self {
             destination: destination.to_path_buf(),
             replace_existing,
+            emit_bootstrap_sidecar,
             existing_volume_paths: existing_tzap_volume_paths(destination)?,
             volume_paths: Vec::new(),
             outputs: Vec::new(),
@@ -648,7 +652,9 @@ impl TzapArchiveFileSink {
             output.commit_with_file_replace(self.replace_existing).map_err(|source| TzapError::Io { path: volume_path, source })?;
         }
 
-        if let Some(sidecar) = self.bootstrap_sidecar.filter(|bytes| !bytes.is_empty()) {
+        if self.emit_bootstrap_sidecar
+            && let Some(sidecar) = self.bootstrap_sidecar.filter(|bytes| !bytes.is_empty())
+        {
             commit_bootstrap_sidecar(&self.destination, &sidecar, self.replace_existing)?;
         }
 
@@ -660,7 +666,8 @@ impl TzapArchiveFileSink {
 ///
 /// The sidecar is named after the archive base name (the destination with any
 /// `.tzap` suffix stripped), mirroring the `{base}.volNNN.tzap` volume naming.
-fn tzap_bootstrap_sidecar_path(destination: &Path) -> PathBuf {
+#[must_use]
+pub fn tzap_bootstrap_sidecar_path(destination: &Path) -> PathBuf {
     let Some(file_name) = destination.file_name().and_then(|name| name.to_str()) else {
         return destination.with_extension("sidecar");
     };

@@ -201,6 +201,7 @@ fn engine_creation_adapters_round_trip_portable_formats() {
                 recovery_percentage: 0,
                 volume_loss_tolerance: 0,
                 x509_signing: None,
+                emit_bootstrap_sidecar: false,
             }),
         ),
     ];
@@ -1022,6 +1023,7 @@ fn engine_rejects_tzap_sibling_mutation_after_open() {
             recovery_percentage: 0,
             volume_loss_tolerance: 0,
             x509_signing: None,
+            emit_bootstrap_sidecar: false,
         }),
     );
     assert!(report.volume_count > 1, "fixture must contain format-owned sibling volumes");

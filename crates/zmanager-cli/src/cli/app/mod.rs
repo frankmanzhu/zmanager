@@ -343,6 +343,7 @@ pub(crate) struct CreateRequest {
     pub(crate) tzap_signing_cert: Option<PathBuf>,
     pub(crate) tzap_signing_private_key: Option<PathBuf>,
     pub(crate) tzap_signing_chain: Vec<PathBuf>,
+    pub(crate) tzap_sidecar: bool,
 }
 
 impl Default for CreateRequest {
@@ -378,6 +379,7 @@ impl Default for CreateRequest {
             tzap_signing_cert: None,
             tzap_signing_private_key: None,
             tzap_signing_chain: Vec::new(),
+            tzap_sidecar: false,
         }
     }
 }

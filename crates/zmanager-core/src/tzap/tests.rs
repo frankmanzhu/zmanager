@@ -517,6 +517,7 @@ fn list_tzap_with_optional_password_includes_precise_portable_metadata() {
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -568,6 +569,7 @@ fn fast_extract_restores_portable_mode_and_precise_mtime() {
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -787,6 +789,7 @@ fn create_tzap_with_recipient_certificate_opens_with_private_key() {
             signing_private_key: SecretBytes::from(signer_key.private_key_to_pem_pkcs8().unwrap()),
             signing_chain: vec![root_cert.to_der().unwrap()],
         }),
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -872,6 +875,7 @@ fn multi_recipient_public_keys_can_open_same_archive() {
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -922,6 +926,7 @@ fn create_split_tzap_uses_os_friendly_volume_names() {
         recovery_percentage: 0,
         volume_loss_tolerance: 1,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -983,6 +988,7 @@ fn create_and_test_tzap_with_x509_root_auth() {
             signing_private_key: SecretBytes::from(signer_private_key),
             signing_chain: Vec::new(),
         }),
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -1029,6 +1035,7 @@ fn public_display_summary_reports_signed_authentic_footer() {
             signing_private_key: SecretBytes::from(signer_key.private_key_to_pem_pkcs8().unwrap()),
             signing_chain: Vec::new(),
         }),
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -1377,6 +1384,7 @@ fn create_tzap_embeds_chain_from_signing_certificate_bundle() {
             signing_private_key: signer_key_path,
             signing_chain: Vec::new(),
         }),
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -1439,6 +1447,7 @@ fn create_tzap_signs_with_pkcs12_identity() {
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: Some(TzapX509SigningOptions::Pkcs12 { identity: identity_path, password: SecretString::from("identity-password") }),
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -1791,6 +1800,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
         replace_existing: true,
         key_source: TzapKeySource::NoPassword,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
@@ -2167,5 +2177,52 @@ fn public_metadata_create_options() -> TzapCreateOptions {
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     }
+}
+
+#[test]
+fn tzap_create_sidecar_toggle_behavior() {
+    let temp = TestDir::new("tzap_sidecar_toggle");
+    let source = temp.path("payload.txt");
+    fs::write(&source, b"test content").unwrap();
+
+    // 1. Without sidecar
+    let archive_no_sidecar = temp.path("no_sidecar.tzap");
+    let sidecar_no_sidecar = temp.path("no_sidecar.sidecar");
+    let manifest = single_file_manifest(&temp, source.clone(), 12);
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::NoPassword,
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: None,
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: None,
+        emit_bootstrap_sidecar: false,
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+    create_tzap_from_manifest_with_context(&manifest, &archive_no_sidecar, &options, &mut context).unwrap();
+
+    assert!(archive_no_sidecar.exists());
+    assert!(!sidecar_no_sidecar.exists(), "sidecar should NOT be created when emit_bootstrap_sidecar is false");
+
+    // Verify it still opens and reads properly
+    let listing = list_tzap_with_optional_password(&archive_no_sidecar, None).unwrap();
+    assert_eq!(listing.entries.len(), 1);
+    assert_eq!(listing.entries[0].path, "payload.txt");
+
+    // 2. With sidecar
+    let archive_with_sidecar = temp.path("with_sidecar.tzap");
+    let sidecar_with_sidecar = temp.path("with_sidecar.sidecar");
+    let options_with_sidecar = TzapCreateOptions { emit_bootstrap_sidecar: true, ..options };
+    let mut context_sidecar = JobContext::new(&token, &mut events);
+    create_tzap_from_manifest_with_context(&manifest, &archive_with_sidecar, &options_with_sidecar, &mut context_sidecar).unwrap();
+
+    assert!(archive_with_sidecar.exists());
+    assert!(sidecar_with_sidecar.exists(), "sidecar SHOULD be created when emit_bootstrap_sidecar is true");
+    assert!(fs::metadata(&sidecar_with_sidecar).unwrap().len() > 0);
 }

@@ -594,6 +594,8 @@ pub struct TzapCreateOptions {
     pub volume_loss_tolerance: u8,
     /// Optional X.509 `RootAuth` signer.
     pub x509_signing: Option<TzapX509SigningOptions>,
+    /// Emit bootstrap sidecar file beside output.
+    pub emit_bootstrap_sidecar: bool,
 }
 
 /// Typed format-specific options for one-shot archive creation.

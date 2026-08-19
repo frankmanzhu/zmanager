@@ -946,6 +946,7 @@ fn tzap_public_metadata_display_summary_reports_unsigned_archive() {
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
+        emit_bootstrap_sidecar: false,
     };
     let token = CancellationToken::new();
     let mut events = |_| {};
