@@ -449,19 +449,27 @@ fn native_xar_adapter_uses_standalone_reader_when_xar_available() {
 
 #[test]
 fn native_lha_adapter_uses_delharc_when_lha_available() {
-    let Some(lha) = std::env::var("PATH")
-        .ok()
-        .and_then(|path| path.split(':').map(std::path::PathBuf::from).map(|directory| directory.join("lha")).find(|candidate| candidate.is_file()))
-    else {
-        return;
-    };
     let temp = TestDir::new("engine-conformance-lha");
     let source = temp.path("project");
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("file.txt"), b"lha engine payload\n").unwrap();
     let archive = temp.path("payload.lzh");
-    let create = std::process::Command::new(lha).current_dir(temp.root()).arg("a").arg(&archive).arg("project").output().unwrap();
-    assert!(create.status.success(), "lha failed: {}", String::from_utf8_lossy(&create.stderr));
+
+    let created_by_native_lha = if let Some(lha) = std::env::var("PATH")
+        .ok()
+        .and_then(|path| path.split(':').map(std::path::PathBuf::from).map(|directory| directory.join("lha")).find(|candidate| candidate.is_file()))
+    {
+        let create = std::process::Command::new(lha).current_dir(temp.root()).arg("a").arg(&archive).arg("project").output();
+        create.is_ok_and(|o| o.status.success())
+    } else {
+        false
+    };
+
+    if !created_by_native_lha {
+        let entries: [(&str, &[u8], bool); 1] = [("project/file.txt", b"lha engine payload\n", false)];
+        let bytes = build_lha_level0_bytes(&entries);
+        fs::write(&archive, bytes).unwrap();
+    }
 
     let engine = create_default_engine().unwrap();
     let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
@@ -479,6 +487,57 @@ fn native_lha_adapter_uses_delharc_when_lha_available() {
     assert!(report.written_entries > 0);
     assert_eq!(fs::read(destination.join("project/file.txt")).unwrap(), b"lha engine payload\n");
     handle.close().unwrap();
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn lha_crc16(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0;
+    for &byte in data {
+        crc ^= u16::from(byte);
+        for _ in 0..8 {
+            if (crc & 1) != 0 {
+                crc = (crc >> 1) ^ 0xA001;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    crc
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn build_lha_level0_bytes(entries: &[(&str, &[u8], bool)]) -> Vec<u8> {
+    let mut archive = Vec::new();
+    for &(name, data, is_dir) in entries {
+        let name_bytes = name.as_bytes();
+        let header_size = (22 + name_bytes.len()) as u8;
+        let mut header = Vec::with_capacity(header_size as usize + 2);
+        header.push(header_size);
+        header.push(0); // placeholder for checksum
+        let method = if is_dir { b"-lhd-" } else { b"-lh0-" };
+        header.extend_from_slice(method);
+        let comp_size = if is_dir { 0_u32 } else { data.len() as u32 };
+        let uncomp_size = comp_size;
+        header.extend_from_slice(&comp_size.to_le_bytes());
+        header.extend_from_slice(&uncomp_size.to_le_bytes());
+        let dos_time: u32 = ((2026 - 1980) << 25) | (1 << 21) | (1 << 16) | (12 << 11);
+        header.extend_from_slice(&dos_time.to_le_bytes());
+        header.push(if is_dir { 0x10 } else { 0x20 });
+        header.push(0); // Level 0
+        header.push(name_bytes.len() as u8);
+        header.extend_from_slice(name_bytes);
+        let crc = if is_dir { 0_u16 } else { lha_crc16(data) };
+        header.extend_from_slice(&crc.to_le_bytes());
+
+        let sum: u8 = header[2..].iter().fold(0_u8, |acc, &b| acc.wrapping_add(b));
+        header[1] = sum;
+
+        archive.extend_from_slice(&header);
+        if !is_dir {
+            archive.extend_from_slice(data);
+        }
+    }
+    archive
 }
 
 #[test]
