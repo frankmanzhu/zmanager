@@ -470,26 +470,16 @@ release reviewers can inspect the complete Cargo dependency closure.
 | windows-strings | 0.5.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows-sys | 0.52.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows-sys | 0.59.0 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows-sys | 0.60.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows-targets | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows-targets | 0.53.5 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_aarch64_gnullvm | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_aarch64_msvc | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_aarch64_msvc | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_i686_gnu | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_i686_gnu | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_i686_gnullvm | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_i686_gnullvm | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_i686_msvc | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_i686_msvc | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_x86_64_gnu | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_x86_64_gnu | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_x86_64_gnullvm | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_x86_64_gnullvm | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
-| windows_x86_64_msvc | 0.53.1 | MIT OR Apache-2.0 | Metadata only; no license file found in the local Cargo cache |
 | winnow | 0.7.15 | MIT | Metadata only; no license file found in the local Cargo cache |
 | winx | 0.36.4 | Apache-2.0 WITH LLVM-exception | third-party-licenses/rust/winx-0.36.4/LICENSE |
 | wit-bindgen | 0.57.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Metadata only; no license file found in the local Cargo cache |
