@@ -526,6 +526,15 @@ pub fn extract_7z(
     extract_7z_inner(archive_path, destination, password, policy, None, None, None)
 }
 
+/// Stable path-based identity for a 7z entry retained by the engine session.
+#[derive(Debug, Clone, Copy)]
+pub struct SevenZEntrySelector<'a> {
+    /// Raw archive path from the retained listing.
+    pub path: &'a str,
+    /// Zero-based occurrence among entries with the same path.
+    pub occurrence: usize,
+}
+
 /// Extracts one retained 7z entry by its stable archive path and duplicate
 /// occurrence.  Unlike the legacy index wrapper, this does not list the
 /// archive again before opening the extraction reader.
@@ -538,9 +547,35 @@ pub(crate) fn extract_7z_entry_by_name_occurrence(
     occurrence: usize,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
 ) -> Result<SevenZExtractReport, SevenZError> {
+    let selectors = [SevenZEntrySelector { path: entry_name, occurrence }];
+    extract_7z_entries_by_name_occurrence(archive_path, destination, password, policy, &selectors, overwrite_resolver)
+}
+
+/// Extracts every retained 7z entry matching one of `selectors` in a single
+/// pass.
+///
+/// A 7z archive is parsed as a whole and its payload is usually stored in solid
+/// blocks, so extracting a selection one entry at a time reopens the file and
+/// re-decodes shared blocks per entry. One pass also means one safety planner,
+/// so the aggregate expansion guard covers the whole batch.
+pub(crate) fn extract_7z_entries_by_name_occurrence(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    password: Option<&str>,
+    policy: ExtractionPolicy,
+    selectors: &[SevenZEntrySelector<'_>],
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<SevenZExtractReport, SevenZError> {
+    // Narrow planning to the selected names so the planner accounts only for
+    // what this call will write. Duplicate names collapse: they differ by
+    // occurrence, which patterns cannot express.
+    let mut include_patterns = selectors.iter().map(|selector| selector.path.to_owned()).collect::<Vec<_>>();
+    include_patterns.sort_unstable();
+    include_patterns.dedup();
+
     let mut selected_policy = policy;
-    selected_policy.include_patterns = vec![entry_name.to_owned()];
-    extract_7z_inner(archive_path, destination, password, selected_policy, overwrite_resolver, None, Some((entry_name, occurrence)))
+    selected_policy.include_patterns = include_patterns;
+    extract_7z_inner(archive_path, destination, password, selected_policy, overwrite_resolver, None, Some(selectors))
 }
 
 /// Extracts a `.7z` archive with an overwrite resolver.
@@ -584,7 +619,7 @@ fn extract_7z_inner(
     policy: ExtractionPolicy,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
     mut context: Option<&mut JobContext<'_>>,
-    selected_entry: Option<(&str, usize)>,
+    selection: Option<&[SevenZEntrySelector<'_>]>,
 ) -> Result<SevenZExtractReport, SevenZError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
@@ -604,7 +639,7 @@ fn extract_7z_inner(
     let result = reader.for_each_entries(|entry, entry_reader| {
         let path = entry.name().to_owned();
         let occurrence = entry_occurrences.entry(path.clone()).or_insert(0);
-        let is_selected = selected_entry.is_none_or(|(selected_path, selected_occurrence)| selected_path == path && selected_occurrence == *occurrence);
+        let is_selected = selection.is_none_or(|selectors| selectors.iter().any(|s| s.path == path && s.occurrence == *occurrence));
         *occurrence = occurrence.saturating_add(1);
         if !is_selected {
             if let Err(error) = drain_reader(entry_reader, &path) {

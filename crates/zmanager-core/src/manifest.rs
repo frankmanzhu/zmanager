@@ -416,13 +416,20 @@ impl ManifestPlanner<'_> {
     }
 
     fn has_explicit_include_descendant(&self, archive_path: &str) -> bool {
-        let prefix = format!("{archive_path}/");
-        self.options.include_archive_paths.iter().any(|included| included.starts_with(&prefix))
+        self.options.include_archive_paths.iter().any(|included| is_strict_descendant_path(included, archive_path))
     }
 }
 
+/// True when `path` lies strictly below `ancestor`.
+///
+/// This is a byte comparison rather than a `starts_with(format!("{ancestor}/"))`
+/// so it allocates nothing; it runs once per excluded directory during a walk.
+fn is_strict_descendant_path(path: &str, ancestor: &str) -> bool {
+    path.strip_prefix(ancestor).is_some_and(|rest| rest.starts_with('/'))
+}
+
 fn path_matches_or_is_descendant(path: &str, include_path: &str) -> bool {
-    path == include_path || path.strip_prefix(include_path).is_some_and(|rest| rest.starts_with('/'))
+    path == include_path || is_strict_descendant_path(path, include_path)
 }
 
 fn clean_source_exclude_name(name: &str) -> bool {

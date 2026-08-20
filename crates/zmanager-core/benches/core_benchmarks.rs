@@ -5,7 +5,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use zmanager_core::backend_test_support::gitignore::{GitignoreRule, gitignore_decision, parse_gitignore_rule};
 use zmanager_core::backend_test_support::jobs::ProgressCoalescer;
@@ -15,6 +15,11 @@ use zmanager_core::manifest::{ManifestFileType, PlanOptions, plan_archives};
 use zmanager_core::safety::{ExtractionPolicy, OverwritePolicy, archive_pattern_matches, case_collision_key, normalize_archive_path};
 
 static NEXT_BENCH_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Wall-clock ceiling for the pathological glob case. The iterative matcher
+/// resolves it in microseconds; the bound is loose enough to absorb loaded-CI
+/// jitter while still failing instantly on exponential backtracking.
+const PATHOLOGICAL_GLOB_BUDGET: Duration = Duration::from_millis(10);
 
 struct BenchDir {
     root: PathBuf,
@@ -119,7 +124,10 @@ fn bench_glob_matching() {
         std::hint::black_box(decision_count);
     }
 
-    // Pathological pattern check
+    // Pathological pattern check. The bound is the point of this case: the
+    // recursive matcher CR-178 replaced took 75 s on 11 `*a` groups, so any
+    // reintroduced backtracking fails the bench run rather than just printing a
+    // slow number nobody reads.
     let pathological_pattern = format!("{}*b", "*a".repeat(15));
     let non_matching_path = "a".repeat(60) + "c";
     let start = Instant::now();
@@ -127,6 +135,10 @@ fn bench_glob_matching() {
     let elapsed = start.elapsed();
     println!("pathological pattern (15x *a + *b): {elapsed:?} (result: {res})");
     assert!(!res);
+    assert!(
+        elapsed < PATHOLOGICAL_GLOB_BUDGET,
+        "pathological glob took {elapsed:?}, over the {PATHOLOGICAL_GLOB_BUDGET:?} budget (CR-178 backtracking regression)"
+    );
 }
 
 fn bench_path_normalization() {

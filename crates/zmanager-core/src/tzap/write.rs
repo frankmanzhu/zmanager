@@ -14,7 +14,7 @@ use crate::tzap::x509::{
     validate_recipient_wrap_create_options,
 };
 use rand::RngCore as _;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -133,19 +133,13 @@ pub fn create_tzap_from_manifest_with_context(
             .and_then(|signer| signer.authenticator_value_for_request(request).map_err(|_| FormatError::WriterUnsupported("X.509 RootAuth signing failed")))
     };
     let authenticator = root_auth.as_ref().map(|_| &mut authenticator as &mut dyn FnMut(&RootAuthSigningRequest) -> Result<Vec<u8>, FormatError>);
-    let file_sizes = file_sources.iter().map(|file| (file.archive_path.clone(), file.size)).collect::<BTreeMap<_, _>>();
-    let mut started_paths = BTreeSet::new();
-    let mut finished_paths = BTreeSet::new();
-    let mut processed_by_path = BTreeMap::<String, u64>::new();
+    let mut entry_progress = TzapEntryProgress::new(&file_sources);
 
     let summary = {
         let mut progress = TzapWriteJobProgress {
             context,
             total_source_bytes: manifest.total_bytes,
-            file_sizes: &file_sizes,
-            started_paths: &mut started_paths,
-            finished_paths: &mut finished_paths,
-            processed_by_path: &mut processed_by_path,
+            entries: &mut entry_progress,
             active_phase: None,
             phase_progress: ProgressCoalescer::new(None),
         };
@@ -184,11 +178,14 @@ pub fn create_tzap_from_manifest_with_context(
     if summary.volume_count != volume_count {
         return Err(TzapError::Format(FormatError::WriterInvariant("TZAP writer summary did not match committed volume count")));
     }
+    // Entries the writer never reported progress for still owe a started and a
+    // finished event apiece.
     for file in &file_sources {
-        if started_paths.insert(file.archive_path.clone()) {
+        let Some(slot) = entry_progress.slot(&file.archive_path) else { continue };
+        if entry_progress.mark_started(slot) {
             context.entry_started(&file.archive_path, Some(file.size));
         }
-        if finished_paths.insert(file.archive_path.clone()) {
+        if entry_progress.mark_finished(slot) {
             context.entry_finished(&file.archive_path, file.size);
         }
     }
@@ -519,13 +516,71 @@ impl<R: io::Read> io::Read for CancellationAwareReader<R> {
     }
 }
 
+/// Per-entry progress bookkeeping resolved to dense slots.
+///
+/// `source_bytes_read` runs once per read chunk, so this keeps the hot path to
+/// a single hash lookup. The string-keyed maps it replaces re-allocated the
+/// archive path two or three times per chunk just to query them.
+struct TzapEntryProgress {
+    /// Archive path to its slot. Duplicate paths collapse onto one slot, which
+    /// is how the previous set-of-paths bookkeeping behaved.
+    slots: HashMap<String, usize>,
+    sizes: Vec<u64>,
+    started: Vec<bool>,
+    finished: Vec<bool>,
+    processed: Vec<u64>,
+}
+
+impl TzapEntryProgress {
+    fn new(sources: &[TzapRegularFileSource]) -> Self {
+        let mut slots = HashMap::with_capacity(sources.len());
+        let mut sizes = Vec::with_capacity(sources.len());
+        for file in sources {
+            if let Some(&slot) = slots.get(file.archive_path.as_str()) {
+                // A repeated path keeps its first slot and the last size seen,
+                // matching the map this replaced.
+                sizes[slot] = file.size;
+            } else {
+                slots.insert(file.archive_path.clone(), sizes.len());
+                sizes.push(file.size);
+            }
+        }
+        let count = sizes.len();
+        Self { slots, sizes, started: vec![false; count], finished: vec![false; count], processed: vec![0; count] }
+    }
+
+    fn slot(&self, archive_path: &str) -> Option<usize> {
+        self.slots.get(archive_path).copied()
+    }
+
+    fn size(&self, slot: usize) -> u64 {
+        self.sizes[slot]
+    }
+
+    /// Claims the started event for `slot`, returning true on the first claim.
+    fn mark_started(&mut self, slot: usize) -> bool {
+        !std::mem::replace(&mut self.started[slot], true)
+    }
+
+    /// Claims the finished event for `slot`, returning true on the first claim.
+    fn mark_finished(&mut self, slot: usize) -> bool {
+        !std::mem::replace(&mut self.finished[slot], true)
+    }
+
+    /// Adds `bytes` to `slot` and returns its size the one time that completes
+    /// the entry.
+    fn record_processed(&mut self, slot: usize, bytes: u64) -> Option<u64> {
+        let processed = &mut self.processed[slot];
+        *processed = processed.saturating_add(bytes);
+        let size = self.sizes[slot];
+        (*processed >= size && self.mark_finished(slot)).then_some(size)
+    }
+}
+
 struct TzapWriteJobProgress<'context, 'job, 'state> {
     context: &'context mut JobContext<'job>,
     total_source_bytes: u64,
-    file_sizes: &'state BTreeMap<String, u64>,
-    started_paths: &'state mut BTreeSet<String>,
-    finished_paths: &'state mut BTreeSet<String>,
-    processed_by_path: &'state mut BTreeMap<String, u64>,
+    entries: &'state mut TzapEntryProgress,
     active_phase: Option<JobPhase>,
     phase_progress: ProgressCoalescer,
 }
@@ -564,8 +619,17 @@ impl ArchiveWriteProgressSink for TzapWriteJobProgress<'_, '_, '_> {
         let phase = job_phase_from_tzap(phase);
         debug_assert_eq!(self.active_phase, Some(phase));
 
-        if phase == JobPhase::EmittingPayload && self.started_paths.insert(archive_path.to_owned()) {
-            self.context.entry_started(archive_path, self.file_sizes.get(archive_path).copied());
+        // Every path the writer reports comes from the same source list this
+        // state was built from. An unrecognized one has no size to report
+        // against, so it contributes to phase progress only.
+        let slot = self.entries.slot(archive_path);
+        debug_assert!(slot.is_some(), "TZAP writer reported progress for an unplanned path: {archive_path}");
+
+        if phase == JobPhase::EmittingPayload
+            && let Some(slot) = slot
+            && self.entries.mark_started(slot)
+        {
+            self.context.entry_started(archive_path, Some(self.entries.size(slot)));
         }
 
         if let Some(batch) = self.phase_progress.record(Some(archive_path), bytes) {
@@ -574,12 +638,8 @@ impl ArchiveWriteProgressSink for TzapWriteJobProgress<'_, '_, '_> {
 
         if phase == JobPhase::EmittingPayload {
             self.context.bytes_processed(Some(archive_path), bytes);
-            let processed = self.processed_by_path.entry(archive_path.to_owned()).or_insert(0);
-            *processed = processed.saturating_add(bytes);
-            let current_processed = *processed;
-            if let Some(size) = self.file_sizes.get(archive_path).copied()
-                && current_processed >= size
-                && self.finished_paths.insert(archive_path.to_owned())
+            if let Some(slot) = slot
+                && let Some(size) = self.entries.record_processed(slot, bytes)
             {
                 self.context.entry_finished(archive_path, size);
             }

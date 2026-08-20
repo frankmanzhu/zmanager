@@ -1769,6 +1769,30 @@ impl NativeReadAdapter for SevenZListAdapter {
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
+    fn selected_extract_many<'a>(
+        &self,
+        archive: &NativeReadContext,
+        entry_ids: &[EntryId],
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let mut selectors = Vec::with_capacity(entry_ids.len());
+        for &entry_id in entry_ids {
+            let selector = archive.retained_entry(entry_id)?;
+            selectors.push(sevenz_backend::SevenZEntrySelector { path: &selector.path, occurrence: selector.occurrence });
+        }
+        let report = sevenz_backend::extract_7z_entries_by_name_occurrence(
+            path,
+            &options.destination,
+            archive.options().password.as_deref(),
+            options.policy.clone(),
+            &selectors,
+            options.overwrite_resolver.as_deref_mut(),
+        )
+        .map_err(|error| sevenz_archive_error(error, path))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
     fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;

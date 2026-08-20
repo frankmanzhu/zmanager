@@ -1414,3 +1414,58 @@ fn engine_batch_selected_extract_executes_in_one_pass() {
     assert!(!out_dir.join("second.txt").exists());
     assert!(out_dir.join("third.txt").exists());
 }
+
+#[test]
+fn engine_batch_selected_extract_covers_seven_z() {
+    let temp = TestDir::new("engine-batch-selected-extract-7z");
+    let source = temp.path("project");
+    let archive_path = temp.path("multi.7z");
+    let out_dir = temp.path("out");
+
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("first.txt"), b"first").unwrap();
+    fs::write(source.join("second.txt"), b"second").unwrap();
+    fs::write(source.join("third.txt"), b"third").unwrap();
+
+    let engine = create_default_engine().unwrap();
+    create_engine_fixture(&engine, &source, &archive_path, CreateOptions::SevenZ(SevenZCreateOptions { encrypt_file_names: false, ..Default::default() }));
+
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive_path), OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    let entry_id = |suffix: &str| listing.entries.iter().find(|entry| entry.path.ends_with(suffix)).expect("entry present").id;
+    let selected = [entry_id("first.txt"), entry_id("third.txt")];
+
+    let mut selected_options = SelectedExtractOptions { destination: out_dir.clone(), ..Default::default() };
+    let report = handle.extract_selected_many(&selected, &mut selected_options).unwrap();
+
+    assert_eq!(report.written_entries, 2);
+
+    // Every archive entry is accounted for exactly once. A per-entry loop
+    // rescans the whole archive per selector and counts the unselected entries
+    // again on each pass, so this equality only holds for a single pass.
+    let accounted = report.written_entries.saturating_add(report.skipped_entries);
+    assert_eq!(accounted, u64::try_from(listing.entries.len()).unwrap(), "batch 7z extraction should visit each entry once");
+
+    let written = |name: &str| {
+        let mut matches = walk_files(&out_dir).into_iter().filter(|path| path.ends_with(name));
+        matches.next()
+    };
+    assert!(written("first.txt").is_some(), "selected first.txt should be written");
+    assert!(written("third.txt").is_some(), "selected third.txt should be written");
+    assert!(written("second.txt").is_none(), "unselected second.txt must not be written");
+}
+
+/// Collects every regular file below `root`, so a test can assert on extraction
+/// output without depending on how a format nests its entries.
+fn walk_files(root: &std::path::Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() { pending.push(path) } else { found.push(path) }
+        }
+    }
+    found
+}

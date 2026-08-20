@@ -395,11 +395,11 @@ pub(crate) fn test_zip_archive<R: Read + Seek>(
         if is_cancelled() {
             return Err(ZipBackendError::Cancelled);
         }
-        let name = {
-            let file = archive.by_index_raw(index).map_err(map_zip_error)?;
-            file.name().to_owned()
-        };
-        if !selected(&name) {
+        // Read the name straight from the parsed central directory. Opening an
+        // entry reader here would decode each selected entry twice, once for its
+        // name and again for its data (CR-194).
+        let name = archive.name_for_index(index).ok_or_else(|| map_zip_error(zip::result::ZipError::FileNotFound))?;
+        if !selected(name) {
             skipped_entries += 1;
             continue;
         }

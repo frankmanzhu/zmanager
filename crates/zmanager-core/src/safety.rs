@@ -233,6 +233,10 @@ pub struct ExtractionSafetyPlanner<'a> {
     seen_paths: HashMap<String, String>,
     planned_expanded_bytes: u64,
     planned_entries: u64,
+    /// Lowest rename suffix not yet known to be taken, keyed by the conflicting
+    /// destination path. Without it, extracting many entries that collide on one
+    /// name re-probes from " 2" every time, which is quadratic in the batch size.
+    next_rename_index: HashMap<PathBuf, u64>,
     overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
 }
 
@@ -302,6 +306,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
             seen_paths: HashMap::new(),
             planned_expanded_bytes: 0,
             planned_entries: 0,
+            next_rename_index: HashMap::new(),
             overwrite_resolver,
         }
     }
@@ -401,7 +406,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
                     if matches!(entry.kind, ExtractionEntryKind::Directory) && metadata.file_type().is_dir() {
                         return Ok(PlannedWrite { normalized_archive_path, destination_path, link_target_path, replace_existing: false }.into());
                     }
-                    destination_path = rename_candidate_or_error(entry, destination_path)?;
+                    destination_path = self.rename_candidate_or_error(entry, destination_path)?;
                 }
                 OverwritePolicy::Ask => {
                     if matches!(entry.kind, ExtractionEntryKind::Directory) && metadata.file_type().is_dir() {
@@ -416,7 +421,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
                             return Ok(PlannedDestination::Skip { normalized_archive_path, reason: "skipped by overwrite prompt".to_owned() });
                         }
                         OverwriteDecision::Rename => {
-                            destination_path = rename_candidate_or_error(entry, destination_path)?;
+                            destination_path = self.rename_candidate_or_error(entry, destination_path)?;
                         }
                         OverwriteDecision::Quit => {
                             return Err(ExtractionSafetyError::OverwriteAborted { archive_path: entry.archive_path.clone(), destination_path });
@@ -441,6 +446,23 @@ impl<'a> ExtractionSafetyPlanner<'a> {
             });
         };
         Ok(resolver.decide(&OverwriteConflict { archive_path: entry.archive_path.clone(), destination_path: destination_path.to_path_buf() }))
+    }
+
+    /// Resolves a renamed destination for a conflicting path, mapping an
+    /// exhausted candidate space to an error instead of falling back to the
+    /// original (existing) path, which would overwrite in place.
+    ///
+    /// Successive conflicts on the same name resume probing above the suffix
+    /// this planner last handed out, so a batch that collides repeatedly stays
+    /// linear rather than re-walking the taken suffixes for every entry.
+    fn rename_candidate_or_error(&mut self, entry: &ExtractionEntry, destination_path: PathBuf) -> Result<PathBuf, ExtractionSafetyError> {
+        let start_index = self.next_rename_index.get(&destination_path).copied().unwrap_or(FIRST_RENAME_INDEX);
+        let Some((candidate, resume_index)) = next_available_destination_path_from(&destination_path, start_index, MAX_RENAME_CANDIDATES) else {
+            return Err(ExtractionSafetyError::RenameDestinationExhausted { archive_path: entry.archive_path.clone(), destination_path });
+        };
+
+        self.next_rename_index.insert(destination_path, resume_index);
+        Ok(candidate)
     }
 
     fn reject_collision(&mut self, normalized_archive_path: &str) -> Result<(), ExtractionSafetyError> {
@@ -902,42 +924,39 @@ fn strip_archive_components(path: &str, count: usize) -> Option<String> {
 /// Maximum deterministic renamed destinations tried for one conflicting path.
 const MAX_RENAME_CANDIDATES: u64 = 10_000;
 
+/// First rename suffix to try: the base name conceptually occupies index 1.
+const FIRST_RENAME_INDEX: u64 = 2;
+
 /// Returns a deterministic non-conflicting sibling path for an existing
-/// destination, or `None` when every candidate in the budget is taken.
+/// destination, searching `"{stem} {index}"` candidates at or after
+/// `start_index`, or `None` when every candidate in the budget is taken.
 /// Returning the original path would silently degrade a rename policy into
 /// an in-place overwrite, so callers must surface `None` as an error.
-fn next_available_destination_path(path: &Path) -> Option<PathBuf> {
-    next_available_destination_path_with_budget(path, MAX_RENAME_CANDIDATES)
-}
-
-fn next_available_destination_path_with_budget(path: &Path, candidate_budget: u64) -> Option<PathBuf> {
+///
+/// The chosen path comes back with the index a subsequent search for the same
+/// name should resume from. The `candidate_budget` ceiling is absolute, so
+/// resuming from a higher `start_index` narrows the search without moving the
+/// point at which the candidate space is considered exhausted.
+fn next_available_destination_path_from(path: &Path, start_index: u64, candidate_budget: u64) -> Option<(PathBuf, u64)> {
     if !path.exists() {
-        return Some(path.to_path_buf());
+        // The base name was free, so the numbered space is untouched.
+        return Some((path.to_path_buf(), start_index));
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
     let stem = path.file_stem().and_then(|stem| stem.to_str()).or_else(|| path.file_name().and_then(|name| name.to_str())).unwrap_or("entry");
     let extension = path.extension().and_then(|extension| extension.to_str());
 
-    // Candidate names start at "stem 2" (the base name occupies index 1), so a
-    // budget of N yields the N candidates numbered 2..=N+1.
-    for index in 2..=candidate_budget.saturating_add(1) {
+    // A budget of N yields the N candidates numbered 2..=N+1.
+    for index in start_index..=candidate_budget.saturating_add(1) {
         let file_name = if let Some(extension) = extension { format!("{stem} {index}.{extension}") } else { format!("{stem} {index}") };
         let candidate = parent.join(file_name);
         if !candidate.exists() {
-            return Some(candidate);
+            return Some((candidate, index.saturating_add(1)));
         }
     }
 
     None
-}
-
-/// Resolves a renamed destination for a conflicting path, mapping an
-/// exhausted candidate space to an error instead of falling back to the
-/// original (existing) path, which would overwrite in place.
-fn rename_candidate_or_error(entry: &ExtractionEntry, destination_path: PathBuf) -> Result<PathBuf, ExtractionSafetyError> {
-    next_available_destination_path(&destination_path)
-        .ok_or_else(|| ExtractionSafetyError::RenameDestinationExhausted { archive_path: entry.archive_path.clone(), destination_path })
 }
 
 /// Removes an existing destination path before an explicit overwrite write.
@@ -993,8 +1012,8 @@ fn lexically_normalize(path: &Path) -> PathBuf {
 mod tests {
     use super::{
         ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionLimits, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner,
-        OverwriteConflict, OverwriteDecision, OverwritePolicy, OverwriteResolver, UnsafeFilePolicy, archive_entry_matches_selected, archive_pattern_matches,
-        deferred_link_dependency_order, next_available_destination_path_with_budget, normalize_archive_path, prepare_destination_root,
+        FIRST_RENAME_INDEX, OverwriteConflict, OverwriteDecision, OverwritePolicy, OverwriteResolver, UnsafeFilePolicy, archive_entry_matches_selected,
+        archive_pattern_matches, deferred_link_dependency_order, next_available_destination_path_from, normalize_archive_path, prepare_destination_root,
     };
     use crate::test_support::TestDir;
     use std::fs;
@@ -1054,15 +1073,39 @@ mod tests {
             fs::write(temp.path(format!("file {index}.txt")), b"taken").unwrap();
         }
 
+        let candidate = |path: PathBuf, budget| next_available_destination_path_from(&path, FIRST_RENAME_INDEX, budget).map(|(path, _)| path);
+
         // A non-conflicting path does not need renaming.
-        assert_eq!(next_available_destination_path_with_budget(&temp.path("free.txt"), 3), Some(temp.path("free.txt")));
+        assert_eq!(candidate(temp.path("free.txt"), 3), Some(temp.path("free.txt")));
 
         // A free candidate inside the budget is selected deterministically.
-        assert_eq!(next_available_destination_path_with_budget(&temp.path("file.txt"), 5), Some(temp.path("file 5.txt")));
+        assert_eq!(candidate(temp.path("file.txt"), 5), Some(temp.path("file 5.txt")));
 
         // An exhausted budget reports `None` instead of falling back to the
         // original existing path, which would silently overwrite it.
-        assert_eq!(next_available_destination_path_with_budget(&temp.path("file.txt"), 3), None);
+        assert_eq!(candidate(temp.path("file.txt"), 3), None);
+    }
+
+    #[test]
+    fn resuming_rename_search_skips_suffixes_already_handed_out() {
+        let temp = TestDir::new("rename-resume");
+        fs::write(temp.path("file.txt"), b"original").unwrap();
+
+        // Nothing numbered exists yet, so a fresh search takes " 2" and reports
+        // 3 as the resume point.
+        let (first, resume) = next_available_destination_path_from(&temp.path("file.txt"), FIRST_RENAME_INDEX, 10).unwrap();
+        assert_eq!(first, temp.path("file 2.txt"));
+        assert_eq!(resume, 3);
+
+        // Resuming skips " 2" even though it is still free on disk, which is
+        // what keeps a colliding batch from re-probing the same suffixes.
+        let (second, resume) = next_available_destination_path_from(&temp.path("file.txt"), resume, 10).unwrap();
+        assert_eq!(second, temp.path("file 3.txt"));
+        assert_eq!(resume, 4);
+
+        // The budget ceiling stays absolute rather than shifting with the
+        // resume point.
+        assert!(next_available_destination_path_from(&temp.path("file.txt"), 12, 10).is_none());
     }
 
     #[test]
