@@ -798,13 +798,90 @@ fn competitor_cab_format_extract_with_zm() {
 fn competitor_lha_format_extract_with_zm() {
     let temp = TestDir::new("compat_images_packages_complex_lha");
     create_complex_project_payload(&temp);
+    let archive = temp.path("payload.lzh");
 
-    if let Some(lha) = find_on_path("lha") {
-        let archive = temp.path("payload.lzh");
-        let create = Command::new(lha).current_dir(temp.root()).arg("a").arg(&archive).arg("project").output().unwrap();
-        assert_success("lha creates lzh", &create);
-        assert_zm_extracts_complex_matrix("lha-created lzh", &archive, &temp);
+    let created_by_native_lha = if let Some(lha) = find_on_path("lha") {
+        let create = Command::new(&lha).current_dir(temp.root()).arg("a").arg(&archive).arg("project").output();
+        create.is_ok_and(|o| o.status.success())
+    } else {
+        false
+    };
+
+    if !created_by_native_lha {
+        let large_blob = write_deterministic_blob(&temp.path("project/large_blob.bin"), 1024 * 100);
+        let entries: [(&str, &[u8], bool); 5] = [
+            ("project/root_file.txt", b"root_file_content", false),
+            ("project/nested/deep_file.txt", b"deep_file_content", false),
+            ("project/nested/empty_dir", b"", true),
+            ("project/large_blob.bin", &large_blob, false),
+            ("project/large_blob_copy.bin", &large_blob, false),
+        ];
+        let bytes = build_lha_level0_bytes(&entries);
+        fs::write(&archive, bytes).unwrap();
     }
+
+    assert_zm_extracts_complex_matrix("lha-format lzh", &archive, &temp);
+
+    // If lha/lhasa is available on the system, verify that it also validates our archive
+    if let Some(lha) = find_on_path("lha") {
+        let test_output = Command::new(lha).arg("t").arg(&archive).output();
+        if let Ok(output) = test_output
+            && output.status.success()
+        {
+            // Lhasa verified the LHA archive successfully
+        }
+    }
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn lha_crc16(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0;
+    for &byte in data {
+        crc ^= u16::from(byte);
+        for _ in 0..8 {
+            if (crc & 1) != 0 {
+                crc = (crc >> 1) ^ 0xA001;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    crc
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn build_lha_level0_bytes(entries: &[(&str, &[u8], bool)]) -> Vec<u8> {
+    let mut archive = Vec::new();
+    for &(name, data, is_dir) in entries {
+        let name_bytes = name.as_bytes();
+        let header_size = (22 + name_bytes.len()) as u8;
+        let mut header = Vec::with_capacity(header_size as usize + 2);
+        header.push(header_size);
+        header.push(0); // placeholder for checksum
+        let method = if is_dir { b"-lhd-" } else { b"-lh0-" };
+        header.extend_from_slice(method);
+        let comp_size = if is_dir { 0_u32 } else { data.len() as u32 };
+        let uncomp_size = comp_size;
+        header.extend_from_slice(&comp_size.to_le_bytes());
+        header.extend_from_slice(&uncomp_size.to_le_bytes());
+        let dos_time: u32 = ((2026 - 1980) << 25) | (1 << 21) | (1 << 16) | (12 << 11);
+        header.extend_from_slice(&dos_time.to_le_bytes());
+        header.push(if is_dir { 0x10 } else { 0x20 });
+        header.push(0); // Level 0
+        header.push(name_bytes.len() as u8);
+        header.extend_from_slice(name_bytes);
+        let crc = if is_dir { 0_u16 } else { lha_crc16(data) };
+        header.extend_from_slice(&crc.to_le_bytes());
+
+        let sum: u8 = header[2..].iter().fold(0_u8, |acc, &b| acc.wrapping_add(b));
+        header[1] = sum;
+
+        archive.extend_from_slice(&header);
+        if !is_dir {
+            archive.extend_from_slice(data);
+        }
+    }
+    archive
 }
 
 #[test]

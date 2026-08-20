@@ -63,7 +63,7 @@ jobs:
         # compatibility fixtures in the CLI compat tests; they are test
         # oracles only — the shipped binaries decode lzop/compress streams
         # natively and reject lrzip with an explicit unsupported error.
-        run: brew install cmake libb2 lz4 xz zstd lzop lrzip ncompress lha
+        run: brew install cmake libb2 lz4 xz zstd lzop lrzip ncompress lhasa sevenzip gcab dpkg cdrtools
 
       - name: Force Clang on macOS
         if: runner.os == 'macOS'
