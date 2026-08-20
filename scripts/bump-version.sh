@@ -31,10 +31,16 @@ sed -i.bak -E "s/^version = \"${OLD_VERSION}\"/version = \"${NEW_VERSION}\"/" Ca
 rm -f Cargo.toml.bak
 
 # Update internal dependency version strings for inter-crate paths in Cargo.toml
-sed -i.bak -E "s/(zmanager-[a-z-]+ = \{ path = \"[^\"]+\", version = \")[^\"]+(\" \})/\1${NEW_VERSION}\2/g" Cargo.toml
+sed -i.bak -E "s/(zmanager-[a-z-]+ = \{[^}]*version = \")[^\"]+(\"[^}]*\})/\1${NEW_VERSION}\2/g" Cargo.toml
 rm -f Cargo.toml.bak
 
 # Update version references with strict anchors to prevent unintended replacements
+
+if [ -f README.md ]; then
+    sed -i.bak -E "s/(\`zm )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?( \(full\)\`)/\1${NEW_VERSION}\3/g" README.md
+    sed -i.bak -E "s/(\`zm )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?( \(offline\)\`)/\1${NEW_VERSION}\3/g" README.md
+    rm -f README.md.bak
+fi
 
 if [ -f docs/INSTALL.md ]; then
     sed -i.bak -E "s/(ZMANAGER_VERSION=v)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?/\1${NEW_VERSION}/g" docs/INSTALL.md

@@ -16,8 +16,59 @@ jobs:
     name: Bump Version to ${{ inputs.version }}
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
+      - name: Clone tzap
+        run: |
+          TZAP_REV=$(cat tzap-rev.txt 2>/dev/null || echo "main")
+          git clone https://github.com/tzap-org/tzap.git ../tzap
+          git -C ../tzap checkout "$TZAP_REV" || git -C ../tzap checkout main
+
+      - name: Clone forensic-vfs-engine
+        run: |
+          FVE_REV=$(cat forensic-vfs-engine-rev.txt 2>/dev/null || echo "main")
+          git clone https://github.com/frankmanzhu/forensic-vfs-engine.git ../forensic-vfs-engine
+          git -C ../forensic-vfs-engine checkout "$FVE_REV" || git -C ../forensic-vfs-engine checkout main
+          UDF_REV=$(cat udf-forensic-rev.txt 2>/dev/null || echo "main")
+          git clone https://github.com/frankmanzhu/udf-forensic.git ../udf-forensic
+          git -C ../udf-forensic checkout "$UDF_REV" || git -C ../udf-forensic checkout main
+          NTFS_REV=$(cat ntfs-forensic-rev.txt 2>/dev/null || echo "main")
+          git clone https://github.com/frankmanzhu/ntfs-forensic.git ../ntfs-forensic
+          git -C ../ntfs-forensic checkout "$NTFS_REV" || git -C ../ntfs-forensic checkout main
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            brotli \
+            bzip2 \
+            cmake \
+            gcab \
+            genisoimage \
+            gzip \
+            libacl1-dev \
+            libarchive-tools \
+            libbz2-dev \
+            liblz4-dev \
+            liblzma-dev \
+            libssl-dev \
+            libxml2-dev \
+            libzstd-dev \
+            dpkg-dev \
+            lrzip \
+            lz4 \
+            lzip \
+            lzop \
+            ncompress \
+            python3 \
+            rpm \
+            unzip \
+            xz-utils \
+            zlib1g-dev \
+            zip \
+            zstd
+          sudo apt-get install -y 7zip || sudo apt-get install -y p7zip-full
+          sudo apt-get install -y lha || sudo apt-get install -y lhasa || true
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
