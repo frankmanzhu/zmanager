@@ -70,6 +70,27 @@ pub trait ReadAdapterSession: Send {
     /// Extracts one retained physical entry.
     fn selected_extract<'a>(&mut self, entry_id: EntryId, options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError>;
 
+    /// Extracts a batch of retained physical entries in one pass when supported.
+    fn selected_extract_many<'a>(&mut self, entry_ids: &[EntryId], options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let mut report = ExtractReport::default();
+        for &entry_id in entry_ids {
+            let mut sub_options = SelectedExtractOptions {
+                destination: options.destination.clone(),
+                policy: options.policy.clone(),
+                tzap_restore_options: options.tzap_restore_options,
+                cancellation: options.cancellation.clone(),
+                event_sink: None,
+                overwrite_resolver: None,
+            };
+            let item_report = self.selected_extract(entry_id, &mut sub_options)?;
+            report.written_entries = report.written_entries.saturating_add(item_report.written_entries);
+            report.skipped_entries = report.skipped_entries.saturating_add(item_report.skipped_entries);
+            report.written_bytes = report.written_bytes.saturating_add(item_report.written_bytes);
+            report.warnings.extend(item_report.warnings);
+        }
+        Ok(report)
+    }
+
     /// Copies one retained regular-file entry.
     fn copy_to_writer(&mut self, entry_id: EntryId, writer: &mut dyn Write) -> Result<CopyReport, ArchiveError>;
 

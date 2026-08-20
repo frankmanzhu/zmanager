@@ -20,8 +20,11 @@ pub(crate) fn system_time_to_unix_seconds(time: std::time::SystemTime) -> Option
 /// used to enable parallel compression. Shared by the zstd and 7z backends.
 #[must_use]
 pub(crate) fn available_parallelism_at_least_two() -> Option<u32> {
-    let threads = std::thread::available_parallelism().ok()?.get();
-    u32::try_from(threads).ok().filter(|threads| *threads > 1)
+    static PARALLELISM: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *PARALLELISM.get_or_init(|| {
+        let threads = std::thread::available_parallelism().ok()?.get();
+        u32::try_from(threads).ok().filter(|threads| *threads > 1)
+    })
 }
 
 pub(crate) fn append_pax_mtime<W: io::Write>(builder: &mut tar::Builder<W>, modified: Option<SystemTime>) -> io::Result<()> {

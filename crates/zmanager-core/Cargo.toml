@@ -48,6 +48,8 @@ tzap-plugin-keywrap = "0.2.2"
 tzap-plugin-signing = "0.2.2"
 zip = "8.6.0"
 zeroize = "1.8.2"
+rayon = "1.10"
+memchr = "2.7"
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
@@ -90,6 +92,10 @@ windows-sys = { version = "0.61.2", features = [
 
 [dev-dependencies]
 crc32c = "0.6"
+
+[[bench]]
+name = "core_benchmarks"
+harness = false
 
 [lints]
 workspace = true

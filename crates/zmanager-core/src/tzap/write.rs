@@ -564,8 +564,7 @@ impl ArchiveWriteProgressSink for TzapWriteJobProgress<'_, '_, '_> {
         let phase = job_phase_from_tzap(phase);
         debug_assert_eq!(self.active_phase, Some(phase));
 
-        if phase == JobPhase::EmittingPayload && !self.started_paths.contains(archive_path) {
-            self.started_paths.insert(archive_path.to_owned());
+        if phase == JobPhase::EmittingPayload && self.started_paths.insert(archive_path.to_owned()) {
             self.context.entry_started(archive_path, self.file_sizes.get(archive_path).copied());
         }
 
@@ -575,18 +574,13 @@ impl ArchiveWriteProgressSink for TzapWriteJobProgress<'_, '_, '_> {
 
         if phase == JobPhase::EmittingPayload {
             self.context.bytes_processed(Some(archive_path), bytes);
-            let processed = if let Some(processed) = self.processed_by_path.get_mut(archive_path) {
-                processed
-            } else {
-                self.processed_by_path.insert(archive_path.to_owned(), 0);
-                self.processed_by_path.get_mut(archive_path).expect("inserted TZAP progress path must exist")
-            };
+            let processed = self.processed_by_path.entry(archive_path.to_owned()).or_insert(0);
             *processed = processed.saturating_add(bytes);
+            let current_processed = *processed;
             if let Some(size) = self.file_sizes.get(archive_path).copied()
-                && *processed >= size
-                && !self.finished_paths.contains(archive_path)
+                && current_processed >= size
+                && self.finished_paths.insert(archive_path.to_owned())
             {
-                self.finished_paths.insert(archive_path.to_owned());
                 self.context.entry_finished(archive_path, size);
             }
         }

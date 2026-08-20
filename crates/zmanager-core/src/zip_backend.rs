@@ -10,7 +10,7 @@
 //!   as link-like are extracted as regular files; see
 //!   `crate::sevenz_backend::extraction_kind` for the rationale.
 
-use crate::jobs::JobContext;
+use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PlanError, PlanOptions, plan_archive};
 use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver};
 use crate::secrets::SecretString;
@@ -362,6 +362,7 @@ pub(crate) fn list_zip_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> R
 /// password.
 ///
 /// # Errors
+/// Tests a ZIP archive from disk.
 ///
 /// Returns [`ZipBackendError`] when the archive cannot be read or a selected
 /// entry requires a missing/incorrect password.
@@ -373,7 +374,7 @@ pub fn test_zip_with_password_filter(
     let path = path.as_ref();
     let reader = open_zip_reader(path)?;
     let mut archive = ZipArchive::new(reader)?;
-    test_zip_archive(&mut archive, path, password, selected)
+    test_zip_archive(&mut archive, path, password, || false, selected)
 }
 
 /// Tests selected entries in an already opened ZIP reader.
@@ -381,6 +382,7 @@ pub(crate) fn test_zip_archive<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     archive_path: &Path,
     password: Option<&str>,
+    is_cancelled: impl Fn() -> bool + Sync,
     mut selected: impl FnMut(&str) -> bool,
 ) -> Result<ZipTestReport, ZipBackendError> {
     let mut tested_entries = 0;
@@ -388,7 +390,11 @@ pub(crate) fn test_zip_archive<R: Read + Seek>(
     let mut tested_bytes = 0;
     let password = password_bytes(password);
 
+    let mut to_test = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
+        if is_cancelled() {
+            return Err(ZipBackendError::Cancelled);
+        }
         let name = {
             let file = archive.by_index_raw(index).map_err(map_zip_error)?;
             file.name().to_owned()
@@ -397,14 +403,73 @@ pub(crate) fn test_zip_archive<R: Read + Seek>(
             skipped_entries += 1;
             continue;
         }
+        to_test.push(index);
+    }
+
+    if to_test.len() >= 4 && crate::tar_metadata::available_parallelism_at_least_two().is_some() && archive_path.is_file() {
+        use rayon::prelude::*;
+        let is_cancelled = &is_cancelled;
+        let results: Result<Vec<(usize, u64)>, ZipBackendError> = to_test
+            .par_chunks(32)
+            .map(|chunk| {
+                let file = File::open(archive_path).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
+                let mut local_archive = ZipArchive::new(file)?;
+                let mut local_tested = 0_usize;
+                let mut local_bytes = 0_u64;
+                let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
+                for &index in chunk {
+                    if is_cancelled() {
+                        return Err(ZipBackendError::Cancelled);
+                    }
+                    let mut file = local_archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(map_zip_error)?;
+                    if file.is_dir() {
+                        local_tested += 1;
+                        continue;
+                    }
+                    loop {
+                        if is_cancelled() {
+                            return Err(ZipBackendError::Cancelled);
+                        }
+                        let read = file.read(&mut buffer).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
+                        if read == 0 {
+                            break;
+                        }
+                        local_bytes += read as u64;
+                    }
+                    local_tested += 1;
+                }
+                Ok((local_tested, local_bytes))
+            })
+            .collect();
+
+        for (entries, bytes) in results? {
+            tested_entries += entries;
+            tested_bytes += bytes;
+        }
+        return Ok(ZipTestReport { tested_entries, skipped_entries, tested_bytes });
+    }
+
+    let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
+    for index in to_test {
+        if is_cancelled() {
+            return Err(ZipBackendError::Cancelled);
+        }
         let mut file = archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(map_zip_error)?;
         if file.is_dir() {
             tested_entries += 1;
             continue;
         }
-        let copied = io::copy(&mut file, &mut io::sink()).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
+        loop {
+            if is_cancelled() {
+                return Err(ZipBackendError::Cancelled);
+            }
+            let read = file.read(&mut buffer).map_err(|source| ZipBackendError::Io { path: archive_path.to_path_buf(), source })?;
+            if read == 0 {
+                break;
+            }
+            tested_bytes += read as u64;
+        }
         tested_entries += 1;
-        tested_bytes += copied;
     }
 
     Ok(ZipTestReport { tested_entries, skipped_entries, tested_bytes })
@@ -429,12 +494,6 @@ pub(crate) fn copy_zip_entry_from_archive<R: Read + Seek, W: Write + ?Sized>(
 }
 
 /// Extracts a ZIP archive with an optional password while emitting job events.
-///
-/// # Errors
-///
-/// Returns [`ZipBackendError`] when the archive cannot be read, a password is
-/// required/incorrect, an entry is unsafe, filesystem writes fail, or
-/// cancellation is requested.
 pub fn extract_zip_with_context_and_password(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,
@@ -445,7 +504,8 @@ pub fn extract_zip_with_context_and_password(
     let archive_path = archive_path.as_ref();
     let reader = open_zip_reader(archive_path)?;
     let mut archive = ZipArchive::new(reader)?;
-    extract_zip_archive(&mut archive, archive_path, destination, policy, password, Some(context), None, None)
+    let token = context.cancellation_token();
+    extract_zip_archive(&mut archive, archive_path, destination, policy, password, Some(&token), Some(context), None, None)
 }
 
 /// Extracts from an already opened ZIP reader without reopening its source.
@@ -456,16 +516,19 @@ pub(crate) fn extract_zip_archive<R: Read + Seek>(
     destination: impl AsRef<Path>,
     policy: ExtractionPolicy,
     password: Option<&str>,
+    cancellation: Option<&CancellationToken>,
     mut context: Option<&mut JobContext<'_>>,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
-    selected_index: Option<usize>,
+    selected_indices: Option<&[usize]>,
 ) -> Result<ZipExtractReport, ZipBackendError> {
     let destination = destination.as_ref();
     let destination_root =
         crate::safety::prepare_destination_root(destination).map_err(|source| ZipBackendError::Io { path: destination.to_path_buf(), source })?;
 
     let password = password_bytes(password);
-    if selected_index.is_some_and(|selected| selected >= archive.len()) {
+    if let Some(indices) = selected_indices
+        && indices.iter().any(|&selected| selected >= archive.len())
+    {
         return Err(ZipBackendError::Io {
             path: archive_path.to_path_buf(),
             source: io::Error::new(io::ErrorKind::NotFound, "retained ZIP entry ID is not present in this archive"),
@@ -476,10 +539,17 @@ pub(crate) fn extract_zip_archive<R: Read + Seek>(
     let mut deferred_directories: Vec<(PathBuf, Option<u32>, Option<zip::DateTime>)> = Vec::new();
     let mut io_buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
 
-    for index in 0..archive.len() {
-        if selected_index.is_some_and(|selected| selected != index) {
-            report.skipped_entries += 1;
-            continue;
+    let all_indices: Vec<usize>;
+    let target_indices: &[usize] = if let Some(indices) = selected_indices {
+        indices
+    } else {
+        all_indices = (0..archive.len()).collect();
+        &all_indices
+    };
+
+    for &index in target_indices {
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(ZipBackendError::Cancelled);
         }
         let mut file = archive.by_index_with_options(index, ZipReadOptions::new().password(password)).map_err(map_zip_error)?;
         let entry_size = file.size();
@@ -510,6 +580,7 @@ pub(crate) fn extract_zip_archive<R: Read + Seek>(
                         deferred_directories: &mut deferred_directories,
                         io_buffer: &mut io_buffer,
                     },
+                    cancellation,
                 ),
             },
         )?;
@@ -707,6 +778,7 @@ fn write_zip_entry<R: Read>(
     file: &mut zip::read::ZipFile<'_, R>,
     entry: &ExtractionEntry,
     context: ZipEntryWriteContext<'_, '_>,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<u64, ZipBackendError> {
     let ZipEntryWriteContext {
         destination_path,
@@ -735,7 +807,12 @@ fn write_zip_entry<R: Read>(
                 Some(&entry.archive_path),
                 job_context,
                 io_buffer,
-                |buf| file.read(buf).map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source }),
+                |buf| {
+                    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+                        return Err(ZipBackendError::Cancelled);
+                    }
+                    file.read(buf).map_err(|source| ZipBackendError::Io { path: destination_path.to_path_buf(), source })
+                },
                 |source, path| ZipBackendError::Io { path: path.to_path_buf(), source },
             )?;
             apply_zip_metadata(destination_path, unix_mode, modified_time)?;

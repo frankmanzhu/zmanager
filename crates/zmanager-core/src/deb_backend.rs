@@ -275,16 +275,16 @@ fn extract_payload_with_engine(
     let report = match archive_format::detect_archive_format(archive_path) {
         ArchiveFormatKind::Tar => {
             let file = File::open(archive_path).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
-            crate::tar_backend::extract(file, archive_path, destination, policy, overwrite_resolver, None, None)?
+            crate::tar_backend::extract(file, archive_path, destination, policy, overwrite_resolver, None, None, None)?
         }
         ArchiveFormatKind::TarGz => {
             let file = File::open(archive_path).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
-            crate::tar_backend::extract(flate2::read::GzDecoder::new(file), archive_path, destination, policy, overwrite_resolver, None, None)?
+            crate::tar_backend::extract(flate2::read::GzDecoder::new(file), archive_path, destination, policy, overwrite_resolver, None, None, None)?
         }
         ArchiveFormatKind::TarZst => {
             let file = File::open(archive_path).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
             let decoder = zstd::stream::read::Decoder::new(file).map_err(|source| DebError::Io { path: archive_path.to_path_buf(), source })?;
-            crate::tar_backend::extract(decoder, archive_path, destination, policy, overwrite_resolver, None, None)?
+            crate::tar_backend::extract(decoder, archive_path, destination, policy, overwrite_resolver, None, None, None)?
         }
         ArchiveFormatKind::TarBz2 | ArchiveFormatKind::TarXz | ArchiveFormatKind::TarLzma => {
             let format = match archive_format::detect_archive_format(archive_path) {
@@ -294,7 +294,7 @@ fn extract_payload_with_engine(
                 _ => unreachable!("outer match limits filtered TAR formats"),
             };
             let decoder = crate::raw_stream_backend::open_decoder(archive_path, format)?;
-            crate::tar_backend::extract(decoder, archive_path, destination, policy, overwrite_resolver, None, None)?
+            crate::tar_backend::extract(decoder, archive_path, destination, policy, overwrite_resolver, None, None, None)?
         }
         format => {
             return Err(DebError::Engine(crate::engine::ArchiveError::usable(

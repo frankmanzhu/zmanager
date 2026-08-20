@@ -242,7 +242,7 @@ fn plan_archive_roots(roots: impl IntoIterator<Item = PathBuf>, manifest_root: P
 
     for root in roots {
         let root_name = archive_file_name(&root)?;
-        planner.walk(&root, root_name, 0, &[], &mut Vec::new())?;
+        planner.walk(&root, root_name, 0, &mut Vec::new(), &mut Vec::new())?;
     }
 
     planner.entries.sort_by(|left, right| left.archive_path.cmp(&right.archive_path));
@@ -280,7 +280,7 @@ impl ManifestPlanner<'_> {
         source_path: &Path,
         archive_path: String,
         depth: usize,
-        gitignore_rules: &[GitignoreRule],
+        gitignore_rules: &mut Vec<GitignoreRule>,
         active_dirs: &mut Vec<PathBuf>,
     ) -> Result<(), PlanError> {
         let metadata = if self.options.follow_symlinks {
@@ -289,6 +289,13 @@ impl ManifestPlanner<'_> {
             fs::symlink_metadata(source_path).map_err(|source| PlanError::Metadata { path: source_path.to_path_buf(), source })?
         };
         let file_type = manifest_file_type(&metadata);
+
+        if depth > 1024 {
+            return Err(PlanError::Metadata {
+                path: source_path.to_path_buf(),
+                source: io::Error::new(io::ErrorKind::InvalidInput, "maximum manifest walk depth exceeded"),
+            });
+        }
 
         if depth > 0
             && let Some(reason) = self.exclusion_reason(source_path, &archive_path, file_type, gitignore_rules)
@@ -325,26 +332,22 @@ impl ManifestPlanner<'_> {
             } else {
                 false
             };
-            let active_gitignore_rules = if self.options.respect_gitignore {
-                let mut rules = gitignore_rules.to_vec();
-                rules.extend(read_gitignore_rules(source_path, &archive_path, &mut self.warnings));
-                rules
-            } else {
-                Vec::new()
-            };
-            let mut children = fs::read_dir(source_path)
+            let gitignore_len = gitignore_rules.len();
+            if self.options.respect_gitignore {
+                gitignore_rules.extend(read_gitignore_rules(source_path, &archive_path, &mut self.warnings));
+            }
+            let children = fs::read_dir(source_path)
                 .map_err(|source| PlanError::ReadDir { path: source_path.to_path_buf(), source })?
                 .collect::<Result<Vec<_>, io::Error>>()
                 .map_err(|source| PlanError::ReadDir { path: source_path.to_path_buf(), source })?;
-
-            children.sort_by_key(fs::DirEntry::file_name);
 
             for child in children {
                 let child_name = child.file_name();
                 let child_name = child_name.to_string_lossy();
                 let child_archive_path = format!("{archive_path}/{child_name}");
-                self.walk(&child.path(), child_archive_path, depth + 1, &active_gitignore_rules, active_dirs)?;
+                self.walk(&child.path(), child_archive_path, depth + 1, gitignore_rules, active_dirs)?;
             }
+            gitignore_rules.truncate(gitignore_len);
             if active_dir_marker {
                 active_dirs.pop();
             }

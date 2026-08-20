@@ -140,6 +140,8 @@ pub struct BrowserExtractOptions<'a> {
     pub tzap_allow_absolute_symlinks: bool,
     /// Whether to ignore symbolic links during extraction.
     pub ignore_symlinks: bool,
+    /// Optional extraction limits overriding the default safety caps.
+    pub limits: Option<crate::safety::ExtractionLimits>,
 }
 
 impl Default for BrowserExtractOptions<'_> {
@@ -152,6 +154,7 @@ impl Default for BrowserExtractOptions<'_> {
             tzap_allow_degraded: false,
             tzap_allow_absolute_symlinks: false,
             ignore_symlinks: false,
+            limits: None,
         }
     }
 }
@@ -338,7 +341,7 @@ pub fn extract_entry_with_options(
     let destination = destination.as_ref();
     let destination_root =
         crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
-    let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
+    let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks, options.limits);
 
     extract_entry_via_engine(
         archive_path,
@@ -391,19 +394,31 @@ pub fn extract_selected_entries_from_engine_handle(
         crate::safety::prepare_destination_root(destination).map_err(|source| ArchiveBrowserError::Io { path: destination.to_path_buf(), source })?;
     let format = handle.detected().format;
     let listing = handle.list().map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
-    let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks);
+    let policy = extraction_policy(options.overwrite, options.strip_components, options.ignore_symlinks, options.limits);
     if entry_paths.is_empty() {
         return Ok(Vec::new());
     }
-    for requested_path in entry_paths {
-        if !listing.entries.iter().any(|entry| crate::safety::archive_entry_matches_selected(&entry.path, requested_path)) {
-            return Err(ArchiveBrowserError::EntryNotFound { path: requested_path.clone() });
+    let norm_selectors: Vec<String> = entry_paths.iter().map(|p| crate::safety::normalize_selector(p)).collect();
+    let mut matched_selector_indices = vec![false; norm_selectors.len()];
+    let mut selected_entries = Vec::new();
+
+    for entry in &listing.entries {
+        let norm_entry = crate::safety::normalize_selector(&entry.path);
+        let mut matched = false;
+        for (i, selector) in norm_selectors.iter().enumerate() {
+            if crate::safety::normalized_entry_matches_normalized_selector(&norm_entry, selector) {
+                matched_selector_indices[i] = true;
+                matched = true;
+            }
+        }
+        if matched {
+            selected_entries.push(entry);
         }
     }
-    let mut selected_entries = Vec::new();
-    for entry in &listing.entries {
-        if entry_paths.iter().any(|requested_path| crate::safety::archive_entry_matches_selected(&entry.path, requested_path)) {
-            selected_entries.push(entry);
+
+    for (i, &matched) in matched_selector_indices.iter().enumerate() {
+        if !matched {
+            return Err(ArchiveBrowserError::EntryNotFound { path: entry_paths[i].clone() });
         }
     }
     if selected_entries.is_empty() {
@@ -415,24 +430,55 @@ pub fn extract_selected_entries_from_engine_handle(
     // entries repeatedly when the archive contains duplicate names or the
     // caller supplies the same selector more than once.
     let mut reports = Vec::with_capacity(selected_entries.len());
+    let mut planned_expanded_bytes = 0_u64;
+    let mut seen_paths = std::collections::HashMap::new();
+
+    let entry_ids: Vec<crate::engine::EntryId> = selected_entries.iter().map(|entry| entry.id).collect();
+    for entry in &selected_entries {
+        if options.overwrite != OverwritePolicy::Replace {
+            let collision_key = crate::safety::case_collision_key(&entry.path);
+            if let Some(previous) = seen_paths.insert(collision_key, entry.path.clone()) {
+                return Err(ArchiveBrowserError::Safety(crate::safety::ExtractionSafetyError::NameCollision {
+                    archive_path: entry.path.clone(),
+                    previous_archive_path: previous,
+                }));
+            }
+        }
+
+        if let Some(entry_size) = entry.size {
+            planned_expanded_bytes = planned_expanded_bytes.saturating_add(entry_size);
+            if let Some(max_bytes) = policy.limits.max_expanded_bytes
+                && planned_expanded_bytes > max_bytes
+            {
+                return Err(ArchiveBrowserError::Safety(crate::safety::ExtractionSafetyError::ExpandedSizeLimitExceeded {
+                    archive_path: entry.path.clone(),
+                    attempted_bytes: planned_expanded_bytes,
+                    limit_bytes: max_bytes,
+                }));
+            }
+        }
+    }
+
+    let mut selected_options = crate::engine::SelectedExtractOptions {
+        destination: destination_root.clone(),
+        policy: policy.clone(),
+        tzap_restore_options: Some(TzapRestoreOptions {
+            policy: options.tzap_restore_policy,
+            allow_degraded: options.tzap_allow_degraded,
+            allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
+        }),
+        ..Default::default()
+    };
+    let batch_report =
+        handle.extract_selected_many(&entry_ids, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
+
     for entry in selected_entries {
-        let mut selected_options = crate::engine::SelectedExtractOptions {
-            destination: destination_root.clone(),
-            policy: policy.clone(),
-            tzap_restore_options: Some(TzapRestoreOptions {
-                policy: options.tzap_restore_policy,
-                allow_degraded: options.tzap_allow_degraded,
-                allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
-            }),
-            ..Default::default()
-        };
-        let report = handle.extract_selected(entry.id, &mut selected_options).map_err(|source| ArchiveBrowserError::Engine { format: Some(format), source })?;
         reports.push((
             entry.path.clone(),
             EntryExtractReport {
                 destination_path: destination_root.join(&entry.path),
-                written_bytes: report.written_bytes,
-                metadata_diagnostics: report.warnings,
+                written_bytes: entry.size.unwrap_or(0),
+                metadata_diagnostics: batch_report.warnings.clone(),
             },
         ));
     }
@@ -629,8 +675,13 @@ pub fn list_entries_from_engine_handle(handle: &mut crate::engine::ArchiveHandle
     Ok(BrowserListing { entries })
 }
 
-fn extraction_policy(overwrite: OverwritePolicy, strip_components: usize, ignore_symlinks: bool) -> ExtractionPolicy {
-    ExtractionPolicy { overwrite, strip_components, ignore_symlinks, ..ExtractionPolicy::default() }
+fn extraction_policy(
+    overwrite: OverwritePolicy,
+    strip_components: usize,
+    ignore_symlinks: bool,
+    limits: Option<crate::safety::ExtractionLimits>,
+) -> ExtractionPolicy {
+    ExtractionPolicy { overwrite, strip_components, ignore_symlinks, limits: limits.unwrap_or_default(), ..ExtractionPolicy::default() }
 }
 
 #[cfg(test)]

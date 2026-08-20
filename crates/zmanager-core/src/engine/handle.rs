@@ -255,8 +255,8 @@ impl ArchiveHandle {
                 format!("No {operation:?} adapter registered for format '{}'", self.detected.format),
             ));
         }
-        self.validate_source()?;
         if self.session.is_none() {
+            self.validate_source()?;
             let factory = self.engine_registry.resolve(self.detected.format, operation).ok_or_else(|| {
                 ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("No {operation:?} adapter registered for format '{}'", self.detected.format))
             })?;
@@ -283,6 +283,7 @@ impl ArchiveHandle {
     }
 
     fn normalize_listing(&mut self, mut listing: ArchiveListing) -> Result<ArchiveListing, ArchiveError> {
+        self.entry_ids.clear();
         let mut seen_ids = HashSet::with_capacity(listing.entries.len());
         for entry in &mut listing.entries {
             if !seen_ids.insert(entry.id) {
@@ -292,23 +293,23 @@ impl ArchiveHandle {
             let engine_id = EntryId(NEXT_ENGINE_ENTRY_ID.fetch_add(1, Ordering::Relaxed));
             self.entry_ids.insert(engine_id, adapter_id);
             entry.id = engine_id;
-            entry.path = normalize_engine_path(&entry.path);
-            if let Some(link_target) = &mut entry.link_target {
-                *link_target = normalize_engine_path(link_target);
+            if let std::borrow::Cow::Owned(norm) = normalize_engine_path(&entry.path) {
+                entry.path = norm;
+            }
+            if let Some(link_target) = &mut entry.link_target
+                && let std::borrow::Cow::Owned(norm) = normalize_engine_path(link_target)
+            {
+                *link_target = norm;
             }
         }
         Ok(listing)
     }
 
     fn require_listed_entry(&self, entry_id: EntryId) -> Result<EntryId, ArchiveError> {
-        if self.listing.as_ref().is_some_and(|listing| listing.entries.iter().any(|entry| entry.id == entry_id)) {
-            self.entry_ids
-                .get(&entry_id)
-                .copied()
-                .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Entry ID {entry_id} is not present in this handle listing")))
-        } else {
-            Err(ArchiveError::usable(ErrorKind::InvalidFormat, format!("Entry ID {entry_id} is not present in this handle listing")))
-        }
+        self.entry_ids
+            .get(&entry_id)
+            .copied()
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("Entry ID {entry_id} is not present in this handle listing")))
     }
 
     /// Lists archive entries using the bound adapter (ARC-105, ARC-108).
@@ -386,6 +387,25 @@ impl ArchiveHandle {
         let result = {
             let session = self.session_for(ArchiveOperation::SelectedExtract)?;
             session.selected_extract(adapter_entry_id, options)
+        };
+        self.finish_operation(result)
+    }
+
+    /// Extracts a batch of retained entries by their session-scoped IDs in one pass.
+    pub fn extract_selected_many<'a>(&mut self, entry_ids: &[EntryId], options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let mut adapter_entry_ids = Vec::with_capacity(entry_ids.len());
+        for &entry_id in entry_ids {
+            adapter_entry_ids.push(self.require_listed_entry(entry_id)?);
+        }
+        if options.destination.as_os_str().is_empty() {
+            return Err(ArchiveError::usable(ErrorKind::Io, "Extraction destination must not be empty"));
+        }
+        if options.cancellation.as_ref().is_some_and(crate::jobs::CancellationToken::is_cancelled) {
+            return Err(ArchiveError::usable(ErrorKind::Cancelled, "Archive extraction was cancelled"));
+        }
+        let result = {
+            let session = self.session_for(ArchiveOperation::SelectedExtract)?;
+            session.selected_extract_many(&adapter_entry_ids, options)
         };
         self.finish_operation(result)
     }

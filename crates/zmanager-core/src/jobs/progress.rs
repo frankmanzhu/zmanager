@@ -127,20 +127,23 @@ pub const PROGRESS_RECENT_PATH_BYTES_LIMIT: usize = 4 * 1024;
 pub const PROGRESS_PATH_DISPLAY_BYTES_LIMIT: usize = PROGRESS_RECENT_PATH_BYTES_LIMIT / PROGRESS_RECENT_PATH_LIMIT;
 pub(crate) const PROGRESS_ENTRY_STEP: u64 = 128;
 
-pub(crate) struct ProgressBatch {
-    pub(crate) path: Option<String>,
-    pub(crate) recent_paths: Vec<String>,
-    pub(crate) recent_path_identities: Vec<ProgressPathIdentity>,
-    pub(crate) bytes: u64,
-    pub(crate) entries: u64,
-    pub(crate) recent_paths_truncated: bool,
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProgressBatch {
+    pub path: Option<String>,
+    pub recent_paths: Vec<String>,
+    pub recent_path_identities: Vec<ProgressPathIdentity>,
+    pub bytes: u64,
+    pub entries: u64,
+    pub recent_paths_truncated: bool,
 }
 
-pub(crate) struct ProgressCoalescer {
+#[derive(Debug)]
+pub struct ProgressCoalescer {
     total_bytes: Option<u64>,
     pending_bytes: u64,
     pending_entries: u64,
     latest_path: Option<String>,
+    last_raw_path: Option<String>,
     recent_paths: VecDeque<(ProgressPathIdentity, String)>,
     last_emitted: Instant,
     emitted_once: bool,
@@ -148,16 +151,19 @@ pub(crate) struct ProgressCoalescer {
 }
 
 impl ProgressCoalescer {
-    pub(crate) fn new(total_bytes: Option<u64>) -> Self {
+    #[must_use]
+    pub fn new(total_bytes: Option<u64>) -> Self {
         Self::new_at(total_bytes, Instant::now())
     }
 
-    pub(crate) fn new_at(total_bytes: Option<u64>, now: Instant) -> Self {
+    #[must_use]
+    pub fn new_at(total_bytes: Option<u64>, now: Instant) -> Self {
         Self {
             total_bytes,
             pending_bytes: 0,
             pending_entries: 0,
             latest_path: None,
+            last_raw_path: None,
             recent_paths: VecDeque::new(),
             last_emitted: now,
             emitted_once: false,
@@ -165,36 +171,40 @@ impl ProgressCoalescer {
         }
     }
 
-    pub(crate) fn reset(&mut self, total_bytes: Option<u64>) {
+    pub fn reset(&mut self, total_bytes: Option<u64>) {
         self.reset_at(total_bytes, Instant::now());
     }
 
-    pub(crate) fn reset_at(&mut self, total_bytes: Option<u64>, now: Instant) {
+    pub fn reset_at(&mut self, total_bytes: Option<u64>, now: Instant) {
         self.total_bytes = total_bytes;
         self.pending_bytes = 0;
         self.pending_entries = 0;
         self.latest_path = None;
+        self.last_raw_path = None;
         self.recent_paths.clear();
         self.last_emitted = now;
         self.emitted_once = false;
         self.recent_paths_truncated = false;
     }
 
-    pub(crate) fn record(&mut self, path: Option<&str>, bytes: u64) -> Option<ProgressBatch> {
+    pub fn record(&mut self, path: Option<&str>, bytes: u64) -> Option<ProgressBatch> {
         self.record_activity(path, bytes, 0)
     }
 
-    pub(crate) fn record_activity(&mut self, path: Option<&str>, bytes: u64, entries: u64) -> Option<ProgressBatch> {
+    pub fn record_activity(&mut self, path: Option<&str>, bytes: u64, entries: u64) -> Option<ProgressBatch> {
         self.record_activity_at(path, bytes, entries, Instant::now())
     }
 
-    pub(crate) fn record_activity_at(&mut self, path: Option<&str>, bytes: u64, entries: u64, now: Instant) -> Option<ProgressBatch> {
+    pub fn record_activity_at(&mut self, path: Option<&str>, bytes: u64, entries: u64, now: Instant) -> Option<ProgressBatch> {
         if bytes == 0 && entries == 0 {
             return None;
         }
         self.pending_bytes = self.pending_bytes.saturating_add(bytes);
         self.pending_entries = self.pending_entries.saturating_add(entries);
-        if let Some(path) = path {
+        if let Some(path) = path
+            && self.last_raw_path.as_deref() != Some(path)
+        {
+            self.last_raw_path = Some(path.to_owned());
             self.recent_paths_truncated |= path.len() > PROGRESS_PATH_DISPLAY_BYTES_LIMIT;
             let identity = path_identity(path);
             let display_path = truncate_utf8(path, PROGRESS_PATH_DISPLAY_BYTES_LIMIT);
@@ -229,7 +239,7 @@ impl ProgressCoalescer {
         }
     }
 
-    pub(crate) fn flush(&mut self) -> Option<ProgressBatch> {
+    pub fn flush(&mut self) -> Option<ProgressBatch> {
         self.flush_at(Instant::now())
     }
 

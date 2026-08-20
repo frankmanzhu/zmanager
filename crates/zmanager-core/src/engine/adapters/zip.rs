@@ -105,8 +105,14 @@ impl ReadAdapterSession for ZipReadSession {
         if options.is_cancelled() {
             return Err(ArchiveError::usable(ErrorKind::Cancelled, "ZIP test was cancelled").with_path(&self.path));
         }
-        let report = crate::zip_backend::test_zip_archive(&mut self.archive, &self.path, self.password.as_deref(), |path| options.selects(path))
-            .map_err(|error| zip_archive_error(&self.path, &error))?;
+        let report = crate::zip_backend::test_zip_archive(
+            &mut self.archive,
+            &self.path,
+            self.password.as_deref(),
+            || options.is_cancelled(),
+            |path| options.selects(path),
+        )
+        .map_err(|error| zip_archive_error(&self.path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.tested_entries).unwrap_or(u64::MAX),
             skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
@@ -116,13 +122,22 @@ impl ReadAdapterSession for ZipReadSession {
     }
 
     fn extract<'a>(&mut self, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let dummy_token = crate::jobs::CancellationToken::new();
+        let token = options.cancellation.as_ref().unwrap_or(&dummy_token);
+        let mut noop_sink = |_event: crate::jobs::JobEvent| {};
+        let sink: &mut dyn crate::jobs::JobEventSink = match options.event_sink.as_mut() {
+            Some(s) => &mut **s,
+            None => &mut noop_sink,
+        };
+        let mut context = crate::jobs::JobContext::new(token, sink);
         let report = crate::zip_backend::extract_zip_archive(
             &mut self.archive,
             &self.path,
             &options.destination,
             options.policy.clone(),
             self.password.as_deref(),
-            None,
+            options.cancellation.as_ref(),
+            Some(&mut context),
             options.overwrite_resolver.as_deref_mut(),
             None,
         )
@@ -136,15 +151,57 @@ impl ReadAdapterSession for ZipReadSession {
             .iter()
             .find_map(|(retained_id, index)| (*retained_id == entry_id).then_some(*index))
             .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("ZIP entry ID {entry_id} is not present in the session listing")))?;
+        let dummy_token = crate::jobs::CancellationToken::new();
+        let token = options.cancellation.as_ref().unwrap_or(&dummy_token);
+        let mut noop_sink = |_event: crate::jobs::JobEvent| {};
+        let sink: &mut dyn crate::jobs::JobEventSink = match options.event_sink.as_mut() {
+            Some(s) => &mut **s,
+            None => &mut noop_sink,
+        };
+        let mut context = crate::jobs::JobContext::new(token, sink);
         let report = crate::zip_backend::extract_zip_archive(
             &mut self.archive,
             &self.path,
             &options.destination,
             options.policy.clone(),
             self.password.as_deref(),
-            None,
+            options.cancellation.as_ref(),
+            Some(&mut context),
             options.overwrite_resolver.as_deref_mut(),
-            Some(entry_index),
+            Some(&[entry_index]),
+        )
+        .map_err(|error| zip_archive_error(&self.path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
+    }
+
+    fn selected_extract_many<'a>(&mut self, entry_ids: &[EntryId], options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let mut indices = Vec::with_capacity(entry_ids.len());
+        for &entry_id in entry_ids {
+            let entry_index = self
+                .retained_entries
+                .iter()
+                .find_map(|(retained_id, index)| (*retained_id == entry_id).then_some(*index))
+                .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("ZIP entry ID {entry_id} is not present in the session listing")))?;
+            indices.push(entry_index);
+        }
+        let dummy_token = crate::jobs::CancellationToken::new();
+        let token = options.cancellation.as_ref().unwrap_or(&dummy_token);
+        let mut noop_sink = |_event: crate::jobs::JobEvent| {};
+        let sink: &mut dyn crate::jobs::JobEventSink = match options.event_sink.as_mut() {
+            Some(s) => &mut **s,
+            None => &mut noop_sink,
+        };
+        let mut context = crate::jobs::JobContext::new(token, sink);
+        let report = crate::zip_backend::extract_zip_archive(
+            &mut self.archive,
+            &self.path,
+            &options.destination,
+            options.policy.clone(),
+            self.password.as_deref(),
+            options.cancellation.as_ref(),
+            Some(&mut context),
+            options.overwrite_resolver.as_deref_mut(),
+            Some(&indices),
         )
         .map_err(|error| zip_archive_error(&self.path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))

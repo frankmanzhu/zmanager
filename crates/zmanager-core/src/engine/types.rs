@@ -107,8 +107,54 @@ pub struct EngineEntry {
 /// Canonicalizes archive names for the engine contract without deciding
 /// whether a name is safe to extract. Traversal components remain visible so
 /// the safety planner can reject them deliberately at extraction time.
-pub(crate) fn normalize_engine_path(raw_path: &str) -> String {
-    raw_path.replace('\\', "/").split('/').filter(|component| !component.is_empty() && *component != ".").collect::<Vec<_>>().join("/")
+#[must_use]
+pub fn normalize_engine_path(raw_path: &str) -> std::borrow::Cow<'_, str> {
+    if raw_path.is_empty() {
+        return std::borrow::Cow::Borrowed("");
+    }
+    let bytes = raw_path.as_bytes();
+    let mut needs_normalization = false;
+    if bytes[0] == b'/' || bytes[bytes.len() - 1] == b'/' {
+        needs_normalization = true;
+    } else {
+        let mut prev_slash = false;
+        let mut comp_start = 0;
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'\\' {
+                needs_normalization = true;
+                break;
+            }
+            if b == b'/' {
+                if prev_slash {
+                    needs_normalization = true;
+                    break;
+                }
+                let comp = &raw_path[comp_start..i];
+                if comp == "." {
+                    needs_normalization = true;
+                    break;
+                }
+                prev_slash = true;
+                comp_start = i + 1;
+            } else {
+                prev_slash = false;
+            }
+        }
+        if !needs_normalization {
+            let comp = &raw_path[comp_start..];
+            if comp == "." {
+                needs_normalization = true;
+            }
+        }
+    }
+
+    if needs_normalization {
+        std::borrow::Cow::Owned(
+            raw_path.replace('\\', "/").split('/').filter(|component| !component.is_empty() && *component != ".").collect::<Vec<_>>().join("/"),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(raw_path)
+    }
 }
 
 impl Default for EngineEntry {
@@ -201,6 +247,8 @@ pub struct ExtractOptions<'a> {
     pub tzap_password: Option<String>,
     /// Optional cancellation token owned by the consumer/job registry.
     pub cancellation: Option<CancellationToken>,
+    /// Optional event sink for live progress and diagnostics.
+    pub event_sink: Option<&'a mut dyn crate::jobs::JobEventSink>,
     /// Optional resolver used when the policy is `OverwritePolicy::Ask`.
     pub overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
 }
@@ -214,6 +262,7 @@ impl std::fmt::Debug for ExtractOptions<'_> {
             .field("recipient_key_bytes", &self.recipient_key_bytes.as_ref().map(Vec::len))
             .field("tzap_restore_options", &self.tzap_restore_options)
             .field("cancellation", &self.cancellation)
+            .field("event_sink", &self.event_sink.is_some())
             .field("overwrite_resolver", &self.overwrite_resolver.is_some())
             .finish()
     }
@@ -229,6 +278,7 @@ impl Default for ExtractOptions<'_> {
             tzap_restore_options: None,
             tzap_password: None,
             cancellation: None,
+            event_sink: None,
             overwrite_resolver: None,
         }
     }
@@ -265,6 +315,8 @@ pub struct SelectedExtractOptions<'a> {
     pub tzap_restore_options: Option<TzapRestoreOptions>,
     /// Optional cancellation token.
     pub cancellation: Option<CancellationToken>,
+    /// Optional event sink for live progress and diagnostics.
+    pub event_sink: Option<&'a mut dyn crate::jobs::JobEventSink>,
     /// Optional overwrite resolver for `Ask` policy.
     pub overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
 }
@@ -276,6 +328,7 @@ impl std::fmt::Debug for SelectedExtractOptions<'_> {
             .field("policy", &self.policy)
             .field("tzap_restore_options", &self.tzap_restore_options)
             .field("cancellation", &self.cancellation)
+            .field("event_sink", &self.event_sink.is_some())
             .field("overwrite_resolver", &self.overwrite_resolver.is_some())
             .finish()
     }
@@ -283,7 +336,14 @@ impl std::fmt::Debug for SelectedExtractOptions<'_> {
 
 impl Default for SelectedExtractOptions<'_> {
     fn default() -> Self {
-        Self { destination: PathBuf::new(), policy: ExtractionPolicy::default(), tzap_restore_options: None, cancellation: None, overwrite_resolver: None }
+        Self {
+            destination: PathBuf::new(),
+            policy: ExtractionPolicy::default(),
+            tzap_restore_options: None,
+            cancellation: None,
+            event_sink: None,
+            overwrite_resolver: None,
+        }
     }
 }
 

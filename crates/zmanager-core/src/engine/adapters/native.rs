@@ -19,12 +19,25 @@ use crate::engine::types::{
     ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, DetectedArchive, EngineEntry, EntryId, ErrorKind, ExtractOptions, ExtractReport, OpenOptions,
     SelectedExtractOptions, TestOptions, TestReport,
 };
+use crate::jobs::{CancellationToken, JobContext, JobEventSink};
 use crate::msi_backend;
 use crate::rar_backend;
 use crate::raw_stream_backend;
 use crate::sevenz_backend;
 use crate::tzap;
 use crate::virtual_disk_backend;
+
+fn with_job_context<R>(cancellation: Option<&CancellationToken>, event_sink: Option<&mut dyn JobEventSink>, f: impl FnOnce(&mut JobContext<'_>) -> R) -> R {
+    let dummy_token = CancellationToken::new();
+    let token = cancellation.unwrap_or(&dummy_token);
+    let mut noop_sink = |_| {};
+    let sink: &mut dyn JobEventSink = match event_sink {
+        Some(s) => s,
+        None => &mut noop_sink,
+    };
+    let mut context = JobContext::new(token, sink);
+    f(&mut context)
+}
 
 /// Immutable context shared by every operation in one native read session.
 ///
@@ -55,13 +68,17 @@ impl NativeReadContext {
         Self { options, cursor_factory, retained_entries: Vec::new(), selected_entry: Cell::new(None) }
     }
 
+    fn from_factory(cursor_factory: SourceCursorFactory, options: OpenOptions) -> Self {
+        Self::new(cursor_factory, options)
+    }
+
     fn retain_listing(&mut self, listing: &ArchiveListing) {
         let mut occurrences = HashMap::<String, usize>::new();
         self.retained_entries = listing
             .entries
             .iter()
             .map(|entry| {
-                let occurrence = occurrences.entry(entry.path.clone()).or_insert(0);
+                let occurrence = occurrences.entry(entry.path.clone()).or_insert(0_usize);
                 let selector = NativeEntrySelector { id: entry.id, path: entry.path.clone(), kind: entry.kind, occurrence: *occurrence };
                 *occurrence = occurrence.saturating_add(1);
                 selector
@@ -132,6 +149,31 @@ trait NativeReadAdapter: Send + Sync + 'static {
         Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "selected extraction is not supported for this archive format"))
     }
 
+    fn selected_extract_many<'a>(
+        &self,
+        archive: &NativeReadContext,
+        entry_ids: &[EntryId],
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let mut report = ExtractReport::default();
+        for &entry_id in entry_ids {
+            let mut sub_options = SelectedExtractOptions {
+                destination: options.destination.clone(),
+                policy: options.policy.clone(),
+                tzap_restore_options: options.tzap_restore_options,
+                cancellation: options.cancellation.clone(),
+                event_sink: None,
+                overwrite_resolver: None,
+            };
+            let item_report = self.selected_extract(archive, entry_id, &mut sub_options)?;
+            report.written_entries = report.written_entries.saturating_add(item_report.written_entries);
+            report.skipped_entries = report.skipped_entries.saturating_add(item_report.skipped_entries);
+            report.written_bytes = report.written_bytes.saturating_add(item_report.written_bytes);
+            report.warnings.extend(item_report.warnings);
+        }
+        Ok(report)
+    }
+
     fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         let _ = (archive, entry_id, writer);
         Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, "writer copy is not supported for this archive format"))
@@ -178,6 +220,11 @@ impl<T: NativeReadAdapter> ReadAdapterSession for NativeReadSession<T> {
         self.adapter.selected_extract(&self.context, entry_id, options)
     }
 
+    fn selected_extract_many<'a>(&mut self, entry_ids: &[EntryId], options: &'a mut SelectedExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        self.ensure_open()?;
+        self.adapter.selected_extract_many(&self.context, entry_ids, options)
+    }
+
     fn copy_to_writer(&mut self, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         self.ensure_open()?;
         self.context.set_selected_entry(entry_id);
@@ -197,13 +244,13 @@ impl<T: NativeReadAdapter> ReadAdapterFactory for T {
 
     fn open(self: Arc<Self>, archive: DetectedArchive, options: OpenOptions) -> Result<Box<dyn ReadAdapterSession>, ArchiveError> {
         let cursor_factory = archive.source.cursor_factory();
-        Ok(Box::new(NativeReadSession { adapter: self, context: NativeReadContext::new(cursor_factory, options), closed: false }))
+        Ok(Box::new(NativeReadSession { adapter: self, context: NativeReadContext::from_factory(cursor_factory, options), closed: false }))
     }
 }
 
-// --- TAR.GZ and plain TAR ---
+// --- GZIP (TAR.GZ) ---
 static TAR_GZ_LIST_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
-    name: "native_tar_gz_adapter",
+    name: "native_tar_gz_lister",
     format: FormatId::TAR_GZ,
     operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::SelectedExtract, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::Seekable,
@@ -253,15 +300,18 @@ impl NativeReadAdapter for TarGzListAdapter {
         let path = archive.primary_path();
         let file = archive.open_primary_file()?;
         let decoder = GzDecoder::new(file);
-        let report = crate::tar_backend::extract(
-            decoder,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            None,
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract(
+                decoder,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                None,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
@@ -276,15 +326,48 @@ impl NativeReadAdapter for TarGzListAdapter {
         let selector = archive.selected_entry_selector(entry_id)?;
         let file = archive.open_primary_file()?;
         let decoder = GzDecoder::new(file);
-        let report = crate::tar_backend::extract_by_path_occurrence(
-            decoder,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_path_occurrence(
+                decoder,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract_many<'a>(
+        &self,
+        archive: &NativeReadContext,
+        entry_ids: &[EntryId],
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let mut selectors = Vec::with_capacity(entry_ids.len());
+        for &entry_id in entry_ids {
+            let selector = archive.retained_entry(entry_id)?;
+            selectors.push(crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence });
+        }
+        let file = archive.open_primary_file()?;
+        let decoder = GzDecoder::new(file);
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_selectors(
+                decoder,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                &selectors,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
@@ -337,15 +420,18 @@ impl NativeReadAdapter for TarListAdapter {
     fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
         let file = archive.open_primary_file()?;
-        let report = crate::tar_backend::extract(
-            file,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            None,
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract(
+                file,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                None,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
@@ -359,15 +445,47 @@ impl NativeReadAdapter for TarListAdapter {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
         let file = archive.open_primary_file()?;
-        let report = crate::tar_backend::extract_by_path_occurrence(
-            file,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_path_occurrence(
+                file,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract_many<'a>(
+        &self,
+        archive: &NativeReadContext,
+        entry_ids: &[EntryId],
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let mut selectors = Vec::with_capacity(entry_ids.len());
+        for &entry_id in entry_ids {
+            let selector = archive.retained_entry(entry_id)?;
+            selectors.push(crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence });
+        }
+        let file = archive.open_primary_file()?;
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_selectors(
+                file,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                &selectors,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
@@ -1341,15 +1459,18 @@ impl NativeReadAdapter for FilteredTarAdapter {
     fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
         let reader = self.open_reader(archive)?;
-        let report = crate::tar_backend::extract(
-            reader,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            None,
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract(
+                reader,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                None,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
@@ -1363,15 +1484,47 @@ impl NativeReadAdapter for FilteredTarAdapter {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
         let reader = self.open_reader(archive)?;
-        let report = crate::tar_backend::extract_by_path_occurrence(
-            reader,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_path_occurrence(
+                reader,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract_many<'a>(
+        &self,
+        archive: &NativeReadContext,
+        entry_ids: &[EntryId],
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let mut selectors = Vec::with_capacity(entry_ids.len());
+        for &entry_id in entry_ids {
+            let selector = archive.retained_entry(entry_id)?;
+            selectors.push(crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence });
+        }
+        let reader = self.open_reader(archive)?;
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_selectors(
+                reader,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                &selectors,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
@@ -1673,15 +1826,18 @@ impl NativeReadAdapter for TarZstListAdapter {
         let file = archive.open_primary_file()?;
         let decoder =
             zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
-        let report = crate::tar_backend::extract(
-            decoder,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            None,
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract(
+                decoder,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                None,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }
@@ -1697,15 +1853,49 @@ impl NativeReadAdapter for TarZstListAdapter {
         let file = archive.open_primary_file()?;
         let decoder =
             zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
-        let report = crate::tar_backend::extract_by_path_occurrence(
-            decoder,
-            path,
-            &options.destination,
-            options.policy.clone(),
-            options.overwrite_resolver.as_deref_mut(),
-            crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
-            options.cancellation.as_ref(),
-        )
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_path_occurrence(
+                decoder,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence },
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
+        .map_err(|error| tar_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn selected_extract_many<'a>(
+        &self,
+        archive: &NativeReadContext,
+        entry_ids: &[EntryId],
+        options: &'a mut SelectedExtractOptions<'a>,
+    ) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let mut selectors = Vec::with_capacity(entry_ids.len());
+        for &entry_id in entry_ids {
+            let selector = archive.retained_entry(entry_id)?;
+            selectors.push(crate::tar_backend::TarEntrySelector { path: &selector.path, occurrence: selector.occurrence });
+        }
+        let file = archive.open_primary_file()?;
+        let decoder =
+            zstd::stream::read::Decoder::new(file).map_err(|error| ArchiveError::usable(ErrorKind::InvalidFormat, error.to_string()).with_path(path))?;
+        let report = with_job_context(options.cancellation.as_ref(), options.event_sink.as_deref_mut(), |context| {
+            crate::tar_backend::extract_by_selectors(
+                decoder,
+                path,
+                &options.destination,
+                options.policy.clone(),
+                options.overwrite_resolver.as_deref_mut(),
+                &selectors,
+                options.cancellation.as_ref(),
+                Some(context),
+            )
+        })
         .map_err(|error| tar_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
     }

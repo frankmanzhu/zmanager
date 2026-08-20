@@ -10,7 +10,7 @@ pub const DEFAULT_MAX_EXTRACTED_BYTES: u64 = DEFAULT_MAX_EXTRACTED_MIB * crate::
 pub const DEFAULT_MAX_ENTRY_EXPANSION_RATIO: u64 = 1_000;
 
 /// Expanded-size guardrails applied while planning extraction writes.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ExtractionLimits {
     /// Maximum total uncompressed file bytes for one extraction. `None`
     /// disables the total-size guard.
@@ -228,6 +228,8 @@ pub enum ExtractionDecision {
 pub struct ExtractionSafetyPlanner<'a> {
     destination_root: PathBuf,
     policy: ExtractionPolicy,
+    compiled_includes: Vec<CompiledPattern>,
+    compiled_excludes: Vec<CompiledPattern>,
     seen_paths: HashMap<String, String>,
     planned_expanded_bytes: u64,
     planned_entries: u64,
@@ -289,8 +291,25 @@ impl<'a> ExtractionSafetyPlanner<'a> {
         overwrite_resolver: Option<&'a mut dyn OverwriteResolver>,
     ) -> Self {
         let destination_root = lexically_normalize(&destination_root.into());
+        let compiled_includes = policy.include_patterns.iter().map(|p| CompiledPattern::new(p)).collect();
+        let compiled_excludes = policy.exclude_patterns.iter().map(|p| CompiledPattern::new(p)).collect();
 
-        Self { destination_root, policy, seen_paths: HashMap::new(), planned_expanded_bytes: 0, planned_entries: 0, overwrite_resolver }
+        Self {
+            destination_root,
+            policy,
+            compiled_includes,
+            compiled_excludes,
+            seen_paths: HashMap::new(),
+            planned_expanded_bytes: 0,
+            planned_entries: 0,
+            overwrite_resolver,
+        }
+    }
+
+    fn is_path_selected(&self, path: &str) -> bool {
+        let matches_include = self.compiled_includes.is_empty() || self.compiled_includes.iter().any(|p| p.matches(path));
+        let matches_exclude = self.compiled_excludes.iter().any(|p| p.matches(path));
+        matches_include && !matches_exclude
     }
 
     /// Validates one archive entry before extraction.
@@ -302,7 +321,7 @@ impl<'a> ExtractionSafetyPlanner<'a> {
     /// configured safety policy.
     pub fn validate_entry(&mut self, entry: &ExtractionEntry) -> Result<ExtractionDecision, ExtractionSafetyError> {
         let mut normalized_archive_path = normalize_archive_path(&entry.archive_path)?;
-        if !archive_path_selected(&normalized_archive_path, &self.policy.include_patterns, &self.policy.exclude_patterns) {
+        if !self.is_path_selected(&normalized_archive_path) {
             return Ok(ExtractionDecision::Skip { normalized_archive_path, reason: "filtered by include/exclude policy".to_owned() });
         }
         if self.policy.strip_components > 0 {
@@ -336,7 +355,9 @@ impl<'a> ExtractionSafetyPlanner<'a> {
             ExtractionEntryKind::File | ExtractionEntryKind::Directory => None,
         };
 
-        self.reject_collision(&normalized_archive_path)?;
+        if self.policy.overwrite != OverwritePolicy::Replace {
+            self.reject_collision(&normalized_archive_path)?;
+        }
 
         let plan = self.plan_destination_write(entry, normalized_archive_path, destination_path, link_target_path)?;
 
@@ -527,8 +548,8 @@ impl<'a> ExtractionSafetyPlanner<'a> {
 /// case-insensitive file systems (APFS, NTFS, FAT) compare at a level far
 /// closer than ASCII-only folding, so both planning passes agree on which
 /// names would collide on such systems.
-pub(crate) fn case_collision_key(path: &str) -> String {
-    path.chars().flat_map(char::to_lowercase).collect()
+pub fn case_collision_key(path: &str) -> String {
+    if path.is_ascii() { path.to_ascii_lowercase() } else { path.chars().flat_map(char::to_lowercase).collect() }
 }
 
 fn reject_expansion_ratio(archive_path: &str, uncompressed_size: u64, compressed_size: Option<u64>, ratio_limit: u64) -> Result<(), ExtractionSafetyError> {
@@ -737,21 +758,35 @@ pub fn normalize_archive_path(raw_path: &str) -> Result<String, ExtractionSafety
     Ok(parts.join("/"))
 }
 
+/// Normalizes a path selector for matching against archive entry paths.
+#[must_use]
+pub fn normalize_selector(path: &str) -> String {
+    path.replace('\\', "/").trim_matches('/').split('/').filter(|segment| !segment.is_empty() && *segment != ".").collect::<Vec<_>>().join("/")
+}
+
+/// Returns true when `norm_entry` matches `norm_selected` or is a descendant of `norm_selected`.
+#[must_use]
+pub fn normalized_entry_matches_normalized_selector(norm_entry: &str, norm_selected: &str) -> bool {
+    if norm_selected.is_empty() {
+        return true;
+    }
+    if norm_entry == norm_selected {
+        return true;
+    }
+    if norm_entry.len() > norm_selected.len() && norm_entry.starts_with(norm_selected) && norm_entry.as_bytes()[norm_selected.len()] == b'/' {
+        return true;
+    }
+    false
+}
+
 /// Returns true when `entry_path` matches `selected_path` or is a descendant of `selected_path`.
 ///
 /// Both paths are normalized using slash separators and stripped of leading/trailing dots and slashes.
 #[must_use]
 pub fn archive_entry_matches_selected(entry_path: &str, selected_path: &str) -> bool {
-    let norm_entry =
-        entry_path.replace('\\', "/").trim_matches('/').split('/').filter(|segment| !segment.is_empty() && *segment != ".").collect::<Vec<_>>().join("/");
-    let norm_selected =
-        selected_path.replace('\\', "/").trim_matches('/').split('/').filter(|segment| !segment.is_empty() && *segment != ".").collect::<Vec<_>>().join("/");
-
-    if norm_selected.is_empty() {
-        return true;
-    }
-
-    norm_entry == norm_selected || norm_entry.starts_with(&format!("{norm_selected}/"))
+    let norm_entry = normalize_selector(entry_path);
+    let norm_selected = normalize_selector(selected_path);
+    normalized_entry_matches_normalized_selector(&norm_entry, &norm_selected)
 }
 
 fn reject_raw_path_hazards(raw_path: &str) -> Result<(), ExtractionSafetyError> {
@@ -796,6 +831,54 @@ fn ensure_inside_destination(destination_root: &Path, destination_path: &Path, a
     })
 }
 
+/// Pre-compiled include/exclude pattern for efficient repeated matching.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CompiledPattern {
+    norm_pattern: String,
+    clean_prefix: Option<String>,
+    ends_with_doublestar: Option<String>,
+    is_wildcard: bool,
+}
+
+impl CompiledPattern {
+    #[must_use]
+    pub fn new(pattern: &str) -> Self {
+        let norm_pattern = pattern.replace('\\', "/");
+        let ends_with_doublestar = if norm_pattern.ends_with("/**") { Some(norm_pattern.trim_end_matches("**").to_owned()) } else { None };
+        let clean = norm_pattern.trim_end_matches('/');
+        let (clean_prefix, is_wildcard) = if !clean.is_empty() && !clean.contains('*') && !clean.contains('?') {
+            (Some(format!("{clean}/")), false)
+        } else {
+            (None, norm_pattern.contains('*') || norm_pattern.contains('?'))
+        };
+        Self { norm_pattern, clean_prefix, ends_with_doublestar, is_wildcard }
+    }
+
+    #[must_use]
+    pub fn matches(&self, path: &str) -> bool {
+        let norm_path = if path.contains('\\') { std::borrow::Cow::Owned(path.replace('\\', "/")) } else { std::borrow::Cow::Borrowed(path) };
+
+        if self.norm_pattern == *norm_path {
+            return true;
+        }
+
+        if let Some(prefix) = &self.ends_with_doublestar
+            && norm_path.starts_with(prefix)
+        {
+            return true;
+        }
+
+        if let Some(prefix) = &self.clean_prefix {
+            let clean = prefix.trim_end_matches('/');
+            if norm_path.as_ref() == clean || norm_path.starts_with(prefix) {
+                return true;
+            }
+        }
+
+        if self.is_wildcard { crate::wildcard::wildcard_matches(self.norm_pattern.as_bytes(), norm_path.as_bytes()) } else { false }
+    }
+}
+
 /// Returns whether an archive path is included and not excluded by the
 /// caller's pattern lists.
 #[must_use]
@@ -806,69 +889,9 @@ pub fn archive_pattern_matches_any(path: &str, includes: &[String], excludes: &[
     matches_include && !matches_exclude
 }
 
-fn archive_path_selected(path: &str, includes: &[String], excludes: &[String]) -> bool {
-    archive_pattern_matches_any(path, includes, excludes)
-}
-
 #[must_use]
 pub fn archive_pattern_matches(pattern: &str, path: &str) -> bool {
-    let norm_pattern = pattern.replace('\\', "/");
-    let norm_path = path.replace('\\', "/");
-
-    if norm_pattern == norm_path {
-        return true;
-    }
-
-    if norm_pattern.ends_with("/**") && norm_path.starts_with(norm_pattern.trim_end_matches("**")) {
-        return true;
-    }
-
-    let clean_pattern = norm_pattern.trim_end_matches('/');
-    if !clean_pattern.is_empty()
-        && !clean_pattern.contains('*')
-        && !clean_pattern.contains('?')
-        && (norm_path == clean_pattern || norm_path.starts_with(&format!("{clean_pattern}/")))
-    {
-        return true;
-    }
-
-    wildcard_matches(norm_pattern.as_bytes(), norm_path.as_bytes())
-}
-
-fn wildcard_matches(pattern: &[u8], value: &[u8]) -> bool {
-    // Keep the matcher linear in the pattern and value lengths. The previous
-    // recursive implementation tried both branches of every `*`, which made
-    // patterns such as `*a*a*a*a*b` take exponential time on a long
-    // non-matching path. Include/exclude patterns are caller-controlled, so
-    // this is a real extraction and manifest-planning hot path rather than a
-    // theoretical micro-optimization.
-    let mut pattern_index = 0;
-    let mut value_index = 0;
-    let mut last_star = None;
-    let mut star_value_index = 0;
-
-    while value_index < value.len() {
-        if pattern_index < pattern.len() && (pattern[pattern_index] == b'?' || pattern[pattern_index] == value[value_index]) {
-            pattern_index += 1;
-            value_index += 1;
-        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
-            last_star = Some(pattern_index);
-            pattern_index += 1;
-            star_value_index = value_index;
-        } else if let Some(star_index) = last_star {
-            pattern_index = star_index + 1;
-            star_value_index += 1;
-            value_index = star_value_index;
-        } else {
-            return false;
-        }
-    }
-
-    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
-        pattern_index += 1;
-    }
-
-    pattern_index == pattern.len()
+    CompiledPattern::new(pattern).matches(path)
 }
 
 fn strip_archive_components(path: &str, count: usize) -> Option<String> {

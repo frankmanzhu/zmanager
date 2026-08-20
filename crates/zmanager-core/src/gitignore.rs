@@ -9,7 +9,7 @@ use std::io;
 use std::path::Path;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) struct GitignoreRule {
+pub struct GitignoreRule {
     base_archive_path: String,
     pattern: String,
     polarity: GitignorePolarity,
@@ -68,24 +68,24 @@ impl GitignoreRule {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum GitignorePolarity {
+pub enum GitignorePolarity {
     Ignore,
     Include,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum GitignoreScope {
+pub enum GitignoreScope {
     Any,
     Directory,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum GitignoreAnchor {
+pub enum GitignoreAnchor {
     Anywhere,
     Anchored,
 }
 
-pub(crate) fn read_gitignore_rules(directory: &Path, base_archive_path: &str, warnings: &mut Vec<ManifestWarning>) -> Vec<GitignoreRule> {
+pub fn read_gitignore_rules(directory: &Path, base_archive_path: &str, warnings: &mut Vec<ManifestWarning>) -> Vec<GitignoreRule> {
     let gitignore_path = directory.join(".gitignore");
     let contents = match fs::read_to_string(&gitignore_path) {
         Ok(contents) => contents,
@@ -99,7 +99,8 @@ pub(crate) fn read_gitignore_rules(directory: &Path, base_archive_path: &str, wa
     contents.lines().filter_map(|line| parse_gitignore_rule(line, base_archive_path)).collect()
 }
 
-pub(crate) fn parse_gitignore_rule(line: &str, base_archive_path: &str) -> Option<GitignoreRule> {
+#[must_use]
+pub fn parse_gitignore_rule(line: &str, base_archive_path: &str) -> Option<GitignoreRule> {
     let mut pattern = line.trim();
     if pattern.is_empty() || pattern.starts_with('#') {
         return None;
@@ -127,7 +128,8 @@ pub(crate) fn parse_gitignore_rule(line: &str, base_archive_path: &str) -> Optio
     Some(GitignoreRule { base_archive_path: base_archive_path.to_owned(), pattern: pattern.to_owned(), polarity, scope, anchor })
 }
 
-pub(crate) fn gitignore_decision(archive_path: &str, file_type: ManifestFileType, rules: &[GitignoreRule]) -> Option<(bool, usize)> {
+#[must_use]
+pub fn gitignore_decision(archive_path: &str, file_type: ManifestFileType, rules: &[GitignoreRule]) -> Option<(bool, usize)> {
     rules
         .iter()
         .enumerate()
@@ -136,7 +138,8 @@ pub(crate) fn gitignore_decision(archive_path: &str, file_type: ManifestFileType
         .next_back()
 }
 
-pub(crate) fn gitignore_has_later_negated_descendant(archive_path: &str, rules: &[GitignoreRule], rule_index: usize) -> bool {
+#[must_use]
+pub fn gitignore_has_later_negated_descendant(archive_path: &str, rules: &[GitignoreRule], rule_index: usize) -> bool {
     rules.iter().skip(rule_index.saturating_add(1)).any(|rule| rule.could_include_below(archive_path))
 }
 
@@ -163,35 +166,9 @@ fn split_path_segments(path: &str) -> Vec<&str> {
 }
 
 fn path_segments_match(pattern: &[&str], path: &[&str]) -> bool {
-    let Some((head, tail)) = pattern.split_first() else {
-        return path.is_empty();
-    };
-
-    if *head == "**" {
-        return (0..=path.len()).any(|index| path_segments_match(tail, &path[index..]));
-    }
-
-    let Some((path_head, path_tail)) = path.split_first() else {
-        return false;
-    };
-
-    segment_pattern_matches(path_head, head) && path_segments_match(tail, path_tail)
+    crate::wildcard::wildcard_matches_custom(pattern, path, |&p| p == "**", |&p, &v| segment_pattern_matches(v, p))
 }
 
 fn segment_pattern_matches(value: &str, pattern: &str) -> bool {
-    let value = value.as_bytes();
-    let pattern = pattern.as_bytes();
-    segment_pattern_matches_bytes(value, pattern)
-}
-
-fn segment_pattern_matches_bytes(value: &[u8], pattern: &[u8]) -> bool {
-    let Some((&pattern_head, pattern_tail)) = pattern.split_first() else {
-        return value.is_empty();
-    };
-
-    match pattern_head {
-        b'*' => segment_pattern_matches_bytes(value, pattern_tail) || !value.is_empty() && segment_pattern_matches_bytes(&value[1..], pattern),
-        b'?' => !value.is_empty() && segment_pattern_matches_bytes(&value[1..], pattern_tail),
-        expected => value.split_first().is_some_and(|(&actual, value_tail)| actual == expected && segment_pattern_matches_bytes(value_tail, pattern_tail)),
-    }
+    crate::wildcard::wildcard_matches(pattern.as_bytes(), value.as_bytes())
 }

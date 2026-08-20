@@ -194,6 +194,38 @@ fn zip_extraction_rejects_entries_above_expansion_ratio_limit() {
     assert!(!temp.path("out/bomb.bin").exists());
 }
 
+#[test]
+fn batch_selected_extraction_enforces_aggregate_expansion_limit() {
+    let temp = TestDir::new("batch_selected_extraction_enforces_aggregate_expansion_limit");
+    let archive = temp.path("multi.zip");
+    let file = File::create(&archive).unwrap();
+    let mut writer = ZipWriter::new(file);
+    for name in ["file1.txt", "file2.txt", "file3.txt", "file4.txt"] {
+        writer.start_file(name, SimpleFileOptions::default().compression_method(CompressionMethod::Stored)).unwrap();
+        writer.write_all(&[0x42_u8; 100]).unwrap();
+    }
+    writer.finish().unwrap();
+
+    let mut handle = zmanager_core::engine::create_default_engine()
+        .unwrap()
+        .open(zmanager_core::engine::ArchiveSource::from_path_autodetect(&archive), zmanager_core::engine::OpenOptions::default())
+        .unwrap();
+
+    // 4 files x 100 bytes = 400 bytes. Cap at 250 bytes.
+    let options = zmanager_core::archive_browser::BrowserExtractOptions {
+        limits: Some(ExtractionLimits { max_expanded_bytes: Some(250), ..ExtractionLimits::default() }),
+        ..zmanager_core::archive_browser::BrowserExtractOptions::default()
+    };
+    let entry_paths = vec!["file1.txt".to_string(), "file2.txt".to_string(), "file3.txt".to_string(), "file4.txt".to_string()];
+
+    let error = zmanager_core::archive_browser::extract_selected_entries_from_engine_handle(&mut handle, &entry_paths, temp.path("out"), options).unwrap_err();
+
+    assert!(matches!(
+        error,
+        zmanager_core::archive_browser::ArchiveBrowserError::Safety(ExtractionSafetyError::ExpandedSizeLimitExceeded { limit_bytes: 250, .. })
+    ));
+}
+
 fn zip_file_case(archive: PathBuf, entry_path: &str, contents: &[u8]) -> PathBuf {
     let file = File::create(&archive).unwrap();
     let mut writer = ZipWriter::new(file);

@@ -2,7 +2,7 @@
 
 use crate::archive_browser::BrowserEntryKind;
 use crate::extract_materialize::DeferredHardlink;
-use crate::jobs::{CancellationToken, JobCancelled};
+use crate::jobs::{CancellationToken, JobCancelled, JobContext};
 use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, OverwriteResolver};
 use std::fmt;
 use std::fs;
@@ -145,6 +145,7 @@ pub fn test<R: Read>(reader: R, archive_path: &Path, selects: impl Fn(&str) -> b
 }
 
 /// Extracts all entries, or one retained archive-order entry, from any TAR-compatible decoder.
+#[allow(clippy::too_many_arguments)]
 pub fn extract<R: Read>(
     reader: R,
     archive_path: &Path,
@@ -153,12 +154,14 @@ pub fn extract<R: Read>(
     resolver: Option<&mut dyn OverwriteResolver>,
     selected_index: Option<usize>,
     cancellation: Option<&CancellationToken>,
+    context: Option<&mut JobContext<'_>>,
 ) -> Result<TarReport, TarError> {
-    extract_with_selector(reader, archive_path, destination, policy, resolver, selected_index.map(TarSelection::Index), cancellation)
+    extract_with_selector(reader, archive_path, destination, policy, resolver, selected_index.map(TarSelection::Index), cancellation, context)
 }
 
 /// Extracts one retained TAR entry by its path and duplicate occurrence in the
 /// session listing.
+#[allow(clippy::too_many_arguments)]
 pub fn extract_by_path_occurrence<R: Read>(
     reader: R,
     archive_path: &Path,
@@ -167,6 +170,7 @@ pub fn extract_by_path_occurrence<R: Read>(
     resolver: Option<&mut dyn OverwriteResolver>,
     selector: TarEntrySelector<'_>,
     cancellation: Option<&CancellationToken>,
+    context: Option<&mut JobContext<'_>>,
 ) -> Result<TarReport, TarError> {
     extract_with_selector(
         reader,
@@ -176,7 +180,23 @@ pub fn extract_by_path_occurrence<R: Read>(
         resolver,
         Some(TarSelection::PathOccurrence { path: selector.path, occurrence: selector.occurrence }),
         cancellation,
+        context,
     )
+}
+
+/// Extracts retained TAR entries matching any of the given selectors in one pass.
+#[allow(clippy::too_many_arguments)]
+pub fn extract_by_selectors<R: Read>(
+    reader: R,
+    archive_path: &Path,
+    destination: &Path,
+    policy: ExtractionPolicy,
+    resolver: Option<&mut dyn OverwriteResolver>,
+    selectors: &[TarEntrySelector<'_>],
+    cancellation: Option<&CancellationToken>,
+    context: Option<&mut JobContext<'_>>,
+) -> Result<TarReport, TarError> {
+    extract_with_selector(reader, archive_path, destination, policy, resolver, Some(TarSelection::MultipleSelectors(selectors)), cancellation, context)
 }
 
 /// Stable path-based identity for a TAR entry retained by the engine session.
@@ -192,8 +212,10 @@ pub struct TarEntrySelector<'a> {
 enum TarSelection<'a> {
     Index(usize),
     PathOccurrence { path: &'a str, occurrence: usize },
+    MultipleSelectors(&'a [TarEntrySelector<'a>]),
 }
 
+#[allow(clippy::too_many_arguments)]
 fn extract_with_selector<R: Read>(
     reader: R,
     archive_path: &Path,
@@ -202,6 +224,7 @@ fn extract_with_selector<R: Read>(
     resolver: Option<&mut dyn OverwriteResolver>,
     selection: Option<TarSelection<'_>>,
     cancellation: Option<&CancellationToken>,
+    mut context: Option<&mut JobContext<'_>>,
 ) -> Result<TarReport, TarError> {
     let root = crate::safety::prepare_destination_root(destination).map_err(|source| io_error(destination, source))?;
     let mut archive = tar::Archive::new(reader);
@@ -211,23 +234,24 @@ fn extract_with_selector<R: Read>(
     let mut deferred_directories = Vec::new();
     let mut deferred_hardlinks = Vec::new();
 
-    let mut path_occurrence = 0_usize;
+    let mut path_occurrences: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (index, item) in archive.entries().map_err(|source| io_error(archive_path, source))?.enumerate() {
-        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        if context.as_deref_mut().is_some_and(|ctx| ctx.check_cancelled().is_err()) || cancellation.is_some_and(CancellationToken::is_cancelled) {
             return Err(TarError::Cancelled);
         }
         let mut entry = item.map_err(|source| io_error(archive_path, source))?;
         let path = entry_path(&mut entry, archive_path)?;
+        let current_occ = {
+            let occ = path_occurrences.entry(path.clone()).or_insert(0);
+            let val = *occ;
+            *occ += 1;
+            val
+        };
         let selected = match selection {
             None => true,
             Some(TarSelection::Index(selected)) => selected == index,
-            Some(TarSelection::PathOccurrence { path: selected_path, occurrence }) => {
-                let matches = path == selected_path && path_occurrence == occurrence;
-                if path == selected_path {
-                    path_occurrence = path_occurrence.saturating_add(1);
-                }
-                matches
-            }
+            Some(TarSelection::PathOccurrence { path: selected_path, occurrence }) => path == selected_path && current_occ == occurrence,
+            Some(TarSelection::MultipleSelectors(selectors)) => selectors.iter().any(|s| s.path == path && s.occurrence == current_occ),
         };
         if !selected {
             report.skipped_entries = report.skipped_entries.saturating_add(1);
@@ -236,56 +260,59 @@ fn extract_with_selector<R: Read>(
         let kind = entry_kind(&mut entry, &path)?;
         let size = entry.header().size().unwrap_or(0);
         let safety_entry = ExtractionEntry { archive_path: path.clone(), kind, uncompressed_size: Some(size), compressed_size: None };
-        crate::extract_loop::process_extraction_entry(&mut report, None, &mut planner, &safety_entry, &mut |action, report, _| match action {
-            crate::extract_loop::EntryAction::Skip => Ok(0),
-            crate::extract_loop::EntryAction::Write(decision) => {
-                if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
-                    crate::extract_loop::skip_entry(report, None, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
-                    return Ok(0);
-                }
-                let metadata = entry_metadata(&mut entry, archive_path)?;
-                if decision.replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
-                    crate::safety::remove_destination_for_replace(decision.destination_path).map_err(|source| io_error(decision.destination_path, source))?;
-                }
-                match &safety_entry.kind {
-                    ExtractionEntryKind::Directory => {
-                        fs::create_dir_all(decision.destination_path).map_err(|source| io_error(decision.destination_path, source))?;
-                        deferred_directories.push((decision.destination_path.to_path_buf(), metadata));
-                        report.entries = report.entries.saturating_add(1);
-                        Ok(0)
+        crate::extract_loop::process_extraction_entry(&mut report, context.as_deref_mut(), &mut planner, &safety_entry, &mut |action, report, job_context| {
+            match action {
+                crate::extract_loop::EntryAction::Skip => Ok(0),
+                crate::extract_loop::EntryAction::Write(decision) => {
+                    if crate::safety::should_skip_symlink_materialization(&safety_entry.kind) {
+                        crate::extract_loop::skip_entry(report, job_context, crate::safety::unsupported_symlink_warning(&safety_entry.archive_path));
+                        return Ok(0);
                     }
-                    ExtractionEntryKind::File => {
-                        let copied = crate::extract_loop::copy_file_entry(
-                            decision.destination_path,
-                            decision.replace_existing,
-                            Some(&safety_entry.archive_path),
-                            None,
-                            &mut buffer,
-                            |buf| entry.read(buf).map_err(|source| io_error(decision.destination_path, source)),
-                            |source, path| io_error(path, source),
-                        )?;
-                        apply_metadata(decision.destination_path, metadata)?;
-                        report.entries = report.entries.saturating_add(1);
-                        report.bytes = report.bytes.saturating_add(copied);
-                        Ok(copied)
-                    }
-                    ExtractionEntryKind::Symlink { target } => {
-                        crate::extract_materialize::write_symlink(target, decision.destination_path)
+                    let metadata = entry_metadata(&mut entry, archive_path)?;
+                    if decision.replace_existing && !matches!(safety_entry.kind, ExtractionEntryKind::File) {
+                        crate::safety::remove_destination_for_replace(decision.destination_path)
                             .map_err(|source| io_error(decision.destination_path, source))?;
-                        apply_symlink_mtime(decision.destination_path, metadata.mtime)?;
-                        report.entries = report.entries.saturating_add(1);
-                        Ok(0)
                     }
-                    ExtractionEntryKind::Hardlink { .. } => {
-                        let source = decision.link_target_path.ok_or_else(|| TarError::MissingLinkTarget { archive_path: path.clone() })?;
-                        deferred_hardlinks
-                            .push(DeferredHardlink { source_path: source.to_path_buf(), destination_path: decision.destination_path.to_path_buf() });
-                        Ok(0)
+                    match &safety_entry.kind {
+                        ExtractionEntryKind::Directory => {
+                            fs::create_dir_all(decision.destination_path).map_err(|source| io_error(decision.destination_path, source))?;
+                            deferred_directories.push((decision.destination_path.to_path_buf(), metadata));
+                            report.entries = report.entries.saturating_add(1);
+                            Ok(0)
+                        }
+                        ExtractionEntryKind::File => {
+                            let copied = crate::extract_loop::copy_file_entry(
+                                decision.destination_path,
+                                decision.replace_existing,
+                                Some(&safety_entry.archive_path),
+                                job_context,
+                                &mut buffer,
+                                |buf| entry.read(buf).map_err(|source| io_error(decision.destination_path, source)),
+                                |source, path| io_error(path, source),
+                            )?;
+                            apply_metadata(decision.destination_path, metadata)?;
+                            report.entries = report.entries.saturating_add(1);
+                            report.bytes = report.bytes.saturating_add(copied);
+                            Ok(copied)
+                        }
+                        ExtractionEntryKind::Symlink { target } => {
+                            crate::extract_materialize::write_symlink(target, decision.destination_path)
+                                .map_err(|source| io_error(decision.destination_path, source))?;
+                            apply_symlink_mtime(decision.destination_path, metadata.mtime)?;
+                            report.entries = report.entries.saturating_add(1);
+                            Ok(0)
+                        }
+                        ExtractionEntryKind::Hardlink { .. } => {
+                            let source = decision.link_target_path.ok_or_else(|| TarError::MissingLinkTarget { archive_path: path.clone() })?;
+                            deferred_hardlinks
+                                .push(DeferredHardlink { source_path: source.to_path_buf(), destination_path: decision.destination_path.to_path_buf() });
+                            Ok(0)
+                        }
+                        ExtractionEntryKind::Device | ExtractionEntryKind::Special => Err(TarError::Io {
+                            path: decision.destination_path.to_path_buf(),
+                            source: io::Error::new(io::ErrorKind::Unsupported, "special tar entry reached materialization after safety planning"),
+                        }),
                     }
-                    ExtractionEntryKind::Device | ExtractionEntryKind::Special => Err(TarError::Io {
-                        path: decision.destination_path.to_path_buf(),
-                        source: io::Error::new(io::ErrorKind::Unsupported, "special tar entry reached materialization after safety planning"),
-                    }),
                 }
             }
         })?;
@@ -324,6 +351,11 @@ fn copy_with_selector<R: Read>(reader: R, archive_path: &Path, selection: TarSel
                 if path == selected_path {
                     path_occurrence = path_occurrence.saturating_add(1);
                 }
+                matches
+            }
+            TarSelection::MultipleSelectors(selectors) => {
+                let matches = selectors.iter().any(|s| s.path == path && s.occurrence == path_occurrence);
+                path_occurrence = path_occurrence.saturating_add(1);
                 matches
             }
         };

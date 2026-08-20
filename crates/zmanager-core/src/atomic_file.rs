@@ -62,20 +62,7 @@ impl AtomicOutputFile {
             remove_file_destination_for_replace(&self.final_path)?;
             fs::rename(&self.temp_path, &self.final_path)?;
         } else {
-            match fs::hard_link(&self.temp_path, &self.final_path) {
-                Ok(()) => {
-                    let _ = fs::remove_file(&self.temp_path);
-                }
-                Err(error) if matches!(error.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) && !self.final_path.exists() => {
-                    // Some app sandboxes (notably Android app filesystems)
-                    // reject hard links even within one directory. The
-                    // destination was validated as absent, so a same-volume
-                    // rename preserves the refuse policy without weakening
-                    // collision safety.
-                    fs::rename(&self.temp_path, &self.final_path)?;
-                }
-                Err(error) => return Err(error),
-            }
+            atomic_no_clobber_rename(&self.temp_path, &self.final_path)?;
         }
         self.committed = true;
         Ok(())
@@ -114,12 +101,88 @@ impl AtomicOutputFile {
             crate::safety::remove_destination_for_replace(&self.final_path)?;
             fs::rename(&self.temp_path, &self.final_path)?;
         } else {
-            fs::hard_link(&self.temp_path, &self.final_path)?;
-            let _ = fs::remove_file(&self.temp_path);
+            atomic_no_clobber_rename(&self.temp_path, &self.final_path)?;
         }
         self.committed = true;
         Ok(())
     }
+}
+
+#[cfg(any(test, target_os = "linux", target_os = "android", not(any(target_os = "macos", target_os = "ios", windows))))]
+fn fallback_hardlink_rename(from: &Path, to: &Path) -> io::Result<()> {
+    match fs::hard_link(from, to) {
+        Ok(()) => {
+            let _ = fs::remove_file(from);
+            Ok(())
+        }
+        Err(error) if matches!(error.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported) && !to.exists() => {
+            // Some app sandboxes (notably Android app filesystems)
+            // reject hard links even within one directory. The
+            // destination was validated as absent, so a same-volume
+            // rename preserves the refuse policy without weakening
+            // collision safety.
+            fs::rename(from, to)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[allow(unsafe_code)]
+fn atomic_no_clobber_rename(from: &Path, to: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let from_c = CString::new(from.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let to_c = CString::new(to.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    let ret = unsafe { libc::renamex_np(from_c.as_ptr(), to_c.as_ptr(), libc::RENAME_EXCL) };
+    if ret == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[allow(unsafe_code)]
+fn atomic_no_clobber_rename(from: &Path, to: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let from_c = CString::new(from.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let to_c = CString::new(to.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    const RENAME_NOREPLACE: libc::c_uint = 1;
+    let ret = unsafe { libc::syscall(libc::SYS_renameat2, libc::AT_FDCWD, from_c.as_ptr(), libc::AT_FDCWD, to_c.as_ptr(), RENAME_NOREPLACE) };
+
+    if ret == 0 {
+        return Ok(());
+    }
+
+    let err = io::Error::last_os_error();
+    let raw = err.raw_os_error();
+    if matches!(raw, Some(libc::ENOSYS | libc::EINVAL | libc::EOPNOTSUPP)) {
+        return fallback_hardlink_rename(from, to);
+    }
+
+    Err(err)
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn atomic_no_clobber_rename(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+
+    let from_w: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to_w: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+    let result = unsafe { MoveFileExW(from_w.as_ptr(), to_w.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux", target_os = "android", windows)))]
+fn atomic_no_clobber_rename(from: &Path, to: &Path) -> io::Result<()> {
+    fallback_hardlink_rename(from, to)
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -336,5 +399,32 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::IsADirectory);
         assert!(final_path.is_dir());
+    }
+
+    #[test]
+    fn fallback_hardlink_rename_moves_file_and_removes_source() {
+        let temp = TestDir::new("atomic_fallback_move");
+        let src = temp.path("src.tmp");
+        let dst = temp.path("dst.txt");
+        fs::write(&src, b"payload").unwrap();
+
+        super::fallback_hardlink_rename(&src, &dst).unwrap();
+
+        assert!(!src.exists());
+        assert_eq!(fs::read(&dst).unwrap(), b"payload");
+    }
+
+    #[test]
+    fn fallback_hardlink_rename_refuses_existing_destination() {
+        let temp = TestDir::new("atomic_fallback_refuse");
+        let src = temp.path("src.tmp");
+        let dst = temp.path("dst.txt");
+        fs::write(&src, b"new").unwrap();
+        fs::write(&dst, b"old").unwrap();
+
+        let error = super::fallback_hardlink_rename(&src, &dst).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&dst).unwrap(), b"old");
     }
 }

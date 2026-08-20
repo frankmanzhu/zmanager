@@ -17,7 +17,7 @@ pub use cancellation::{CancellationToken, JobCancelled};
 #[cfg(test)]
 pub(crate) use progress::PROGRESS_ENTRY_STEP;
 pub use progress::{JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT, PROGRESS_RECENT_PATH_LIMIT};
-pub(crate) use progress::{ProgressBatch, ProgressCoalescer};
+pub use progress::{ProgressBatch, ProgressCoalescer};
 
 use self::progress::path_identity;
 use std::collections::BTreeMap;

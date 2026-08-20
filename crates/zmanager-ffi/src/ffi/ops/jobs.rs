@@ -409,8 +409,13 @@ fn run_full_extract_job(input: ExtractJobInput, token: &CancellationToken, sink:
         return Err(cancelled_bridge_error("Extraction job was cancelled."));
     }
     sink.emit(CoreJobEvent::Started { kind: core_extract_job_kind(archive_path, input.format), total_bytes: None });
-    let mut options =
-        zmanager_core::engine::ExtractOptions { destination: destination_root.to_path_buf(), policy, cancellation: Some(token.clone()), ..Default::default() };
+    let mut options = zmanager_core::engine::ExtractOptions {
+        destination: destination_root.to_path_buf(),
+        policy,
+        cancellation: Some(token.clone()),
+        event_sink: Some(sink),
+        ..Default::default()
+    };
     let result = zmanager_core::engine::extract_with_default_engine(
         zmanager_core::engine::ArchiveSource::from_path_autodetect(archive_path),
         zmanager_core::engine::OpenOptions { password: input.password, recipient_key: None, ..Default::default() },

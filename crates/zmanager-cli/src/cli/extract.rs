@@ -215,6 +215,7 @@ fn run_engine_extract(
         recipient_key: recipient_key.map(Path::to_path_buf),
         tzap_password: password.map(str::to_owned),
         tzap_restore_options: Some(tzap_restore_options),
+        event_sink: Some(&mut progress),
         ..Default::default()
     };
     let result = if matches!(policy.overwrite, zmanager_core::safety::OverwritePolicy::Ask) {

@@ -2982,6 +2982,8 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "tzap-core"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ec5560634bd11bc8a00562a0e088c9f08b8b4bf76b9596fbdedc66af755e520"
 dependencies = [
  "aes-gcm",
  "aes-gcm-siv",
@@ -3005,11 +3007,14 @@ dependencies = [
  "xattr",
  "zeroize",
  "zstd",
+ "zstd-safe",
 ]
 
 [[package]]
 name = "tzap-plugin-keywrap"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30388a984160e2fbb086131438913c356d7d6720a737e532b4caff559a13508c"
 dependencies = [
  "hpke",
  "openssl",
@@ -3022,6 +3027,8 @@ dependencies = [
 [[package]]
 name = "tzap-plugin-signing"
 version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed10b05294b36b726692b44dc8ee07603fc3d20c94716f9f75cd82faf67f2c3d"
 dependencies = [
  "ed25519-dalek",
  "openssl",
@@ -3829,10 +3836,12 @@ dependencies = [
 name = "zmanager-core"
 version = "2.0.1"
 dependencies = [
+ "adler2",
  "base64",
  "brotli",
  "bzip2 0.6.1",
  "cab",
+ "crc32fast",
  "delharc",
  "dpp",
  "filetime",
@@ -3844,6 +3853,7 @@ dependencies = [
  "libc",
  "lz4_flex 0.14.0",
  "lzma-rust2 0.16.5",
+ "lzo",
  "msi",
  "mtree",
  "num-bigint",

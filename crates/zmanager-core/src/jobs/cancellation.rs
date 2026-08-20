@@ -18,13 +18,13 @@ impl CancellationToken {
 
     /// Requests cancellation.
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        self.cancelled.store(true, Ordering::Release);
     }
 
     /// Returns whether cancellation was requested.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.cancelled.load(Ordering::Relaxed)
     }
 }
 

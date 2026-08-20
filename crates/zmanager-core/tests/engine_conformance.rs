@@ -15,8 +15,8 @@ use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{
     AdapterDescriptor, ArchiveEngineBuilder, ArchiveError, ArchiveListing, ArchiveOperation, ArchivePlugin, ArchivePluginRole, ArchiveSource, CreateOptions,
     CreateRequest, CredentialRequirement, EngineEntry, ExtractOptions, FormatId, NavigationMode, OpenLimits, OpenOptions, ReadAdapterFactory,
-    ReadAdapterSession, SevenZCreateOptions, SourceAccess, TarGzCreateOptions, TarZstdCreateOptions, TzapCreateOptions, TzapKeySource, ZipCreateOptions,
-    create_default_engine, is_split_zip_archive_path,
+    ReadAdapterSession, SelectedExtractOptions, SevenZCreateOptions, SourceAccess, TarGzCreateOptions, TarZstdCreateOptions, TzapCreateOptions, TzapKeySource,
+    ZipCreateOptions, create_default_engine, is_split_zip_archive_path,
 };
 
 struct NoopSink;
@@ -777,6 +777,26 @@ fn engine_extract_cancellation_is_reported_before_adapter_work() {
 }
 
 #[test]
+fn engine_extract_zip_cancellation_is_honored_by_adapter() {
+    let temp = TestDir::new("engine-conformance-zip-cancel-adapter");
+    let zip_path = temp.path("test.zip");
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    for name in ["first.txt", "second.txt", "third.txt"] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"sample payload").unwrap();
+    }
+    zip.finish().unwrap();
+
+    let cancellation = zmanager_core::jobs::CancellationToken::new();
+    cancellation.cancel();
+    let mut handle = create_default_engine().unwrap().open(ArchiveSource::from_path_autodetect(&zip_path), OpenOptions::default()).unwrap();
+    let mut options = ExtractOptions { destination: temp.path("out"), cancellation: Some(cancellation), ..Default::default() };
+    let error = handle.extract(&mut options).unwrap_err();
+    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::Cancelled);
+}
+
+#[test]
 fn engine_extract_enforces_entry_count_budget() {
     let temp = TestDir::new("engine-conformance-extract-entry-budget");
     let zip_path = temp.path("test.zip");
@@ -1306,4 +1326,91 @@ fn engine_rejects_unclaimed_operations_at_the_registry_seam_after_open() {
     let error = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap_err();
     assert_eq!(error.kind, zmanager_core::engine::ErrorKind::UnsupportedOperation);
     assert_eq!(handle.disposition(), zmanager_core::engine::SessionDisposition::Usable);
+}
+
+#[test]
+fn engine_extract_progress_sink_receives_live_events() {
+    let temp = TestDir::new("engine-progress-sink");
+    let zip_path = temp.path("archive.zip");
+    let out_dir = temp.path("out");
+
+    let file = File::create(&zip_path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("sample.txt", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"Hello world from live progress test!").unwrap();
+    zip.finish().unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let source = ArchiveSource::from_path_autodetect(&zip_path);
+    let mut handle = engine.open(source, OpenOptions::default()).unwrap();
+
+    let mut events = Vec::new();
+    let mut sink = |event: zmanager_core::jobs::JobEvent| {
+        events.push(event);
+    };
+
+    let mut options = ExtractOptions { destination: out_dir.clone(), event_sink: Some(&mut sink), ..Default::default() };
+
+    let report = handle.extract(&mut options).unwrap();
+    assert_eq!(report.written_entries, 1);
+    assert!(out_dir.join("sample.txt").exists());
+
+    // Verify events recorded EntryStarted or BytesProcessed
+    let has_entry_event = events.iter().any(|ev| {
+        matches!(
+            ev,
+            zmanager_core::jobs::JobEvent::EntryStarted { .. }
+                | zmanager_core::jobs::JobEvent::BytesProcessed { .. }
+                | zmanager_core::jobs::JobEvent::EntryFinished { .. }
+        )
+    });
+    assert!(has_entry_event, "Extraction event sink must receive entry progress events");
+}
+
+#[test]
+fn engine_batch_selected_extract_executes_in_one_pass() {
+    let temp = TestDir::new("engine-batch-selected-extract");
+    let archive_path = temp.path("multi.tar.gz");
+    let out_dir = temp.path("out");
+
+    {
+        let file = File::create(&archive_path).unwrap();
+        let enc = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut tar = tar::Builder::new(enc);
+        let mut header1 = tar::Header::new_gnu();
+        header1.set_path("first.txt").unwrap();
+        header1.set_size(5);
+        header1.set_cksum();
+        tar.append(&header1, b"first".as_slice()).unwrap();
+
+        let mut header2 = tar::Header::new_gnu();
+        header2.set_path("second.txt").unwrap();
+        header2.set_size(6);
+        header2.set_cksum();
+        tar.append(&header2, b"second".as_slice()).unwrap();
+
+        let mut header3 = tar::Header::new_gnu();
+        header3.set_path("third.txt").unwrap();
+        header3.set_size(5);
+        header3.set_cksum();
+        tar.append(&header3, b"third".as_slice()).unwrap();
+        tar.finish().unwrap();
+    }
+
+    let engine = create_default_engine().unwrap();
+    let source = ArchiveSource::from_path_autodetect(&archive_path);
+    let mut handle = engine.open(source, OpenOptions::default()).unwrap();
+    let listing = handle.list().unwrap();
+    assert_eq!(listing.entries.len(), 3);
+
+    let first_id = listing.entries[0].id;
+    let third_id = listing.entries[2].id;
+
+    let mut selected_options = SelectedExtractOptions { destination: out_dir.clone(), ..Default::default() };
+
+    let report = handle.extract_selected_many(&[first_id, third_id], &mut selected_options).unwrap();
+    assert_eq!(report.written_entries, 2);
+    assert!(out_dir.join("first.txt").exists());
+    assert!(!out_dir.join("second.txt").exists());
+    assert!(out_dir.join("third.txt").exists());
 }

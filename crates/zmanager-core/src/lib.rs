@@ -52,6 +52,7 @@ mod temp_names;
 #[cfg(test)]
 mod test_support;
 mod tzap;
+pub(crate) mod wildcard;
 mod zip_split;
 
 // Offline identity, catalog, signing, and verification remain part of the
@@ -108,6 +109,12 @@ pub mod backend_test_support {
     };
     pub mod tzap {
         pub use crate::tzap::*;
+    }
+    pub mod gitignore {
+        pub use crate::gitignore::*;
+    }
+    pub mod jobs {
+        pub use crate::jobs::ProgressCoalescer;
     }
 }
 

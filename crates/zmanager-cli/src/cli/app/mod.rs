@@ -171,6 +171,12 @@ impl ProgressReporter {
     }
 }
 
+impl zmanager_core::jobs::JobEventSink for ProgressReporter {
+    fn emit(&mut self, event: JobEvent) {
+        self.emit(event);
+    }
+}
+
 fn progress_job_label(kind: JobKind) -> &'static str {
     match kind {
         JobKind::ZipCreate => "zip create",
