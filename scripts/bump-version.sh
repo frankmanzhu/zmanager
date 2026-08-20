@@ -64,11 +64,6 @@ if [ -f crates/zmanager-cli/tests/help_cli.rs ]; then
     rm -f crates/zmanager-cli/tests/help_cli.rs.bak
 fi
 
-if [ -f .github/workflows/update-homebrew-tap.yml ]; then
-    sed -i.bak -E "s/(e\.g\. v)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?/\1${NEW_VERSION}/g" .github/workflows/update-homebrew-tap.yml
-    rm -f .github/workflows/update-homebrew-tap.yml.bak
-fi
-
 echo "==> Updating root Cargo.lock..."
 cargo check --workspace
 
