@@ -79,6 +79,7 @@ impl TzapRestoreOptions {
             allow_degraded: self.allow_degraded,
             system_authorized: self.policy == TzapRestorePolicy::System && process_is_elevated(),
             allow_absolute_symlinks: self.allow_absolute_symlinks,
+            sync_published_files: false,
         }
     }
 }
