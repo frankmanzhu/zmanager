@@ -270,7 +270,8 @@ fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
         if size % 2 == 1 {
             skip(&mut file, 1, path)?;
         }
-        if token != "//" && !token.starts_with('/') && !token.starts_with("__.SYMDEF") {
+        let is_special_table = token == "//" || token == "/" || token == "/SYM64/" || token.starts_with("__.SYMDEF");
+        if !is_special_table {
             raw_entries.push(RawEntry { token, bsd_name, size: payload_size, data_offset: payload_offset, modified, mode });
         }
     }
@@ -326,4 +327,173 @@ fn open(path: &Path) -> Result<File, ArError> {
 
 fn io_error(path: &Path, source: io::Error) -> ArError {
     ArError::Io { path: path.to_path_buf(), source }
+}
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use crate::engine::types::TestOptions;
+    use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
+    use std::fs;
+
+    fn build_ar_header(name: &str, size: usize, mode: u32, mtime: u64) -> [u8; 60] {
+        let mut header = [b' '; 60];
+        let name_bytes = name.as_bytes();
+        header[0..name_bytes.len().min(16)].copy_from_slice(&name_bytes[0..name_bytes.len().min(16)]);
+        let mtime_str = format!("{mtime}");
+        header[16..16 + mtime_str.len()].copy_from_slice(mtime_str.as_bytes());
+        header[28..29].copy_from_slice(b"0");
+        header[34..35].copy_from_slice(b"0");
+        let mode_str = format!("{mode:o}");
+        header[40..40 + mode_str.len()].copy_from_slice(mode_str.as_bytes());
+        let size_str = format!("{size}");
+        header[48..48 + size_str.len()].copy_from_slice(size_str.as_bytes());
+        header[58..60].copy_from_slice(b"`\n");
+        header
+    }
+
+    #[test]
+    fn test_ar_standard_and_gnu_and_bsd() {
+        let temp = TestDir::new("ar-backend-test");
+        let archive_path = temp.path("sample.a");
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"!<arch>\n");
+
+        // 1. GNU string table member `//`
+        let string_table = b"very_long_gnu_member_name.txt/\nanother_gnu_member.txt/\n";
+        bytes.extend_from_slice(&build_ar_header("//", string_table.len(), 0, 0));
+        bytes.extend_from_slice(string_table);
+        if string_table.len() % 2 == 1 {
+            bytes.push(b'\n');
+        }
+
+        // 2. Member using GNU string table (/0 -> very_long_gnu_member_name.txt)
+        let gnu_payload = b"GNU payload contents\n";
+        bytes.extend_from_slice(&build_ar_header("/0", gnu_payload.len(), 0o100644, 1700000000));
+        bytes.extend_from_slice(gnu_payload);
+        if gnu_payload.len() % 2 == 1 {
+            bytes.push(b'\n');
+        }
+
+        // 3. Member using BSD extended name `#1/24`
+        let bsd_filename = b"bsd_extended_name.txt\0\0\0";
+        let bsd_payload = b"BSD payload!";
+        let bsd_total_size = bsd_filename.len() + bsd_payload.len();
+        bytes.extend_from_slice(&build_ar_header("#1/24", bsd_total_size, 0o100644, 1700000001));
+        bytes.extend_from_slice(bsd_filename);
+        bytes.extend_from_slice(bsd_payload);
+        if bsd_total_size % 2 == 1 {
+            bytes.push(b'\n');
+        }
+
+        // 4. Standard short member
+        let short_payload = b"short file";
+        bytes.extend_from_slice(&build_ar_header("short.txt/", short_payload.len(), 0o100644, 1700000002));
+        bytes.extend_from_slice(short_payload);
+        if short_payload.len() % 2 == 1 {
+            bytes.push(b'\n');
+        }
+
+        fs::write(&archive_path, bytes).unwrap();
+
+        // 1. List
+        let entries = list(&archive_path).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].path, "very_long_gnu_member_name.txt");
+        assert_eq!(entries[0].size, gnu_payload.len() as u64);
+        assert_eq!(entries[1].path, "bsd_extended_name.txt");
+        assert_eq!(entries[1].size, bsd_payload.len() as u64);
+        assert_eq!(entries[2].path, "short.txt");
+        assert_eq!(entries[2].size, short_payload.len() as u64);
+
+        // 2. Test
+        let test_report = test(&archive_path, &TestOptions::default()).unwrap();
+        assert_eq!(test_report.entries, 3);
+        assert_eq!(test_report.bytes, (gnu_payload.len() + bsd_payload.len() + short_payload.len()) as u64);
+
+        // Selective test
+        let sel_test = TestOptions { selected_paths: vec!["short.txt".to_string()], ..TestOptions::default() };
+        let sel_report = test(&archive_path, &sel_test).unwrap();
+        assert_eq!(sel_report.entries, 1);
+        assert_eq!(sel_report.skipped_entries, 2);
+
+        // 3. Extract All
+        let dest = temp.path("out");
+        let extract_report = extract(&archive_path, &dest, ExtractionPolicy::default(), None, None, None).unwrap();
+        assert_eq!(extract_report.entries, 3);
+        assert_eq!(fs::read(dest.join("very_long_gnu_member_name.txt")).unwrap(), gnu_payload);
+        assert_eq!(fs::read(dest.join("bsd_extended_name.txt")).unwrap(), bsd_payload);
+        assert_eq!(fs::read(dest.join("short.txt")).unwrap(), short_payload);
+
+        // Extract by index
+        let dest_single = temp.path("out_single");
+        let single_report = extract(&archive_path, &dest_single, ExtractionPolicy::default(), None, Some(2), None).unwrap();
+        assert_eq!(single_report.entries, 1);
+        assert_eq!(single_report.skipped_entries, 2);
+        assert_eq!(fs::read(dest_single.join("short.txt")).unwrap(), short_payload);
+
+        // Extract by path occurrence
+        let dest_occ = temp.path("out_occ");
+        let occ_report = extract_by_path_occurrence(&archive_path, &dest_occ, ExtractionPolicy::default(), None, "bsd_extended_name.txt", 0, None).unwrap();
+        assert_eq!(occ_report.entries, 1);
+        assert_eq!(fs::read(dest_occ.join("bsd_extended_name.txt")).unwrap(), bsd_payload);
+
+        // 4. Copy by index
+        let mut copied = Vec::new();
+        let written = copy(&archive_path, 0, &mut copied).unwrap();
+        assert_eq!(written, gnu_payload.len() as u64);
+        assert_eq!(copied, gnu_payload);
+
+        // 5. Copy by path occurrence
+        let mut copied_occ = Vec::new();
+        let written_occ = copy_by_path_occurrence(&archive_path, "short.txt", 0, &mut copied_occ).unwrap();
+        assert_eq!(written_occ, short_payload.len() as u64);
+        assert_eq!(copied_occ, short_payload);
+    }
+
+    #[test]
+    fn test_ar_error_handling() {
+        let temp = TestDir::new("ar-backend-errors");
+        let non_existent = temp.path("missing.a");
+        assert!(list(&non_existent).is_err());
+        assert!(test(&non_existent, &TestOptions::default()).is_err());
+        assert!(extract(&non_existent, temp.path("out"), ExtractionPolicy::default(), None, None, None).is_err());
+        assert!(copy(&non_existent, 0, &mut Vec::new()).is_err());
+
+        // Missing magic
+        let invalid_magic = temp.path("invalid_magic.a");
+        fs::write(&invalid_magic, b"not-an-ar-archive\n").unwrap();
+        assert!(list(&invalid_magic).is_err());
+
+        // Missing trailer
+        let mut bad_trailer = Vec::new();
+        bad_trailer.extend_from_slice(b"!<arch>\n");
+        let mut bad_header = [b' '; 60];
+        bad_header[0..4].copy_from_slice(b"file");
+        bad_header[48..49].copy_from_slice(b"0");
+        bad_header[58..60].copy_from_slice(b"XX"); // bad trailer
+        bad_trailer.extend_from_slice(&bad_header);
+        let bad_trailer_path = temp.path("bad_trailer.a");
+        fs::write(&bad_trailer_path, bad_trailer).unwrap();
+        assert!(list(&bad_trailer_path).is_err());
+
+        // Error types and formatting
+        let io_err = ArError::Io { path: PathBuf::from("a.a"), source: io::Error::new(io::ErrorKind::Other, "io err") };
+        assert!(io_err.to_string().contains("I/O failed"));
+        assert!(std::error::Error::source(&io_err).is_some());
+
+        let invalid_err = ArError::Invalid { path: PathBuf::from("b.a"), message: "corrupt".to_string() };
+        assert!(invalid_err.to_string().contains("invalid AR"));
+        assert!(std::error::Error::source(&invalid_err).is_none());
+
+        let cancelled = ArError::Cancelled;
+        assert_eq!(cancelled.to_string(), "job cancelled");
+
+        let safety = ArError::Safety(ExtractionSafetyError::EmptyPath);
+        assert!(safety.to_string().contains("extraction safety"));
+        assert!(std::error::Error::source(&safety).is_some());
+    }
 }

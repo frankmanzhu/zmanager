@@ -129,3 +129,40 @@ pub(crate) fn optional_unix_or_rfc3339(
         })
         .transpose()
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use num_bigint::BigUint;
+
+    #[test]
+    fn test_canonical_biguint_hex() {
+        assert_eq!(canonical_biguint_hex(&BigUint::from(0_u32)), "00");
+        assert_eq!(canonical_biguint_hex(&BigUint::from(0x1a_u32)), "1A");
+        assert_eq!(canonical_biguint_hex(&BigUint::from(0x0abc_u32)), "0ABC");
+    }
+
+    #[test]
+    fn test_optional_unix_or_rfc3339() {
+        let mut map = Map::new();
+        map.insert("time_unix".to_string(), Value::from(1700000000));
+        assert_eq!(optional_unix_or_rfc3339(&map, "time_unix", "time_rfc", "time").unwrap(), Some(1700000000));
+
+        let mut map2 = Map::new();
+        map2.insert("time_rfc".to_string(), Value::from("2026-01-01T00:00:00Z"));
+        assert!(optional_unix_or_rfc3339(&map2, "time_unix", "time_rfc", "time").unwrap().is_some());
+
+        let map3 = Map::new();
+        assert_eq!(optional_unix_or_rfc3339(&map3, "time_unix", "time_rfc", "time").unwrap(), None);
+    }
+
+    #[test]
+    fn test_parse_crl_manifest_invalid() {
+        // Not JSON
+        assert!(parse_crl_manifest(b"invalid json").is_err());
+
+        // Empty JSON object missing crls
+        assert!(parse_crl_manifest(b"{}").is_err());
+    }
+}

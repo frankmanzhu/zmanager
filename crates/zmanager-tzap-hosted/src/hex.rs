@@ -8,3 +8,14 @@ pub(crate) fn hex_upper(bytes: &[u8]) -> String {
     }
     output
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hex_upper() {
+        assert_eq!(hex_upper(&[]), "");
+        assert_eq!(hex_upper(&[0x00, 0x0f, 0x10, 0xab, 0xff]), "000F10ABFF");
+    }
+}

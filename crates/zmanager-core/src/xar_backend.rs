@@ -312,3 +312,93 @@ fn parser_error(path: &Path, error: impl fmt::Display) -> XarError {
 fn io_error(path: &Path, source: io::Error) -> XarError {
     XarError::Io { path: path.to_path_buf(), source }
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
+    use std::fs;
+
+    fn fixture_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.xar")
+    }
+
+    #[test]
+    fn test_xar_list_test_extract_and_copy() {
+        let xar_file = fixture_path();
+        if !xar_file.exists() {
+            return;
+        }
+
+        let temp = TestDir::new("xar-backend-test");
+
+        // 1. List
+        let entries = list(&xar_file).unwrap();
+        assert!(!entries.is_empty());
+        let has_readme = entries.iter().any(|entry| entry.path.ends_with("README.txt"));
+        assert!(has_readme, "XAR entries should contain README.txt");
+
+        // 2. Test
+        let test_report = test(&xar_file, &TestOptions::default()).unwrap();
+        assert!(test_report.entries > 0);
+        assert!(test_report.bytes > 0);
+
+        // Test with selection
+        let sel_opts = TestOptions { selected_paths: vec!["payload/README.txt".to_string()], ..TestOptions::default() };
+        let sel_report = test(&xar_file, &sel_opts).unwrap();
+        assert_eq!(sel_report.entries, 1);
+
+        // 3. Extract
+        let dest = temp.path("out");
+        let extract_report = extract(&xar_file, &dest, ExtractionPolicy::default(), None, None).unwrap();
+        assert!(extract_report.entries > 0);
+        assert!(extract_report.bytes > 0);
+        assert!(dest.join("payload/README.txt").exists());
+
+        // 4. Copy by index
+        let readme_idx = entries.iter().position(|e| e.path.ends_with("README.txt")).unwrap();
+        let mut copied = Vec::new();
+        let bytes_copied = copy(&xar_file, readme_idx, &mut copied).unwrap();
+        assert!(bytes_copied > 0);
+        assert_eq!(bytes_copied, copied.len() as u64);
+
+        // 5. Copy by path occurrence
+        let mut copied_occ = Vec::new();
+        let occ_bytes = copy_by_path_occurrence(&xar_file, &entries[readme_idx].path, 0, &mut copied_occ).unwrap();
+        assert_eq!(occ_bytes, bytes_copied);
+        assert_eq!(copied_occ, copied);
+    }
+
+    #[test]
+    fn test_xar_error_handling() {
+        let temp = TestDir::new("xar-backend-errors");
+        let non_existent = temp.path("missing.xar");
+        assert!(list(&non_existent).is_err());
+        assert!(test(&non_existent, &TestOptions::default()).is_err());
+        assert!(extract(&non_existent, temp.path("out"), ExtractionPolicy::default(), None, None).is_err());
+        assert!(copy(&non_existent, 0, &mut Vec::new()).is_err());
+
+        // Corrupt file
+        let corrupt = temp.path("corrupt.xar");
+        fs::write(&corrupt, b"not a xar archive").unwrap();
+        assert!(list(&corrupt).is_err());
+
+        // Error types & Display coverage
+        let parser_err = XarError::Parser { path: PathBuf::from("a.xar"), message: "parse failed".to_string() };
+        assert!(parser_err.to_string().contains("invalid XAR"));
+        assert!(std::error::Error::source(&parser_err).is_none());
+
+        let io_err = XarError::Io { path: PathBuf::from("b.xar"), source: io::Error::new(io::ErrorKind::NotFound, "err") };
+        assert!(io_err.to_string().contains("I/O failed"));
+        assert!(std::error::Error::source(&io_err).is_some());
+
+        let cancelled = XarError::Cancelled;
+        assert_eq!(cancelled.to_string(), "job cancelled");
+
+        let safety = XarError::Safety(ExtractionSafetyError::EmptyPath);
+        assert!(safety.to_string().contains("extraction safety"));
+        assert!(std::error::Error::source(&safety).is_some());
+    }
+}

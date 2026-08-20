@@ -358,3 +358,142 @@ impl From<TempDirAllocError> for DebError {
         Self::Io { path: error.path, source: error.source }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        {
+            let mut tar = tar::Builder::new(&mut gz);
+            for &(name, data) in files {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                tar.append_data(&mut header, name, data).unwrap();
+            }
+            tar.finish().unwrap();
+        }
+        gz.finish().unwrap()
+    }
+
+    fn build_tar_zst(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
+        {
+            let mut tar = tar::Builder::new(&mut encoder);
+            for &(name, data) in files {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                tar.append_data(&mut header, name, data).unwrap();
+            }
+            tar.finish().unwrap();
+        }
+        encoder.finish().unwrap()
+    }
+
+    fn build_ar_header(name: &str, size: usize) -> [u8; 60] {
+        let mut header = [b' '; 60];
+        let name_bytes = name.as_bytes();
+        header[0..name_bytes.len().min(16)].copy_from_slice(&name_bytes[0..name_bytes.len().min(16)]);
+        header[16..26].copy_from_slice(b"1700000000");
+        header[28..29].copy_from_slice(b"0");
+        header[34..35].copy_from_slice(b"0");
+        header[40..46].copy_from_slice(b"100644");
+        let size_str = format!("{size}");
+        header[48..48 + size_str.len()].copy_from_slice(size_str.as_bytes());
+        header[58..60].copy_from_slice(b"`\n");
+        header
+    }
+
+    fn build_deb(debian_binary: Option<&[u8]>, control_gz: Option<&[u8]>, data_zst: Option<&[u8]>) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"!<arch>\n");
+
+        if let Some(db) = debian_binary {
+            bytes.extend_from_slice(&build_ar_header("debian-binary", db.len()));
+            bytes.extend_from_slice(db);
+            if db.len() % 2 == 1 {
+                bytes.push(b'\n');
+            }
+        }
+        if let Some(ctrl) = control_gz {
+            bytes.extend_from_slice(&build_ar_header("control.tar.gz", ctrl.len()));
+            bytes.extend_from_slice(ctrl);
+            if ctrl.len() % 2 == 1 {
+                bytes.push(b'\n');
+            }
+        }
+        if let Some(dt) = data_zst {
+            bytes.extend_from_slice(&build_ar_header("data.tar.zst", dt.len()));
+            bytes.extend_from_slice(dt);
+            if dt.len() % 2 == 1 {
+                bytes.push(b'\n');
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn test_extract_deb_nested_complete() {
+        let temp = TestDir::new("deb-backend-test");
+        let archive_path = temp.path("sample.deb");
+
+        let control_bytes = build_tar_gz(&[("control", b"Package: test\nVersion: 1.0\n")]);
+        let data_bytes = build_tar_zst(&[("usr/bin/app", b"binary payload here")]);
+        let deb_bytes = build_deb(Some(b"2.0\n"), Some(&control_bytes), Some(&data_bytes));
+        fs::write(&archive_path, deb_bytes).unwrap();
+
+        let dest = temp.path("out");
+        let policy = ExtractionPolicy::default();
+        let report = extract_deb_nested(&archive_path, &dest, &policy).unwrap();
+
+        assert_eq!(report.written_entries, 3);
+        assert_eq!(fs::read(dest.join("debian-binary")).unwrap(), b"2.0\n");
+        assert_eq!(fs::read(dest.join("control/control")).unwrap(), b"Package: test\nVersion: 1.0\n");
+        assert_eq!(fs::read(dest.join("data/usr/bin/app")).unwrap(), b"binary payload here");
+    }
+
+    #[test]
+    fn test_deb_missing_members_and_errors() {
+        let temp = TestDir::new("deb-backend-errors");
+
+        // Missing control
+        let data_bytes = build_tar_zst(&[("file.txt", b"content")]);
+        let deb_no_control = build_deb(Some(b"2.0\n"), None, Some(&data_bytes));
+        let p1 = temp.path("no_control.deb");
+        fs::write(&p1, deb_no_control).unwrap();
+        assert!(matches!(extract_deb_nested(&p1, temp.path("out1"), &ExtractionPolicy::default()), Err(DebError::MissingMember { .. })));
+
+        // Missing data
+        let control_bytes = build_tar_gz(&[("control", b"test")]);
+        let deb_no_data = build_deb(Some(b"2.0\n"), Some(&control_bytes), None);
+        let p2 = temp.path("no_data.deb");
+        fs::write(&p2, deb_no_data).unwrap();
+        assert!(matches!(extract_deb_nested(&p2, temp.path("out2"), &ExtractionPolicy::default()), Err(DebError::MissingMember { .. })));
+
+        // Missing debian-binary emits warning but still proceeds
+        let deb_no_bin = build_deb(None, Some(&control_bytes), Some(&data_bytes));
+        let p3 = temp.path("no_bin.deb");
+        fs::write(&p3, deb_no_bin).unwrap();
+        let r3 = extract_deb_nested(&p3, temp.path("out3"), &ExtractionPolicy::default()).unwrap();
+        assert!(!r3.warnings.is_empty());
+
+        // Error types & Display coverage
+        let err_missing = DebError::MissingMember { member: "control.tar.*" };
+        assert!(err_missing.to_string().contains("missing control.tar.*"));
+        assert!(std::error::Error::source(&err_missing).is_none());
+
+        let io_err = DebError::Io { path: PathBuf::from("a.deb"), source: io::Error::new(io::ErrorKind::NotFound, "err") };
+        assert!(io_err.to_string().contains("I/O failed"));
+        assert!(std::error::Error::source(&io_err).is_some());
+    }
+}

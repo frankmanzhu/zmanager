@@ -144,3 +144,50 @@ pub(crate) fn hint(value: impl Into<String>) -> Option<String> {
 pub(crate) fn is_retryable_io_error(kind: io::ErrorKind) -> bool {
     matches!(kind, io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::UnexpectedEof)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_mapping_and_hints() {
+        assert!(hint("a hint").is_some());
+        assert!(is_retryable_io_error(io::ErrorKind::TimedOut));
+        assert!(!is_retryable_io_error(io::ErrorKind::NotFound));
+
+        let warning = bridge_warning("test warning");
+        assert!(matches!(warning.severity, BridgeSeverity::Warning));
+
+        let damaged = damaged_archive("corrupt archive");
+        match damaged {
+            ZmanagerGuiError::Bridge { code, recovery_hint, .. } => {
+                assert_eq!(code, ERROR_DAMAGED_ARCHIVE);
+                assert!(recovery_hint.is_some());
+            }
+        }
+
+        let cancelled = cancelled_bridge_error("cancelled op");
+        match cancelled {
+            ZmanagerGuiError::Bridge { code, retryable, .. } => {
+                assert_eq!(code, ERROR_CANCELLED);
+                assert!(retryable);
+            }
+        }
+
+        let io_not_found = map_io_error(PathBuf::from("missing.zip"), io::Error::new(io::ErrorKind::NotFound, "file not found"));
+        match io_not_found {
+            ZmanagerGuiError::Bridge { code, recovery_hint, .. } => {
+                assert_eq!(code, ERROR_NOT_FOUND);
+                assert!(recovery_hint.is_some());
+            }
+        }
+
+        let io_other = map_io_error(PathBuf::from("other.zip"), io::Error::new(io::ErrorKind::PermissionDenied, "permission denied"));
+        match io_other {
+            ZmanagerGuiError::Bridge { code, retryable, .. } => {
+                assert_eq!(code, ERROR_IO_ERROR);
+                assert!(!retryable);
+            }
+        }
+    }
+}

@@ -140,3 +140,52 @@ pub fn tzap_contact_remove_json(request_json: String) -> String {
 pub fn tzap_share_create_json(request_json: String) -> String {
     zmanager_tzap_hosted::tzap_service::tzap_share_create_json(&request_json)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tzap_ffi_missing_paths() {
+        let missing = "non_existent_archive_12345.tzap".to_string();
+        let summary = tzapPublicMetadataSummary(missing.clone());
+        assert!(summary.contains("\"ok\":false"));
+
+        let display_summary = tzapPublicMetadataDisplaySummary(missing.clone());
+        assert!(display_summary.contains("\"ok\":false"));
+
+        let verify = verifyTzapX509(missing.clone(), None, vec![], false);
+        assert!(verify.contains("\"ok\":false"));
+
+        let verify_pub = verifyTzapX509PublicNoKey(missing.clone(), vec![], false);
+        assert!(verify_pub.contains("\"ok\":false"));
+
+        let inspect = inspectTzapX509Signer(missing.clone(), None);
+        assert!(inspect.contains("\"ok\":false"));
+
+        let inspect_pub = inspectTzapX509PublicNoKeySigner(missing);
+        assert!(inspect_pub.contains("\"ok\":false"));
+    }
+
+    #[test]
+    fn test_tzap_ffi_json_endpoints() {
+        let empty_req = "{}".to_string();
+        assert!(!tzap_auth_status_json(empty_req.clone()).is_empty());
+        assert!(!tzap_auth_forget_json(empty_req.clone()).is_empty());
+        assert!(!tzap_auth_account_url_json(empty_req.clone()).is_empty());
+        assert!(!tzap_certificate_inventory_json(empty_req.clone()).is_empty());
+        assert!(!tzap_cert_enroll_json(empty_req.clone()).is_empty());
+        assert!(!tzap_cert_renew_json(empty_req.clone()).is_empty());
+        assert!(!tzap_cert_revoke_json(empty_req.clone()).is_empty());
+        assert!(!tzap_device_retire_json(empty_req.clone()).is_empty());
+        assert!(!tzap_document_sign_json(empty_req.clone()).is_empty());
+        assert!(!tzap_document_verify_json(empty_req.clone()).is_empty());
+        assert!(!tzap_recipient_key_generate_json(empty_req.clone()).is_empty());
+        assert!(!tzap_recipient_key_remove_json(empty_req.clone()).is_empty());
+        assert!(!tzap_contact_export_json(empty_req.clone()).is_empty());
+        assert!(!tzap_contact_import_json(empty_req.clone()).is_empty());
+        assert!(!tzap_contact_list_json(empty_req.clone()).is_empty());
+        assert!(!tzap_contact_remove_json(empty_req.clone()).is_empty());
+        assert!(!tzap_share_create_json(empty_req).is_empty());
+    }
+}

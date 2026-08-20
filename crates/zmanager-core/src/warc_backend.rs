@@ -274,3 +274,109 @@ fn invalid(path: &Path, error: impl fmt::Display) -> WarcError {
 fn io_error(path: &Path, source: io::Error) -> WarcError {
     WarcError::Io { path: path.to_path_buf(), source }
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
+    use std::fs;
+
+    fn build_warc(records: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
+        let mut warc = Vec::new();
+        for (i, &(record_type, target_uri, body)) in records.iter().enumerate() {
+            warc.extend_from_slice(b"WARC/1.0\r\n");
+            warc.extend_from_slice(format!("WARC-Type: {record_type}\r\n").as_bytes());
+            warc.extend_from_slice(format!("WARC-Record-ID: <urn:uuid:00000000-0000-0000-0000-{i:012}>\r\n").as_bytes());
+            warc.extend_from_slice(b"WARC-Date: 2026-01-01T12:00:00Z\r\n");
+            if let Some(uri) = target_uri {
+                warc.extend_from_slice(format!("WARC-Target-URI: {uri}\r\n").as_bytes());
+            }
+            warc.extend_from_slice(format!("Content-Length: {}\r\n", body.len()).as_bytes());
+            warc.extend_from_slice(b"\r\n");
+            warc.extend_from_slice(body);
+            warc.extend_from_slice(b"\r\n\r\n");
+        }
+        warc
+    }
+
+    #[test]
+    fn test_warc_list_test_extract_and_copy() {
+        let temp = TestDir::new("warc-backend-test");
+        let archive_path = temp.path("sample.warc");
+
+        let warc_bytes =
+            build_warc(&[("warcinfo", None, b"software: test\n"), ("response", Some("http://example.com/page.html"), b"<html><body>Hello</body></html>")]);
+        fs::write(&archive_path, warc_bytes).unwrap();
+
+        // 1. List
+        let entries = list(&archive_path).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].path.starts_with("records/00000000-warcinfo"));
+        assert_eq!(entries[0].size, 15);
+        assert_eq!(entries[1].path, "example.com/page.html");
+        assert_eq!(entries[1].size, 31);
+
+        // 2. Test
+        let test_report = test(&archive_path, &TestOptions::default()).unwrap();
+        assert_eq!(test_report.entries, 2);
+        assert_eq!(test_report.bytes, 15 + 31);
+
+        // Test with selection
+        let sel_opts = TestOptions { selected_paths: vec!["example.com/page.html".to_string()], ..TestOptions::default() };
+        let sel_report = test(&archive_path, &sel_opts).unwrap();
+        assert_eq!(sel_report.entries, 1);
+        assert_eq!(sel_report.skipped_entries, 1);
+
+        // 3. Extract
+        let dest = temp.path("out");
+        let extract_report = extract(&archive_path, &dest, ExtractionPolicy::default(), None, None).unwrap();
+        assert_eq!(extract_report.entries, 2);
+        assert_eq!(fs::read(dest.join("example.com/page.html")).unwrap(), b"<html><body>Hello</body></html>");
+
+        // 4. Copy by index
+        let mut copied = Vec::new();
+        let bytes_copied = copy(&archive_path, 1, &mut copied).unwrap();
+        assert_eq!(bytes_copied, 31);
+        assert_eq!(copied, b"<html><body>Hello</body></html>");
+
+        // 5. Copy by path occurrence
+        let mut copied_occ = Vec::new();
+        let bytes_occ = copy_by_path_occurrence(&archive_path, "example.com/page.html", 0, &mut copied_occ).unwrap();
+        assert_eq!(bytes_occ, 31);
+        assert_eq!(copied_occ, b"<html><body>Hello</body></html>");
+    }
+
+    #[test]
+    fn test_warc_error_handling() {
+        let temp = TestDir::new("warc-backend-errors");
+        let non_existent = temp.path("missing.warc");
+        assert!(list(&non_existent).is_err());
+        assert!(test(&non_existent, &TestOptions::default()).is_err());
+        assert!(extract(&non_existent, temp.path("out"), ExtractionPolicy::default(), None, None).is_err());
+        assert!(copy(&non_existent, 0, &mut Vec::new()).is_err());
+
+        // Corrupt file
+        let corrupt = temp.path("corrupt.warc");
+        fs::write(&corrupt, b"WARC/1.0\r\nWARC-Type: invalid\r\n\r\n").unwrap();
+        // listing or test handles bad data
+        let _ = list(&corrupt);
+
+        // Error types & Display coverage
+        let inv_err = WarcError::Invalid { path: PathBuf::from("a.warc"), message: "corrupt".to_string() };
+        assert!(inv_err.to_string().contains("invalid WARC"));
+        assert!(std::error::Error::source(&inv_err).is_none());
+
+        let io_err = WarcError::Io { path: PathBuf::from("b.warc"), source: io::Error::new(io::ErrorKind::NotFound, "err") };
+        assert!(io_err.to_string().contains("I/O failed"));
+        assert!(std::error::Error::source(&io_err).is_some());
+
+        let cancelled = WarcError::Cancelled;
+        assert_eq!(cancelled.to_string(), "job cancelled");
+
+        let safety = WarcError::Safety(ExtractionSafetyError::EmptyPath);
+        assert!(safety.to_string().contains("extraction safety"));
+        assert!(std::error::Error::source(&safety).is_some());
+    }
+}

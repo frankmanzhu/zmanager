@@ -260,3 +260,179 @@ fn invalid(path: &Path, error: impl fmt::Display) -> LhaError {
 fn io_error(path: &Path, source: io::Error) -> LhaError {
     LhaError::Io { path: path.to_path_buf(), source }
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use crate::engine::types::TestOptions;
+    use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
+    use std::fs;
+
+    fn lha_crc16(data: &[u8]) -> u16 {
+        let mut crc: u16 = 0;
+        for &byte in data {
+            crc ^= u16::from(byte);
+            for _ in 0..8 {
+                if (crc & 1) != 0 {
+                    crc = (crc >> 1) ^ 0xA001;
+                } else {
+                    crc >>= 1;
+                }
+            }
+        }
+        crc
+    }
+
+    fn build_lha_level0(entries: &[(&str, &[u8], bool)]) -> Vec<u8> {
+        let mut archive = Vec::new();
+        for &(name, data, is_dir) in entries {
+            let name_bytes = name.as_bytes();
+            let header_size = (22 + name_bytes.len()) as u8;
+            let mut header = Vec::with_capacity(header_size as usize + 2);
+            header.push(header_size);
+            header.push(0); // placeholder for checksum
+            let method = if is_dir { b"-lhd-" } else { b"-lh0-" };
+            header.extend_from_slice(method);
+            let comp_size = if is_dir { 0_u32 } else { data.len() as u32 };
+            let uncomp_size = comp_size;
+            header.extend_from_slice(&comp_size.to_le_bytes());
+            header.extend_from_slice(&uncomp_size.to_le_bytes());
+            // MS-DOS datetime (2026-01-01 12:00:00)
+            let dos_time: u32 = ((2026 - 1980) << 25) | (1 << 21) | (1 << 16) | (12 << 11);
+            header.extend_from_slice(&dos_time.to_le_bytes());
+            header.push(if is_dir { 0x10 } else { 0x20 });
+            header.push(0); // Level 0
+            header.push(name_bytes.len() as u8);
+            header.extend_from_slice(name_bytes);
+            let crc = if is_dir { 0_u16 } else { lha_crc16(data) };
+            header.extend_from_slice(&crc.to_le_bytes());
+
+            // Compute header checksum (sum of bytes 2..end of basic header)
+            let sum: u8 = header[2..].iter().fold(0_u8, |acc, &b| acc.wrapping_add(b));
+            header[1] = sum;
+
+            archive.extend_from_slice(&header);
+            if !is_dir {
+                archive.extend_from_slice(data);
+            }
+        }
+        archive.push(0); // EOF marker
+        archive
+    }
+
+    #[test]
+    fn test_lha_list_test_extract_and_copy() {
+        let temp = TestDir::new("lha-backend-test");
+        let archive_path = temp.path("sample.lzh");
+        let bytes =
+            build_lha_level0(&[("nested", b"", true), ("nested/hello.txt", b"Hello, LHA world!\n", false), ("notes.txt", b"Second file contents", false)]);
+        fs::write(&archive_path, bytes).unwrap();
+
+        // 1. List
+        let entries = list(&archive_path).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].path, "nested");
+        assert_eq!(entries[0].kind, BrowserEntryKind::Directory);
+        assert_eq!(entries[1].path, "nested/hello.txt");
+        assert_eq!(entries[1].kind, BrowserEntryKind::File);
+        assert_eq!(entries[1].size, 18);
+        assert!(entries[1].supported);
+        assert_eq!(entries[2].path, "notes.txt");
+
+        // 2. Test
+        let test_opts = TestOptions::default();
+        let report = test(&archive_path, &test_opts).unwrap();
+        assert_eq!(report.entries, 3);
+        assert_eq!(report.bytes, 18 + 20);
+
+        // Test with selective filter
+        let selective = TestOptions { selected_paths: vec!["notes.txt".to_string()], ..TestOptions::default() };
+        let selective_report = test(&archive_path, &selective).unwrap();
+        assert_eq!(selective_report.entries, 1);
+        assert_eq!(selective_report.skipped_entries, 2);
+
+        // 3. Extract
+        let dest = temp.path("out");
+        let policy = ExtractionPolicy { overwrite: crate::safety::OverwritePolicy::Replace, ..ExtractionPolicy::default() };
+        let extract_report = extract(&archive_path, &dest, policy.clone(), None, None).unwrap();
+        assert_eq!(extract_report.entries, 3);
+        assert_eq!(fs::read(dest.join("nested/hello.txt")).unwrap(), b"Hello, LHA world!\n");
+        assert_eq!(fs::read(dest.join("notes.txt")).unwrap(), b"Second file contents");
+
+        // 4. Copy by index
+        let mut copied = Vec::new();
+        let written = copy(&archive_path, 1, &mut copied).unwrap();
+        assert_eq!(written, 18);
+        assert_eq!(copied, b"Hello, LHA world!\n");
+
+        // Copy directory entry should error
+        assert!(copy(&archive_path, 0, &mut Vec::new()).is_err());
+
+        // 5. Copy by path occurrence
+        let mut copied_path = Vec::new();
+        let written_path = copy_by_path_occurrence(&archive_path, "notes.txt", 0, &mut copied_path).unwrap();
+        assert_eq!(written_path, 20);
+        assert_eq!(copied_path, b"Second file contents");
+
+        // Missing path occurrence
+        assert!(copy_by_path_occurrence(&archive_path, "missing.txt", 0, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn test_lha_error_handling() {
+        let temp = TestDir::new("lha-backend-errors");
+        let non_existent = temp.path("non_existent.lzh");
+        assert!(list(&non_existent).is_err());
+        assert!(test(&non_existent, &TestOptions::default()).is_err());
+        assert!(extract(&non_existent, temp.path("out"), ExtractionPolicy::default(), None, None).is_err());
+        assert!(copy(&non_existent, 0, &mut Vec::new()).is_err());
+
+        // Corrupt archive bytes
+        let corrupt_path = temp.path("corrupt.lzh");
+        fs::write(&corrupt_path, b"garbage data").unwrap();
+        assert!(list(&corrupt_path).is_err());
+
+        // Error Display & Source coverage
+        let io_err = LhaError::Io { path: PathBuf::from("foo.lha"), source: io::Error::new(io::ErrorKind::NotFound, "not found") };
+        assert!(io_err.to_string().contains("I/O failed"));
+        assert!(std::error::Error::source(&io_err).is_some());
+
+        let invalid_err = LhaError::Invalid { path: PathBuf::from("bar.lha"), message: "bad header".to_string() };
+        assert!(invalid_err.to_string().contains("invalid LHA"));
+        assert!(std::error::Error::source(&invalid_err).is_none());
+
+        let cancelled_err = LhaError::Cancelled;
+        assert_eq!(cancelled_err.to_string(), "job cancelled");
+
+        let safety_err = LhaError::Safety(ExtractionSafetyError::ParentTraversal { path: "../escape".to_string() });
+        assert!(safety_err.to_string().contains("extraction safety"));
+        assert!(std::error::Error::source(&safety_err).is_some());
+    }
+
+    #[test]
+    fn test_lha_duplicate_and_cancellation() {
+        let temp = TestDir::new("lha-backend-more");
+        // Duplicate path
+        let dup_bytes = build_lha_level0(&[("dup.txt", b"one", false), ("dup.txt", b"two", false)]);
+        let dup_path = temp.path("dup.lzh");
+        fs::write(&dup_path, dup_bytes).unwrap();
+        assert!(list(&dup_path).is_err());
+
+        // Valid archive for cancellation testing
+        let valid_bytes = build_lha_level0(&[("item.txt", b"content", false)]);
+        let valid_path = temp.path("valid.lzh");
+        fs::write(&valid_path, valid_bytes).unwrap();
+
+        // Cancelled test
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let cancel_opts = TestOptions { cancellation: Some(cancel_flag), ..TestOptions::default() };
+        assert!(matches!(test(&valid_path, &cancel_opts), Err(LhaError::Cancelled)));
+
+        // Cancelled extract
+        let cancel_token = crate::jobs::CancellationToken::new();
+        cancel_token.cancel();
+        assert!(matches!(extract(&valid_path, temp.path("out"), ExtractionPolicy::default(), None, Some(&cancel_token)), Err(LhaError::Cancelled)));
+    }
+}

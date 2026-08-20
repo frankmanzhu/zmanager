@@ -188,3 +188,58 @@ pub(crate) fn cancelled_event(message: String) -> MobileJobEvent {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zmanager_core::jobs::JobKind as CoreJobKind;
+
+    #[test]
+    fn test_mobile_events_from_core_events() {
+        // Started
+        let started = mobile_event_from_core_event(CoreJobEvent::Started { kind: CoreJobKind::ArchiveExtract, total_bytes: Some(1024) }).unwrap();
+        assert_eq!(started.event_type, MobileJobEventKind::Started);
+        assert_eq!(started.total_bytes, Some(1024));
+
+        // EntryStarted
+        let entry_start = mobile_event_from_core_event(CoreJobEvent::EntryStarted { path: "file.txt".to_string(), bytes: Some(100) }).unwrap();
+        assert_eq!(entry_start.event_type, MobileJobEventKind::EntryStarted);
+        assert_eq!(entry_start.path, Some("file.txt".to_string()));
+
+        // BytesProcessed
+        let bytes_proc = mobile_event_from_core_event(CoreJobEvent::BytesProcessed {
+            path: Some("file.txt".to_string()),
+            recent_paths: vec!["file.txt".to_string()],
+            recent_path_identities: vec![],
+            bytes: 50,
+            total_bytes_processed: 50,
+            entries: 1,
+            total_entries_processed: 1,
+            recent_paths_truncated: false,
+        })
+        .unwrap();
+        assert_eq!(bytes_proc.event_type, MobileJobEventKind::BytesProcessed);
+        assert_eq!(bytes_proc.bytes, Some(50));
+
+        // EntryFinished
+        let entry_fin = mobile_event_from_core_event(CoreJobEvent::EntryFinished { path: "file.txt".to_string(), bytes: 100 }).unwrap();
+        assert_eq!(entry_fin.event_type, MobileJobEventKind::EntryFinished);
+
+        // Warning
+        let warning = mobile_event_from_core_event(CoreJobEvent::Warning { message: "warning msg".to_string() }).unwrap();
+        assert_eq!(warning.event_type, MobileJobEventKind::Warning);
+
+        // Completed
+        let completed = mobile_event_from_core_event(CoreJobEvent::Completed { entries: 5, bytes: 500 }).unwrap();
+        assert_eq!(completed.event_type, MobileJobEventKind::Completed);
+        assert_eq!(completed.entries, Some(5));
+
+        // Failed
+        let failed = mobile_event_from_core_event(CoreJobEvent::Failed { message: "failure msg".to_string() }).unwrap();
+        assert_eq!(failed.event_type, MobileJobEventKind::Failed);
+
+        // Cancelled
+        let cancelled = mobile_event_from_core_event(CoreJobEvent::Cancelled { message: "user cancel".to_string() }).unwrap();
+        assert_eq!(cancelled.event_type, MobileJobEventKind::Cancelled);
+    }
+}

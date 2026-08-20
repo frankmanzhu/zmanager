@@ -259,3 +259,180 @@ fn invalid(path: &Path, message: &str) -> RpmError {
 fn io_error(path: &Path, source: io::Error) -> RpmError {
     RpmError::Io { path: path.to_path_buf(), source }
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::fs;
+
+    fn pad(output: &mut Vec<u8>, alignment: usize) {
+        while output.len() % alignment != 0 {
+            output.push(0);
+        }
+    }
+
+    fn newc_record(name: &str, mode: u32, inode: u64, data: &[u8]) -> Vec<u8> {
+        let name_bytes = name.as_bytes();
+        let fields = [inode, u64::from(mode), 0, 0, 1, 0, u64::try_from(data.len()).unwrap(), 0, 0, 0, 0, u64::try_from(name_bytes.len() + 1).unwrap(), 0];
+        let mut output = Vec::from(b"070701".as_slice());
+        for field in fields {
+            output.extend(format!("{field:08x}").as_bytes());
+        }
+        output.extend_from_slice(name_bytes);
+        output.push(0);
+        pad(&mut output, 4);
+        output.extend_from_slice(data);
+        pad(&mut output, 4);
+        output
+    }
+
+    fn build_cpio(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut cpio = Vec::new();
+        for (i, &(name, data)) in files.iter().enumerate() {
+            cpio.extend(newc_record(name, 0o100_644, (i + 1) as u64, data));
+        }
+        cpio.extend(newc_record("TRAILER!!!", 0, 0, &[]));
+        cpio
+    }
+
+    fn build_rpm(compressor: Option<&str>, payload_bytes: &[u8]) -> Vec<u8> {
+        let mut rpm = Vec::new();
+        // 1. Lead (96 bytes)
+        rpm.extend_from_slice(&RPM_LEAD_MAGIC);
+        rpm.resize(96, 0);
+
+        // 2. Signature Header (16 bytes, empty)
+        rpm.extend_from_slice(&RPM_HEADER_MAGIC);
+        rpm.extend_from_slice(&[0; 12]);
+
+        // 3. Align 8
+        pad(&mut rpm, 8);
+
+        // 4. Main Header
+        rpm.extend_from_slice(&RPM_HEADER_MAGIC);
+        rpm.extend_from_slice(&[0; 4]); // reserved
+
+        if let Some(comp) = compressor {
+            // 1 index entry for tag 1125
+            rpm.extend_from_slice(&1_u32.to_be_bytes()); // count = 1
+            let comp_null = format!("{comp}\0");
+            rpm.extend_from_slice(&(comp_null.len() as u32).to_be_bytes()); // data_size
+
+            // Index entry: tag, kind (6 = string), offset (0), count (1)
+            rpm.extend_from_slice(&PAYLOAD_COMPRESSOR_TAG.to_be_bytes());
+            rpm.extend_from_slice(&6_u32.to_be_bytes());
+            rpm.extend_from_slice(&0_u32.to_be_bytes());
+            rpm.extend_from_slice(&1_u32.to_be_bytes());
+
+            // Data
+            rpm.extend_from_slice(comp_null.as_bytes());
+        } else {
+            rpm.extend_from_slice(&[0; 8]); // count = 0, data_size = 0
+        }
+
+        // 5. Payload
+        rpm.extend_from_slice(payload_bytes);
+        rpm
+    }
+
+    #[test]
+    fn test_rpm_uncompressed_and_compressed() {
+        let temp = TestDir::new("rpm-backend-test");
+
+        // 1. Uncompressed RPM
+        let cpio_data = build_cpio(&[("etc/app.conf", b"setting=true\n")]);
+        let rpm_bytes = build_rpm(None, &cpio_data);
+        let rpm_path = temp.path("sample.rpm");
+        fs::write(&rpm_path, rpm_bytes).unwrap();
+
+        // List
+        let entries = list(&rpm_path).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "etc/app.conf");
+        assert_eq!(entries[0].size, 13);
+
+        // Test
+        let test_report = test(&rpm_path, &TestOptions::default()).unwrap();
+        assert_eq!(test_report.entries, 1);
+        assert_eq!(test_report.bytes, 13);
+
+        // Extract
+        let dest = temp.path("out");
+        let extract_report = extract(&rpm_path, &dest, ExtractionPolicy::default(), None, None).unwrap();
+        assert_eq!(extract_report.entries, 1);
+        assert_eq!(fs::read(dest.join("etc/app.conf")).unwrap(), b"setting=true\n");
+
+        // Copy by index
+        let mut copied = Vec::new();
+        let written = copy(&rpm_path, 0, &mut copied).unwrap();
+        assert_eq!(written, 13);
+        assert_eq!(copied, b"setting=true\n");
+
+        // Copy by path occurrence
+        let mut copied_occ = Vec::new();
+        let written_occ = copy_by_path_occurrence(&rpm_path, "etc/app.conf", 0, &mut copied_occ).unwrap();
+        assert_eq!(written_occ, 13);
+        assert_eq!(copied_occ, b"setting=true\n");
+
+        // 2. Gzip-compressed RPM
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        std::io::Write::write_all(&mut gz, &cpio_data).unwrap();
+        let compressed_payload = gz.finish().unwrap();
+
+        let rpm_gz_bytes = build_rpm(Some("gzip"), &compressed_payload);
+        let rpm_gz_path = temp.path("sample_gz.rpm");
+        fs::write(&rpm_gz_path, rpm_gz_bytes).unwrap();
+
+        let entries_gz = list(&rpm_gz_path).unwrap();
+        assert_eq!(entries_gz.len(), 1);
+        assert_eq!(entries_gz[0].path, "etc/app.conf");
+
+        let dest_gz = temp.path("out_gz");
+        let report_gz = extract(&rpm_gz_path, &dest_gz, ExtractionPolicy::default(), None, None).unwrap();
+        assert_eq!(report_gz.entries, 1);
+        assert_eq!(fs::read(dest_gz.join("etc/app.conf")).unwrap(), b"setting=true\n");
+    }
+
+    #[test]
+    fn test_rpm_error_handling() {
+        let temp = TestDir::new("rpm-backend-errors");
+        let non_existent = temp.path("missing.rpm");
+        assert!(list(&non_existent).is_err());
+        assert!(test(&non_existent, &TestOptions::default()).is_err());
+        assert!(extract(&non_existent, temp.path("out"), ExtractionPolicy::default(), None, None).is_err());
+        assert!(copy(&non_existent, 0, &mut Vec::new()).is_err());
+
+        // Short lead
+        let short_lead = temp.path("short.rpm");
+        fs::write(&short_lead, b"short").unwrap();
+        assert!(list(&short_lead).is_err());
+
+        // Invalid lead magic
+        let mut bad_magic = [0_u8; 96];
+        bad_magic[0..4].copy_from_slice(b"bad!");
+        let bad_magic_path = temp.path("bad_magic.rpm");
+        fs::write(&bad_magic_path, bad_magic).unwrap();
+        assert!(list(&bad_magic_path).is_err());
+
+        // Unsupported compressor
+        let cpio_data = build_cpio(&[("f.txt", b"x")]);
+        let unsupported_rpm = build_rpm(Some("unknown_algo"), &cpio_data);
+        let unsupp_path = temp.path("unsupp.rpm");
+        fs::write(&unsupp_path, unsupported_rpm).unwrap();
+        assert!(list(&unsupp_path).is_err());
+
+        // Error types & Display coverage
+        let inv_err = RpmError::Invalid { path: PathBuf::from("a.rpm"), message: "corrupt".to_string() };
+        assert!(inv_err.to_string().contains("invalid RPM"));
+        assert!(std::error::Error::source(&inv_err).is_none());
+
+        let io_err = RpmError::Io { path: PathBuf::from("b.rpm"), source: io::Error::new(io::ErrorKind::NotFound, "err") };
+        assert!(io_err.to_string().contains("I/O failed"));
+        assert!(std::error::Error::source(&io_err).is_some());
+    }
+}

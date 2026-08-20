@@ -1122,3 +1122,120 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
         Ok(response)
     })
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+
+    fn test_temp_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("zm-tzap-test-{name}-{}", rand::random::<u64>()));
+        let _ = fs::create_dir_all(&path);
+        path
+    }
+
+    #[test]
+    fn test_self_signed_identity_creation() {
+        let temp = test_temp_dir("id");
+        let identity_p12 = temp.join("identity.p12");
+        let cert_pem = temp.join("cert.pem");
+
+        let res = create_tzap_self_signed_identity(&identity_p12.display().to_string(), Some(&cert_pem.display().to_string()), "Test Identity", "password123");
+        let val: Value = serde_json::from_str(&res).unwrap();
+        assert_eq!(val["ok"], true);
+        assert!(val["certificate"]["subject"].as_str().unwrap().contains("Test Identity"));
+        assert!(identity_p12.exists());
+        assert!(cert_pem.exists());
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn test_tzap_service_recipient_key_lifecycle() {
+        let temp = test_temp_dir("key");
+        let state_dir = temp.display().to_string();
+
+        // 1. Generate recipient key
+        let gen_req = json!({
+            "state_dir": state_dir,
+            "account_key": "test_acc",
+            "label": "My Recipient Key",
+            "created_at_unix_seconds": 1700000000,
+        });
+        let gen_res_str = tzap_recipient_key_generate_json(&gen_req.to_string());
+        let gen_res: Value = serde_json::from_str(&gen_res_str).unwrap();
+        assert_eq!(gen_res["ok"], true);
+        let key_id = gen_res["recipient_key"]["key_id"].as_str().unwrap();
+
+        // 2. Inventory check
+        let inv_req = json!({
+            "state_dir": state_dir,
+            "account_key": "test_acc",
+        });
+        let inv_res: Value = serde_json::from_str(&tzap_certificate_inventory_json(&inv_req.to_string())).unwrap();
+        assert_eq!(inv_res["ok"], true);
+        assert_eq!(inv_res["inventory"]["recipient_encryption_keys"].as_array().unwrap().len(), 1);
+
+        // 3. Remove recipient key
+        let rem_req = json!({
+            "state_dir": state_dir,
+            "account_key": "test_acc",
+            "key_id": key_id,
+        });
+        let rem_res: Value = serde_json::from_str(&tzap_recipient_key_remove_json(&rem_req.to_string())).unwrap();
+        assert_eq!(rem_res["ok"], true);
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn test_tzap_service_contact_lifecycle() {
+        let temp = test_temp_dir("contact");
+        let state_dir = temp.display().to_string();
+
+        // 1. List contacts (initially empty)
+        let list_req = json!({
+            "state_dir": state_dir,
+            "account_key": "test_acc",
+        });
+        let list_res: Value = serde_json::from_str(&tzap_contact_list_json(&list_req.to_string())).unwrap();
+        assert_eq!(list_res["ok"], true);
+        assert!(list_res["contacts"].as_array().unwrap().is_empty());
+
+        // 2. Export contact card with mock payload
+        let export_req = json!({
+            "state_dir": state_dir,
+            "account_key": "test_acc",
+        });
+        let export_res: Value = serde_json::from_str(&tzap_contact_export_json(&export_req.to_string())).unwrap();
+        assert!(export_res.is_object());
+
+        // 3. Remove contact
+        let rem_req = json!({
+            "state_dir": state_dir,
+            "account_key": "test_acc",
+            "contact_id": "non_existent_contact",
+        });
+        let rem_res: Value = serde_json::from_str(&tzap_contact_remove_json(&rem_req.to_string())).unwrap();
+        assert_eq!(rem_res["ok"], true);
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn test_tzap_auth_endpoints() {
+        let temp = test_temp_dir("auth");
+        let state_dir = temp.display().to_string();
+
+        let req = json!({
+            "state_dir": state_dir,
+            "account_key": "test_acc",
+        });
+        let status_res: Value = serde_json::from_str(&tzap_auth_status_json(&req.to_string())).unwrap();
+        assert_eq!(status_res["ok"], true);
+
+        let forget_res: Value = serde_json::from_str(&tzap_auth_forget_json(&req.to_string())).unwrap();
+        assert_eq!(forget_res["ok"], true);
+
+        let account_url_res: Value = serde_json::from_str(&tzap_auth_account_url_json(&req.to_string())).unwrap();
+        assert_eq!(account_url_res["ok"], true);
+        let _ = fs::remove_dir_all(temp);
+    }
+}

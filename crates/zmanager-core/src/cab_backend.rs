@@ -239,3 +239,159 @@ fn invalid(path: &Path, message: impl Into<String>) -> CabError {
 fn io_error(path: &Path, source: io::Error) -> CabError {
     CabError::Io { path: path.to_path_buf(), source }
 }
+
+#[cfg(test)]
+#[allow(clippy::all, clippy::pedantic)]
+mod tests {
+    use super::*;
+    use crate::safety::ExtractionPolicy;
+    use crate::test_support::TestDir;
+    use std::fs;
+
+    fn build_uncompressed_cab(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut cab = Vec::new();
+        let num_files = files.len() as u16;
+
+        let header_len = 36_usize;
+        let folder_len = 8_usize;
+        let mut file_entries_len = 0_usize;
+        for &(name, _) in files {
+            file_entries_len += 16 + name.len() + 1;
+        }
+
+        let first_data_offset = (header_len + folder_len + file_entries_len) as u32;
+
+        let mut data_blocks = Vec::new();
+
+        // Single data block containing concatenated file data
+        let mut block_data = Vec::new();
+        for &(_, data) in files {
+            block_data.extend_from_slice(data);
+        }
+
+        let block_len = 8 + block_data.len();
+        let mut block_bytes = Vec::with_capacity(block_len);
+        block_bytes.extend_from_slice(&0_u32.to_le_bytes()); // checksum
+        block_bytes.extend_from_slice(&(block_data.len() as u16).to_le_bytes()); // comp size
+        block_bytes.extend_from_slice(&(block_data.len() as u16).to_le_bytes()); // uncomp size
+        block_bytes.extend_from_slice(&block_data);
+        data_blocks.extend_from_slice(&block_bytes);
+
+        let total_cab_size = (first_data_offset as usize + data_blocks.len()) as u32;
+
+        // 1. CFHEADER (36 bytes)
+        cab.extend_from_slice(b"MSCF"); // 0..4
+        cab.extend_from_slice(&0_u32.to_le_bytes()); // 4..8 reserved
+        cab.extend_from_slice(&total_cab_size.to_le_bytes()); // 8..12 total size
+        cab.extend_from_slice(&0_u32.to_le_bytes()); // 12..16 reserved
+        cab.extend_from_slice(&((header_len + folder_len) as u32).to_le_bytes()); // 16..20 files offset
+        cab.extend_from_slice(&0_u32.to_le_bytes()); // 20..24 reserved
+        cab.extend_from_slice(&0x0103_u16.to_le_bytes()); // 24..26 version 1.3
+        cab.extend_from_slice(&1_u16.to_le_bytes()); // 26..28 num folders
+        cab.extend_from_slice(&num_files.to_le_bytes()); // 28..30 num files
+        cab.extend_from_slice(&0_u16.to_le_bytes()); // 30..32 flags
+        cab.extend_from_slice(&1234_u16.to_le_bytes()); // 32..34 set ID
+        cab.extend_from_slice(&0_u16.to_le_bytes()); // 34..36 cabinet index (0)
+
+        // 2. CFFOLDER (8 bytes)
+        cab.extend_from_slice(&first_data_offset.to_le_bytes()); // data offset
+        cab.extend_from_slice(&1_u16.to_le_bytes()); // number of data blocks (1)
+        cab.extend_from_slice(&0_u16.to_le_bytes()); // comp type: NONE
+
+        // 3. CFFILE entries
+        let mut current_offset_in_folder = 0_u32;
+        for &(name, data) in files {
+            cab.extend_from_slice(&(data.len() as u32).to_le_bytes()); // uncomp size
+            cab.extend_from_slice(&current_offset_in_folder.to_le_bytes()); // folder offset
+            cab.extend_from_slice(&0_u16.to_le_bytes()); // folder index (0)
+            cab.extend_from_slice(&0x5a21_u16.to_le_bytes()); // date
+            cab.extend_from_slice(&0x6000_u16.to_le_bytes()); // time
+            cab.extend_from_slice(&0x20_u16.to_le_bytes()); // attr: archive
+            cab.extend_from_slice(name.as_bytes());
+            cab.push(0); // null terminator
+            current_offset_in_folder += data.len() as u32;
+        }
+
+        // 4. CFDATA
+        cab.extend_from_slice(&data_blocks);
+        cab
+    }
+
+    #[test]
+    fn test_cab_list_test_extract_and_copy() {
+        let temp = TestDir::new("cab-backend-test");
+        let archive_path = temp.path("sample.cab");
+
+        let cab_bytes = build_uncompressed_cab(&[("hello.txt", b"Hello, CAB world!\n"), ("notes.txt", b"Cabinet documentation")]);
+        fs::write(&archive_path, cab_bytes).unwrap();
+
+        // 1. List
+        let entries = list(&archive_path).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].path, "hello.txt");
+        assert_eq!(entries[0].size, 18);
+        assert_eq!(entries[1].path, "notes.txt");
+        assert_eq!(entries[1].size, 21);
+
+        // 2. Test
+        let test_report = test(&archive_path, &TestOptions::default()).unwrap();
+        assert_eq!(test_report.entries, 2);
+        assert_eq!(test_report.bytes, 18 + 21);
+
+        // Test with selection
+        let sel_opts = TestOptions { selected_paths: vec!["hello.txt".to_string()], ..TestOptions::default() };
+        let sel_report = test(&archive_path, &sel_opts).unwrap();
+        assert_eq!(sel_report.entries, 1);
+        assert_eq!(sel_report.skipped_entries, 1);
+
+        // 3. Extract
+        let dest = temp.path("out");
+        let extract_report = extract(&archive_path, &dest, ExtractionPolicy::default(), None, None).unwrap();
+        assert_eq!(extract_report.entries, 2);
+        assert_eq!(fs::read(dest.join("hello.txt")).unwrap(), b"Hello, CAB world!\n");
+        assert_eq!(fs::read(dest.join("notes.txt")).unwrap(), b"Cabinet documentation");
+
+        // 4. Copy by index
+        let mut copied = Vec::new();
+        let bytes_copied = copy(&archive_path, 0, &mut copied).unwrap();
+        assert_eq!(bytes_copied, 18);
+        assert_eq!(copied, b"Hello, CAB world!\n");
+
+        // 5. Copy by path occurrence
+        let mut copied_occ = Vec::new();
+        let bytes_occ = copy_by_path_occurrence(&archive_path, "notes.txt", 0, &mut copied_occ).unwrap();
+        assert_eq!(bytes_occ, 21);
+        assert_eq!(copied_occ, b"Cabinet documentation");
+    }
+
+    #[test]
+    fn test_cab_error_handling() {
+        let temp = TestDir::new("cab-backend-errors");
+        let non_existent = temp.path("missing.cab");
+        assert!(list(&non_existent).is_err());
+        assert!(test(&non_existent, &TestOptions::default()).is_err());
+        assert!(extract(&non_existent, temp.path("out"), ExtractionPolicy::default(), None, None).is_err());
+        assert!(copy(&non_existent, 0, &mut Vec::new()).is_err());
+
+        // Corrupt file
+        let corrupt = temp.path("corrupt.cab");
+        fs::write(&corrupt, b"not a cab archive").unwrap();
+        assert!(list(&corrupt).is_err());
+
+        // Error types & Display coverage
+        let inv_err = CabError::Invalid { path: PathBuf::from("a.cab"), message: "corrupt".to_string() };
+        assert!(inv_err.to_string().contains("invalid CAB"));
+        assert!(std::error::Error::source(&inv_err).is_none());
+
+        let io_err = CabError::Io { path: PathBuf::from("b.cab"), source: io::Error::new(io::ErrorKind::NotFound, "err") };
+        assert!(io_err.to_string().contains("I/O failed"));
+        assert!(std::error::Error::source(&io_err).is_some());
+
+        let cancelled = CabError::Cancelled;
+        assert_eq!(cancelled.to_string(), "job cancelled");
+
+        let safety = CabError::Safety(ExtractionSafetyError::EmptyPath);
+        assert!(safety.to_string().contains("extraction safety"));
+        assert!(std::error::Error::source(&safety).is_some());
+    }
+}
