@@ -224,6 +224,28 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
         zmanager_core::archive_format::ArchiveFormatKind::Tar => ArchiveFormat::Tar,
         zmanager_core::archive_format::ArchiveFormatKind::TarBz2 => ArchiveFormat::TarBz2,
         zmanager_core::archive_format::ArchiveFormatKind::TarXz => ArchiveFormat::TarXz,
+        zmanager_core::archive_format::ArchiveFormatKind::TarLzma => ArchiveFormat::TarLzma,
+        zmanager_core::archive_format::ArchiveFormatKind::TarLz => ArchiveFormat::TarLz,
+        zmanager_core::archive_format::ArchiveFormatKind::TarLzo => ArchiveFormat::TarLzo,
+        zmanager_core::archive_format::ArchiveFormatKind::TarCompress => ArchiveFormat::TarCompress,
+        zmanager_core::archive_format::ArchiveFormatKind::TarLz4 => ArchiveFormat::TarLz4,
+        zmanager_core::archive_format::ArchiveFormatKind::TarUu => ArchiveFormat::TarUu,
+        zmanager_core::archive_format::ArchiveFormatKind::Iso => ArchiveFormat::Iso,
+        zmanager_core::archive_format::ArchiveFormatKind::Cab => ArchiveFormat::Cab,
+        zmanager_core::archive_format::ArchiveFormatKind::Cpio => ArchiveFormat::Cpio,
+        zmanager_core::archive_format::ArchiveFormatKind::Rpm => ArchiveFormat::Rpm,
+        zmanager_core::archive_format::ArchiveFormatKind::Xar => ArchiveFormat::Xar,
+        zmanager_core::archive_format::ArchiveFormatKind::Pkg => ArchiveFormat::Pkg,
+        zmanager_core::archive_format::ArchiveFormatKind::Dmg => ArchiveFormat::Dmg,
+        zmanager_core::archive_format::ArchiveFormatKind::Lha => ArchiveFormat::Lha,
+        zmanager_core::archive_format::ArchiveFormatKind::Ar => ArchiveFormat::Ar,
+        zmanager_core::archive_format::ArchiveFormatKind::Warc => ArchiveFormat::Warc,
+        zmanager_core::archive_format::ArchiveFormatKind::Mtree => ArchiveFormat::Mtree,
+        zmanager_core::archive_format::ArchiveFormatKind::Deb => ArchiveFormat::Deb,
+        zmanager_core::archive_format::ArchiveFormatKind::Msi => ArchiveFormat::Msi,
+        zmanager_core::archive_format::ArchiveFormatKind::Vhd => ArchiveFormat::Vhd,
+        zmanager_core::archive_format::ArchiveFormatKind::Vmdk => ArchiveFormat::Vmdk,
+        zmanager_core::archive_format::ArchiveFormatKind::Udf => ArchiveFormat::Udf,
         zmanager_core::archive_format::ArchiveFormatKind::Tzap => ArchiveFormat::Tzap,
         zmanager_core::archive_format::ArchiveFormatKind::AppleArchive => ArchiveFormat::AppleArchive,
         zmanager_core::archive_format::ArchiveFormatKind::RawStream => match extension.as_str() {
@@ -238,10 +260,7 @@ pub(crate) fn classify_archive_path(path: &Path) -> (ArchiveFormat, Vec<BridgeEr
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_split_zip_extension(&extension) => ArchiveFormat::SplitZip,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if is_rar_sidecar_extension(&extension) => ArchiveFormat::MultipartRar,
         zmanager_core::archive_format::ArchiveFormatKind::Unknown if extension == "xip" => ArchiveFormat::Xip,
-        // Kinds with no dedicated FFI variant (TarLzma, TarLz, TarLzo,
-        // TarCompress, TarLz4, Iso, Cab, Cpio, Rpm, Xar, Pkg, Dmg,
-        // Msi, Lha, Ar, Warc, Mtree, Deb) and unknown paths use the generic
-        // product classification.
+        // Unknown paths use the generic product classification.
         _ => ArchiveFormat::Other,
     };
 
@@ -258,7 +277,15 @@ pub(crate) fn format_capabilities(format: ArchiveFormat) -> (bool, bool, bool) {
     match format {
         ArchiveFormat::Xip => (false, false, false),
         ArchiveFormat::Other => (false, false, false),
-        _ => format_capabilities_for_kind(kind_for_format(format)),
+        _ => {
+            let kind = kind_for_format(format);
+            match zmanager_core::archive_format::format_status(kind) {
+                zmanager_core::archive_format::BackendStatus::Available => format_capabilities_for_kind(kind),
+                zmanager_core::archive_format::BackendStatus::UnsupportedPlatform | zmanager_core::archive_format::BackendStatus::Unavailable { .. } => {
+                    (false, false, false)
+                }
+            }
+        }
     }
 }
 
@@ -274,6 +301,28 @@ pub(crate) fn kind_for_format(format: ArchiveFormat) -> zmanager_core::archive_f
         ArchiveFormat::TarBz2 => ArchiveFormatKind::TarBz2,
         ArchiveFormat::TarXz => ArchiveFormatKind::TarXz,
         ArchiveFormat::TarZst => ArchiveFormatKind::TarZst,
+        ArchiveFormat::TarLzma => ArchiveFormatKind::TarLzma,
+        ArchiveFormat::TarLz => ArchiveFormatKind::TarLz,
+        ArchiveFormat::TarLzo => ArchiveFormatKind::TarLzo,
+        ArchiveFormat::TarCompress => ArchiveFormatKind::TarCompress,
+        ArchiveFormat::TarLz4 => ArchiveFormatKind::TarLz4,
+        ArchiveFormat::TarUu => ArchiveFormatKind::TarUu,
+        ArchiveFormat::Iso => ArchiveFormatKind::Iso,
+        ArchiveFormat::Cab => ArchiveFormatKind::Cab,
+        ArchiveFormat::Cpio => ArchiveFormatKind::Cpio,
+        ArchiveFormat::Rpm => ArchiveFormatKind::Rpm,
+        ArchiveFormat::Xar => ArchiveFormatKind::Xar,
+        ArchiveFormat::Pkg => ArchiveFormatKind::Pkg,
+        ArchiveFormat::Dmg => ArchiveFormatKind::Dmg,
+        ArchiveFormat::Lha => ArchiveFormatKind::Lha,
+        ArchiveFormat::Ar => ArchiveFormatKind::Ar,
+        ArchiveFormat::Warc => ArchiveFormatKind::Warc,
+        ArchiveFormat::Mtree => ArchiveFormatKind::Mtree,
+        ArchiveFormat::Deb => ArchiveFormatKind::Deb,
+        ArchiveFormat::Msi => ArchiveFormatKind::Msi,
+        ArchiveFormat::Vhd => ArchiveFormatKind::Vhd,
+        ArchiveFormat::Vmdk => ArchiveFormatKind::Vmdk,
+        ArchiveFormat::Udf => ArchiveFormatKind::Udf,
         ArchiveFormat::Gzip | ArchiveFormat::Bzip2 | ArchiveFormat::Xz | ArchiveFormat::Zstd | ArchiveFormat::RawStream => ArchiveFormatKind::RawStream,
         ArchiveFormat::Tzap => ArchiveFormatKind::Tzap,
         ArchiveFormat::AppleArchive => ArchiveFormatKind::AppleArchive,
@@ -304,8 +353,8 @@ pub(crate) fn format_capabilities_for_kind(kind: zmanager_core::archive_format::
 }
 
 /// Display label for a core format kind, used by `listFormats`. The FFI's
-/// [`format_label`] keeps its own strings for the `ArchiveFormat` enum; this
-/// covers the kinds that have no FFI variant.
+/// [`format_label`] keeps its own strings for the corresponding
+/// `ArchiveFormat` enum values.
 pub(crate) fn kind_label(kind: zmanager_core::archive_format::ArchiveFormatKind) -> &'static str {
     use zmanager_core::archive_format::ArchiveFormatKind;
     match kind {
@@ -359,6 +408,28 @@ pub(crate) fn format_label(format: ArchiveFormat) -> &'static str {
         ArchiveFormat::TarBz2 => "TAR.BZ2",
         ArchiveFormat::TarXz => "TAR.XZ",
         ArchiveFormat::TarZst => "TAR.ZST",
+        ArchiveFormat::TarLzma => "TAR.LZMA",
+        ArchiveFormat::TarLz => "TAR.LZ",
+        ArchiveFormat::TarLzo => "TAR.LZO",
+        ArchiveFormat::TarCompress => "TAR.Z",
+        ArchiveFormat::TarLz4 => "TAR.LZ4",
+        ArchiveFormat::TarUu => "TAR.UU",
+        ArchiveFormat::Iso => "ISO",
+        ArchiveFormat::Cab => "CAB",
+        ArchiveFormat::Cpio => "CPIO",
+        ArchiveFormat::Rpm => "RPM",
+        ArchiveFormat::Xar => "XAR",
+        ArchiveFormat::Pkg => "PKG",
+        ArchiveFormat::Dmg => "DMG",
+        ArchiveFormat::Lha => "LHA",
+        ArchiveFormat::Ar => "AR",
+        ArchiveFormat::Warc => "WARC",
+        ArchiveFormat::Mtree => "MTREE",
+        ArchiveFormat::Deb => "DEB",
+        ArchiveFormat::Msi => "MSI",
+        ArchiveFormat::Vhd => "VHD",
+        ArchiveFormat::Vmdk => "VMDK",
+        ArchiveFormat::Udf => "UDF",
         ArchiveFormat::Gzip => "GZIP",
         ArchiveFormat::Bzip2 => "BZIP2",
         ArchiveFormat::Xz => "XZ",
@@ -376,7 +447,9 @@ pub(crate) fn create_format_label(format: CreateArchiveFormat) -> &'static str {
         CreateArchiveFormat::Zip => "ZIP",
         CreateArchiveFormat::SevenZ => "7z",
         CreateArchiveFormat::TarZst => "TAR.ZST",
+        CreateArchiveFormat::TarGz => "TAR.GZ",
         CreateArchiveFormat::Tzap => "TZAP",
+        CreateArchiveFormat::AppleArchive => "AppleArchive / AAR",
     }
 }
 

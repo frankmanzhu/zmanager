@@ -55,6 +55,28 @@ fn classify_archive_path_supports_launch_extensions() {
         ("archive.tbz2", ArchiveFormat::TarBz2),
         ("archive.txz", ArchiveFormat::TarXz),
         ("archive.tar.zst", ArchiveFormat::TarZst),
+        ("archive.tar.lzma", ArchiveFormat::TarLzma),
+        ("archive.tar.lz", ArchiveFormat::TarLz),
+        ("archive.tar.lzo", ArchiveFormat::TarLzo),
+        ("archive.tar.z", ArchiveFormat::TarCompress),
+        ("archive.tar.lz4", ArchiveFormat::TarLz4),
+        ("archive.tar.uu", ArchiveFormat::TarUu),
+        ("archive.iso", ArchiveFormat::Iso),
+        ("archive.cab", ArchiveFormat::Cab),
+        ("archive.cpio", ArchiveFormat::Cpio),
+        ("archive.rpm", ArchiveFormat::Rpm),
+        ("archive.xar", ArchiveFormat::Xar),
+        ("archive.pkg", ArchiveFormat::Pkg),
+        ("archive.dmg", ArchiveFormat::Dmg),
+        ("archive.lha", ArchiveFormat::Lha),
+        ("archive.ar", ArchiveFormat::Ar),
+        ("archive.warc", ArchiveFormat::Warc),
+        ("archive.mtree", ArchiveFormat::Mtree),
+        ("archive.deb", ArchiveFormat::Deb),
+        ("archive.msi", ArchiveFormat::Msi),
+        ("archive.vhd", ArchiveFormat::Vhd),
+        ("archive.vmdk", ArchiveFormat::Vmdk),
+        ("archive.udf", ArchiveFormat::Udf),
         ("archive.gz", ArchiveFormat::Gzip),
         ("archive.bz2", ArchiveFormat::Bzip2),
         ("archive.xz", ArchiveFormat::Xz),
@@ -72,6 +94,43 @@ fn classify_archive_path_supports_launch_extensions() {
 
     for (path, expected) in cases {
         assert_eq!(classify_archive_path(Path::new(path)).0, expected, "{path}");
+    }
+}
+
+#[test]
+fn every_registered_core_format_has_a_dedicated_mobile_classification() {
+    let cases = [
+        ("tar.lzma", ArchiveFormat::TarLzma),
+        ("tar.lz", ArchiveFormat::TarLz),
+        ("tar.lzo", ArchiveFormat::TarLzo),
+        ("tar.z", ArchiveFormat::TarCompress),
+        ("tar.lz4", ArchiveFormat::TarLz4),
+        ("tar.uu", ArchiveFormat::TarUu),
+        ("iso", ArchiveFormat::Iso),
+        ("cab", ArchiveFormat::Cab),
+        ("cpio", ArchiveFormat::Cpio),
+        ("rpm", ArchiveFormat::Rpm),
+        ("xar", ArchiveFormat::Xar),
+        ("pkg", ArchiveFormat::Pkg),
+        ("dmg", ArchiveFormat::Dmg),
+        ("lha", ArchiveFormat::Lha),
+        ("ar", ArchiveFormat::Ar),
+        ("warc", ArchiveFormat::Warc),
+        ("mtree", ArchiveFormat::Mtree),
+        ("deb", ArchiveFormat::Deb),
+        ("msi", ArchiveFormat::Msi),
+        ("vhd", ArchiveFormat::Vhd),
+        ("vmdk", ArchiveFormat::Vmdk),
+        ("udf", ArchiveFormat::Udf),
+    ];
+
+    for (extension, expected) in cases {
+        let detected = classify_archive_path(Path::new(&format!("fixture.{extension}"))).0;
+        assert_eq!(detected, expected, "fixture.{extension}");
+        assert!(format_capabilities(expected).0, "{extension} must expose list support");
+        if !matches!(expected, ArchiveFormat::Mtree) {
+            assert!(format_capabilities(expected).1, "{extension} must expose extract support");
+        }
     }
 }
 
@@ -683,6 +742,49 @@ fn start_create_job_creates_zip_and_reports_terminal_summary() {
 
     let listing = listArchive(ListArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password: None })
         .expect("created zip should list through the bridge");
+    assert!(listing.entries.iter().any(|entry| entry.path.ends_with("readme.txt")));
+}
+
+#[test]
+fn start_create_job_creates_tar_gz_and_supports_verify_after_create() {
+    let _guard = JOB_TEST_LOCK.lock().expect("job test lock poisoned");
+    let temp = TestDir::new("start-create-tar-gz");
+    temp.create_dir("project");
+    temp.write_file("project/readme.txt", b"hello tar gzip bridge\n");
+    let destination = temp.path("archive.tar.gz");
+
+    let started = startCreate(StartCreateRequest {
+        source_paths: vec![temp.path("project").to_string_lossy().to_string()],
+        destination_archive_path: destination.to_string_lossy().to_string(),
+        format: CreateArchiveFormat::TarGz,
+        password: None,
+        preserve_metadata: true,
+        replace_existing: false,
+        clean_source: false,
+        verify_after_create: true,
+        excluded_paths: vec![],
+        level: 6,
+        encrypt_file_names: false,
+        volume_size: None,
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        tzap_signing_certificate: None,
+        tzap_signing_private_key: None,
+        tzap_signing_chain: vec![],
+        tzap_identity: None,
+        tzap_identity_password: None,
+    })
+    .expect("TAR.GZ create job should start");
+
+    assert_eq!(started.kind, MobileJobKind::TarGzCreate);
+    let terminal = wait_for_terminal_job(&started.job_id);
+    assert_eq!(terminal.status, MobileJobStatus::Completed);
+    assert!(destination.exists());
+    let summary = terminal.terminal_summary.expect("TAR.GZ create should include a summary");
+    assert_eq!(summary.verified, Some(true));
+    assert_eq!(summary.output_paths, vec![destination.to_string_lossy().to_string()]);
+    let listing = listArchive(ListArchiveRequest { archive_path: destination.to_string_lossy().to_string(), password: None })
+        .expect("created TAR.GZ should list through the bridge");
     assert!(listing.entries.iter().any(|entry| entry.path.ends_with("readme.txt")));
 }
 

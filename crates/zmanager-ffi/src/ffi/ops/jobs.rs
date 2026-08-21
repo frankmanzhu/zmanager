@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use zmanager_core::archive_browser::{self, BrowserEntry, BrowserEntryKind, BrowserExtractOptions};
 use zmanager_core::engine::{
-    ArchiveSource, OpenOptions, SevenZCreateOptions, TarZstdCreateOptions, TzapCreateOptions, TzapKeySource, TzapX509SigningOptions, ZipCreateOptions,
-    create_default_engine,
+    AppleArchiveCreateOptions, ArchiveSource, OpenOptions, SevenZCreateOptions, TarGzCreateOptions, TarZstdCreateOptions, TzapCreateOptions, TzapKeySource,
+    TzapX509SigningOptions, ZipCreateOptions, create_default_engine,
 };
 use zmanager_core::jobs::{self, CancellationToken, JobEvent as CoreJobEvent, JobKind as CoreJobKind};
 use zmanager_core::manifest::{ManifestFileType, PlanOptions};
@@ -360,6 +360,23 @@ pub(crate) fn run_create_job(
             .map_err(map_archive_engine_error)?;
             JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
         }
+        CreateArchiveFormat::TarGz => {
+            let options = TarGzCreateOptions {
+                preserve_metadata: input.preserve_metadata,
+                replace_existing: input.replace_existing,
+                level: i32::try_from(level).unwrap_or(0),
+            };
+            let report = jobs::run_engine_create_job_from_sources(
+                &input.source_paths,
+                destination,
+                &zmanager_core::engine::CreateOptions::TarGz(options),
+                &plan_options,
+                token,
+                sink,
+            )
+            .map_err(map_archive_engine_error)?;
+            JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
+        }
         CreateArchiveFormat::Tzap => {
             let options = TzapCreateOptions {
                 key_source: input.password.map(|password| TzapKeySource::Passphrase(SecretString::from(password))).unwrap_or(TzapKeySource::NoPassword),
@@ -376,6 +393,24 @@ pub(crate) fn run_create_job(
                 &input.source_paths,
                 destination,
                 &zmanager_core::engine::CreateOptions::Tzap(options),
+                &plan_options,
+                token,
+                sink,
+            )
+            .map_err(map_archive_engine_error)?;
+            JobTerminalSummary::from(ArchiveJobReport::from(report).with_output_path(destination))
+        }
+        CreateArchiveFormat::AppleArchive => {
+            let options = AppleArchiveCreateOptions {
+                preserve_metadata: input.preserve_metadata,
+                replace_existing: input.replace_existing,
+                password: input.password,
+                ..AppleArchiveCreateOptions::default()
+            };
+            let report = jobs::run_engine_create_job_from_sources(
+                &input.source_paths,
+                destination,
+                &zmanager_core::engine::CreateOptions::AppleArchive(options),
                 &plan_options,
                 token,
                 sink,
@@ -750,7 +785,15 @@ fn tzap_signing_options(input: &CreateJobInput) -> Option<TzapX509SigningOptions
 /// path. All current formats do; a format without a test path must return
 /// false here instead of silently offering verification.
 pub(crate) fn create_verify_supported(format: CreateArchiveFormat) -> bool {
-    matches!(format, CreateArchiveFormat::Zip | CreateArchiveFormat::SevenZ | CreateArchiveFormat::TarZst | CreateArchiveFormat::Tzap)
+    matches!(
+        format,
+        CreateArchiveFormat::Zip
+            | CreateArchiveFormat::SevenZ
+            | CreateArchiveFormat::TarZst
+            | CreateArchiveFormat::TarGz
+            | CreateArchiveFormat::Tzap
+            | CreateArchiveFormat::AppleArchive
+    )
 }
 
 fn apply_create_verification(summary: &mut JobTerminalSummary, destination: &Path, password: Option<String>, sink: &mut dyn jobs::JobEventSink) {
@@ -775,7 +818,9 @@ pub(crate) fn mobile_create_job_kind(format: CreateArchiveFormat) -> MobileJobKi
         CreateArchiveFormat::Zip => MobileJobKind::ZipCreate,
         CreateArchiveFormat::SevenZ => MobileJobKind::SevenZCreate,
         CreateArchiveFormat::TarZst => MobileJobKind::TarZstdCreate,
+        CreateArchiveFormat::TarGz => MobileJobKind::TarGzCreate,
         CreateArchiveFormat::Tzap => MobileJobKind::TzapCreate,
+        CreateArchiveFormat::AppleArchive => MobileJobKind::AppleArchiveCreate,
     }
 }
 
