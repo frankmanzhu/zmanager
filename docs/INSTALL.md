@@ -20,14 +20,14 @@ a release or install elsewhere:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
-  | ZMANAGER_VERSION=v2.0.1 ZMANAGER_INSTALL_DIR="$HOME/bin" sh
+  | ZMANAGER_VERSION=v2.1.0 ZMANAGER_INSTALL_DIR="$HOME/bin" sh
 ```
 
 Use `sudo env` for system-wide locations:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
-  | sudo env ZMANAGER_VERSION=v2.0.1 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
+  | sudo env ZMANAGER_VERSION=v2.1.0 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
 ```
 
 The default installs the **full** build (with online identity features such as
@@ -65,8 +65,8 @@ Verify checksums before installing.
 Unix:
 
 ```sh
-curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.0.1/SHA256SUMS
-curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.0.1/zm-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.1.0/SHA256SUMS
+curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.1.0/zm-aarch64-apple-darwin.tar.gz
 shasum -a 256 -c SHA256SUMS --ignore-missing
 ```
 
@@ -132,8 +132,8 @@ without installing extra runtime packages. The install script is the recommended
 path; use the manual flow when you want to inspect or stage the tarball yourself.
 
 ```sh
-curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.0.1/SHA256SUMS
-curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.0.1/zm-x86_64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.1.0/SHA256SUMS
+curl -LO https://github.com/tzap-org/zmanager/releases/download/v2.1.0/zm-x86_64-unknown-linux-musl.tar.gz
 sha256sum -c SHA256SUMS --ignore-missing
 tar -xzf zm-x86_64-unknown-linux-musl.tar.gz
 ./zm --version
@@ -154,14 +154,14 @@ elsewhere:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
-  | ZMANAGER_VERSION=v2.0.1 ZMANAGER_INSTALL_DIR="$HOME/bin" sh
+  | ZMANAGER_VERSION=v2.1.0 ZMANAGER_INSTALL_DIR="$HOME/bin" sh
 ```
 
 Use `sudo env` for system-wide locations:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
-  | sudo env ZMANAGER_VERSION=v2.0.1 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
+  | sudo env ZMANAGER_VERSION=v2.1.0 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
 ```
 
 ## Preview Builds (developers)
@@ -212,8 +212,8 @@ generate it locally from release artifacts:
 
 ```sh
 scripts/generate-package-metadata.sh \
-  v2.0.1 \
-  https://github.com/tzap-org/zmanager/releases/download/v2.0.1 \
+  v2.1.0 \
+  https://github.com/tzap-org/zmanager/releases/download/v2.1.0 \
   dist/SHA256SUMS \
   dist/package-metadata
 ```
