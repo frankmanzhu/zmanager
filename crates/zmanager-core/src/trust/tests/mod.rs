@@ -252,7 +252,7 @@ fn certificate_profile_rejects_root_profile_errors() {
 
 #[test]
 fn certificate_profile_rejects_intermediate_path_and_policy_errors() {
-    for config in [ChainConfig { platform_path_len: 1, ..ChainConfig::default() }, ChainConfig { omit_platform_ca_policy: true, ..ChainConfig::default() }] {
+    for config in [ChainConfig { omit_platform_ca_policy: true, ..ChainConfig::default() }] {
         let fixture = certificate_fixture(config);
         let pins = current_pin_set(&fixture.root_pin);
 
@@ -261,6 +261,30 @@ fn certificate_profile_rejects_intermediate_path_and_policy_errors() {
             Err(TzapCertificateProfileError::IntermediateProfile { .. })
         ));
     }
+}
+
+#[test]
+fn certificate_profile_accepts_org_capable_platform_intermediate_for_a_leaf_only_chain() {
+    // Reproduces a real staging incident: cert-root-server issues both personal
+    // leaves and organization intermediates from the *same* platform issuer, so
+    // that issuer's pathLenConstraint is 1 (PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE)
+    // to permit the organization-intermediate case. A personal enrollment chain
+    // (leaf directly under the platform intermediate, no org intermediate) has
+    // zero subordinate CAs below it, which pathlen 1 permits under RFC 5280's
+    // "at most" semantics - openssl verify accepts this chain. The client
+    // previously required pathlen to equal exactly 0 for a leaf-only chain and
+    // rejected every personal certificate issued by an org-capable platform
+    // issuer; this must now succeed like any other valid chain.
+    let fixture = certificate_fixture(ChainConfig {
+        platform_path_len: super::PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE,
+        ..ChainConfig::default()
+    });
+    let pins = current_pin_set(&fixture.root_pin);
+
+    let validation = validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default())
+        .expect("a platform intermediate with a looser-than-required pathlen must still validate a leaf-only chain");
+
+    assert_eq!(validation.trust_anchor_type, TzapTrustAnchorType::OfficialTzap);
 }
 
 #[test]

@@ -646,11 +646,55 @@ pub(crate) fn plan_browser_entry(planner: &mut ExtractionSafetyPlanner<'_>, entr
         BrowserEntryKind::File | BrowserEntryKind::FileCopy => ExtractionEntryKind::File,
         BrowserEntryKind::Directory => ExtractionEntryKind::Directory,
         BrowserEntryKind::Symlink | BrowserEntryKind::Hardlink => {
-            let reason = "Link target metadata is required before mobile can safely plan this entry.";
-            let archive_path = entry.path.clone();
-            return PlanEntryOutcome::EntryWithWarning {
-                plan_entry: blocked_plan_entry(entry, kind, reason),
-                warning: bridge_warning(format!("Blocked {} until zmanager-core exposes link target metadata for mobile planning.", archive_path)),
+            let Some(link_target) = entry.link_target.as_deref() else {
+                let reason = "Link target metadata is required before mobile can safely plan this entry.";
+                let archive_path = entry.path.clone();
+                return PlanEntryOutcome::EntryWithWarning {
+                    plan_entry: blocked_plan_entry(entry, kind, reason),
+                    warning: bridge_warning(format!("Blocked {archive_path} because the archive omitted its link target.")),
+                };
+            };
+            let target = PathBuf::from(link_target);
+            let extraction_kind = if matches!(entry.kind, BrowserEntryKind::Symlink) {
+                ExtractionEntryKind::Symlink { target }
+            } else {
+                ExtractionEntryKind::Hardlink { target }
+            };
+            // Link targets are validated by the same Rust safety planner as
+            // ordinary paths; do not treat them as an opaque mobile-only
+            // restriction.
+            let safety_entry = ExtractionEntry {
+                archive_path: entry.path.clone(),
+                kind: extraction_kind,
+                uncompressed_size: entry.size,
+                compressed_size: entry.compressed_size,
+            };
+            return match planner.validate_entry(&safety_entry) {
+                Ok(ExtractionDecision::Write { normalized_archive_path, destination_path, replace_existing, .. }) => {
+                    PlanEntryOutcome::Entry(ExtractionPlanEntry {
+                        archive_path: entry.path,
+                        normalized_path: Some(normalized_archive_path),
+                        destination_path: Some(destination_path.to_string_lossy().to_string()),
+                        kind,
+                        status: ExtractionPlanEntryStatus::Write,
+                        reason: None,
+                        size: entry.size,
+                        compressed_size: entry.compressed_size,
+                        replace_existing,
+                    })
+                }
+                Ok(ExtractionDecision::Skip { normalized_archive_path, reason }) => PlanEntryOutcome::Entry(ExtractionPlanEntry {
+                    archive_path: entry.path,
+                    normalized_path: Some(normalized_archive_path),
+                    destination_path: None,
+                    kind,
+                    status: ExtractionPlanEntryStatus::Skip,
+                    reason: Some(reason),
+                    size: entry.size,
+                    compressed_size: entry.compressed_size,
+                    replace_existing: false,
+                }),
+                Err(error) => PlanEntryOutcome::Entry(blocked_plan_entry_from_safety_error(entry, kind, error)),
             };
         }
         BrowserEntryKind::Special => {

@@ -287,6 +287,7 @@ pub fn listArchive(request: ListArchiveRequest) -> Result<ListArchiveResult, Zma
             size: entry.size,
             compressed_size: entry.compressed_size,
             modified_at: entry.modified,
+            link_target: entry.link_target,
         });
     }
 

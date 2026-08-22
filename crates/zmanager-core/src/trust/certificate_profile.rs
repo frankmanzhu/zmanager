@@ -363,19 +363,32 @@ fn validate_intermediates(chain: &[X509Certificate<'_>], options: &TzapCertifica
         }
         let has_org_intermediate = chain.len() == MAX_TZAP_CHAIN_LEN;
         let role = if has_org_intermediate && index == 1 { CertificateRole::OrganizationIntermediate } else { CertificateRole::PlatformIntermediate };
-        let expected_path_len = match role {
-            CertificateRole::PlatformIntermediate if has_org_intermediate => PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE,
-            CertificateRole::PlatformIntermediate => PLATFORM_LEAF_ONLY_PATH_LEN,
-            CertificateRole::OrganizationIntermediate => ORG_INTERMEDIATE_PATH_LEN,
-            CertificateRole::Root => unreachable!(),
-        };
 
         let basic_constraints = certificate
             .basic_constraints()
             .map_err(|_| TzapCertificateProfileError::IntermediateProfile { index, reason: "basic constraints are invalid or duplicated" })?
             .ok_or(TzapCertificateProfileError::IntermediateProfile { index, reason: "missing critical basic constraints" })?;
-        if !basic_constraints.critical || !basic_constraints.value.ca || basic_constraints.value.path_len_constraint != Some(expected_path_len) {
-            return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "intermediate must be a critical CA with the expected path length" });
+        // pathLenConstraint is a ceiling on how many more CAs may follow, not a
+        // per-chain exact count: RFC 5280 ss4.2.1.9 lets a stricter value pass
+        // any chain with fewer subordinate CAs than the ceiling allows. A
+        // single platform issuer legitimately signs both organization
+        // intermediates (needs pathlen >= 1) and leaf certificates directly
+        // (needs pathlen >= 0) with the *same* certificate, so requiring an
+        // exact match per scenario rejected valid leaf-only chains issued by
+        // an org-capable platform issuer. The organization intermediate role
+        // keeps an exact match: it must never be allowed to sign further
+        // sub-CAs, so a looser-than-zero pathlen is a real profile violation,
+        // not just an unused allowance.
+        let remaining_cas_below = u32::try_from(index - 1).unwrap_or(u32::MAX);
+        let path_len_ok = match role {
+            CertificateRole::PlatformIntermediate => {
+                basic_constraints.value.path_len_constraint.is_some_and(|actual| actual >= remaining_cas_below)
+            }
+            CertificateRole::OrganizationIntermediate => basic_constraints.value.path_len_constraint == Some(ORG_INTERMEDIATE_PATH_LEN),
+            CertificateRole::Root => unreachable!(),
+        };
+        if !basic_constraints.critical || !basic_constraints.value.ca || !path_len_ok {
+            return Err(TzapCertificateProfileError::IntermediateProfile { index, reason: "intermediate must be a critical CA with a sufficient path length" });
         }
 
         require_ca_key_usage(certificate, role, Some(index))?;

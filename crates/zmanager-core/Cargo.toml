@@ -53,11 +53,12 @@ memchr = "2.7"
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
-# Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4).
-# Switch back to `dpp = "0.4.2"` once upstream releases the fix.
-dpp = { git = "https://github.com/frankmanzhu/dpp", branch = "fix-apfs-symlink-xattr" }
+# Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4)
+# and XAR symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/5), combined
+# on the `zmanager-integration` branch since zmanager needs both before either merges.
+# Switch back to `dpp = "0.4.2"` once upstream releases both fixes.
+dpp = { git = "https://github.com/frankmanzhu/dpp", branch = "zmanager-integration" }
 delharc = { version = "0.8.0", default-features = false, features = ["std", "lh1", "lz", "lhx"] }
-warc = { version = "0.4.0", default-features = false }
 # Forensic disk-image stack: VHD/VMDK containers, MBR/GPT volume systems, and
 # NTFS/FAT/ext4/UDF filesystems (SecurityRonin family, Apache-2.0/MIT, read-only).
 # Path dependency on the sibling checkout so engine/adapter bugs can be patched

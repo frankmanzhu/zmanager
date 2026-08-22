@@ -21,6 +21,8 @@ pub struct XarEntry {
     pub kind: BrowserEntryKind,
     /// Uncompressed file size when present.
     pub size: u64,
+    /// Relative target for a symbolic-link entry.
+    pub link_target: Option<String>,
     source: dpp::xara::XarFile,
 }
 
@@ -132,11 +134,7 @@ pub fn extract(
         let kind = match entry.kind {
             BrowserEntryKind::File => ExtractionEntryKind::File,
             BrowserEntryKind::Directory => ExtractionEntryKind::Directory,
-            BrowserEntryKind::Symlink => {
-                let mut target = Vec::new();
-                let _ = read_entry_to(path, archive.header(), &entry.source, &mut target)?;
-                ExtractionEntryKind::Symlink { target: PathBuf::from(String::from_utf8_lossy(&target).into_owned()) }
-            }
+            BrowserEntryKind::Symlink => ExtractionEntryKind::Symlink { target: PathBuf::from(entry.link_target.clone().unwrap_or_default()) },
             BrowserEntryKind::Hardlink | BrowserEntryKind::Special | BrowserEntryKind::FileCopy => {
                 return Err(parser_error(path, format!("unsupported XAR entry kind for {}", entry.path)));
             }
@@ -286,11 +284,13 @@ fn collect_entries<R: io::Read + io::Seek>(archive: &dpp::xara::XarArchive<R>, p
             dpp::xara::XarFileType::Directory => BrowserEntryKind::Directory,
             dpp::xara::XarFileType::Symlink => BrowserEntryKind::Symlink,
         };
+        let link_target = if kind == BrowserEntryKind::Symlink { source.link.clone() } else { None };
         entries.push(XarEntry {
             index: entries.len(),
             path: normalized_path,
             kind,
             size: source.data.as_ref().map_or(0, |data| data.size),
+            link_target,
             source: source.clone(),
         });
     }
@@ -339,6 +339,8 @@ mod tests {
         assert!(!entries.is_empty());
         let has_readme = entries.iter().any(|entry| entry.path.ends_with("README.txt"));
         assert!(has_readme, "XAR entries should contain README.txt");
+        let readme_link = entries.iter().find(|entry| entry.path.ends_with("readme-link.txt"));
+        assert_eq!(readme_link.and_then(|entry| entry.link_target.as_deref()), Some("../README.txt"));
 
         // 2. Test
         let test_report = test(&xar_file, &TestOptions::default()).unwrap();

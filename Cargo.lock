@@ -227,7 +227,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "apfs"
 version = "0.2.4"
-source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -777,7 +777,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a347dcabdae9c31b0825fd6a8bed285ec9c2acb89c47827126d52fa4f59cece3"
 dependencies = [
  "fnv",
- "uuid 1.24.0",
+ "uuid",
  "web-time",
 ]
 
@@ -1270,7 +1270,7 @@ dependencies = [
 [[package]]
 name = "dpp"
 version = "0.4.2"
-source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
 dependencies = [
  "apfs",
  "hfsplus",
@@ -1359,7 +1359,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1451,7 +1451,7 @@ dependencies = [
  "pbkdf2 0.12.2",
  "sha2 0.10.9",
  "thiserror",
- "uuid 1.24.0",
+ "uuid",
  "xts-mode",
 ]
 
@@ -1798,7 +1798,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hfsplus"
 version = "0.2.4"
-source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -2470,7 +2470,7 @@ dependencies = [
  "byteorder",
  "cfb",
  "encoding_rs",
- "uuid 1.24.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2688,7 +2688,7 @@ dependencies = [
 [[package]]
 name = "pbzx"
 version = "0.3.1"
-source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -3067,7 +3067,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3617,10 +3617,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3919,7 +3919,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "unicode-normalization",
- "uuid 1.24.0",
+ "uuid",
  "windows-sys 0.61.2",
  "xattr",
  "zeroize",
@@ -3965,7 +3965,7 @@ dependencies = [
 [[package]]
 name = "udif"
 version = "0.3.4"
-source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
 dependencies = [
  "base64",
  "byteorder",
@@ -4189,15 +4189,6 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom 0.2.17",
-]
-
-[[package]]
-name = "uuid"
 version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
@@ -4278,18 +4269,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
 dependencies = [
  "try-lock",
-]
-
-[[package]]
-name = "warc"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3afd4100d197bbba734febd5eb3b854ebe6e5d42bde935f603a6732b9dedcc0d"
-dependencies = [
- "chrono",
- "nom",
- "url",
- "uuid 0.8.2",
 ]
 
 [[package]]
@@ -4622,7 +4601,7 @@ dependencies = [
 [[package]]
 name = "xara"
 version = "0.3.2"
-source = "git+https://github.com/frankmanzhu/dpp?branch=fix-apfs-symlink-xattr#27e771ac593e6ea9780b154b98898a724f8cdcd1"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
 dependencies = [
  "byteorder",
  "flate2",
@@ -4957,7 +4936,6 @@ dependencies = [
  "tzap-core",
  "tzap-plugin-keywrap",
  "tzap-plugin-signing",
- "warc",
  "windows-sys 0.61.2",
  "x509-parser",
  "xattr",

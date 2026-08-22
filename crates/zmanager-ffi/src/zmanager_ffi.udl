@@ -176,6 +176,7 @@ dictionary ArchiveEntry {
     u64? size;
     u64? compressed_size;
     string? modified_at;
+    string? link_target;
 };
 
 dictionary ListArchiveRequest {

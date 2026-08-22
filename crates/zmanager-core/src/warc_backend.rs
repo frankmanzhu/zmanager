@@ -12,10 +12,11 @@ use crate::safety::{
 use std::fmt;
 use std::fs::File;
 use std::io;
-use std::io::BufReader;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const RECORDS_DIRECTORY: &str = "records";
+const MAX_WARC_RECORD_BYTES: u64 = 512 * 1024 * 1024;
 
 /// One normalized WARC record entry.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -83,47 +84,33 @@ impl From<ExtractionSafetyError> for WarcError {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ParsedWarcRecord {
+    entry: WarcEntry,
+    body_offset: u64,
+}
+
 /// Lists WARC records without buffering their bodies.
 pub fn list(path: impl AsRef<Path>) -> Result<Vec<WarcEntry>, WarcError> {
     let path = path.as_ref();
-    let mut reader = open(path)?;
-    let mut stream = reader.stream_records();
-    let mut entries = Vec::new();
-    let mut used_paths = Vec::new();
-    while let Some(record) = stream.next_item() {
-        let record = record.map_err(|source| warc_error(path, source))?;
-        let index = entries.len();
-        let record_type = record.warc_type().to_string();
-        let path_name = record_path(&record, index, &record_type, &mut used_paths)?;
-        entries.push(WarcEntry { index, path: path_name, size: record.content_length(), record_type });
-    }
-    Ok(entries)
+    Ok(parse_records(path)?.into_iter().map(|record| record.entry).collect())
 }
 
 /// Verifies WARC headers and streams selected record bodies to a sink.
 pub fn test(path: impl AsRef<Path>, options: &TestOptions) -> Result<WarcReport, WarcError> {
     let path = path.as_ref();
-    let mut reader = open(path)?;
-    let mut stream = reader.stream_records();
     let mut report = WarcReport::default();
-    let mut used_paths = Vec::new();
-    while let Some(record) = stream.next_item() {
+    let records = parse_records(path)?;
+    let mut source = File::open(path).map_err(|source| io_error(path, source))?;
+    for record in records {
         if options.is_cancelled() {
             return Err(WarcError::Cancelled);
         }
-        let mut record = record.map_err(|source| warc_error(path, source))?;
-        let index = report.entries.saturating_add(report.skipped_entries);
-        let record_type = record.warc_type().to_string();
-        let entry_path = record_path(&record, index, &record_type, &mut used_paths)?;
-        if !options.selects(&entry_path) {
+        if !options.selects(&record.entry.path) {
             report.skipped_entries = report.skipped_entries.saturating_add(1);
             continue;
         }
-        let expected = record.content_length();
-        let bytes = io::copy(&mut record, &mut io::sink()).map_err(|source| io_error(path, source))?;
-        if bytes != expected {
-            return Err(invalid(path, format!("record {index} decoded to {bytes} bytes, expected {expected}")));
-        }
+        let bytes = copy_body_from(&mut source, path, &record, &mut io::sink())?;
         report.entries = report.entries.saturating_add(1);
         report.bytes = report.bytes.saturating_add(bytes);
     }
@@ -141,36 +128,26 @@ pub fn extract(
     let path = path.as_ref();
     let destination = destination.as_ref();
     let root = crate::safety::prepare_destination_root(destination).map_err(|source| io_error(destination, source))?;
-    let mut reader = open(path)?;
-    let mut stream = reader.stream_records();
     let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(&root, policy, resolver);
     let mut report = WarcReport::default();
-    let mut used_paths = Vec::new();
-    while let Some(record) = stream.next_item() {
+    let records = parse_records(path)?;
+    let mut source = File::open(path).map_err(|source| io_error(path, source))?;
+    for record in records {
         if cancellation.is_some_and(crate::jobs::CancellationToken::is_cancelled) {
             return Err(WarcError::Cancelled);
         }
-        let mut record = record.map_err(|source| warc_error(path, source))?;
-        let index = report.entries.saturating_add(report.skipped_entries);
-        let record_type = record.warc_type().to_string();
-        let entry_path = record_path(&record, index, &record_type, &mut used_paths)?;
-        let expected = record.content_length();
         let decision = planner.validate_entry(&ExtractionEntry {
-            archive_path: entry_path.clone(),
+            archive_path: record.entry.path.clone(),
             kind: ExtractionEntryKind::File,
-            uncompressed_size: Some(expected),
-            compressed_size: Some(expected),
+            uncompressed_size: Some(record.entry.size),
+            compressed_size: Some(record.entry.size),
         })?;
         let ExtractionDecision::Write { destination_path, replace_existing, .. } = decision else {
             report.skipped_entries = report.skipped_entries.saturating_add(1);
             continue;
         };
         let mut output = crate::atomic_file::AtomicOutputFile::create(&destination_path).map_err(|source| io_error(&destination_path, source))?;
-        let bytes = io::copy(&mut record, output.file_mut().map_err(|source| io_error(&destination_path, source))?)
-            .map_err(|source| io_error(&destination_path, source))?;
-        if bytes != expected {
-            return Err(invalid(path, format!("record {index} decoded to {bytes} bytes, expected {expected}")));
-        }
+        let bytes = copy_body_from(&mut source, path, &record, output.file_mut().map_err(|source| io_error(&destination_path, source))?)?;
         output.commit_with_replace(replace_existing).map_err(|source| io_error(&destination_path, source))?;
         report.entries = report.entries.saturating_add(1);
         report.bytes = report.bytes.saturating_add(bytes);
@@ -181,26 +158,11 @@ pub fn extract(
 /// Copies one retained WARC record body to a caller-owned writer.
 pub fn copy(path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Write) -> Result<u64, WarcError> {
     let path = path.as_ref();
-    let mut reader = open(path)?;
-    let mut stream = reader.stream_records();
-    let mut used_paths = Vec::new();
-    for index in 0..=entry_index {
-        let Some(record) = stream.next_item() else {
-            return Err(invalid(path, "retained WARC entry ID is not present"));
-        };
-        let mut record = record.map_err(|source| warc_error(path, source))?;
-        let record_type = record.warc_type().to_string();
-        let _entry_path = record_path(&record, index, &record_type, &mut used_paths)?;
-        if index == entry_index {
-            let expected = record.content_length();
-            let bytes = io::copy(&mut record, writer).map_err(|source| io_error(path, source))?;
-            if bytes != expected {
-                return Err(invalid(path, format!("record {index} decoded to {bytes} bytes, expected {expected}")));
-            }
-            return Ok(bytes);
-        }
-    }
-    Err(invalid(path, "retained WARC entry ID is not present"))
+    let record = parse_records(path)?
+        .into_iter()
+        .find(|record| record.entry.index == entry_index)
+        .ok_or_else(|| invalid(path, "retained WARC entry ID is not present"))?;
+    copy_body(path, &record, writer)
 }
 
 /// Copies one retained WARC record by path and duplicate occurrence.
@@ -221,16 +183,8 @@ pub fn copy_by_path_occurrence(path: impl AsRef<Path>, selected_path: &str, sele
     copy(path, entry_index, writer)
 }
 
-fn record_path<T: io::Read>(
-    record: &warc::Record<warc::StreamingBody<'_, T>>,
-    index: usize,
-    record_type: &str,
-    used: &mut Vec<String>,
-) -> Result<String, WarcError> {
-    let candidate = record
-        .header(warc::WarcHeader::TargetURI)
-        .and_then(|target| target_path(&target))
-        .unwrap_or_else(|| format!("{RECORDS_DIRECTORY}/{index:08}-{record_type}"));
+fn record_path(target: Option<&str>, index: usize, record_type: &str, used: &mut Vec<String>) -> Result<String, WarcError> {
+    let candidate = target.and_then(target_path).unwrap_or_else(|| format!("{RECORDS_DIRECTORY}/{index:08}-{record_type}"));
     let mut path = candidate.clone();
     if used.iter().any(|existing| existing == &path) {
         path = format!("{candidate}~{index}");
@@ -240,6 +194,98 @@ fn record_path<T: io::Read>(
     }
     used.push(path.clone());
     Ok(path)
+}
+
+fn parse_records(path: &Path) -> Result<Vec<ParsedWarcRecord>, WarcError> {
+    let file = File::open(path).map_err(|source| io_error(path, source))?;
+    let mut reader = BufReader::new(file);
+    let mut records = Vec::new();
+    let mut used_paths = Vec::new();
+    loop {
+        let Some(first_line) = read_nonempty_line(&mut reader, path)? else { break };
+        if !first_line.starts_with(b"WARC/") {
+            return Err(invalid(path, "record does not start with a WARC version line"));
+        }
+        let mut record_type = None;
+        let mut target = None;
+        let mut content_length = None;
+        loop {
+            let line = read_line(&mut reader, path)?;
+            if line.is_empty() {
+                break;
+            }
+            let Some(separator) = line.iter().position(|byte| *byte == b':') else {
+                return Err(invalid(path, "WARC header is missing a colon"));
+            };
+            let (name, value) = line.split_at(separator);
+            let value = &value[1..];
+            let name = String::from_utf8_lossy(name).to_ascii_lowercase();
+            let value = String::from_utf8(value.trim_ascii().to_vec()).map_err(|_| invalid(path, "WARC header is not UTF-8"))?;
+            match name.as_str() {
+                "warc-type" => record_type = Some(value),
+                "warc-target-uri" => target = Some(value),
+                "content-length" => {
+                    content_length = Some(value.parse::<u64>().map_err(|_| invalid(path, "WARC content length is invalid"))?);
+                }
+                _ => {}
+            }
+        }
+        let record_type = record_type.ok_or_else(|| invalid(path, "WARC-Type header is missing"))?;
+        let size = content_length.ok_or_else(|| invalid(path, "Content-Length header is missing"))?;
+        if size > MAX_WARC_RECORD_BYTES {
+            return Err(invalid(path, format!("WARC record exceeds {MAX_WARC_RECORD_BYTES} byte limit")));
+        }
+        let body_offset = reader.stream_position().map_err(|source| io_error(path, source))?;
+        let body_end = body_offset.checked_add(size).ok_or_else(|| invalid(path, "WARC record length overflows"))?;
+        reader.seek(SeekFrom::Start(body_end)).map_err(|source| io_error(path, source))?;
+        let mut separator = [0_u8; 4];
+        reader.read_exact(&mut separator).map_err(|source| io_error(path, source))?;
+        if separator != *b"\r\n\r\n" {
+            return Err(invalid(path, "WARC record is missing its CRLF separator"));
+        }
+        let index = records.len();
+        let path_name = record_path(target.as_deref(), index, &record_type, &mut used_paths)?;
+        records.push(ParsedWarcRecord { entry: WarcEntry { index, path: path_name, size, record_type }, body_offset });
+    }
+    Ok(records)
+}
+
+fn read_nonempty_line(reader: &mut BufReader<File>, path: &Path) -> Result<Option<Vec<u8>>, WarcError> {
+    loop {
+        let line = read_line(reader, path)?;
+        if line.is_empty() {
+            return Ok(None);
+        }
+        if !line.iter().all(u8::is_ascii_whitespace) {
+            return Ok(Some(line));
+        }
+    }
+}
+
+fn read_line(reader: &mut BufReader<File>, path: &Path) -> Result<Vec<u8>, WarcError> {
+    let mut line = Vec::new();
+    let bytes = reader.read_until(b'\n', &mut line).map_err(|source| io_error(path, source))?;
+    if bytes == 0 {
+        return Ok(Vec::new());
+    }
+    while line.last().is_some_and(|byte| *byte == b'\n' || *byte == b'\r') {
+        line.pop();
+    }
+    Ok(line)
+}
+
+fn copy_body(path: &Path, record: &ParsedWarcRecord, writer: &mut dyn io::Write) -> Result<u64, WarcError> {
+    let mut file = File::open(path).map_err(|source| io_error(path, source))?;
+    copy_body_from(&mut file, path, record, writer)
+}
+
+fn copy_body_from(file: &mut File, path: &Path, record: &ParsedWarcRecord, writer: &mut dyn io::Write) -> Result<u64, WarcError> {
+    file.seek(SeekFrom::Start(record.body_offset)).map_err(|source| io_error(path, source))?;
+    let bytes = io::copy(&mut file.take(record.entry.size), writer).map_err(|source| io_error(path, source))?;
+    if bytes != record.entry.size {
+        return Err(invalid(path, format!("record {} decoded to {bytes} bytes, expected {}", record.entry.index, record.entry.size)));
+    }
+    Ok(bytes)
 }
 
 fn target_path(target: &str) -> Option<String> {
@@ -253,18 +299,6 @@ fn target_path(target: &str) -> Option<String> {
         target.to_owned()
     };
     crate::safety::normalize_archive_path(raw.trim_start_matches('/')).ok()
-}
-
-fn warc_error(path: &Path, error: warc::Error) -> WarcError {
-    match error {
-        warc::Error::ReadData(source) => io_error(path, source),
-        other => invalid(path, other),
-    }
-}
-
-fn open(path: &Path) -> Result<warc::WarcReader<BufReader<File>>, WarcError> {
-    let file = File::open(path).map_err(|source| io_error(path, source))?;
-    Ok(warc::WarcReader::new(BufReader::new(file)))
 }
 
 fn invalid(path: &Path, error: impl fmt::Display) -> WarcError {

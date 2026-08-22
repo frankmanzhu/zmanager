@@ -66,6 +66,8 @@ pub struct VirtualDiskListEntry {
     pub kind: VirtualDiskEntryKind,
     /// Declared uncompressed size.
     pub size: u64,
+    /// Relative target for a symbolic-link entry.
+    pub link_target: Option<String>,
 }
 
 /// Disk-image extraction report.
@@ -359,14 +361,21 @@ fn list_virtual_disk_inner(archive_path: impl AsRef<Path>) -> Result<Vec<Virtual
     let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
     Ok(entries
         .into_iter()
-        .map(|(entry, _)| VirtualDiskListEntry {
-            path: entry.archive_path,
-            kind: match entry.kind {
-                ExtractionEntryKind::Directory => VirtualDiskEntryKind::Directory,
-                ExtractionEntryKind::Symlink { .. } => VirtualDiskEntryKind::Symlink,
-                _ => VirtualDiskEntryKind::File,
-            },
-            size: entry.uncompressed_size.unwrap_or(0),
+        .map(|(entry, _)| {
+            let link_target = match &entry.kind {
+                ExtractionEntryKind::Symlink { target } => Some(target.to_string_lossy().into_owned()),
+                _ => None,
+            };
+            VirtualDiskListEntry {
+                path: entry.archive_path,
+                kind: match entry.kind {
+                    ExtractionEntryKind::Directory => VirtualDiskEntryKind::Directory,
+                    ExtractionEntryKind::Symlink { .. } => VirtualDiskEntryKind::Symlink,
+                    _ => VirtualDiskEntryKind::File,
+                },
+                size: entry.uncompressed_size.unwrap_or(0),
+                link_target,
+            }
         })
         .collect())
 }

@@ -155,6 +155,7 @@ pub struct ArchiveEntry {
     pub size: Option<u64>,
     pub compressed_size: Option<u64>,
     pub modified_at: Option<String>,
+    pub link_target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

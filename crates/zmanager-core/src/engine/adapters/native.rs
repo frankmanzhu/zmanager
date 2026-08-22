@@ -882,6 +882,7 @@ fn map_xar_entries(entries: Vec<crate::xar_backend::XarEntry>) -> Vec<EngineEntr
             compressed_size: None,
             encrypted: Some(false),
             method: Some("xar".to_owned()),
+            link_target: entry.link_target,
             ..EngineEntry::default()
         })
         .collect()
@@ -2777,7 +2778,7 @@ fn map_virtual_disk_entries(entries: Vec<virtual_disk_backend::VirtualDiskListEn
             method: None,
             crc: None,
             comment: None,
-            link_target: None,
+            link_target: entry.link_target,
             ..EngineEntry::default()
         })
         .collect()
