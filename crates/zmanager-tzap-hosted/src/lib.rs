@@ -36,6 +36,9 @@ pub mod enrollment_client;
 pub(crate) mod http_client;
 #[path = "auth/local_tzap_service.rs"]
 pub mod local_tzap_service;
+#[cfg(feature = "reqwest-transport")]
+#[path = "auth/reqwest_transport.rs"]
+pub mod reqwest_transport;
 #[path = "auth/status_client.rs"]
 pub mod status_client;
 #[path = "auth/tzap_service.rs"]

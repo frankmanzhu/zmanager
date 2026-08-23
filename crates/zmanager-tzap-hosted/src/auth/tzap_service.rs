@@ -20,6 +20,8 @@ use openssl::x509::{X509, X509NameBuilder};
 use serde_json::{Value, json};
 
 use crate::trust;
+#[cfg(feature = "reqwest-transport")]
+use crate::tzap_service_auth::load_pending_auth_metadata;
 use crate::tzap_service_auth::{
     AUTH_PENDING_FILE, TzapFfiSessionStore, current_unix_seconds, default_tzap_state_dir, load_pending_auth, parse_auth_environment, save_pending_auth,
     session_summary_json, session_summary_json_at,
@@ -28,6 +30,8 @@ use crate::tzap_service_auth::{
 use crate::auth_client::TzapSessionStore;
 use crate::engine::tzap::TzapPublicSignatureStatus;
 use crate::engine::{TzapCreateOptions, TzapKeySource, TzapX509TrustOptions};
+#[cfg(feature = "reqwest-transport")]
+use crate::enrollment_client::TzapEnrollmentCertificateValidator;
 use crate::jobs::{CancellationToken, JobEvent};
 use crate::local_identity_store::{
     FileTzapLocalIdentityStore, TzapContactRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory,
@@ -718,7 +722,24 @@ pub fn tzap_auth_callback_json(request_json: &str) -> String {
         let pending = load_pending_auth(&context.state_dir)?;
         let state = required_request_string(&request, "state")?;
         let redirect_uri = request_string(&request, "redirect_uri")?.unwrap_or_else(|| DEFAULT_TZAP_REDIRECT_URI.into());
-        let relay_body = required_request_string(&request, "relay_body")?.into_bytes();
+        let relay_body = if let Some(relay_body) = request_string(&request, "relay_body")? {
+            relay_body.into_bytes()
+        } else {
+            #[cfg(feature = "reqwest-transport")]
+            {
+                let handoff_code = required_request_string(&request, "handoff_code")?;
+                let metadata = load_pending_auth_metadata(&context.state_dir);
+                let auth_base_url = request_string(&request, "auth_base_url")?
+                    .or(metadata.auth_base_url)
+                    .ok_or_else(|| "missing auth_base_url for handoff exchange".to_owned())?;
+                let client_id = request_string(&request, "client_id")?.or(metadata.client_id).unwrap_or_else(|| DEFAULT_TZAP_CLIENT_ID.to_owned());
+                crate::reqwest_transport::exchange_handoff_code(&auth_base_url, &client_id, &redirect_uri, &state, &pending.pkce.verifier, &handoff_code)?
+            }
+            #[cfg(not(feature = "reqwest-transport"))]
+            {
+                return Err("handoff-code exchange is unavailable in this build".to_owned());
+            }
+        };
         let callback = crate::auth_client::TzapHostedAuthCallback {
             state,
             redirect_uri,
@@ -818,6 +839,10 @@ pub fn tzap_certificate_inventory_json(request_json: &str) -> String {
 
 #[must_use]
 pub fn tzap_cert_enroll_json(request_json: &str) -> String {
+    #[cfg(feature = "reqwest-transport")]
+    if request_json_has_service_base_url(request_json) {
+        return hosted_tzap_cert_enroll_json(request_json);
+    }
     run_local_tzap_service(request_json, |store, session, options, _| {
         crate::local_tzap_service::enroll_local_certificate(store, session, options)
             .map(|certificate| {
@@ -829,6 +854,124 @@ pub fn tzap_cert_enroll_json(request_json: &str) -> String {
             })
             .map_err(|error| error.to_string())
     })
+}
+
+#[cfg(feature = "reqwest-transport")]
+fn request_json_has_service_base_url(request_json: &str) -> bool {
+    serde_json::from_str::<Value>(request_json)
+        .ok()
+        .and_then(|request| request.get("service_base_url").and_then(Value::as_str).map(|value| !value.is_empty()))
+        .unwrap_or(false)
+}
+
+#[cfg(feature = "reqwest-transport")]
+fn hosted_tzap_cert_enroll_json(request_json: &str) -> String {
+    with_json_request(request_json, |request| {
+        let context = TzapFfiContext::from_request(&request)?;
+        let service_base_url = request_string(&request, "service_base_url")?.ok_or_else(|| "missing or invalid field: service_base_url".to_owned())?;
+        let session_store = TzapFfiSessionStore::new(&context.state_dir);
+        let session = session_store.load_session(&context.account_key).ok_or_else(|| MISSING_TZAP_SESSION.to_owned())?;
+        let (trusted_root_sha256, trusted_root_der) = custom_trust_roots_from_request(&request)?;
+        if trusted_root_der.is_empty() {
+            return Err("hosted certificate enrollment requires at least one trusted root certificate".to_owned());
+        }
+        let now_unix_seconds = request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds);
+        let enrollment_request = crate::enrollment_client::TzapEnrollmentRequest {
+            account_key: context.account_key.clone(),
+            org_id: request_string(&request, "org_id")?.or_else(|| session.selected_org_id.clone()),
+            requested_validity_seconds: request_u64(&request, "requested_validity_seconds")?.unwrap_or(90 * 24 * 60 * 60),
+            now_unix_seconds,
+        };
+        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let mut inventory = store.load_inventory(&context.account_key).map_err(|error| error.to_string())?;
+        let label = match enrollment_request.org_id.as_deref() {
+            Some(org_id) => format!("ZManager Mobile Enrollment (org:{org_id})"),
+            None => "ZManager Mobile Enrollment (personal)".to_owned(),
+        };
+        let (signing_key, csr_der) = if let Some(record) = inventory.device_signing_keys.iter().find(|record| {
+            record.label.as_deref() == Some(label.as_str())
+                && !inventory.enrolled_certificates.iter().any(|certificate| certificate.signing_key_id == record.key_id)
+        }) {
+            let csr_der =
+                crate::device_identity::generate_device_csr_from_private_key(&record.private_key_der, &crate::device_identity::TzapDeviceCsrOptions::default())
+                    .map_err(|error| error.to_string())?;
+            (record.clone(), csr_der)
+        } else {
+            let material = crate::device_identity::generate_device_signing_key_and_csr(&crate::device_identity::TzapDeviceCsrOptions::default())
+                .map_err(|error| error.to_string())?;
+            let record = crate::local_identity_store::TzapDeviceSigningKeyRecord {
+                key_id: material.public_key_fingerprint.clone(),
+                public_key_fingerprint: material.public_key_fingerprint,
+                private_key_der: material.private_key_der,
+                created_at_unix_seconds: now_unix_seconds,
+                label: Some(label),
+            };
+            inventory.device_signing_keys.push(record.clone());
+            store.save_inventory(&context.account_key, inventory).map_err(|error| error.to_string())?;
+            (record, material.csr_der)
+        };
+        let transport = crate::reqwest_transport::ReqwestTransport;
+        let client = crate::enrollment_client::TzapEnrollmentClient::local_staging_server(&service_base_url, &transport);
+        let validator =
+            FfiTrustedEnrollmentCertificateValidator { trusted_root_sha256, trusted_root_der, options: crate::trust::TzapCertificateProfileOptions::default() };
+        let certificate =
+            crate::enrollment_client::enroll_device_certificate(&client, &validator, &mut store, &session, &enrollment_request, &signing_key, &csr_der)
+                .map_err(|error| error.to_string())?;
+        Ok(json!({
+            "ok": true,
+            "operation": OP_CERT_ENROLL,
+            "service_base_url": service_base_url,
+            "certificate": certificate_summary_json(&certificate),
+        }))
+    })
+}
+
+#[cfg(feature = "reqwest-transport")]
+struct FfiTrustedEnrollmentCertificateValidator {
+    trusted_root_sha256: Vec<String>,
+    trusted_root_der: Vec<Vec<u8>>,
+    options: crate::trust::TzapCertificateProfileOptions,
+}
+
+#[cfg(feature = "reqwest-transport")]
+impl TzapEnrollmentCertificateValidator for FfiTrustedEnrollmentCertificateValidator {
+    fn validate_certificate_chain(
+        &self,
+        chain_der: &[Vec<u8>],
+    ) -> Result<crate::trust::TzapCertificatePublicMetadata, crate::enrollment_client::TzapEnrollmentError> {
+        self.validate_chain(chain_der).map(|validation| validation.public_metadata)
+    }
+
+    fn validate_and_complete_certificate_chain(
+        &self,
+        chain_der: &[Vec<u8>],
+    ) -> Result<(Vec<Vec<u8>>, crate::trust::TzapCertificatePublicMetadata), crate::enrollment_client::TzapEnrollmentError> {
+        if let Ok(validation) = self.validate_chain(chain_der) {
+            return Ok((chain_der.to_vec(), validation.public_metadata));
+        }
+        let mut last_error = None;
+        for root_der in &self.trusted_root_der {
+            let mut completed_chain = chain_der.to_vec();
+            completed_chain.push(root_der.clone());
+            match self.validate_chain(&completed_chain) {
+                Ok(validation) => return Ok((completed_chain, validation.public_metadata)),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| crate::enrollment_client::TzapEnrollmentError::CertificateChain("certificate chain validation failed".to_owned())))
+    }
+}
+
+#[cfg(feature = "reqwest-transport")]
+impl FfiTrustedEnrollmentCertificateValidator {
+    fn validate_chain(&self, chain_der: &[Vec<u8>]) -> Result<crate::trust::TzapCertificateProfileValidation, crate::enrollment_client::TzapEnrollmentError> {
+        let validation = crate::trust::validate_custom_tzap_certificate_chain_der(chain_der, &self.options)
+            .map_err(|error| crate::enrollment_client::TzapEnrollmentError::CertificateChain(error.to_string()))?;
+        if !self.trusted_root_sha256.iter().any(|trusted| trusted == &validation.root_certificate_sha256) {
+            return Err(crate::enrollment_client::TzapEnrollmentError::CertificateChain("root certificate is not in the temporary trust store".to_owned()));
+        }
+        Ok(validation)
+    }
 }
 
 #[must_use]
