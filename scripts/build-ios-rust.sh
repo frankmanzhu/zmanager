@@ -16,10 +16,10 @@ TZAP_PROFILE_ARGS=()
 
 case "${ZMANAGER_TZAP_PROFILE:-full}" in
   full)
-    TZAP_PROFILE_ARGS=(--no-default-features --features tzap-online)
+    TZAP_PROFILE_ARGS=(--no-default-features --features tzap-online,localsend)
     ;;
   offline)
-    TZAP_PROFILE_ARGS=(--no-default-features)
+    TZAP_PROFILE_ARGS=(--no-default-features --features localsend)
     ;;
   *)
     echo "ZMANAGER_TZAP_PROFILE must be full or offline" >&2

@@ -12,6 +12,6 @@ mod registry;
 
 pub use localsend_rs as protocol;
 pub use registry::{
-    BridgeResult, DeviceInfoDto, DiscoverRequest, DiscoveredDevice, LocalSendBridgeError, LocalSendRegistry, PollEventsResult, QueuedEvent,
+    BridgeResult, CancelSendRequest, DeviceInfoDto, DiscoverRequest, DiscoveredDevice, LocalSendBridgeError, LocalSendRegistry, PollEventsResult, QueuedEvent,
     RespondToTransferRequest, SendFileRequest, SendFileResult, StartReceiverRequest, TransferDecisionKind, TransferFile, registry,
 };

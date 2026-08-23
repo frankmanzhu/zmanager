@@ -18,3 +18,4 @@ unavailable_json_endpoint!(localsend_stop_receiver_json, "localsend_stop_receive
 unavailable_json_endpoint!(localsend_poll_events_json, "localsend_poll_events_json");
 unavailable_json_endpoint!(localsend_respond_to_transfer_json, "localsend_respond_to_transfer_json");
 unavailable_json_endpoint!(localsend_send_file_json, "localsend_send_file_json");
+unavailable_json_endpoint!(localsend_cancel_send_json, "localsend_cancel_send_json");

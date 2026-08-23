@@ -56,3 +56,11 @@ pub fn localsend_send_file_json(request_json: String) -> String {
     };
     ok_or_error(zmanager_localsend::registry().send_file(request))
 }
+
+pub fn localsend_cancel_send_json(request_json: String) -> String {
+    let request = match parse_or_error(&request_json) {
+        Ok(request) => request,
+        Err(envelope) => return envelope,
+    };
+    ok_or_error(zmanager_localsend::registry().cancel_send(request).map(|()| serde_json::json!({ "ok": true })))
+}

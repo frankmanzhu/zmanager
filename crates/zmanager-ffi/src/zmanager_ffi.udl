@@ -69,6 +69,7 @@ namespace zmanager {
     string localsend_poll_events_json(string request_json);
     string localsend_respond_to_transfer_json(string request_json);
     string localsend_send_file_json(string request_json);
+    string localsend_cancel_send_json(string request_json);
 };
 
 enum BridgeSeverity {
