@@ -168,6 +168,15 @@ impl LocalSendRegistry {
         state.server.as_ref().map(LocalSendServer::port)
     }
 
+    /// The receiver's own fingerprint — under `https: true` this is the SHA-256
+    /// of the TLS certificate `start_receiver` generated, resolved only once
+    /// the server has actually bound (same reasoning as [`receiver_port`](Self::receiver_port)).
+    /// `None` if no receiver is running.
+    pub fn receiver_fingerprint(&self) -> Option<String> {
+        let state = self.state.lock().expect("registry lock poisoned");
+        state.server.as_ref().map(|server| server.device().fingerprint.clone())
+    }
+
     /// Converts one `ServerEvent` into a queued, JSON-serializable event.
     /// `TransferRequest`/`WebShareRequest` carry a non-serializable
     /// one-shot responder, so those are stashed by request id and only
@@ -306,11 +315,22 @@ impl LocalSendRegistry {
         let progress_send_id = send_id.clone();
 
         let task = self.runtime.spawn(async move {
-            use localsend_rs::LocalSendClient;
+            use localsend_rs::{LocalSendClient, TlsTrustPolicy};
 
             let protocol = if https { Protocol::Https } else { Protocol::Http };
             let self_device = DeviceInfoBuilder::new(alias, self_port).protocol(protocol).build();
-            let client = LocalSendClient::new(self_device);
+            // `LocalSendClient::new` builds a plain reqwest client that does
+            // ordinary TLS validation — it will always reject a LocalSend
+            // peer's self-signed cert. HTTPS targets need the pinned trust
+            // policy instead, keyed off the fingerprint `discover()` already
+            // returned for this device (LocalSend's actual security model:
+            // trust is established by the fingerprint shown to the user at
+            // send time, not by a CA chain).
+            let client = if matches!(target.protocol, Protocol::Https) {
+                LocalSendClient::with_trust_policy(self_device, TlsTrustPolicy::PinnedFingerprint(target.fingerprint.clone()))?
+            } else {
+                LocalSendClient::new(self_device)
+            };
 
             let metadata = localsend_rs::build_file_metadata(&file_path).await?;
             let file_id = metadata.id.clone();

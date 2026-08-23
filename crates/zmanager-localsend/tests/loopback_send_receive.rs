@@ -181,3 +181,70 @@ fn cancel_send_aborts_an_in_flight_upload_before_it_reaches_the_receiver() {
         "cancelling the same send_id again after it's done must report UnknownSendId, not silently succeed"
     );
 }
+
+/// `https: true` is untested elsewhere: the two tests above only exercise
+/// plain HTTP. Mobile's receiver now starts with `https: true` (decision 3
+/// of the migration plan), which takes a different path inside
+/// `start_receiver` — real TLS cert generation (`generate_tls_certificate`)
+/// and an actual TLS accept/handshake on every connection, not just a raw
+/// TCP one. `LocalSendClient`'s transport accepts any cert
+/// (`danger_accept_invalid_certs(true)` in the vendored fork — fingerprint
+/// pinning is an opt-in check callers do at discovery time, not something
+/// the transport enforces), so this can push over HTTPS without needing to
+/// learn the receiver's real cert fingerprint first.
+#[test]
+fn an_https_receiver_starts_and_accepts_a_pushed_file() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let registry = zmanager_localsend::registry();
+    let receive_dir = tempfile::tempdir().expect("tempdir");
+    let source_dir = tempfile::tempdir().expect("tempdir");
+
+    let source_path = source_dir.path().join("secure.txt");
+    let contents = b"https loopback verification payload";
+    std::fs::File::create(&source_path).expect("create source file").write_all(contents).expect("write source file");
+
+    registry
+        .start_receiver(StartReceiverRequest {
+            alias: "loopback-https-receiver".to_owned(),
+            port: 0,
+            https: true,
+            save_dir: receive_dir.path().to_path_buf(),
+            auto_accept: true,
+            pin: None,
+        })
+        .expect("an HTTPS receiver must start cleanly (TLS cert generation + bind must not fail)");
+    let port = registry.receiver_port().expect("receiver_port must report the just-bound port");
+    let fingerprint = registry.receiver_fingerprint().expect("receiver_fingerprint must report the cert's fingerprint");
+    assert!(!fingerprint.is_empty(), "an HTTPS receiver's fingerprint must be the real cert fingerprint, never blank");
+
+    let target = DeviceInfoDto {
+        alias: "loopback-https-receiver".to_owned(),
+        fingerprint,
+        port,
+        protocol: "https".to_owned(),
+        ip: Some("127.0.0.1".to_owned()),
+        device_model: None,
+    };
+
+    let result = registry.send_file(SendFileRequest {
+        send_id: "loopback-https-send".to_owned(),
+        alias: "loopback-https-sender".to_owned(),
+        self_port: 0,
+        https: true,
+        target,
+        file_path: source_path,
+        pin: None,
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let received_path = receive_dir.path().join("secure.txt");
+    while std::time::Instant::now() < deadline && !received_path.exists() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    registry.stop_receiver().expect("receiver was running and must stop cleanly");
+
+    result.expect("send_file over HTTPS must succeed against a receiver that just auto-accepted");
+    let received = std::fs::read(&received_path).expect("receiver must have written the file to its save_dir");
+    assert_eq!(received, contents, "received bytes must match exactly what was sent over HTTPS");
+}
