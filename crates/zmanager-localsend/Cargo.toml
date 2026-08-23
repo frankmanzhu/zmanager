@@ -1,0 +1,30 @@
+[package]
+name = "zmanager-localsend"
+version.workspace = true
+description = "LAN peer discovery and LocalSend-protocol file transfer for ZManager, plus TZAP application-level exchange workflows built on top of it."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Vendored fork of CrossCopy/localsend-rs (MIT) — see NOTICE / THIRD_PARTY_NOTICES.md.
+# `path` dependency during active co-development; switch to a pinned git tag
+# once the fork stabilizes, matching the pinned-checkout pattern zmanager-mobile
+# already uses for its own sibling `zmanager` dependency.
+localsend-rs = { path = "../../../localsend-rs", default-features = false, features = [
+    "https",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

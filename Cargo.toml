@@ -4,6 +4,7 @@ members = [
     "crates/zmanager-cli",
     "crates/zmanager-core",
     "crates/zmanager-ffi",
+    "crates/zmanager-localsend",
     "crates/zmanager-tzap-hosted",
     "crates/zmanager-unrar",
 ]
@@ -34,6 +35,7 @@ zmanager-cli = { path = "crates/zmanager-cli", version = "2.1.0" }
 # depend on `zmanager-tzap-hosted`.
 zmanager-core = { path = "crates/zmanager-core", version = "2.1.0", default-features = false }
 zmanager-tzap-hosted = { path = "crates/zmanager-tzap-hosted", version = "2.1.0" }
+zmanager-localsend = { path = "crates/zmanager-localsend", version = "2.1.0" }
 zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.1.0" }
 zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.1.0" }
 

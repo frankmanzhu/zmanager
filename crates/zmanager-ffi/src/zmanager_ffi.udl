@@ -59,6 +59,16 @@ namespace zmanager {
     string tzap_contact_list_json(string request_json);
     string tzap_contact_remove_json(string request_json);
     string tzap_share_create_json(string request_json);
+
+    // LocalSend endpoints. Each returns a JSON response envelope documented
+    // by the zmanager-localsend crate; the underlying protocol is unmodified
+    // upstream `localsend-rs` — push-only, same as official LocalSend apps.
+    string localsend_discover_json(string request_json);
+    string localsend_start_receiver_json(string request_json);
+    string localsend_stop_receiver_json(string request_json);
+    string localsend_poll_events_json(string request_json);
+    string localsend_respond_to_transfer_json(string request_json);
+    string localsend_send_file_json(string request_json);
 };
 
 enum BridgeSeverity {

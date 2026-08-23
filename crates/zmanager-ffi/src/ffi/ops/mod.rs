@@ -1,5 +1,10 @@
 pub mod archive;
 pub mod jobs;
+#[cfg(feature = "localsend")]
+pub mod localsend;
+#[cfg(not(feature = "localsend"))]
+#[path = "localsend_unavailable.rs"]
+pub mod localsend;
 #[cfg(feature = "tzap-online")]
 pub mod tzap;
 #[cfg(not(feature = "tzap-online"))]

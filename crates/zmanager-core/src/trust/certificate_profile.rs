@@ -381,9 +381,7 @@ fn validate_intermediates(chain: &[X509Certificate<'_>], options: &TzapCertifica
         // not just an unused allowance.
         let remaining_cas_below = u32::try_from(index - 1).unwrap_or(u32::MAX);
         let path_len_ok = match role {
-            CertificateRole::PlatformIntermediate => {
-                basic_constraints.value.path_len_constraint.is_some_and(|actual| actual >= remaining_cas_below)
-            }
+            CertificateRole::PlatformIntermediate => basic_constraints.value.path_len_constraint.is_some_and(|actual| actual >= remaining_cas_below),
             CertificateRole::OrganizationIntermediate => basic_constraints.value.path_len_constraint == Some(ORG_INTERMEDIATE_PATH_LEN),
             CertificateRole::Root => unreachable!(),
         };

@@ -19,6 +19,10 @@ pub use ops::archive::{
     cancelJob, clearSensitiveState, closeArchiveSession, detectArchive, extractArchiveSessionEntry, healthcheck, listArchive, listArchiveSession, listFormats,
     materializePreview, openArchiveSession, planCreate, planExtract, pollJobEvents, startCreate, startExtract, testArchive,
 };
+pub use ops::localsend::{
+    localsend_discover_json, localsend_poll_events_json, localsend_respond_to_transfer_json, localsend_send_file_json, localsend_start_receiver_json,
+    localsend_stop_receiver_json,
+};
 pub use ops::tzap::{
     createTzapSelfSignedIdentity, inspectTzapX509PublicNoKeySigner, inspectTzapX509Signer, tzap_auth_account_url_json, tzap_auth_callback_json,
     tzap_auth_forget_json, tzap_auth_login_json, tzap_auth_status_json, tzap_cert_enroll_json, tzap_cert_renew_json, tzap_cert_revoke_json,

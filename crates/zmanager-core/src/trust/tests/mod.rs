@@ -275,10 +275,7 @@ fn certificate_profile_accepts_org_capable_platform_intermediate_for_a_leaf_only
     // previously required pathlen to equal exactly 0 for a leaf-only chain and
     // rejected every personal certificate issued by an org-capable platform
     // issuer; this must now succeed like any other valid chain.
-    let fixture = certificate_fixture(ChainConfig {
-        platform_path_len: super::PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE,
-        ..ChainConfig::default()
-    });
+    let fixture = certificate_fixture(ChainConfig { platform_path_len: super::PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE, ..ChainConfig::default() });
     let pins = current_pin_set(&fixture.root_pin);
 
     let validation = validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default())
