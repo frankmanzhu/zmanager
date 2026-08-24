@@ -2380,12 +2380,20 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "iso9660-forensic"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4b3891bcab834008e60b36e198acbe9b04b9234ec9054ee94c1de07a2811a6"
+version = "0.8.0"
+dependencies = [
+ "forensicnomicon",
+ "iso9660-forensic-core",
+ "safe-read 0.1.0",
+ "sha1 0.10.7",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "iso9660-forensic-core"
+version = "0.1.0"
 dependencies = [
  "forensic-vfs",
- "forensicnomicon",
  "safe-read 0.1.0",
  "sha1 0.10.7",
  "sha2 0.10.9",
