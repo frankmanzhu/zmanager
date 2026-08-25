@@ -331,6 +331,21 @@ fn cli_lists_tests_and_extracts_apple_dmg_pkg_fixtures() {
         assert!(list_stdout.contains("payload/unicode/こんにちは.txt"), "{list_stdout}");
         assert!(!list_stdout.contains("payload/./"), "entries must not carry ./ prefixes: {list_stdout}");
 
+        let json_list = Command::new(cli_path()).arg("list").arg(&fixture).arg("--json").output().unwrap();
+        assert_success(&format!("zm list {filename} --json"), &json_list);
+        let listing: serde_json::Value = serde_json::from_slice(&json_list.stdout).unwrap();
+        let entries = listing["entries"].as_array().expect("JSON listing entries array");
+        let kind_for = |path: &str| {
+            entries
+                .iter()
+                .find(|entry| entry["name"].as_str() == Some(path))
+                .and_then(|entry| entry["kind"].as_str())
+                .unwrap_or_else(|| panic!("missing JSON listing entry {path} in {listing}"))
+        };
+        assert_eq!(kind_for("payload/README.txt"), "file", "regular file kind for {filename}");
+        assert_eq!(kind_for("payload/nested"), "directory", "directory kind for {filename}");
+        assert_eq!(kind_for("payload/nested/readme-link.txt"), "symlink", "symlink kind for {filename}");
+
         let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
         assert_success(&format!("zm test {filename}"), &test);
 

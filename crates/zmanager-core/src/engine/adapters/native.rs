@@ -2498,7 +2498,11 @@ impl NativeReadAdapter for DmgListAdapter {
             .map(|(index, entry)| EngineEntry {
                 id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
-                kind: BrowserEntryKind::File,
+                kind: match entry.kind {
+                    apple_dmg_backend::DmgEntryKind::File => BrowserEntryKind::File,
+                    apple_dmg_backend::DmgEntryKind::Directory => BrowserEntryKind::Directory,
+                    apple_dmg_backend::DmgEntryKind::Symlink => BrowserEntryKind::Symlink,
+                },
                 size: Some(entry.size),
                 compressed_size: None,
                 modified: None,
@@ -2555,7 +2559,11 @@ impl NativeReadAdapter for PkgListAdapter {
             .map(|(index, entry)| EngineEntry {
                 id: crate::engine::adapters::listing_entry_id(index),
                 path: entry.path,
-                kind: BrowserEntryKind::File,
+                kind: match entry.kind {
+                    apple_pkg_backend::PkgEntryKind::File => BrowserEntryKind::File,
+                    apple_pkg_backend::PkgEntryKind::Directory => BrowserEntryKind::Directory,
+                    apple_pkg_backend::PkgEntryKind::Symlink => BrowserEntryKind::Symlink,
+                },
                 size: Some(entry.size),
                 compressed_size: None,
                 modified: None,
