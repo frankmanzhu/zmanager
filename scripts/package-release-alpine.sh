@@ -39,13 +39,14 @@ if [ ! -d "$TZAP_DIR" ]; then
 fi
 
 # zmanager-core path-depends on the forensic-vfs-engine sibling, which in turn
-# path-depends on the udf-forensic and ntfs-forensic siblings; from the
-# container's /workspace checkout those resolve to /forensic-vfs-engine,
-# /udf-forensic, and /ntfs-forensic, so all three must be mounted.
+# path-depends on the udf-forensic and ntfs-forensic siblings. zmanager-ffi also
+# path-depends on the localsend-rs sibling. From the container's /workspace
+# checkout those resolve to the mount points below, so all four must be mounted.
+LOCALSEND_DIR="$ROOT/../localsend-rs"
 FVE_DIR="$ROOT/../forensic-vfs-engine"
 UDF_DIR="$ROOT/../udf-forensic"
 NTFS_DIR="$ROOT/../ntfs-forensic"
-for d in "$FVE_DIR" "$UDF_DIR" "$NTFS_DIR"; do
+for d in "$LOCALSEND_DIR" "$FVE_DIR" "$UDF_DIR" "$NTFS_DIR"; do
   if [ ! -d "$d" ]; then
     echo "sibling directory not found at $d — clone it first" >&2
     exit 1
@@ -56,6 +57,7 @@ docker run --rm \
   --platform "$PLATFORM" \
   -v "$ROOT:/workspace" \
   -v "$(cd "$TZAP_DIR" && pwd):/tzap" \
+  -v "$(cd "$LOCALSEND_DIR" && pwd):/localsend-rs" \
   -v "$(cd "$FVE_DIR" && pwd):/forensic-vfs-engine" \
   -v "$(cd "$UDF_DIR" && pwd):/udf-forensic" \
   -v "$(cd "$NTFS_DIR" && pwd):/ntfs-forensic" \
