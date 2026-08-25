@@ -23,7 +23,7 @@ static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn a_pushed_file_arrives_intact_on_the_receiver_this_crate_started() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let registry = zmanager_localsend::registry();
     let receive_dir = tempfile::tempdir().expect("tempdir");
     let source_dir = tempfile::tempdir().expect("tempdir");
@@ -99,17 +99,17 @@ fn a_pushed_file_arrives_intact_on_the_receiver_this_crate_started() {
 
 #[test]
 fn cancel_send_aborts_an_in_flight_upload_before_it_reaches_the_receiver() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let registry = zmanager_localsend::registry();
     let receive_dir = tempfile::tempdir().expect("tempdir");
     let source_dir = tempfile::tempdir().expect("tempdir");
 
-    // Large enough that, on ordinary loopback hardware, the upload takes
-    // long enough for the retry loop below to reliably land its cancel
-    // before the transfer finishes — a sparse file keeps setup itself fast.
+    // Large enough that, even when the other loopback tests have warmed the
+    // shared runtime, the retry loop below reliably lands its cancel before
+    // the transfer finishes — a sparse file keeps setup itself fast.
     let source_path = source_dir.path().join("large.bin");
     let file = std::fs::File::create(&source_path).expect("create source file");
-    file.set_len(256 * 1024 * 1024).expect("grow source file to 256MiB (sparse)");
+    file.set_len(1024 * 1024 * 1024).expect("grow source file to 1GiB (sparse)");
     drop(file);
 
     registry
@@ -175,6 +175,15 @@ fn cancel_send_aborts_an_in_flight_upload_before_it_reaches_the_receiver() {
         matches!(send_result, Err(LocalSendBridgeError::SendCancelled)),
         "a send aborted immediately after registration must fail as SendCancelled, got: {send_result:?}"
     );
+    // The receiver reserves the final name before streaming into its
+    // temporary file. The sender's abort can therefore return before the
+    // receiver has finished asynchronously removing that reservation; wait
+    // for the receiver-side cleanup before checking the visible path.
+    let received_path = receive_dir.path().join("large.bin");
+    let cleanup_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while received_path.exists() && std::time::Instant::now() < cleanup_deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert!(!receive_dir.path().join("large.bin").exists(), "the receiver must not end up with a fully-written file from a cancelled send");
     assert!(
         matches!(registry.cancel_send(CancelSendRequest { send_id }), Err(LocalSendBridgeError::UnknownSendId(_))),
@@ -194,7 +203,7 @@ fn cancel_send_aborts_an_in_flight_upload_before_it_reaches_the_receiver() {
 /// learn the receiver's real cert fingerprint first.
 #[test]
 fn an_https_receiver_starts_and_accepts_a_pushed_file() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let registry = zmanager_localsend::registry();
     let receive_dir = tempfile::tempdir().expect("tempdir");
     let source_dir = tempfile::tempdir().expect("tempdir");
