@@ -127,7 +127,8 @@ fn every_registered_core_format_has_a_dedicated_mobile_classification() {
     for (extension, expected) in cases {
         let detected = classify_archive_path(Path::new(&format!("fixture.{extension}"))).0;
         assert_eq!(detected, expected, "fixture.{extension}");
-        assert!(format_capabilities(expected).0, "{extension} must expose list support");
+        let list_support_expected = !matches!(expected, ArchiveFormat::Mtree) || cfg!(unix);
+        assert_eq!(format_capabilities(expected).0, list_support_expected, "{extension} list support");
         if !matches!(expected, ArchiveFormat::Mtree) {
             assert!(format_capabilities(expected).1, "{extension} must expose extract support");
         }
