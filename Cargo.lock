@@ -1685,7 +1685,7 @@ dependencies = [
  "forensic-vfs",
  "forensic-vfs-resolver",
  "hfsplus-forensic",
- "iso9660-forensic",
+ "iso9660-forensic 0.8.0",
  "luks-core",
  "ntfs-core",
  "qcow2-core",
@@ -2383,7 +2383,19 @@ name = "iso9660-forensic"
 version = "0.8.0"
 dependencies = [
  "forensicnomicon",
- "iso9660-forensic-core",
+ "iso9660-forensic-core 0.1.0",
+ "safe-read 0.1.0",
+ "sha1 0.10.7",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "iso9660-forensic"
+version = "0.8.0"
+source = "git+https://github.com/SecurityRonin/iso9660-forensic?rev=589a93c5c058070426471cf4d39c8d5c12162fc1#589a93c5c058070426471cf4d39c8d5c12162fc1"
+dependencies = [
+ "forensicnomicon",
+ "iso9660-forensic-core 0.1.0 (git+https://github.com/SecurityRonin/iso9660-forensic?rev=589a93c5c058070426471cf4d39c8d5c12162fc1)",
  "safe-read 0.1.0",
  "sha1 0.10.7",
  "sha2 0.10.9",
@@ -2394,6 +2406,17 @@ name = "iso9660-forensic-core"
 version = "0.1.0"
 dependencies = [
  "forensic-vfs",
+ "safe-read 0.1.0",
+ "sha1 0.10.7",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
+name = "iso9660-forensic-core"
+version = "0.1.0"
+source = "git+https://github.com/SecurityRonin/iso9660-forensic?rev=589a93c5c058070426471cf4d39c8d5c12162fc1#589a93c5c058070426471cf4d39c8d5c12162fc1"
+dependencies = [
  "safe-read 0.1.0",
  "sha1 0.10.7",
  "sha2 0.10.9",
@@ -5669,7 +5692,7 @@ dependencies = [
  "forensic-vfs",
  "forensic-vfs-engine",
  "hex",
- "iso9660-forensic",
+ "iso9660-forensic 0.8.0 (git+https://github.com/SecurityRonin/iso9660-forensic?rev=589a93c5c058070426471cf4d39c8d5c12162fc1)",
  "libc",
  "lz4_flex 0.14.0",
  "lzma-rust2 0.16.5",

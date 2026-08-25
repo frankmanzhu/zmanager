@@ -69,10 +69,9 @@ forensic-vfs-engine = { path = "../../../forensic-vfs-engine", version = "=0.1.1
 # The engine does not re-export the contract types (FileSystem, FsKind, ...);
 # same floor as the engine so cargo unifies to one copy.
 forensic-vfs = "0.7"
-# Local fork under active development: hybrid ISO session validation fix.
-# Switch back to the published dependency after the upstream PR is merged and
-# a compatible release is available.
-iso = { path = "../../../iso9660-forensic/forensic", version = "0.8.0", package = "iso9660-forensic" }
+# Upstream PR #14 was merged, but no post-fix release has been published yet.
+# Pin the exact upstream merge commit until the next compatible release exists.
+iso = { git = "https://github.com/SecurityRonin/iso9660-forensic", rev = "589a93c5c058070426471cf4d39c8d5c12162fc1", version = "0.8.0", package = "iso9660-forensic" }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 zmanager-apple-archive = { workspace = true }
