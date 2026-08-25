@@ -252,15 +252,13 @@ fn certificate_profile_rejects_root_profile_errors() {
 
 #[test]
 fn certificate_profile_rejects_intermediate_path_and_policy_errors() {
-    for config in [ChainConfig { omit_platform_ca_policy: true, ..ChainConfig::default() }] {
-        let fixture = certificate_fixture(config);
-        let pins = current_pin_set(&fixture.root_pin);
+    let fixture = certificate_fixture(ChainConfig { omit_platform_ca_policy: true, ..ChainConfig::default() });
+    let pins = current_pin_set(&fixture.root_pin);
 
-        assert!(matches!(
-            validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
-            Err(TzapCertificateProfileError::IntermediateProfile { .. })
-        ));
-    }
+    assert!(matches!(
+        validate_official_tzap_certificate_chain_der(&fixture.chain_der, &pins, &TzapCertificateProfileOptions::default(),),
+        Err(TzapCertificateProfileError::IntermediateProfile { .. })
+    ));
 }
 
 #[test]

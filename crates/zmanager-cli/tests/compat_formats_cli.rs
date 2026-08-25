@@ -1246,6 +1246,23 @@ fn assert_zm_extracts_complex_matrix_inner(label: &str, archive: &Path, temp: &T
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("project/root_file.txt"));
     assert!(stdout.contains("project/nested/deep_file.txt"));
+
+    let json = Command::new(zm_path()).arg("list").arg(archive).arg("--json").output().unwrap();
+    assert_success(&format!("zm list {label} --json"), &json);
+    let listing: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    let entries = listing["entries"].as_array().expect("JSON listing entries array");
+    let kind_for = |path: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some(path))
+            .and_then(|entry| entry["kind"].as_str())
+            .unwrap_or_else(|| panic!("missing JSON listing entry {path} for {label}: {listing}"))
+    };
+    assert_eq!(kind_for("project/root_file.txt"), "file", "regular file kind for {label}");
+    if !label.contains("cab") && !label.contains("msi") {
+        let directory_path = if label.contains("lha") { "project/nested/empty_dir" } else { "project/nested" };
+        assert_eq!(kind_for(directory_path), "directory", "directory kind for {label}");
+    }
 }
 
 #[test]

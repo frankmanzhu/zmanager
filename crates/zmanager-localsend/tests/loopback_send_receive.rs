@@ -158,7 +158,7 @@ fn cancel_send_aborts_an_in_flight_upload_before_it_reaches_the_receiver() {
     // could complete even over loopback.
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
-        match registry.cancel_send(CancelSendRequest { send_id: send_id.clone() }) {
+        match registry.cancel_send(&CancelSendRequest { send_id: send_id.clone() }) {
             Ok(()) => break,
             Err(LocalSendBridgeError::UnknownSendId(_)) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(1));
@@ -186,7 +186,7 @@ fn cancel_send_aborts_an_in_flight_upload_before_it_reaches_the_receiver() {
     }
     assert!(!receive_dir.path().join("large.bin").exists(), "the receiver must not end up with a fully-written file from a cancelled send");
     assert!(
-        matches!(registry.cancel_send(CancelSendRequest { send_id }), Err(LocalSendBridgeError::UnknownSendId(_))),
+        matches!(registry.cancel_send(&CancelSendRequest { send_id }), Err(LocalSendBridgeError::UnknownSendId(_))),
         "cancelling the same send_id again after it's done must report UnknownSendId, not silently succeed"
     );
 }

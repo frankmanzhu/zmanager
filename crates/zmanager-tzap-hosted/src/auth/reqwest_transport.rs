@@ -84,7 +84,7 @@ pub fn exchange_handoff_code(
                 .get("expires_at")
                 .and_then(Value::as_str)
                 .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
-                .map(|value| value.unix_timestamp())
+                .map(OffsetDateTime::unix_timestamp)
                 .and_then(|value| u64::try_from(value).ok())
         })
         .ok_or_else(|| "auth exchange response is missing an expiration time".to_owned())?;

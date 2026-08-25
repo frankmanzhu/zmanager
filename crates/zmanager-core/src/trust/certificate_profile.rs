@@ -26,7 +26,9 @@ const OID_SERVER_AUTH_EKU: &str = "1.3.6.1.5.5.7.3.1";
 const OID_CLIENT_AUTH_EKU: &str = "1.3.6.1.5.5.7.3.2";
 const OID_CODE_SIGNING_EKU: &str = "1.3.6.1.5.5.7.3.3";
 pub(crate) const REQUIRED_ROOT_PATH_LEN: u32 = 2;
+#[cfg(test)]
 pub(crate) const PLATFORM_PATH_LEN_WITH_ORG_INTERMEDIATE: u32 = 1;
+#[cfg(test)]
 pub(crate) const PLATFORM_LEAF_ONLY_PATH_LEN: u32 = 0;
 pub(crate) const ORG_INTERMEDIATE_PATH_LEN: u32 = 0;
 const MIN_TZAP_CHAIN_LEN: usize = 3;

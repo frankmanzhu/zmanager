@@ -201,8 +201,7 @@ fn parse_records(path: &Path) -> Result<Vec<ParsedWarcRecord>, WarcError> {
     let mut reader = BufReader::new(file);
     let mut records = Vec::new();
     let mut used_paths = Vec::new();
-    loop {
-        let Some(first_line) = read_nonempty_line(&mut reader, path)? else { break };
+    while let Some(first_line) = read_nonempty_line(&mut reader, path)? {
         if !first_line.starts_with(b"WARC/") {
             return Err(invalid(path, "record does not start with a WARC version line"));
         }

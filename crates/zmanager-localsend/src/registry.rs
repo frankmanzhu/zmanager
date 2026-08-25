@@ -1,4 +1,4 @@
-//! Persistent LocalSend receiver + one-shot discovery/send, bridged to a
+//! Persistent `LocalSend` receiver + one-shot discovery/send, bridged to a
 //! synchronous, JSON-shaped surface for FFI callers (`zmanager-ffi`) and for
 //! `zmanager-desktop`'s direct-Rust callers alike.
 //!
@@ -6,7 +6,7 @@
 //! of this workspace's HTTP-backed logic (`zmanager-tzap-hosted` stays
 //! synchronous behind an injected transport trait). This crate owns the one
 //! tokio runtime that bridges the two worlds; nothing above this module
-//! needs to know LocalSend is async at all.
+//! needs to know `LocalSend` is async at all.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -47,6 +47,10 @@ struct RegistryState {
 }
 
 /// Returns the shared registry, creating it (and its runtime) on first use.
+///
+/// # Panics
+///
+/// Panics if the Tokio runtime cannot be created.
 pub fn registry() -> Arc<LocalSendRegistry> {
     REGISTRY
         .get_or_init(|| {
@@ -107,6 +111,16 @@ fn default_port() -> u16 {
 }
 
 impl LocalSendRegistry {
+    /// Starts a `LocalSend` receiver with the requested configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a receiver is already running, TLS setup fails, or
+    /// the underlying `LocalSend` server cannot start.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned.
     pub fn start_receiver(&self, request: StartReceiverRequest) -> BridgeResult<()> {
         {
             let state = self.state.lock().expect("registry lock poisoned");
@@ -146,6 +160,16 @@ impl LocalSendRegistry {
         Ok(())
     }
 
+    /// Stops the running `LocalSend` receiver.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalSendBridgeError::NoReceiverRunning`] when there is no
+    /// receiver to stop.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned.
     pub fn stop_receiver(&self) -> BridgeResult<()> {
         let server = {
             let mut state = self.state.lock().expect("registry lock poisoned");
@@ -163,6 +187,10 @@ impl LocalSendRegistry {
     /// was `0` (OS-assigned) — the server resolves the real port during its
     /// own bind, before any caller could otherwise learn it. `None` if no
     /// receiver is running.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned.
     pub fn receiver_port(&self) -> Option<u16> {
         let state = self.state.lock().expect("registry lock poisoned");
         state.server.as_ref().map(LocalSendServer::port)
@@ -172,6 +200,10 @@ impl LocalSendRegistry {
     /// of the TLS certificate `start_receiver` generated, resolved only once
     /// the server has actually bound (same reasoning as [`receiver_port`](Self::receiver_port)).
     /// `None` if no receiver is running.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned.
     pub fn receiver_fingerprint(&self) -> Option<String> {
         let state = self.state.lock().expect("registry lock poisoned");
         state.server.as_ref().map(|server| server.device().fingerprint.clone())
@@ -242,11 +274,26 @@ impl LocalSendRegistry {
         state.events.push_back(event);
     }
 
+    /// Drains and returns all queued receiver and sender events.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned.
     pub fn poll_events(&self) -> PollEventsResult {
         let mut state = self.state.lock().expect("registry lock poisoned");
         PollEventsResult { events: state.events.drain(..).collect() }
     }
 
+    /// Applies the caller's decision to a queued incoming transfer request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalSendBridgeError::UnknownRequestId`] when the request is
+    /// no longer pending, or an error from the underlying transfer responder.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned.
     pub fn respond_to_transfer(&self, request: RespondToTransferRequest) -> BridgeResult<()> {
         let pending = {
             let mut state = self.state.lock().expect("registry lock poisoned");
@@ -268,6 +315,16 @@ impl LocalSendRegistry {
     // Discovery — a bounded sweep, not a persistent background listener.
     // ---------------------------------------------------------------------
 
+    /// Discovers nearby `LocalSend` devices for the requested timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if discovery cannot start, announce, or stop cleanly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the discovery result mutex is poisoned or the Tokio runtime
+    /// cannot synchronously drive the discovery task.
     pub fn discover(&self, request: DiscoverRequest) -> BridgeResult<Vec<DiscoveredDevice>> {
         self.runtime.block_on(async move {
             use localsend_rs::{Discovery, MulticastDiscovery};
@@ -298,6 +355,17 @@ impl LocalSendRegistry {
     // Send — one file, one push, blocking on completion.
     // ---------------------------------------------------------------------
 
+    /// Sends one file to a discovered `LocalSend` device.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path is not a file, the upload fails, or the
+    /// transfer is cancelled.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned or this synchronous API
+    /// is called from a Tokio runtime context that cannot be nested.
     pub fn send_file(&self, request: SendFileRequest) -> BridgeResult<SendFileResult> {
         if !request.file_path.is_file() {
             return Err(LocalSendBridgeError::InvalidRequest(format!("not a file: {}", request.file_path.display())));
@@ -389,13 +457,22 @@ impl LocalSendRegistry {
         }
     }
 
-    /// Aborts the in-flight `send_file` task registered under
-    /// `request.send_id`, unblocking its `block_on` on this or another
-    /// thread with [`LocalSendBridgeError::SendCancelled`]. This is a hard
-    /// abort (the underlying connection is simply dropped), not a
-    /// protocol-level cancel notice to the peer — `localsend-rs`'s
-    /// `LocalSendClient::cancel` exists for that and is a separate concern.
-    pub fn cancel_send(&self, request: CancelSendRequest) -> BridgeResult<()> {
+    /// Aborts the in-flight `send_file` task identified by `request.send_id`,
+    /// unblocking its `block_on` on this or another thread with
+    /// [`LocalSendBridgeError::SendCancelled`]. This is a hard abort (the
+    /// underlying connection is simply dropped), not a protocol-level cancel
+    /// notice to the peer — `localsend-rs`'s `LocalSendClient::cancel` exists
+    /// for that and is a separate concern.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalSendBridgeError::UnknownSendId`] when no active send has
+    /// that identifier.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the registry state mutex is poisoned.
+    pub fn cancel_send(&self, request: &CancelSendRequest) -> BridgeResult<()> {
         let state = self.state.lock().expect("registry lock poisoned");
         let handle = state.active_sends.get(&request.send_id).ok_or_else(|| LocalSendBridgeError::UnknownSendId(request.send_id.clone()))?;
         handle.abort();

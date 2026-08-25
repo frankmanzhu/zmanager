@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// A recognized exchange payload, sent as an ordinary file in a LocalSend
+/// A recognized exchange payload, sent as an ordinary file in a `LocalSend`
 /// push. `session_correlation_id` lets the original sender auto-accept the
 /// matching reply from the same peer without a second manual confirmation —
 /// see the module-level exchange flow this backs, described in the crate's

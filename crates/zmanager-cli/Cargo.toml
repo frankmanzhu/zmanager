@@ -25,7 +25,7 @@ tzap-online = ["dep:reqwest", "dep:zmanager-tzap-hosted"]
 [dependencies]
 anstream = "1.0.0"
 anstyle = "1.0.14"
-reqwest = { version = "0.12.28", features = ["blocking", "json"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "native-tls-vendored", "charset", "http2", "system-proxy"], optional = true }
 rpassword = "7.5.2"
 serde_json = "1.0.140"
 zmanager-core = { workspace = true }

@@ -62,5 +62,5 @@ pub fn localsend_cancel_send_json(request_json: String) -> String {
         Ok(request) => request,
         Err(envelope) => return envelope,
     };
-    ok_or_error(zmanager_localsend::registry().cancel_send(request).map(|()| serde_json::json!({ "ok": true })))
+    ok_or_error(zmanager_localsend::registry().cancel_send(&request).map(|()| serde_json::json!({ "ok": true })))
 }

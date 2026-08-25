@@ -627,24 +627,73 @@ fn native_mtree_adapter_rejects_unsupported_unset_directives_without_panicking()
 }
 
 #[test]
-fn native_iso_adapter_uses_forensic_vfs_for_list_test_copy_and_extract() {
+fn native_iso_adapter_handles_hybrid_iso_for_list_test_copy_and_extract() {
     let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.iso");
+
+    // This fixture is deliberately a hybrid ISO 9660/Joliet image. Keep the
+    // assertion here so the regression test cannot silently be replaced with
+    // a plain ISO and lose coverage of supplementary-volume handling.
+    let mut iso_reader = iso::IsoReader::open(File::open(&archive).unwrap()).unwrap();
+    assert!(iso_reader.has_joliet(), "the ISO regression fixture must contain a Joliet supplementary volume");
+    assert!(
+        iso_reader.walk_joliet().unwrap().iter().any(|entry| !entry.record.joliet_name().is_ascii()),
+        "the hybrid fixture must exercise a non-ASCII Joliet filename"
+    );
+
     let engine = create_default_engine().unwrap();
     let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
     let listing = handle.list().unwrap();
-    let file_entry = listing.entries.iter().find(|entry| entry.path == "README.TXT").expect("ISO fixture file should be listed");
+
+    // The adapter exposes the active primary tree once; it must not surface a
+    // second copy of every entry from the Joliet tree.
+    let expected_entries = [
+        ("DIR WITH SPACES", true, 2048),
+        ("NESTED", true, 2048),
+        ("README.TXT", false, 25),
+        ("UNICODE", true, 2048),
+        ("UNICODE/_.TXT", false, 21),
+        ("NESTED/EMPTY-DIR", true, 2048),
+        ("NESTED/FILE.TXT", false, 20),
+        ("DIR WITH SPACES/FILE WITH SPACES.TXT", false, 15),
+    ];
+    assert_eq!(listing.entries.len(), expected_entries.len());
+    for (path, is_directory, size) in expected_entries {
+        let entry = listing.entries.iter().find(|entry| entry.path == path).unwrap_or_else(|| panic!("ISO fixture entry should be listed: {path}"));
+        assert_eq!(matches!(entry.kind, BrowserEntryKind::Directory), is_directory, "wrong kind for {path}");
+        assert_eq!(entry.size, Some(size), "wrong size for {path}");
+    }
+
+    let selected_test = handle.test(&zmanager_core::engine::TestOptions { selected_paths: vec!["NESTED/FILE.TXT".to_owned()], ..Default::default() }).unwrap();
+    assert_eq!(selected_test.tested_entries, 1);
+    assert_eq!(selected_test.skipped_entries, (listing.entries.len() - 1) as u64);
+    assert_eq!(selected_test.tested_bytes, b"nested fixture file\n".len() as u64);
+
     let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
     assert_eq!(test.tested_entries, listing.entries.len() as u64);
-    assert!(test.tested_bytes > 0);
-    let mut copied = Vec::new();
-    let copy = handle.copy_entry(file_entry.id, &mut copied).unwrap();
-    assert_eq!(copy.written_bytes, copied.len() as u64);
-    assert_eq!(copied, b"ZManager fixture payload\n");
+    assert_eq!(test.tested_bytes, 25 + 20 + 15 + 21);
+
+    for (path, expected) in [
+        ("README.TXT", b"ZManager fixture payload\n".as_slice()),
+        ("NESTED/FILE.TXT", b"nested fixture file\n".as_slice()),
+        ("DIR WITH SPACES/FILE WITH SPACES.TXT", b"spaces in path\n".as_slice()),
+        ("UNICODE/_.TXT", b"unicode path fixture\n".as_slice()),
+    ] {
+        let entry = listing.entries.iter().find(|entry| entry.path == path).unwrap_or_else(|| panic!("ISO fixture file should be listed: {path}"));
+        let mut copied = Vec::new();
+        let copy = handle.copy_entry(entry.id, &mut copied).unwrap();
+        assert_eq!(copy.written_bytes, expected.len() as u64, "wrong copied byte count for {path}");
+        assert_eq!(copied, expected, "wrong copied contents for {path}");
+    }
+
     let destination = TestDir::new("engine-conformance-iso");
     let mut options = ExtractOptions { destination: destination.path("out"), ..ExtractOptions::default() };
     let report = handle.extract(&mut options).unwrap();
-    assert!(report.written_entries > 0);
+    assert_eq!(report.written_entries, 4);
+    assert_eq!(report.written_bytes, 25 + 20 + 15 + 21);
     assert_eq!(fs::read(destination.path("out/README.TXT")).unwrap(), b"ZManager fixture payload\n");
+    assert_eq!(fs::read(destination.path("out/NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
+    assert_eq!(fs::read(destination.path("out/DIR WITH SPACES/FILE WITH SPACES.TXT")).unwrap(), b"spaces in path\n");
+    assert_eq!(fs::read(destination.path("out/UNICODE/_.TXT")).unwrap(), b"unicode path fixture\n");
     handle.close().unwrap();
 }
 

@@ -107,6 +107,81 @@ fn cli_lists_all_fixture_archives() {
     }
 }
 
+fn assert_listing_kinds(archive: &Path, expected: &[(&str, &str)]) {
+    let output = Command::new(cli_path()).arg("list").arg(archive).arg("--json").output().unwrap();
+    assert_success(&format!("zm list {} --json", archive.display()), &output);
+    let listing: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = listing["entries"].as_array().expect("JSON listing entries array");
+
+    for &(path, expected_kind) in expected {
+        let entry = entries
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some(path))
+            .unwrap_or_else(|| panic!("missing JSON listing entry {path} in {}: {listing}", archive.display()));
+        assert_eq!(entry["kind"].as_str(), Some(expected_kind), "wrong kind for {path} in {}", archive.display());
+    }
+}
+
+#[test]
+fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("basic.zip", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "file")]),
+        ("basic.7z", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "file")]),
+        (
+            "basic.tar.gz",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        (
+            "basic.tar.xz",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        (
+            "basic.tar.zst",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        (
+            "basic.cpio",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        (
+            "basic.xar",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        ("basic.iso", &[("NESTED", "directory"), ("README.TXT", "file"), ("NESTED/FILE.TXT", "file")]),
+        ("basic.deb", &[("debian-binary", "file"), ("control.tar.gz", "file"), ("data.tar.xz", "file")]),
+        (
+            "basic.dmg",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        (
+            "basic.pkg",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        ("basic.msi", &[("payload/README.txt", "file"), ("payload/nested/file.txt", "file"), ("payload/dir with spaces/file with spaces.txt", "file")]),
+        (
+            "basic.vhd",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        ("basic.vmdk", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/file.txt", "file")]),
+        (
+            "basic.udf",
+            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+    ];
+
+    for &(filename, expected) in cases {
+        let archive = archives_dir().join(filename);
+        if archive.exists() {
+            assert_listing_kinds(&archive, expected);
+        }
+    }
+
+    let rar = archives_dir().join("rar5-multipart.part1.rar");
+    if rar.exists() {
+        assert_listing_kinds(&rar, &[("rar-fixture", "directory"), ("rar-fixture/docs/readme.txt", "file")]);
+    }
+}
+
 #[test]
 fn cli_extracts_extractable_fixture_archives() {
     for fixture in fixture_manifest().into_iter().filter(|fixture| fixture.extract) {
@@ -231,6 +306,42 @@ fn cli_lists_tests_and_extracts_virtual_disk_fixtures() {
             String::from_utf8_lossy(&stdout.stderr)
         );
     }
+}
+
+#[test]
+fn cli_lists_tests_and_extracts_hybrid_iso_fixture() {
+    let fixture = archives_dir().join("basic.iso");
+    if !fixture.exists() {
+        return;
+    }
+    let temp = TestDir::new("fixture-cli-hybrid-iso");
+
+    let list = Command::new(cli_path()).arg("list").arg(&fixture).output().unwrap();
+    assert_success("zm list basic.iso", &list);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    for path in
+        ["DIR WITH SPACES", "NESTED", "README.TXT", "UNICODE", "UNICODE/_.TXT", "NESTED/EMPTY-DIR", "NESTED/FILE.TXT", "DIR WITH SPACES/FILE WITH SPACES.TXT"]
+    {
+        assert!(list_stdout.contains(path), "basic.iso list is missing {path}:\n{list_stdout}");
+    }
+    assert_eq!(list_stdout.matches("README.TXT").count(), 1, "hybrid ISO trees must not be listed twice:\n{list_stdout}");
+
+    let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
+    assert_success("zm test basic.iso", &test);
+
+    let out = temp.path("out");
+    let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
+    assert_success("zm extract basic.iso", &extract);
+    assert_eq!(fs::read(out.join("README.TXT")).unwrap(), b"ZManager fixture payload\n");
+    assert_eq!(fs::read(out.join("NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
+    assert_eq!(fs::read(out.join("DIR WITH SPACES/FILE WITH SPACES.TXT")).unwrap(), b"spaces in path\n");
+    assert_eq!(fs::read(out.join("UNICODE/_.TXT")).unwrap(), b"unicode path fixture\n");
+
+    let selected_out = temp.path("selected");
+    let selected = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&selected_out).arg("--include").arg("NESTED/FILE.TXT").output().unwrap();
+    assert_success("zm extract basic.iso --include", &selected);
+    assert_eq!(fs::read(selected_out.join("NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
+    assert!(!selected_out.join("README.TXT").exists());
 }
 
 /// Extracts the VHD and VMDK fixtures with 7-Zip (which reads VPC and VMDK
