@@ -225,8 +225,10 @@ cargo clippy --workspace --all-targets
 cargo test --workspace
 ```
 
-Some compatibility tests use optional external archive tools when installed, but
-the core suite is deterministic and should pass without network access.
+The core suite is deterministic and should pass without network access. Unix CI
+also runs the committed-fixture compatibility test with `unzip`, 7-Zip, and a
+tar reader; it lists and extracts the small checked-in ZIP, 7z, TAR, compressed
+TAR, and CPIO fixtures, then compares the resulting tree with `zm`.
 
 ## Project Links
 

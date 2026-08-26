@@ -152,6 +152,20 @@ jobs:
             exit "$status"
           fi
 
+      - name: External fixture compatibility
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v unzip
+          command -v 7zz || command -v 7z
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            command -v bsdtar
+          else
+            command -v tar
+          fi
+          cargo test -p zmanager-cli --test external_fixture_cli -- --nocapture
+
   windows-test:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}

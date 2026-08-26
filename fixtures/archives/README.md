@@ -26,6 +26,12 @@ bash scripts/generate-rar-test-fixtures.sh
 tests verify those hashes before listing or extraction so accidental fixture
 drift is caught early.
 
+Unix CI additionally uses the committed small fixtures as external-tool test
+inputs. It asks `unzip`, 7-Zip, and a tar reader to list and extract them, then
+compares those trees and listings with ZManager. This keeps compatibility
+coverage available even when fixture creators are not installed on a developer
+machine.
+
 ## Included Fixtures
 
 | File | Format | Created by | Notes |
@@ -58,4 +64,6 @@ drift is caught early.
 - WIM: requires `wimlib-imagex` or equivalent.
 - RPM: requires an RPM build toolchain and package metadata setup.
 
-Compatibility tests skip optional external validation tools when they are not installed.
+The external-fixture test skips unavailable tools for local runs; Unix CI checks
+the required commands first, so the committed-fixture validation is mandatory
+there.
