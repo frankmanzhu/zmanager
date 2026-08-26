@@ -1,1 +1,4 @@
 crates/zmanager-cli/contracts/archive-formats.json text eol=lf
+
+# AR archives can contain only text bytes, but their signature is byte-sensitive.
+fixtures/archives/*.ar binary
