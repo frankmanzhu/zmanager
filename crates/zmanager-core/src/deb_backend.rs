@@ -5,7 +5,9 @@ use crate::safety::{
 };
 use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
 use std::fmt;
-use std::fs::{self, File};
+#[cfg(any(unix, test))]
+use std::fs;
+use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};

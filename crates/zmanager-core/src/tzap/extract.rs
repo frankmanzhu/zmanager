@@ -99,14 +99,20 @@ fn process_is_elevated() -> bool {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     let mut token = std::ptr::null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) } == 0 {
         return false;
     }
     let mut elevation = TOKEN_ELEVATION::default();
     let mut returned = 0u32;
+    let Ok(elevation_size) = u32::try_from(size_of::<TOKEN_ELEVATION>()) else {
+        unsafe {
+            CloseHandle(token);
+        }
+        return false;
+    };
     let elevated = unsafe {
-        GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut returned) != 0
-            && returned == size_of::<TOKEN_ELEVATION>() as u32
+        GetTokenInformation(token, TokenElevation, (&raw mut elevation).cast(), elevation_size, &raw mut returned) != 0
+            && returned == elevation_size
             && elevation.TokenIsElevated != 0
     };
     unsafe {

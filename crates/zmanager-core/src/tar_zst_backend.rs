@@ -274,7 +274,7 @@ mod tests {
     use crate::test_support::TestDir;
     use std::fs::{self, File};
     use std::io::{self, Write};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::time::UNIX_EPOCH;
 
     /// Extracts through the public engine seam (the only read path).
@@ -448,6 +448,7 @@ mod tests {
     #[test]
     fn preserves_symlinks() {
         use std::os::unix::fs::symlink;
+        use std::path::PathBuf;
 
         let temp = TestDir::new("preserves_symlinks");
         temp.write_file("project/target.txt", b"target");

@@ -67,13 +67,18 @@ pub(crate) fn portable_file_metadata(path: &Path) -> Result<CapturedPortableFile
     #[cfg(not(unix))]
     let posix_owner = portable_posix_owner(&metadata);
 
+    #[cfg(windows)]
+    let attributes = Some(portable_file_attributes(&metadata));
+    #[cfg(not(windows))]
+    let attributes = None;
+
     Ok(CapturedPortableFileMetadata {
         metadata: PortableFileMetadata {
             source_os,
             source_filesystem: "unknown".to_owned(),
             mode_origin: if cfg!(unix) { PortableModeOrigin::Native } else { PortableModeOrigin::Projected },
             posix_owner,
-            attributes: portable_file_attributes(&metadata),
+            attributes,
             created,
             accessed,
             native,
@@ -142,36 +147,20 @@ fn portable_posix_owner(_metadata: &fs::Metadata) -> Option<PortablePosixOwner> 
     None
 }
 
-fn portable_file_attributes(metadata: &fs::Metadata) -> Option<u32> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        let attributes = metadata.file_attributes();
-        let mut projection = 0u32;
-        // Bit 0: READONLY  (FILE_ATTRIBUTE_READONLY = 0x1)
-        // Bit 1: HIDDEN    (FILE_ATTRIBUTE_HIDDEN   = 0x2)
-        // Bit 2: SYSTEM    (FILE_ATTRIBUTE_SYSTEM   = 0x4)
-        // Bit 3: ARCHIVE   (FILE_ATTRIBUTE_ARCHIVE  = 0x20)
-        projection |= u32::from(attributes & 0x0000_0001 != 0);
-        projection |= u32::from(attributes & 0x0000_0002 != 0) << 1;
-        projection |= u32::from(attributes & 0x0000_0004 != 0) << 2;
-        projection |= u32::from(attributes & 0x0000_0020 != 0) << 3;
-        Some(projection)
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let _ = metadata;
-        // Exact BSD flags are carried in TZAP.macos.st-flags. Portable
-        // attributes model Windows semantics and are intentionally absent.
-        None
-    }
-
-    #[cfg(all(unix, not(target_os = "macos"), not(windows)))]
-    {
-        let _ = metadata;
-        None
-    }
+#[cfg(windows)]
+fn portable_file_attributes(metadata: &fs::Metadata) -> u32 {
+    use std::os::windows::fs::MetadataExt;
+    let attributes = metadata.file_attributes();
+    let mut projection = 0u32;
+    // Bit 0: READONLY  (FILE_ATTRIBUTE_READONLY = 0x1)
+    // Bit 1: HIDDEN    (FILE_ATTRIBUTE_HIDDEN   = 0x2)
+    // Bit 2: SYSTEM    (FILE_ATTRIBUTE_SYSTEM   = 0x4)
+    // Bit 3: ARCHIVE   (FILE_ATTRIBUTE_ARCHIVE  = 0x20)
+    projection |= u32::from(attributes & 0x0000_0001 != 0);
+    projection |= u32::from(attributes & 0x0000_0002 != 0) << 1;
+    projection |= u32::from(attributes & 0x0000_0004 != 0) << 2;
+    projection |= u32::from(attributes & 0x0000_0020 != 0) << 3;
+    projection
 }
 
 fn source_os_label() -> &'static str {
