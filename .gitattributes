@@ -3,6 +3,12 @@ crates/zmanager-cli/contracts/archive-formats.json text eol=lf
 # AR archives can contain only text bytes, but their signature is byte-sensitive.
 fixtures/archives/*.ar binary
 
+# Encoded archive fixtures are byte-sensitive despite containing printable
+# text; do not let Windows checkout line-ending conversion corrupt them.
+fixtures/archives/*.uu binary
+fixtures/archives/*.b64 binary
+fixtures/archives/*.warc binary
+
 # MTREE manifests are parsed as byte-stable fixtures; keep checkout line endings
 # consistent across platforms so their integrity checks do not drift on Windows.
 fixtures/archives/*.mtree text eol=lf

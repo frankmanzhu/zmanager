@@ -107,6 +107,7 @@ fn cli_lists_all_fixture_archives() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+        assert!(!output.stdout.is_empty(), "list output was empty for {} ({})", fixture.filename, fixture.format);
     }
 }
 
@@ -213,12 +214,13 @@ fn cli_extracts_extractable_fixture_archives() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+        assert!(!collect_tree_entries(&temp.path("out")).is_empty(), "extraction produced no entries for {} ({})", fixture.filename, fixture.format);
     }
 }
 
 #[test]
 fn cli_tests_all_fixture_archives() {
-    for fixture in fixture_manifest().into_iter().filter(|fixture| fixture_supported_on_target(fixture)) {
+    for fixture in fixture_manifest().into_iter().filter(fixture_supported_on_target) {
         let output = Command::new(cli_path()).arg("test").arg(fixture.path()).output().unwrap();
         assert_success(&format!("zm test {}", fixture.filename), &output);
     }
@@ -2665,7 +2667,7 @@ fn fixture_manifest() -> Vec<Fixture> {
 }
 
 fn fixture_supported_on_target(fixture: &Fixture) -> bool {
-    fixture.format != "MTREE" || cfg!(unix)
+    (fixture.format != "MTREE" || cfg!(unix)) && (fixture.format != "AAR" || cfg!(any(target_os = "macos", target_os = "ios")))
 }
 
 fn sha256_hex(path: &Path) -> String {

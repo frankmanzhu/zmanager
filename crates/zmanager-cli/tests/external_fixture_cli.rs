@@ -47,6 +47,7 @@ impl ExternalArchiveTool {
     }
 }
 
+#[derive(Clone, Copy)]
 struct FixtureCase {
     filename: &'static str,
     tool: ExternalArchiveTool,
@@ -59,9 +60,18 @@ fn external_tools_list_and_extract_committed_fixtures() {
         FixtureCase { filename: "basic.7z", tool: ExternalArchiveTool::SevenZip },
         FixtureCase { filename: "basic.tar", tool: ExternalArchiveTool::Tar },
         FixtureCase { filename: "basic.tar.gz", tool: ExternalArchiveTool::Tar },
+        FixtureCase { filename: "basic.tar.bz2", tool: ExternalArchiveTool::Tar },
         FixtureCase { filename: "basic.tar.xz", tool: ExternalArchiveTool::Tar },
+        FixtureCase { filename: "basic.tar.lzma", tool: ExternalArchiveTool::Tar },
+        FixtureCase { filename: "basic.tar.lz", tool: ExternalArchiveTool::Tar },
+        FixtureCase { filename: "basic.tar.lzo", tool: ExternalArchiveTool::Tar },
+        FixtureCase { filename: "basic.tar.Z", tool: ExternalArchiveTool::Tar },
+        FixtureCase { filename: "basic.tar.lz4", tool: ExternalArchiveTool::Tar },
         FixtureCase { filename: "basic.tar.zst", tool: ExternalArchiveTool::Tar },
         FixtureCase { filename: "basic.cpio", tool: ExternalArchiveTool::Tar },
+        FixtureCase { filename: "basic.cab", tool: ExternalArchiveTool::SevenZip },
+        FixtureCase { filename: "basic.rar", tool: ExternalArchiveTool::SevenZip },
+        FixtureCase { filename: "basic.lha", tool: ExternalArchiveTool::SevenZip },
     ];
 
     let archives = repo_root().join("fixtures/archives");
@@ -90,11 +100,11 @@ fn validate_fixture(case: FixtureCase, binary: &Path, archive: &Path) {
 
     let external_entries = collect_tree_entries(&external_out);
     assert!(!external_entries.is_empty(), "external extraction of {} produced no entries", case.filename);
-    assert_external_listing_contains_all_entries(case.filename, &list, &external_entries);
+    assert_external_listing_contains_all_entries(case.tool, case.filename, &list, &external_out, &external_entries);
 
     let zm_list = Command::new(zm_path()).arg("list").arg(archive).arg("--json").output().unwrap();
     assert_success(&format!("zm lists {}", case.filename), &zm_list);
-    assert_zm_listing_matches_tree(case.filename, &zm_list.stdout, &external_entries);
+    assert_zm_listing_matches_tree(case.tool, case.filename, &zm_list.stdout, &external_out, &external_entries);
 
     let zm = TestDir::new("external-fixture-zm");
     let zm_out = zm.path("out");
@@ -103,26 +113,44 @@ fn validate_fixture(case: FixtureCase, binary: &Path, archive: &Path) {
     assert_trees_match(&format!("external and zm trees for {}", case.filename), &external_out, &zm_out);
 }
 
-fn assert_external_listing_contains_all_entries(filename: &str, output: &Output, entries: &[PathBuf]) {
+fn assert_external_listing_contains_all_entries(tool: ExternalArchiveTool, filename: &str, output: &Output, root: &Path, entries: &[PathBuf]) {
     let listing = String::from_utf8_lossy(&output.stdout).replace('\\', "/");
+    assert!(!listing.trim().is_empty(), "external listing for {filename} was empty");
     for entry in entries {
+        // Some 7-Zip codecs (notably CAB and LHA) synthesize parent
+        // directories during extraction without emitting directory records.
+        if matches!(tool, ExternalArchiveTool::SevenZip) && fs::symlink_metadata(root.join(entry)).is_ok_and(|metadata| metadata.is_dir()) {
+            continue;
+        }
         let normalized = entry.to_string_lossy().replace('\\', "/");
+        // Info-ZIP on macOS emits non-ASCII names in the current locale even
+        // when the archive carries the Unicode path extra field. Extraction
+        // below still verifies the exact name and bytes; keep the listing
+        // assertion strict for every name the oracle can represent as UTF-8.
+        if matches!(tool, ExternalArchiveTool::Unzip) && !normalized.is_ascii() {
+            continue;
+        }
         assert!(listing.contains(&normalized), "external listing for {filename} missed {normalized}\nstdout:\n{listing}");
     }
 }
 
-fn assert_zm_listing_matches_tree(filename: &str, stdout: &[u8], external_entries: &[PathBuf]) {
+fn assert_zm_listing_matches_tree(tool: ExternalArchiveTool, filename: &str, stdout: &[u8], root: &Path, external_entries: &[PathBuf]) {
     let listing: Value = serde_json::from_slice(stdout)
         .unwrap_or_else(|error| panic!("invalid JSON listing for {filename}: {error}\nstdout:\n{}", String::from_utf8_lossy(stdout)));
     let actual = listing["entries"]
         .as_array()
         .unwrap_or_else(|| panic!("JSON listing for {filename} has no entries array: {listing}"))
         .iter()
+        .filter(|entry| !(matches!(tool, ExternalArchiveTool::SevenZip) && entry["kind"] == "directory"))
         .filter_map(|entry| entry["name"].as_str())
         .filter(|name| !is_apple_double(Path::new(name)))
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
-    let expected = external_entries.iter().map(|entry| entry.to_string_lossy().replace('\\', "/")).collect::<BTreeSet<_>>();
+    let expected = external_entries
+        .iter()
+        .filter(|entry| !(matches!(tool, ExternalArchiveTool::SevenZip) && fs::symlink_metadata(root.join(entry)).is_ok_and(|metadata| metadata.is_dir())))
+        .map(|entry| entry.to_string_lossy().replace('\\', "/"))
+        .collect::<BTreeSet<_>>();
     assert_eq!(actual, expected, "zm JSON listing differs from external extraction for {filename}");
 }
 

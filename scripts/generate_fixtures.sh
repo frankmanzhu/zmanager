@@ -17,10 +17,21 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.7z \
   "$ARCHIVES"/basic.tar \
   "$ARCHIVES"/basic.tar.gz \
+  "$ARCHIVES"/basic.tar.bz2 \
   "$ARCHIVES"/basic.tar.xz \
+  "$ARCHIVES"/basic.tar.lzma \
+  "$ARCHIVES"/basic.tar.lz \
+  "$ARCHIVES"/basic.tar.lzo \
+  "$ARCHIVES"/basic.tar.Z \
+  "$ARCHIVES"/basic.tar.lz4 \
   "$ARCHIVES"/basic.tar.zst \
   "$ARCHIVES"/basic.cpio \
+  "$ARCHIVES"/basic.cab \
+  "$ARCHIVES"/basic.rar \
+  "$ARCHIVES"/basic.rpm \
+  "$ARCHIVES"/basic.lha \
   "$ARCHIVES"/basic.xar \
+  "$ARCHIVES"/basic.warc \
   "$ARCHIVES"/basic.iso \
   "$ARCHIVES"/basic.deb \
   "$ARCHIVES"/basic.ar \
@@ -30,7 +41,23 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.vhd \
   "$ARCHIVES"/basic.vmdk \
   "$ARCHIVES"/basic.udf \
-  "$ARCHIVES"/basic.mtree
+  "$ARCHIVES"/basic.mtree \
+  "$ARCHIVES"/basic.tzap \
+  "$ARCHIVES"/basic.aar \
+  "$ARCHIVES"/basic.txt.gz \
+  "$ARCHIVES"/basic.txt.bz2 \
+  "$ARCHIVES"/basic.txt.xz \
+  "$ARCHIVES"/basic.txt.lzma \
+  "$ARCHIVES"/basic.txt.zst \
+  "$ARCHIVES"/basic.txt.lz \
+  "$ARCHIVES"/basic.txt.br \
+  "$ARCHIVES"/basic.txt.lz4 \
+  "$ARCHIVES"/basic.txt.lzo \
+  "$ARCHIVES"/basic.txt.Z \
+  "$ARCHIVES"/basic.txt.uu \
+  "$ARCHIVES"/basic.txt.b64 \
+  "$ARCHIVES"/basic.tar.uu \
+  "$ARCHIVES"/basic.tar.b64
 
 mkdir -p "$SRC/nested/empty-dir"
 mkdir -p "$SRC/dir with spaces"
@@ -50,13 +77,92 @@ fi
   cargo run -p zmanager-cli --bin zmanager-cli -- create "$ARCHIVES/basic.zip" "$SRC" --method deflate
   cargo run -p zmanager-cli --bin zmanager-cli -- create "$ARCHIVES/basic.7z" "$SRC" --format 7z --solid
   cargo run -p zmanager-cli --bin zmanager-cli -- create "$ARCHIVES/basic.tar.zst" "$SRC" --format tar.zst --level 1
+  cargo run -p zmanager-cli --bin zmanager-cli -- create "$ARCHIVES/basic.tzap" "$SRC" --format tzap
 )
+
+aa archive -d "$WORK" -o "$ARCHIVES/basic.aar" -a lz4 >/dev/null
 
 cp "$SRC/README.txt" "$WORK/README.md"
 bsdtar -czf "$ARCHIVES/basic.tar.gz" -C "$WORK" payload
+bsdtar -cjf "$ARCHIVES/basic.tar.bz2" -C "$WORK" payload
 bsdtar -cf "$ARCHIVES/basic.tar" -C "$WORK" README.md
 bsdtar -cJf "$ARCHIVES/basic.tar.xz" -C "$WORK" payload
+bsdtar -cf - -C "$WORK" payload | xz --format=lzma -c > "$ARCHIVES/basic.tar.lzma"
+bsdtar -cf - -C "$WORK" payload | lzip -c > "$ARCHIVES/basic.tar.lz"
+bsdtar -cf - -C "$WORK" payload | lzop -c > "$ARCHIVES/basic.tar.lzo"
+bsdtar -cf - -C "$WORK" payload | compress -c > "$ARCHIVES/basic.tar.Z"
+bsdtar -cf - -C "$WORK" payload | lz4 -q -c > "$ARCHIVES/basic.tar.lz4"
 bsdtar --format=cpio -cf "$ARCHIVES/basic.cpio" -C "$WORK" payload
+
+# LHA has no maintained native creator in Homebrew. jlha-utils is a small
+# Java implementation available in Debian/Ubuntu, so use Docker when the
+# corpus is regenerated on macOS or another host without an LHA writer.
+docker run --rm -v "$WORK:/work" ubuntu:24.04 bash -c '
+  set -e
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y -qq default-jre-headless jlha-utils >/dev/null 2>&1
+  cd /work
+  jlha c basic.lha payload/README.txt payload/nested/file.txt >/dev/null
+'
+cp "$WORK/basic.lha" "$ARCHIVES/basic.lha"
+
+(
+  cd "$WORK"
+  gcab -c "$ARCHIVES/basic.cab" payload
+  rar a -idq -ma5 -m0 "$ARCHIVES/basic.rar" payload
+)
+bsdtar --format=warc -cf "$ARCHIVES/basic.warc" -C "$WORK" payload/README.txt
+
+RPM="$WORK/rpm"
+mkdir -p "$RPM"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+cat > "$RPM/SPECS/zmanager-fixture.spec" <<'SPEC'
+Name: zmanager-fixture
+Version: 1.0
+Release: 1
+Summary: ZManager compatibility fixture
+License: Apache-2.0
+BuildArch: noarch
+
+%description
+Small ZManager compatibility fixture.
+
+%install
+mkdir -p %{buildroot}/usr/share/zmanager-fixture
+printf 'ZManager fixture payload\n' > %{buildroot}/usr/share/zmanager-fixture/README.txt
+
+%files
+/usr/share/zmanager-fixture/README.txt
+SPEC
+rpmbuild --define "_topdir $RPM" --define '_build_id_links none' -bb "$RPM/SPECS/zmanager-fixture.spec" >/dev/null
+cp "$RPM/RPMS/noarch/zmanager-fixture-1.0-1.noarch.rpm" "$ARCHIVES/basic.rpm"
+
+RAW="$WORK/raw"
+mkdir -p "$RAW"
+printf 'ZManager raw stream fixture\n' > "$RAW/payload.txt"
+gzip -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.gz"
+bzip2 -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.bz2"
+xz -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.xz"
+xz --format=lzma -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.lzma"
+zstd -q -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.zst"
+lzip -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.lz"
+brotli -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.br"
+lz4 -q -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.lz4"
+lzop -q -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.lzo"
+compress -c "$RAW/payload.txt" > "$ARCHIVES/basic.txt.Z"
+uuencode "$RAW/payload.txt" basic.txt > "$ARCHIVES/basic.txt.uu"
+{
+  printf 'begin-base64 644 basic.txt\n'
+  base64 < "$RAW/payload.txt"
+  printf '====\n'
+} > "$ARCHIVES/basic.txt.b64"
+COPYFILE_DISABLE=1 bsdtar -cf "$RAW/basic.tar" -C "$WORK" payload
+uuencode "$RAW/basic.tar" basic.tar > "$ARCHIVES/basic.tar.uu"
+{
+  printf 'begin-base64 644 basic.tar\n'
+  base64 < "$RAW/basic.tar"
+  printf '====\n'
+} > "$ARCHIVES/basic.tar.b64"
 
 # MTREE is intentionally kept to the two regular files and one symlink used
 # by the native manifest tests; the broader payload tree would change the
@@ -276,10 +382,21 @@ append_manifest "basic.zip" "ZIP" "true" "" "ZIP Deflate fixture created by ZMan
 append_manifest "basic.7z" "7Z" "true" "" "7Z LZMA2 solid fixture created by ZManager"
 append_manifest "basic.tar" "TAR" "true" "" "TAR fixture created by bsdtar"
 append_manifest "basic.tar.gz" "TAR.GZ" "true" "" "Tar fixture compressed with gzip"
+append_manifest "basic.tar.bz2" "TAR.BZ2" "true" "" "Tar fixture compressed with bzip2"
 append_manifest "basic.tar.xz" "TAR.XZ" "true" "" "Tar fixture compressed with xz"
+append_manifest "basic.tar.lzma" "TAR.LZMA" "true" "" "Tar fixture compressed with legacy LZMA"
+append_manifest "basic.tar.lz" "TAR.LZ" "true" "" "Tar fixture compressed with lzip"
+append_manifest "basic.tar.lzo" "TAR.LZO" "true" "" "Tar fixture compressed with lzop"
+append_manifest "basic.tar.Z" "TAR.Z" "true" "" "Tar fixture compressed with Unix compress"
+append_manifest "basic.tar.lz4" "TAR.LZ4" "true" "" "Tar fixture compressed with LZ4"
 append_manifest "basic.tar.zst" "TAR.ZST" "true" "" "Tar fixture compressed with zstd"
 append_manifest "basic.cpio" "CPIO" "true" "" "CPIO fixture created by bsdtar"
+append_manifest "basic.cab" "CAB" "true" "" "CAB fixture created by gcab"
+append_manifest "basic.rar" "RAR" "true" "" "RAR5 fixture created by the RAR tool"
+append_manifest "basic.lha" "LHA" "true" "" "LHA fixture created by jlha-utils in Docker"
+append_manifest "basic.rpm" "RPM" "true" "" "RPM package fixture created by rpmbuild"
 append_manifest "basic.xar" "XAR" "true" "" "XAR fixture created by macOS xar"
+append_manifest "basic.warc" "WARC" "true" "" "WARC fixture created by bsdtar"
 append_manifest "basic.iso" "ISO" "true" "" "ISO fixture created by hdiutil makehybrid"
 append_manifest "basic.deb" "DEB" "true" "" "Debian ar package fixture"
 append_manifest "basic.ar" "AR" "true" "" "AR fixture created by the platform ar tool"
@@ -290,5 +407,21 @@ append_manifest "basic.vhd" "VHD" "true" "" "VPC disk image fixture: MBR + NTFS,
 append_manifest "basic.vmdk" "VMDK" "true" "" "VMware disk image fixture: superfloppy FAT32, qemu-img -O vmdk (mtools populates)"
 append_manifest "basic.udf" "UDF" "true" "" "UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload"
 append_manifest "basic.mtree" "MTREE" "true" "" "MTREE manifest fixture with directories, files, sizes, and a symlink"
+append_manifest "basic.tzap" "TZAP" "true" "" "TZAP fixture created by zmanager-cli"
+append_manifest "basic.aar" "AAR" "true" "" "Apple Archive fixture created by macOS aa"
+append_manifest "basic.txt.gz" "RAW" "true" "" "Raw gzip stream fixture"
+append_manifest "basic.txt.bz2" "RAW" "true" "" "Raw bzip2 stream fixture"
+append_manifest "basic.txt.xz" "RAW" "true" "" "Raw xz stream fixture"
+append_manifest "basic.txt.lzma" "RAW" "true" "" "Raw legacy LZMA stream fixture"
+append_manifest "basic.txt.zst" "RAW" "true" "" "Raw zstd stream fixture"
+append_manifest "basic.txt.lz" "RAW" "true" "" "Raw lzip stream fixture"
+append_manifest "basic.txt.br" "RAW" "true" "" "Raw Brotli stream fixture"
+append_manifest "basic.txt.lz4" "RAW" "true" "" "Raw LZ4 stream fixture"
+append_manifest "basic.txt.lzo" "RAW" "true" "" "Raw lzop stream fixture"
+append_manifest "basic.txt.Z" "RAW" "true" "" "Raw Unix compress stream fixture"
+append_manifest "basic.txt.uu" "RAW" "true" "" "Raw uuencode stream fixture"
+append_manifest "basic.txt.b64" "RAW" "true" "" "Raw base64 stream fixture"
+append_manifest "basic.tar.uu" "TAR.UU" "true" "" "Tar fixture encoded with uuencode"
+append_manifest "basic.tar.b64" "TAR.B64" "true" "" "Tar fixture encoded with base64"
 
 echo "Generated fixtures in $ARCHIVES"
