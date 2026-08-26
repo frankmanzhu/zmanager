@@ -70,7 +70,9 @@ fn external_tools_list_and_extract_committed_fixtures() {
         FixtureCase { filename: "basic.tar.zst", tool: ExternalArchiveTool::Tar },
         FixtureCase { filename: "basic.cpio", tool: ExternalArchiveTool::Tar },
         FixtureCase { filename: "basic.cab", tool: ExternalArchiveTool::SevenZip },
-        FixtureCase { filename: "basic.rar", tool: ExternalArchiveTool::SevenZip },
+        // Ubuntu 22.04 ships 7-Zip 21.07, which cannot read the RAR5 stream
+        // emitted by the supported RAR creator. The native fixture test still
+        // validates this archive through the bundled UnRAR backend.
         FixtureCase { filename: "basic.lha", tool: ExternalArchiveTool::SevenZip },
     ];
 

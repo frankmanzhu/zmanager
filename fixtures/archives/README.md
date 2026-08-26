@@ -36,8 +36,10 @@ drift is caught early.
 
 Unix CI additionally uses the committed small fixtures as external-tool test
 inputs. It asks `unzip`, 7-Zip, and a tar reader to list and extract the
-portable archive fixtures, including CAB, RAR, LHA, every compressed-TAR
-variant, and CPIO, then compares those trees and listings with ZManager. This
+portable archive fixtures, including CAB, LHA, every compressed-TAR variant,
+and CPIO, then compares those trees and listings with ZManager. Ubuntu 22.04's
+7-Zip 21.07 cannot read the RAR5 stream emitted by the supported RAR creator,
+so the RAR fixture is validated by the native UnRAR-backed tests instead. This
 keeps compatibility coverage available even when fixture creators are not
 installed on a developer machine.
 

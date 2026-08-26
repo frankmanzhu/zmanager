@@ -136,7 +136,10 @@ RAROpenArchiveDataEx open_request(const char *archive, BridgeContext *context,
                                   std::wstring *archive_wide) {
   RAROpenArchiveDataEx request{};
   request.ArcName = const_cast<char *>(archive);
-  if (archive_wide != nullptr && CharToWide(archive, *archive_wide) &&
+  // Rust paths are serialized as UTF-8.  CharToWide uses CP_ACP on Windows,
+  // so using it here would corrupt non-ASCII archive paths before UnRAR sees
+  // them.  Keep the C ABI input explicit about its encoding.
+  if (archive_wide != nullptr && UtfToWide(archive, *archive_wide) &&
       !archive_wide->empty()) {
     request.ArcNameW = const_cast<wchar_t *>(archive_wide->c_str());
   }
@@ -242,7 +245,10 @@ extern "C" int zmu_unrar_extract(const char *archive, const char *password,
     std::wstring destination_wide;
     wchar_t *destination_arg = nullptr;
     if (callback_code == 1) {
-      if (!CharToWide(destination, destination_wide) ||
+      // `destination` came from Rust as UTF-8.  On Windows CharToWide treats
+      // it as the ANSI code page, which makes extraction fail for otherwise
+      // valid Unicode members such as `こんにちは.txt`.
+      if (!UtfToWide(destination, destination_wide) ||
           destination_wide.empty()) {
         RARCloseArchive(handle);
         return ZMU_UNRAR_ABORTED;
