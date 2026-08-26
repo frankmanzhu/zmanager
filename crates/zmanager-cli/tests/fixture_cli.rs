@@ -94,6 +94,9 @@ fn windows_process_is_elevated() -> bool {
 #[test]
 fn cli_lists_all_fixture_archives() {
     for fixture in fixture_manifest() {
+        if !fixture_supported_on_target(&fixture) {
+            continue;
+        }
         let output = Command::new(cli_path()).arg("list").arg(fixture.path()).output().unwrap();
 
         assert!(
@@ -127,6 +130,7 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         ("basic.zip", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "file")]),
         ("basic.7z", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "file")]),
+        ("basic.tar", &[("README.md", "file")]),
         (
             "basic.tar.gz",
             &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
@@ -149,6 +153,7 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
         ),
         ("basic.iso", &[("NESTED", "directory"), ("README.TXT", "file"), ("NESTED/FILE.TXT", "file")]),
         ("basic.deb", &[("debian-binary", "file"), ("control.tar.gz", "file"), ("data.tar.xz", "file")]),
+        ("basic.ar", &[("README.md", "file")]),
         (
             "basic.dmg",
             &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
@@ -180,11 +185,23 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
     if rar.exists() {
         assert_listing_kinds(&rar, &[("rar-fixture", "directory"), ("rar-fixture/docs/readme.txt", "file")]);
     }
+
+    #[cfg(unix)]
+    assert_listing_kinds(
+        &archives_dir().join("basic.mtree"),
+        &[
+            ("payload", "directory"),
+            ("payload/nested", "directory"),
+            ("payload/README.txt", "file"),
+            ("payload/nested/file.txt", "file"),
+            ("payload/nested/readme-link.txt", "symlink"),
+        ],
+    );
 }
 
 #[test]
 fn cli_extracts_extractable_fixture_archives() {
-    for fixture in fixture_manifest().into_iter().filter(|fixture| fixture.extract) {
+    for fixture in fixture_manifest().into_iter().filter(|fixture| fixture.extract && fixture_supported_on_target(fixture)) {
         let temp = TestDir::new("fixture_cli_extracts");
         let output = Command::new(cli_path()).arg("extract").arg(fixture.path()).arg(temp.path("out")).output().unwrap();
 
@@ -196,6 +213,14 @@ fn cli_extracts_extractable_fixture_archives() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+#[test]
+fn cli_tests_all_fixture_archives() {
+    for fixture in fixture_manifest().into_iter().filter(|fixture| fixture_supported_on_target(fixture)) {
+        let output = Command::new(cli_path()).arg("test").arg(fixture.path()).output().unwrap();
+        assert_success(&format!("zm test {}", fixture.filename), &output);
     }
 }
 
@@ -2637,6 +2662,10 @@ fn fixture_manifest() -> Vec<Fixture> {
     }
 
     fixtures
+}
+
+fn fixture_supported_on_target(fixture: &Fixture) -> bool {
+    fixture.format != "MTREE" || cfg!(unix)
 }
 
 fn sha256_hex(path: &Path) -> String {

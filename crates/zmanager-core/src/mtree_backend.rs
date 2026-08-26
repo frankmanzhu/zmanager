@@ -1,16 +1,18 @@
 //! Native MTREE manifest reader.
 //!
 //! MTREE describes filesystem metadata and optional digests; it does not
-//! contain the file payloads.  `ZManager` therefore exposes list and test only:
-//! list reports manifest entries and test validates the manifest syntax and
-//! declared metadata.  Extraction and copy remain deliberately unsupported.
+//! contain the file payloads. Extraction therefore materializes the declared
+//! filesystem shape and file sizes (as sparse placeholder files), while list
+//! and test report the manifest entries and declared metadata.
 
 use crate::archive_browser::BrowserEntryKind;
 use crate::engine::types::TestOptions;
-use crate::safety::ExtractionSafetyError;
+use crate::extract_loop::{EntryAction, ExtractReport as ExtractReportTrait, process_extraction_entry};
+use crate::jobs::{CancellationToken, JobCancelled};
+use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner};
 use std::fmt;
-use std::fs::File;
-use std::io::{self, Cursor, Read as _};
+use std::fs::{self, File};
+use std::io::{self, Cursor, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 const MAX_MTREE_BYTES: u64 = 64 * 1024 * 1024;
@@ -28,6 +30,8 @@ pub struct MtreeEntry {
     pub size: Option<u64>,
     /// Declared file type name.
     pub file_type: String,
+    /// Symbolic-link target when the manifest declares one.
+    pub link_target: Option<PathBuf>,
 }
 
 /// Native MTREE operation report.
@@ -54,6 +58,28 @@ pub enum MtreeError {
     Safety(ExtractionSafetyError),
     /// The caller cancelled the operation.
     Cancelled,
+}
+
+impl From<ExtractionSafetyError> for MtreeError {
+    fn from(source: ExtractionSafetyError) -> Self {
+        Self::Safety(source)
+    }
+}
+
+impl From<JobCancelled> for MtreeError {
+    fn from(_: JobCancelled) -> Self {
+        Self::Cancelled
+    }
+}
+
+impl ExtractReportTrait for MtreeReport {
+    fn skipped_entries_mut(&mut self) -> &mut usize {
+        &mut self.skipped_entries
+    }
+
+    fn warnings_mut(&mut self) -> &mut Vec<String> {
+        &mut self.warnings
+    }
 }
 
 impl fmt::Display for MtreeError {
@@ -91,7 +117,14 @@ pub fn list(path: impl AsRef<Path>) -> Result<Vec<MtreeEntry>, MtreeError> {
         }
         used_paths.push(normalized.clone());
         let file_type = entry.file_type().unwrap_or(mtree::FileType::File);
-        entries.push(MtreeEntry { index: entries.len(), path: normalized, kind: map_kind(file_type), size: entry.size(), file_type: file_type.to_string() });
+        entries.push(MtreeEntry {
+            index: entries.len(),
+            path: normalized,
+            kind: map_kind(file_type),
+            size: entry.size(),
+            file_type: file_type.to_string(),
+            link_target: entry.link().map(Path::to_path_buf),
+        });
     }
     Ok(entries)
 }
@@ -114,6 +147,89 @@ pub fn test(path: impl AsRef<Path>, options: &TestOptions) -> Result<MtreeReport
             report.bytes = report.bytes.saturating_add(entry.size.unwrap_or(0));
         }
     }
+    Ok(report)
+}
+
+/// Materializes the filesystem shape declared by an MTREE manifest.
+///
+/// MTREE is a manifest, not a payload container. Regular files are therefore
+/// created as sparse placeholders with their declared size; their original
+/// contents are not available in the manifest. Symbolic links are restored
+/// from their declared targets, and directories are created normally.
+pub fn extract(
+    path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: Option<&mut dyn crate::safety::OverwriteResolver>,
+    cancellation: Option<&CancellationToken>,
+) -> Result<MtreeReport, MtreeError> {
+    let path = path.as_ref();
+    let entries = list(path)?;
+    let mut report = MtreeReport::default();
+    let mut planner = ExtractionSafetyPlanner::with_overwrite_resolver(destination.as_ref(), policy, overwrite_resolver);
+
+    for entry in entries {
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(MtreeError::Cancelled);
+        }
+
+        let safety_entry = ExtractionEntry {
+            archive_path: entry.path.clone(),
+            kind: match entry.kind {
+                BrowserEntryKind::File => ExtractionEntryKind::File,
+                BrowserEntryKind::Directory => ExtractionEntryKind::Directory,
+                BrowserEntryKind::Symlink => ExtractionEntryKind::Symlink {
+                    target: entry.link_target.clone().ok_or_else(|| invalid(path, format!("symbolic-link entry {} has no link target", entry.path)))?,
+                },
+                BrowserEntryKind::Hardlink => ExtractionEntryKind::Hardlink {
+                    target: entry.link_target.clone().ok_or_else(|| invalid(path, format!("hard-link entry {} has no link target", entry.path)))?,
+                },
+                BrowserEntryKind::Special | BrowserEntryKind::FileCopy => ExtractionEntryKind::Special,
+            },
+            uncompressed_size: (entry.kind == BrowserEntryKind::File).then_some(entry.size.unwrap_or(0)),
+            compressed_size: None,
+        };
+
+        process_extraction_entry(&mut report, None, &mut planner, &safety_entry, &mut |action, report, _context| {
+            let EntryAction::Write(decision) = action else {
+                return Ok(0);
+            };
+
+            if decision.replace_existing {
+                crate::safety::remove_destination_for_replace(decision.destination_path).map_err(|source| io_error(decision.destination_path, source))?;
+            }
+
+            let written = match &safety_entry.kind {
+                ExtractionEntryKind::Directory => {
+                    fs::create_dir_all(decision.destination_path).map_err(|source| io_error(decision.destination_path, source))?;
+                    0
+                }
+                ExtractionEntryKind::File => {
+                    let mut output = crate::atomic_file::AtomicOutputFile::create(decision.destination_path)
+                        .map_err(|source| io_error(decision.destination_path, source))?;
+                    output
+                        .file_mut()
+                        .map_err(|source| io_error(decision.destination_path, source))?
+                        .set_len(entry.size.unwrap_or(0))
+                        .map_err(|source| io_error(decision.destination_path, source))?;
+                    output.commit_with_replace(decision.replace_existing).map_err(|source| io_error(decision.destination_path, source))?;
+                    entry.size.unwrap_or(0)
+                }
+                ExtractionEntryKind::Symlink { target } => {
+                    crate::extract_materialize::write_symlink(target, decision.destination_path)
+                        .map_err(|source| io_error(decision.destination_path, source))?;
+                    0
+                }
+                ExtractionEntryKind::Hardlink { .. } | ExtractionEntryKind::Device | ExtractionEntryKind::Special => {
+                    return Err(invalid(path, format!("unsupported MTREE entry type for {}", entry.path)));
+                }
+            };
+            report.entries = report.entries.saturating_add(1);
+            report.bytes = report.bytes.saturating_add(written);
+            Ok(written)
+        })?;
+    }
+
     Ok(report)
 }
 

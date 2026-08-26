@@ -15,6 +15,7 @@ trap cleanup EXIT
 mkdir -p "$ARCHIVES"
 rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.7z \
+  "$ARCHIVES"/basic.tar \
   "$ARCHIVES"/basic.tar.gz \
   "$ARCHIVES"/basic.tar.xz \
   "$ARCHIVES"/basic.tar.zst \
@@ -22,12 +23,14 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.xar \
   "$ARCHIVES"/basic.iso \
   "$ARCHIVES"/basic.deb \
+  "$ARCHIVES"/basic.ar \
   "$ARCHIVES"/basic.dmg \
   "$ARCHIVES"/basic.pkg \
   "$ARCHIVES"/basic.msi \
   "$ARCHIVES"/basic.vhd \
   "$ARCHIVES"/basic.vmdk \
-  "$ARCHIVES"/basic.udf
+  "$ARCHIVES"/basic.udf \
+  "$ARCHIVES"/basic.mtree
 
 mkdir -p "$SRC/nested/empty-dir"
 mkdir -p "$SRC/dir with spaces"
@@ -49,9 +52,22 @@ fi
   cargo run -p zmanager-cli --bin zmanager-cli -- create "$ARCHIVES/basic.tar.zst" "$SRC" --format tar.zst --level 1
 )
 
+cp "$SRC/README.txt" "$WORK/README.md"
 bsdtar -czf "$ARCHIVES/basic.tar.gz" -C "$WORK" payload
+bsdtar -cf "$ARCHIVES/basic.tar" -C "$WORK" README.md
 bsdtar -cJf "$ARCHIVES/basic.tar.xz" -C "$WORK" payload
 bsdtar --format=cpio -cf "$ARCHIVES/basic.cpio" -C "$WORK" payload
+
+# MTREE is intentionally kept to the two regular files and one symlink used
+# by the native manifest tests; the broader payload tree would change the
+# declared byte total when optional fixture files are added.
+mkdir -p "$WORK/mtree/payload/nested"
+cp "$SRC/README.txt" "$WORK/mtree/payload/README.txt"
+cp "$SRC/nested/file.txt" "$WORK/mtree/payload/nested/file.txt"
+if [ -L "$SRC/nested/readme-link.txt" ]; then
+  ln -s "../README.txt" "$WORK/mtree/payload/nested/readme-link.txt"
+fi
+bsdtar --format=mtree -cf "$ARCHIVES/basic.mtree" -C "$WORK/mtree" payload
 
 (
   cd "$WORK"
@@ -82,6 +98,7 @@ cp "$SRC/README.txt" "$DEB/data/usr/share/zmanager-fixture/README.txt"
 bsdtar -czf "$DEB/control.tar.gz" -C "$DEB/control" control
 bsdtar -cJf "$DEB/data.tar.xz" -C "$DEB/data" .
 bsdtar --format=ar -cf "$ARCHIVES/basic.deb" -C "$DEB" debian-binary control.tar.gz data.tar.xz
+ar -rcs "$ARCHIVES/basic.ar" "$WORK/README.md"
 
 # DMG fixture: hdiutil treats the -srcfolder directory as the volume root,
 # so stage the payload tree in a dedicated directory to keep the payload/
@@ -257,6 +274,7 @@ append_manifest() {
 printf '# filename\tformat\textract\tpassword\tsha256\tnotes\n' > "$MANIFEST"
 append_manifest "basic.zip" "ZIP" "true" "" "ZIP Deflate fixture created by ZManager"
 append_manifest "basic.7z" "7Z" "true" "" "7Z LZMA2 solid fixture created by ZManager"
+append_manifest "basic.tar" "TAR" "true" "" "TAR fixture created by bsdtar"
 append_manifest "basic.tar.gz" "TAR.GZ" "true" "" "Tar fixture compressed with gzip"
 append_manifest "basic.tar.xz" "TAR.XZ" "true" "" "Tar fixture compressed with xz"
 append_manifest "basic.tar.zst" "TAR.ZST" "true" "" "Tar fixture compressed with zstd"
@@ -264,11 +282,13 @@ append_manifest "basic.cpio" "CPIO" "true" "" "CPIO fixture created by bsdtar"
 append_manifest "basic.xar" "XAR" "true" "" "XAR fixture created by macOS xar"
 append_manifest "basic.iso" "ISO" "true" "" "ISO fixture created by hdiutil makehybrid"
 append_manifest "basic.deb" "DEB" "true" "" "Debian ar package fixture"
+append_manifest "basic.ar" "AR" "true" "" "AR fixture created by the platform ar tool"
 append_manifest "basic.dmg" "DMG" "true" "" "Disk image fixture created by hdiutil create -srcfolder"
 append_manifest "basic.pkg" "PKG" "true" "" "Apple package fixture created by pkgbuild"
 append_manifest "basic.msi" "MSI" "true" "" "Windows Installer fixture created by wixl (msitools)"
 append_manifest "basic.vhd" "VHD" "true" "" "VPC disk image fixture: MBR + NTFS, qemu-img -O vpc (docker ntfs-3g populates)"
 append_manifest "basic.vmdk" "VMDK" "true" "" "VMware disk image fixture: superfloppy FAT32, qemu-img -O vmdk (mtools populates)"
 append_manifest "basic.udf" "UDF" "true" "" "UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload"
+append_manifest "basic.mtree" "MTREE" "true" "" "MTREE manifest fixture with directories, files, sizes, and a symlink"
 
 echo "Generated fixtures in $ARCHIVES"

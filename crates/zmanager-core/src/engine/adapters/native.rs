@@ -602,7 +602,7 @@ static WARC_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 static MTREE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_mtree_adapter",
     format: FormatId::MTREE,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Test],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -1073,6 +1073,19 @@ impl NativeReadAdapter for MtreeListAdapter {
             warnings: report.warnings,
         })
     }
+
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = crate::mtree_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| mtree_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
 }
 
 #[cfg(unix)]
@@ -1087,6 +1100,7 @@ fn map_mtree_entries(entries: Vec<crate::mtree_backend::MtreeEntry>) -> Vec<Engi
             compressed_size: None,
             encrypted: Some(false),
             method: Some(format!("mtree/{}", entry.file_type)),
+            link_target: entry.link_target.map(|target| target.to_string_lossy().into_owned()),
             ..EngineEntry::default()
         })
         .collect()

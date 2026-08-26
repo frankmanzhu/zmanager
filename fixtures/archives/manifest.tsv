@@ -1,6 +1,7 @@
 # filename	format	extract	password	sha256	notes
 basic.zip	ZIP	true		1cf7675156226619ff9cf4671092c334df8de5072a52353787fc77086774bc77	ZIP Deflate fixture created by ZManager
 basic.7z	7Z	true		889bca109d803671593626e48abf1001acb8aa59600264230c4352cb571dc095	7Z LZMA2 solid fixture created by ZManager
+basic.tar	TAR	true		79f0cf92ef4e3ce2d185e661dca28819384ed1202937beb4ce379bc5c9888957	TAR fixture created by the platform tar tool
 basic.tar.gz	TAR.GZ	true		2db1742c0c5d912f0810b3ff94a997d499594913c5a08a16e039b4a5a0d4feba	Tar fixture compressed with gzip
 basic.tar.xz	TAR.XZ	true		bb63fbdc63383ed8d768131c24fdbdb0c43528ff349ebdbd0e9558aba9aa9ce9	Tar fixture compressed with xz
 basic.tar.zst	TAR.ZST	true		68f4a7defc4ea9defe7873405fbd92ef1b430aff55addc9a5a71267d1fd3c904	Tar fixture compressed with zstd
@@ -8,9 +9,11 @@ basic.cpio	CPIO	true		8257435768cab2e5dd572a317d04d40d1871d1f21b5d8720f919021df4
 basic.xar	XAR	true		882d27770dfd292defa3b84a0588aeb0464a62792b0d45f7ba207cfd66124e89	XAR fixture created by macOS xar
 basic.iso	ISO	true		672bd8c9aa5972b085c0ddeb7b61de8b3302130fb6d5cd8968de85732ae35765	ISO fixture created by hdiutil makehybrid
 basic.deb	DEB	true		f5b1075c922dd17d70eaa0ffd8072734a4539d2417183c498cf22b85c560b931	Debian ar package fixture
+basic.ar	AR	true		5328c2b5d0c9431644a51fe60a23f6635a799ed5894f502450982a6f4b2209ea	AR fixture created by GNU ar
 basic.dmg	DMG	true		c45e00ab29fb05e77d14e9b8ab25e2fa26373d4978db0e83ce0199243dc22495	Disk image fixture created by hdiutil create -srcfolder
 basic.pkg	PKG	true		2d1c1bf0ad07f0f7c5f09bc4a731547ae51aa2e66e9dc8d5cdfcaef5e73ad6c4	Apple package fixture created by pkgbuild
 basic.msi	MSI	true		4a8135e507c33f790bd2b38bb5e1f0e2c0204264ab329680e1b3948fdaaf43ee	Windows Installer fixture created by wixl (msitools)
 basic.vhd	VHD	true		eacd014ddbfc1e3a5d0217aed733f80a37723c36a7645efab18aedc2d9c3af13	VPC disk image fixture: MBR + NTFS, qemu-img -O vpc (docker ntfs-3g populates)
 basic.vmdk	VMDK	true		d9e25f7f69602f71ad42635cbc8c572c9a6b648b57440b88e5bcb17ed33ecfdb	VMware disk image fixture: superfloppy FAT32, qemu-img -O vmdk (mtools populates)
 basic.udf	UDF	true		b9e42f999e23f7e7b3c85203741a9adbe64039ce4b6f884bac8e5ab88130b04f	UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload
+basic.mtree	MTREE	true		87c5aea774c67595474bb021750d044b6ce08d7d89518e7ef9ede912dedd4db1	MTREE manifest fixture with directories, files, sizes, and a symlink

@@ -69,7 +69,7 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         let mtree = engine.registry().capabilities_for_format(FormatId::MTREE).expect("missing MTREE capabilities");
         assert!(mtree.operations.contains(&ArchiveOperation::List));
         assert!(mtree.operations.contains(&ArchiveOperation::Test));
-        assert!(!mtree.operations.contains(&ArchiveOperation::Extract));
+        assert!(mtree.operations.contains(&ArchiveOperation::Extract));
     }
     for format in
         [FormatId::ZIP, FormatId::SPLIT_ZIP, FormatId::SEVEN_Z, FormatId::TAR_ZST, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM, FormatId::APPLE_ARCHIVE]
@@ -584,32 +584,25 @@ fn native_warc_adapter_materializes_record_bodies_when_bsdtar_available() {
 }
 
 #[test]
-fn native_mtree_adapter_lists_and_verifies_manifest_metadata_without_materializing_payloads() {
-    let Some(bsdtar) = std::env::var("PATH")
-        .ok()
-        .and_then(|path| path.split(':').map(std::path::PathBuf::from).map(|directory| directory.join("bsdtar")).find(|candidate| candidate.is_file()))
-    else {
-        return;
-    };
+#[cfg(unix)]
+fn native_mtree_adapter_lists_verifies_and_extracts_manifest_shape() {
     let temp = TestDir::new("engine-conformance-mtree");
-    let source = temp.path("project");
-    fs::create_dir_all(&source).unwrap();
-    fs::write(source.join("file.txt"), b"mtree engine payload\n").unwrap();
-    let archive = temp.path("payload.mtree");
-    let create =
-        std::process::Command::new(bsdtar).current_dir(temp.root()).arg("--format").arg("mtree").arg("-cf").arg(&archive).arg("project").output().unwrap();
-    assert!(create.status.success(), "bsdtar failed: {}", String::from_utf8_lossy(&create.stderr));
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.mtree");
 
     let engine = create_default_engine().unwrap();
     let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
     let listing = handle.list().unwrap();
-    assert!(listing.entries.iter().any(|entry| entry.path == "project/file.txt"));
+    assert!(listing.entries.iter().any(|entry| entry.path == "payload/README.txt"));
+    assert!(listing.entries.iter().any(|entry| entry.path == "payload/nested/readme-link.txt"));
     let test = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
     assert_eq!(test.tested_entries, listing.entries.len() as u64);
-    assert_eq!(test.tested_bytes, b"mtree engine payload\n".len() as u64);
+    assert_eq!(test.tested_bytes, 45);
     let mut options = ExtractOptions { destination: temp.path("out"), ..ExtractOptions::default() };
-    let error = handle.extract(&mut options).unwrap_err();
-    assert_eq!(error.kind, zmanager_core::engine::ErrorKind::UnsupportedOperation);
+    let report = handle.extract(&mut options).unwrap();
+    assert!(report.written_entries > 0);
+    assert_eq!(fs::metadata(temp.path("out/payload/README.txt")).unwrap().len(), 25);
+    assert_eq!(fs::metadata(temp.path("out/payload/nested/file.txt")).unwrap().len(), 20);
+    assert_eq!(fs::read_link(temp.path("out/payload/nested/readme-link.txt")).unwrap(), std::path::PathBuf::from("../README.txt"));
     handle.close().unwrap();
 }
 
