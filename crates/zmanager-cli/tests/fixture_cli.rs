@@ -111,6 +111,54 @@ fn cli_lists_all_fixture_archives() {
     }
 }
 
+#[test]
+fn fixture_manifest_covers_every_supported_extension() {
+    let fixtures = fixture_manifest();
+    let extensions = [
+        zmanager_core::archive_format::ZIP_FAMILY_EXTENSIONS,
+        zmanager_core::archive_format::SEVEN_Z_EXTENSIONS,
+        zmanager_core::archive_format::RAR_EXTENSIONS,
+        zmanager_core::archive_format::TAR_EXTENSIONS,
+        zmanager_core::archive_format::TAR_BZ2_EXTENSIONS,
+        zmanager_core::archive_format::TAR_XZ_EXTENSIONS,
+        zmanager_core::archive_format::TAR_LZMA_EXTENSIONS,
+        zmanager_core::archive_format::TAR_LZ_EXTENSIONS,
+        zmanager_core::archive_format::TAR_LZO_EXTENSIONS,
+        zmanager_core::archive_format::TAR_COMPRESS_EXTENSIONS,
+        zmanager_core::archive_format::TAR_LZ4_EXTENSIONS,
+        zmanager_core::archive_format::TAR_UU_EXTENSIONS,
+        zmanager_core::archive_format::ISO_EXTENSIONS,
+        zmanager_core::archive_format::CAB_EXTENSIONS,
+        zmanager_core::archive_format::CPIO_EXTENSIONS,
+        zmanager_core::archive_format::RPM_EXTENSIONS,
+        zmanager_core::archive_format::XAR_EXTENSIONS,
+        zmanager_core::archive_format::PKG_EXTENSIONS,
+        zmanager_core::archive_format::DMG_EXTENSIONS,
+        zmanager_core::archive_format::LHA_EXTENSIONS,
+        zmanager_core::archive_format::AR_EXTENSIONS,
+        zmanager_core::archive_format::WARC_EXTENSIONS,
+        zmanager_core::archive_format::MTREE_EXTENSIONS,
+        zmanager_core::archive_format::TAR_ZST_EXTENSIONS,
+        zmanager_core::archive_format::TGZ_EXTENSIONS,
+        zmanager_core::archive_format::TZAP_EXTENSIONS,
+        zmanager_core::archive_format::APPLE_ARCHIVE_EXTENSIONS,
+        zmanager_core::archive_format::DEB_EXTENSIONS,
+        zmanager_core::archive_format::MSI_EXTENSIONS,
+        zmanager_core::archive_format::VHD_EXTENSIONS,
+        zmanager_core::archive_format::VMDK_EXTENSIONS,
+        zmanager_core::archive_format::UDF_EXTENSIONS,
+        zmanager_core::engine::raw_stream_suffixes(),
+    ];
+
+    for extension in extensions.into_iter().flatten() {
+        let extension = extension.to_ascii_lowercase();
+        assert!(
+            fixtures.iter().any(|fixture| fixture.filename.to_ascii_lowercase().ends_with(&extension)),
+            "fixture manifest has no file exercising supported extension {extension}"
+        );
+    }
+}
+
 fn assert_listing_kinds(archive: &Path, expected: &[(&str, &str)]) {
     let output = Command::new(cli_path()).arg("list").arg(archive).arg("--json").output().unwrap();
     assert_success(&format!("zm list {} --json", archive.display()), &output);

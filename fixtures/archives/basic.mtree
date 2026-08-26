@@ -1,9 +1,6 @@
-# ZManager MTREE fixture: metadata describes a filesystem shape, not payload bytes.
-/set type=dir
-./payload
-./payload/nested
-/set type=file
-./payload/README.txt size=25
-./payload/nested/file.txt size=20
-/set type=link
-./payload/nested/readme-link.txt link=../README.txt
+#mtree
+./payload gname=staff uname=frankzhu time=1787753256.763303226 mode=755 gid=20 uid=501 type=dir
+./payload/README.txt gname=staff uname=frankzhu time=1787753256.763373225 mode=644 gid=20 uid=501 type=file size=25
+./payload/nested gname=staff uname=frankzhu time=1787753256.766384870 mode=755 gid=20 uid=501 type=dir
+./payload/nested/file.txt gname=staff uname=frankzhu time=1787753256.764843236 mode=644 gid=20 uid=501 type=file size=20
+./payload/nested/readme-link.txt gname=staff uname=frankzhu time=1787753256.766383162 mode=755 gid=20 uid=501 type=link link=../README.txt

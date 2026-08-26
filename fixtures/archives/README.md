@@ -15,9 +15,12 @@ fixture is a checked-in manifest because MTREE records filesystem metadata but
 does not carry payload bytes.
 
 The corpus also includes representative CAB, RAR, LHA, RPM, WARC, TZAP, Apple
-Archive, and every raw-stream suffix supported by the detector. The LHA fixture
-is generated with Debian's `jlha-utils` inside Docker because macOS has no
-maintained native LHA creator in the standard toolchain.
+Archive, every raw-stream suffix, and every other filename extension supported
+by the detector. Alias files contain the same small valid payload as their
+primary fixture; this keeps the corpus compact while exercising extension
+detection in CI. The LHA fixture is generated with Debian's `jlha-utils` inside
+Docker because macOS has no maintained native LHA creator in the standard
+toolchain.
 
 Regenerate them with:
 
@@ -42,28 +45,30 @@ installed on a developer machine.
 
 | File | Format | Created by | Notes |
 | --- | --- | --- | --- |
-| `basic.zip` | ZIP Deflate | `zmanager-cli zip-create` | Symlink is skipped by the ZIP v1 writer. |
+| `basic.zip` … `basic.epub` | ZIP family | `zmanager-cli zip-create` | One Deflate fixture under every supported ZIP-family extension; symlink is skipped by the ZIP v1 writer. |
 | `basic.7z` | 7Z LZMA2 solid | `zmanager-cli source-small` | Symlink is skipped by the 7z v1 writer. |
+| `basic.cb7`, `basic.sevenz` | 7Z aliases | copied from `basic.7z` | Alias spellings exercise 7z detection. |
+| `basic.cbr` | RAR5 alias | copied from `basic.rar` | Alias spelling exercises RAR detection. |
 | `basic.tar` | TAR | `bsdtar -cf` | Plain TAR fixture for mandatory list/test/extract coverage. |
-| `basic.tar.gz` | TAR.GZ | `bsdtar -czf` | Preserves directory structure and symlink. |
-| `basic.tar.bz2` | TAR.BZ2 | `bsdtar -cjf` | bzip2-compressed TAR fixture. |
-| `basic.tar.xz` | TAR.XZ | `bsdtar -cJf` | Preserves directory structure and symlink. |
-| `basic.tar.lzma` | TAR.LZMA | `bsdtar` plus `xz --format=lzma` | Legacy LZMA-compressed TAR fixture. |
+| `basic.tar.gz`, `basic.tgz` | TAR.GZ | `bsdtar -czf` | Both supported TAR.GZ spellings. |
+| `basic.tar.bz2`, `basic.tbz2`, `basic.tbz` | TAR.BZ2 | `bsdtar -cjf` | All supported bzip2-compressed TAR spellings. |
+| `basic.tar.xz`, `basic.txz` | TAR.XZ | `bsdtar -cJf` | Both supported XZ-compressed TAR spellings. |
+| `basic.tar.lzma`, `basic.tlzma` | TAR.LZMA | `bsdtar` plus `xz --format=lzma` | Both supported legacy LZMA TAR spellings. |
 | `basic.tar.lz` | TAR.LZ | `bsdtar` plus `lzip` | lzip-compressed TAR fixture. |
 | `basic.tar.lzo` | TAR.LZO | `bsdtar` plus `lzop` | lzop-compressed TAR fixture. |
-| `basic.tar.Z` | TAR.Z | `bsdtar` plus `compress` | Unix `compress`-compressed TAR fixture. |
+| `basic.tar.Z`, `basic-lowercase.tar.z`, `basic.taz` | TAR.Z | `bsdtar` plus `compress` | All supported Unix `compress` TAR spellings; the distinct name avoids macOS case-insensitive collisions. |
 | `basic.tar.lz4` | TAR.LZ4 | `bsdtar` plus `lz4` | LZ4-compressed TAR fixture. |
 | `basic.tar.zst` | TAR.ZST | `zmanager-cli source-fast` | Preserves directory structure and symlink. |
-| `basic.cpio` | CPIO | `bsdtar --format=cpio` | External-oracle fixture for the native CPIO adapter. |
+| `basic.cpio` … `basic.cpio.zst` | CPIO | `bsdtar --format=cpio` plus compressors | Uncompressed and every supported compressed CPIO spelling. |
 | `basic.cab` | CAB | `gcab -c` | Small Cabinet fixture for list/test/extract coverage. |
 | `basic.rar` | RAR5 | `rar` | Small single-volume RAR fixture for list/test/extract coverage. |
-| `basic.lha` | LHA | `jlha-utils` in Docker | Small LHA fixture; Docker supplies the creator on macOS/Linux hosts. |
+| `basic.lha`, `basic.lzh` | LHA | `jlha-utils` in Docker | Both supported LHA spellings; Docker supplies the creator on macOS/Linux hosts. |
 | `basic.rpm` | RPM | `rpmbuild` | Small noarch RPM package fixture. |
 | `basic.xar` | XAR | macOS `xar` | Apple package-adjacent archive fixture. |
 | `basic.warc` | WARC | `bsdtar --format=warc` | Small WARC container fixture. |
 | `basic.iso` | ISO 9660/Joliet | macOS `hdiutil makehybrid` | Disk/container listing and extraction fixture; generated without symlink because ISO/Joliet is not the symlink-preserving path. |
 | `basic.deb` | Debian package | `bsdtar --format=ar` plus tar members | Package/container fixture; extraction exposes package members. |
-| `basic.ar` | AR | platform `ar` | Standalone AR fixture for mandatory list/test/extract coverage. |
+| `basic.ar`, `basic.a`, `basic.lib` | AR | platform `ar` | All supported AR spellings. |
 | `basic.dmg` | DMG disk image | macOS `hdiutil create -format UDZO` | Apple disk image fixture. HFS+ symlink targets live in the resource fork, which the reader cannot expose, so the symlink is skipped with a warning instead of materializing a broken empty link. |
 | `basic.pkg` | Apple package | macOS `pkgbuild` | Apple package fixture. macOS adds a `com.apple.provenance` xattr to every new file, so pkgbuild emits `._` AppleDouble payload entries; the backend extracts them as plain files. |
 | `basic.msi` | Windows Installer | `wixl` (msitools, `brew install msitools`) | MSI fixture. MSI has no symlink entries, and wixl cannot encode non-ASCII File table names, so the unicode file is absent; the backend extracts `File`-table files through `Directory`-table resolution, verified entry-for-entry against `msiextract`. |
@@ -72,7 +77,7 @@ installed on a developer machine.
 | `basic.udf` | UDF 2.01 optical image | `mkudffs --media-type=hd --udfrev=0x0201` in a privileged Ubuntu container, populated via loop mount | UDF fixture. Requires a running Docker daemon. **Keeps the symlink**: the patched udf-forensic adapter (frankmanzhu fork) decodes PATH_COMPONENT symlinks, verified against macOS's native resolution. macOS reads the image natively (`hdiutil attach` oracle); 7-Zip 26.02 does not list it reliably. |
 | `basic.mtree` | MTREE manifest | `bsdtar --format=mtree` | Manifest fixture with directories, declared file sizes, and a symlink. Extraction materializes the declared filesystem shape using sparse placeholder files because MTREE contains no payload bytes. |
 | `basic.tzap` | TZAP | `zmanager-cli create --format tzap` | Checked-in native TZAP fixture for CI list/test/extract coverage. |
-| `basic.aar` | Apple Archive | macOS `aa archive` | Small LZ4 Apple Archive fixture; skipped on non-Apple targets. |
+| `basic.aar`, `basic.aea` | Apple Archive | macOS `aa archive` | Small LZ4 Apple Archive fixture under both supported spellings; skipped on non-Apple targets. |
 | `basic.txt.gz` … `basic.txt.b64` | Raw streams | platform compressors | One tiny checked-in fixture for each supported raw stream suffix. |
 | `basic.tar.uu`, `basic.tar.b64` | TAR.UU/TAR.B64 | `uuencode`/`base64` plus `bsdtar` | Encoded TAR fixtures for both supported TAR stream wrappers. |
 | `rar5-multipart.part1.rar`–`part4.rar` | RAR5 multipart | RAR | Checked-in multi-volume fixture with a 192 KiB spanning file; core, FFI, and CLI tests verify every extracted byte. |
@@ -80,8 +85,8 @@ installed on a developer machine.
 
 ## Not Included By Default
 
-- ZIPX: requires a compatible creator such as 7-Zip with ZIPX/Zstd/Deflate64 options.
-- WIM: requires `wimlib-imagex` or equivalent.
+- WIM: requires `wimlib-imagex` or equivalent and is not a supported ZManager
+  format yet.
 
 The external-fixture test skips unavailable tools for local runs; Unix CI checks
 the required commands first, so the committed-fixture validation is mandatory

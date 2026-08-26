@@ -1,8 +1,8 @@
 WARC/1.0
 WARC-Type: warcinfo
-WARC-Date: 2026-08-26T13:26:32Z
-Last-Modified: 2026-08-26T13:26:32Z
-WARC-Record-ID: <urn:uuid:2d875d4d-a053-4f5d-8805-c94e1c958a18>
+WARC-Date: 2026-08-26T14:07:36Z
+Last-Modified: 2026-08-26T14:07:36Z
+WARC-Record-ID: <urn:uuid:6173526d-79b6-4bfc-8748-2f8f9c0a0700>
 Content-Type: application/warc-fields
 Content-Length: 59
 
@@ -13,9 +13,9 @@ format: WARC file version 1.0
 WARC/1.0
 WARC-Type: resource
 WARC-Target-URI: file://payload/README.txt
-WARC-Date: 2026-08-26T13:26:32Z
-Last-Modified: 2026-08-12T09:41:43Z
-WARC-Record-ID: <urn:uuid:32f80785-2e2d-4b39-9a54-bb6c6f8b1a2e>
+WARC-Date: 2026-08-26T14:07:36Z
+Last-Modified: 2026-08-26T14:07:10Z
+WARC-Record-ID: <urn:uuid:bbc18060-21f6-401c-beaf-b653623e8218>
 Content-Length: 25
 
 ZManager fixture payload

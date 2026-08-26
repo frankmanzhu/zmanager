@@ -1,36 +1,69 @@
 # filename	format	extract	password	sha256	notes
-basic.zip	ZIP	true		1cf7675156226619ff9cf4671092c334df8de5072a52353787fc77086774bc77	ZIP Deflate fixture created by ZManager
-basic.7z	7Z	true		889bca109d803671593626e48abf1001acb8aa59600264230c4352cb571dc095	7Z LZMA2 solid fixture created by ZManager
-basic.tar	TAR	true		79f0cf92ef4e3ce2d185e661dca28819384ed1202937beb4ce379bc5c9888957	TAR fixture created by the platform tar tool
-basic.tar.gz	TAR.GZ	true		2db1742c0c5d912f0810b3ff94a997d499594913c5a08a16e039b4a5a0d4feba	Tar fixture compressed with gzip
-basic.tar.bz2	TAR.BZ2	true		55fd685ad5f41afe8a1ac3ed7128a983f188ed6be1715b230fc0829273c1e25b	Tar fixture compressed with bzip2
-basic.tar.xz	TAR.XZ	true		bb63fbdc63383ed8d768131c24fdbdb0c43528ff349ebdbd0e9558aba9aa9ce9	Tar fixture compressed with xz
-basic.tar.lzma	TAR.LZMA	true		25b9f5e2e5544e68c7af2f8d887abfb80dc3d044a6837d44544d57edd8812c24	Tar fixture compressed with legacy LZMA
-basic.tar.lz	TAR.LZ	true		319df74f25bf8bf3ee25137b609fd7c5d3e098c7fe36327cdefbcca32a872d3a	Tar fixture compressed with lzip
-basic.tar.lzo	TAR.LZO	true		2a2bf3931af5c9436761a4bdf02e1b8c603b7ae5ff960ee4436c76e186fabea9	Tar fixture compressed with lzop
-basic.tar.Z	TAR.Z	true		c8adc3a76d4600b30f6d78cff7d17f9e12a9abaf45e7a3bf8fcf420ae2a95409	Tar fixture compressed with Unix compress
-basic.tar.lz4	TAR.LZ4	true		2633aec28534b3a857878484274d79a521237c9575cba4aa4d011c5c3edbc1c6	Tar fixture compressed with LZ4
-basic.tar.zst	TAR.ZST	true		68f4a7defc4ea9defe7873405fbd92ef1b430aff55addc9a5a71267d1fd3c904	Tar fixture compressed with zstd
-basic.cpio	CPIO	true		8257435768cab2e5dd572a317d04d40d1871d1f21b5d8720f919021df433cb1a	CPIO fixture created by bsdtar
-basic.cab	CAB	true		411877de5a6a20fab8e2b089ca68ce2657bfe39e1ecc8c846c3b6362a7fb07ec	CAB fixture created by gcab
-basic.rar	RAR	true		e483efe7b8a25888adc3c5f267438df2ba069d704f55bde0a2752b2b48697471	RAR5 fixture created by the RAR tool
-basic.lha	LHA	true		749bef1fb9a98d098ce0148aaa9a88093dcf0f7f456ee8318415e7a1e4595e67	LHA fixture created by jlha-utils in Docker
-basic.rpm	RPM	true		7a185bc331bc6059905e6f018c9bef550ac6fabab5701b19f1916e10419315fe	RPM package fixture created by rpmbuild
-basic.xar	XAR	true		882d27770dfd292defa3b84a0588aeb0464a62792b0d45f7ba207cfd66124e89	XAR fixture created by macOS xar
-basic.warc	WARC	true		2e0145df517e0c63f39cdbb27883df6a8a59a82c70ee9e5686a5beb131f65101	WARC fixture created by bsdtar
-basic.iso	ISO	true		672bd8c9aa5972b085c0ddeb7b61de8b3302130fb6d5cd8968de85732ae35765	ISO fixture created by hdiutil makehybrid
-basic.deb	DEB	true		f5b1075c922dd17d70eaa0ffd8072734a4539d2417183c498cf22b85c560b931	Debian ar package fixture
-basic.ar	AR	true		5328c2b5d0c9431644a51fe60a23f6635a799ed5894f502450982a6f4b2209ea	AR fixture created by GNU ar
-basic.dmg	DMG	true		c45e00ab29fb05e77d14e9b8ab25e2fa26373d4978db0e83ce0199243dc22495	Disk image fixture created by hdiutil create -srcfolder
-basic.pkg	PKG	true		2d1c1bf0ad07f0f7c5f09bc4a731547ae51aa2e66e9dc8d5cdfcaef5e73ad6c4	Apple package fixture created by pkgbuild
-basic.msi	MSI	true		4a8135e507c33f790bd2b38bb5e1f0e2c0204264ab329680e1b3948fdaaf43ee	Windows Installer fixture created by wixl (msitools)
-basic.vhd	VHD	true		eacd014ddbfc1e3a5d0217aed733f80a37723c36a7645efab18aedc2d9c3af13	VPC disk image fixture: MBR + NTFS, qemu-img -O vpc (docker ntfs-3g populates)
-basic.vmdk	VMDK	true		d9e25f7f69602f71ad42635cbc8c572c9a6b648b57440b88e5bcb17ed33ecfdb	VMware disk image fixture: superfloppy FAT32, qemu-img -O vmdk (mtools populates)
-basic.udf	UDF	true		b9e42f999e23f7e7b3c85203741a9adbe64039ce4b6f884bac8e5ab88130b04f	UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload
-basic.mtree	MTREE	true		87c5aea774c67595474bb021750d044b6ce08d7d89518e7ef9ede912dedd4db1	MTREE manifest fixture with directories, files, sizes, and a symlink
-basic.tzap	TZAP	true		26d74f13a425c3a99620a0b018bb5889e0ea598e1b03de8229080d65c9ec7602	TZAP fixture created by zmanager-cli
-basic.aar	AAR	true		b518d6c525ef5e3de88600fe8da56bd98128a37ba09cf62126d32150dea996c5	Apple Archive fixture created by macOS aa
-basic.txt.gz	RAW	true		28dfaa2c95ecb2f9e3a3574d454c379bb0892302b68a2433abcfad820fc01434	Raw gzip stream fixture
+basic.zip	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture created by ZManager
+basic.zipx	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .zipx extension
+basic.jar	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .jar extension
+basic.war	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .war extension
+basic.ipa	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .ipa extension
+basic.apk	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .apk extension
+basic.appx	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .appx extension
+basic.xpi	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .xpi extension
+basic.cbz	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .cbz extension
+basic.epub	ZIP	true		d6e881678145cb42246ffa810f79f604b52606b627066bbb108a194ab83e2748	ZIP Deflate fixture under the .epub extension
+basic.7z	7Z	true		1ad775eaa8bc4a8f4f8bac8f5fa0a8417bfabd00f4e04545b9480c9fe2815dab	7Z LZMA2 solid fixture created by ZManager
+basic.cb7	7Z	true		1ad775eaa8bc4a8f4f8bac8f5fa0a8417bfabd00f4e04545b9480c9fe2815dab	7Z fixture under the .cb7 extension
+basic.sevenz	7Z	true		1ad775eaa8bc4a8f4f8bac8f5fa0a8417bfabd00f4e04545b9480c9fe2815dab	7Z fixture under the .sevenz extension
+basic.cbr	RAR	true		b1b541ad0e8d2d8a52d64f73bf0526a232d2160f04b92b00c82a8eb3f9ce9d39	RAR5 fixture under the .cbr extension
+basic.tar	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture created by bsdtar
+basic.cbt	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture under the .cbt extension
+basic.pax	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture under the .pax extension
+basic.ustar	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture under the .ustar extension
+basic.tar.gz	TAR.GZ	true		17adf304bee108974c6f8c5f448a393a343c7725b2550514cd68ce24f1b705d4	Tar fixture compressed with gzip
+basic.tgz	TAR.GZ	true		17adf304bee108974c6f8c5f448a393a343c7725b2550514cd68ce24f1b705d4	Tar.GZ fixture under the .tgz extension
+basic.tar.bz2	TAR.BZ2	true		504067aa58e1ea02972a98da722bd44bb4dcaebf47ebb2a20d3ab0cf95a2a884	Tar fixture compressed with bzip2
+basic.tbz2	TAR.BZ2	true		504067aa58e1ea02972a98da722bd44bb4dcaebf47ebb2a20d3ab0cf95a2a884	Tar.BZ2 fixture under the .tbz2 extension
+basic.tbz	TAR.BZ2	true		504067aa58e1ea02972a98da722bd44bb4dcaebf47ebb2a20d3ab0cf95a2a884	Tar.BZ2 fixture under the .tbz extension
+basic.tar.xz	TAR.XZ	true		4656b1143b3e551014033007d22aa7e94e2d3d00116fe04ed6db118e1930ef78	Tar fixture compressed with xz
+basic.txz	TAR.XZ	true		4656b1143b3e551014033007d22aa7e94e2d3d00116fe04ed6db118e1930ef78	Tar.XZ fixture under the .txz extension
+basic.tar.lzma	TAR.LZMA	true		b35e50cb7a2d90b7c3fb09f7b4877e9271776bf33cf405d2368904ec23fe77ec	Tar fixture compressed with legacy LZMA
+basic.tlzma	TAR.LZMA	true		b35e50cb7a2d90b7c3fb09f7b4877e9271776bf33cf405d2368904ec23fe77ec	Tar.LZMA fixture under the .tlzma extension
+basic.tar.lz	TAR.LZ	true		f351e7ae6e9cacfe91a4925e7b638444fa343583b0cec23382b093ed8c252450	Tar fixture compressed with lzip
+basic.tar.lzo	TAR.LZO	true		8567062e4e19f6e4af045b7f3b1de9f1cb7723f09677b6c4198a5ea364ae9281	Tar fixture compressed with lzop
+basic.tar.Z	TAR.Z	true		34fd22d26ea6916f4ad1a92edd3e2693fab18ade9ab7bd9dac04f7cc7d0bb557	Tar fixture compressed with Unix compress
+basic-lowercase.tar.z	TAR.Z	true		34fd22d26ea6916f4ad1a92edd3e2693fab18ade9ab7bd9dac04f7cc7d0bb557	Tar.Z fixture under the lowercase .tar.z extension
+basic.taz	TAR.Z	true		34fd22d26ea6916f4ad1a92edd3e2693fab18ade9ab7bd9dac04f7cc7d0bb557	Tar.Z fixture under the .taz extension
+basic.tar.lz4	TAR.LZ4	true		2aae6c1d496b1150ec2cf51516d8ba4c43586156091d75e3360d28087bb5d309	Tar fixture compressed with LZ4
+basic.tar.zst	TAR.ZST	true		d399b8d62b45cdc796e7ac3b9f140b743e18058966ee65849c983a615e2d516d	Tar fixture compressed with zstd
+basic.cpio	CPIO	true		4a460acb31928b7b9a8a12651e5a1e095c5054f8ebb50aa53b1d9a9e63bd8fd0	CPIO fixture created by bsdtar
+basic.cpio.gz	CPIO	true		776c6f0d058f50c980e55e9725dc5f6bc476fcc4f7c03d1b3ad7a917426ef091	CPIO fixture compressed with gzip
+basic.cpgz	CPIO	true		776c6f0d058f50c980e55e9725dc5f6bc476fcc4f7c03d1b3ad7a917426ef091	CPIO fixture compressed with gzip under the .cpgz extension
+basic.cpio.bz2	CPIO	true		1ad2ae286a9c4a4d87a98d3baf514c16089816b628dfe69dc347145451bb0d0e	CPIO fixture compressed with bzip2
+basic.cpio.xz	CPIO	true		5a0e67b66a3c36bddcc48284fc34d3daf90879e5515d677da7aa9dcc6878e663	CPIO fixture compressed with xz
+basic.cpio.lzma	CPIO	true		daac8699f0cd376b26c3445f1ab8467c26880152837cd69d2e15586e79d1242b	CPIO fixture compressed with legacy LZMA
+basic.cpio.zst	CPIO	true		0bc87baf25e84fed6c0dbd345b66e0886e4d43e5f54aec6af866e72ade1e8cc3	CPIO fixture compressed with zstd
+basic.cab	CAB	true		42662b72c6390b071a6e5494a7bb4b5dd6b3ac73d3afc66d50e261a67147cd02	CAB fixture created by gcab
+basic.rar	RAR	true		b1b541ad0e8d2d8a52d64f73bf0526a232d2160f04b92b00c82a8eb3f9ce9d39	RAR5 fixture created by the RAR tool
+basic.lha	LHA	true		cd4e2e35f476251831051c5ccf45a58d8ea80eae82e5317e93047e2b9c3c0fb9	LHA fixture created by jlha-utils in Docker
+basic.lzh	LHA	true		cd4e2e35f476251831051c5ccf45a58d8ea80eae82e5317e93047e2b9c3c0fb9	LHA fixture under the .lzh extension
+basic.rpm	RPM	true		29a061a5dd41ad6fb84b751df366e7725ca67ca5d79a1ee2324fe6a9b94c049c	RPM package fixture created by rpmbuild
+basic.xar	XAR	true		7c39cb58987162c5631c3db5bf2c30cf6c87831dd2da2d048baf1615385b7dfe	XAR fixture created by macOS xar
+basic.warc	WARC	true		eed0912a49d11ddee4ecfa7c313f79bc72330430090e0662f662e640f1c8fddf	WARC fixture created by bsdtar
+basic.iso	ISO	true		6f4ddd00da821d285f85300af3a80d1403ba0307f73f5d20bf87cd7089dc31d3	ISO fixture created by hdiutil makehybrid
+basic.deb	DEB	true		5264825b90cbf2783d51b22f9e44128da95b91e989e940b33ee59608dd66bc35	Debian ar package fixture
+basic.ar	AR	true		34a2c895a68d40caf751194f8d76133c51599cafbae24d99f8706bce63bf2a1e	AR fixture created by the platform ar tool
+basic.a	AR	true		34a2c895a68d40caf751194f8d76133c51599cafbae24d99f8706bce63bf2a1e	AR fixture under the .a extension
+basic.lib	AR	true		34a2c895a68d40caf751194f8d76133c51599cafbae24d99f8706bce63bf2a1e	AR fixture under the .lib extension
+basic.dmg	DMG	true		54140f315b20bd8eb419ab4bf6b57b572764b0269f688b1edf0b9ec479f675e2	Disk image fixture created by hdiutil create -srcfolder
+basic.pkg	PKG	true		fdc4d8d26065681d379d01431ba92c85f7c75a89c99d86c42e38c3857e5a508c	Apple package fixture created by pkgbuild
+basic.msi	MSI	true		25ac8057739cb5d3a697eb0425efe025240bfece372128f2cb594653d9c14acd	Windows Installer fixture created by wixl (msitools)
+basic.vhd	VHD	true		9306fb565fe7c8835fa1b7d4489b4b92ec178bd50dd37507000eccec8c717a58	VPC disk image fixture: MBR + NTFS, qemu-img -O vpc (docker ntfs-3g populates)
+basic.vmdk	VMDK	true		293d9d0409f70ab9a855255c719ce7496e6d91ab3af81f70f3f8557b00d605aa	VMware disk image fixture: superfloppy FAT32, qemu-img -O vmdk (mtools populates)
+basic.udf	UDF	true		ab48200cacd12911aa6357e6957eea3eaaad415ba4824eb7ef31b7a7e3050ddb	UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload
+basic.mtree	MTREE	true		600fb51264e01d7e906f9b8aa2a3d227bb882d517feefafe439625e86a19ec76	MTREE manifest fixture with directories, files, sizes, and a symlink
+basic.tzap	TZAP	true		af14a43b1ada0526f54a8105292f5332637a0255ea3a98535938f8d544a89f2f	TZAP fixture created by zmanager-cli
+basic.tzst	TAR.ZST	true		d399b8d62b45cdc796e7ac3b9f140b743e18058966ee65849c983a615e2d516d	Tar.ZST fixture under the .tzst extension
+basic.aea	AAR	true		7c2dd23af8f0c54d4ce71a5b4bb795d67b00d0940ae36f92ca79894965f54c91	Apple Archive fixture under the .aea extension
+basic.aar	AAR	true		7c2dd23af8f0c54d4ce71a5b4bb795d67b00d0940ae36f92ca79894965f54c91	Apple Archive fixture created by macOS aa
+basic.txt.gz	RAW	true		3179eb3daa079ad64ad98c7b5a568a620297f794c115d2a9bbc93658713226bd	Raw gzip stream fixture
 basic.txt.bz2	RAW	true		8c1005194a51b91b850467cb594cfebf18b5b8274b464e522556425c5fcf27b9	Raw bzip2 stream fixture
 basic.txt.xz	RAW	true		5b2ef6b1d13e77f84273be149cf7d4e4ad62e5221243ff016345057b226da320	Raw xz stream fixture
 basic.txt.lzma	RAW	true		0b8a969d569a100f991b2056672cd853d2bbfea548742d02e4f3b70a85999c93	Raw legacy LZMA stream fixture
@@ -38,9 +71,9 @@ basic.txt.zst	RAW	true		c1e89b8a9441cc18c7e1487e64dd495e268e0bbb39044f9fabbea483
 basic.txt.lz	RAW	true		e36847561d794d02b150cd14fa200bdbd3526ac0273d969e70d64f782b0ba04c	Raw lzip stream fixture
 basic.txt.br	RAW	true		cef9bf7c86914d3a45712c13888d55e2a2d150086b250c56f6edd8226ae5d7ec	Raw Brotli stream fixture
 basic.txt.lz4	RAW	true		3b85708c233857cf00f9e86f9b0b369a8745b234ecabf6958045604440cbf574	Raw LZ4 stream fixture
-basic.txt.lzo	RAW	true		31675c90ca5d250b1290ec4a05f7d1e99127b3a1ade39a981e5123b730b30c06	Raw lzop stream fixture
+basic.txt.lzo	RAW	true		a9c55fab58a26ff66fda30360694ba14d90dda9103d421a74185ffbb8e3dd773	Raw lzop stream fixture
 basic.txt.Z	RAW	true		49e92ffb3df228f1f379913c93ec817c3a3f56d40bcfbce73dbc97e10a493f82	Raw Unix compress stream fixture
 basic.txt.uu	RAW	true		b07435a808510a4da6d10a9eb59915a4a700c8d4c1af90fb95b58e71d05dee49	Raw uuencode stream fixture
 basic.txt.b64	RAW	true		aa38a5dc83d2e476311df34b150994f00ac100cd3d9d725aceed22fa7b4c80ef	Raw base64 stream fixture
-basic.tar.uu	TAR.UU	true		3d83782191f0b60a982fc7b431920b12a6c4adfc93a9cb8e27c4ed2cde4937bb	Tar fixture encoded with uuencode
-basic.tar.b64	TAR.B64	true		033abade96c2b04d38f24d81e77434b9c0dfe7c746963c1e2f6e383a8c16ac1c	Tar fixture encoded with base64
+basic.tar.uu	TAR.UU	true		d56ff83c06d220b524d0ba7dd075418a82bad34bae861b291ca38518b7175216	Tar fixture encoded with uuencode
+basic.tar.b64	TAR.B64	true		85489ac272a0c93c20b798dc37933988c5e01b5adaba68d3e9cb4fe7725f09cc	Tar fixture encoded with base64

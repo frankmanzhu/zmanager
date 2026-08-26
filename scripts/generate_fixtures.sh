@@ -14,27 +14,38 @@ trap cleanup EXIT
 
 mkdir -p "$ARCHIVES"
 rm -f "$ARCHIVES"/basic.zip \
+  "$ARCHIVES"/basic.zipx "$ARCHIVES"/basic.jar "$ARCHIVES"/basic.war "$ARCHIVES"/basic.ipa "$ARCHIVES"/basic.apk "$ARCHIVES"/basic.appx "$ARCHIVES"/basic.xpi "$ARCHIVES"/basic.cbz "$ARCHIVES"/basic.epub \
   "$ARCHIVES"/basic.7z \
+  "$ARCHIVES"/basic.cb7 "$ARCHIVES"/basic.sevenz \
+  "$ARCHIVES"/basic.cbr \
   "$ARCHIVES"/basic.tar \
+  "$ARCHIVES"/basic.cbt "$ARCHIVES"/basic.pax "$ARCHIVES"/basic.ustar \
   "$ARCHIVES"/basic.tar.gz \
   "$ARCHIVES"/basic.tar.bz2 \
+  "$ARCHIVES"/basic.tbz2 "$ARCHIVES"/basic.tbz \
   "$ARCHIVES"/basic.tar.xz \
+  "$ARCHIVES"/basic.txz \
   "$ARCHIVES"/basic.tar.lzma \
+  "$ARCHIVES"/basic.tlzma \
   "$ARCHIVES"/basic.tar.lz \
   "$ARCHIVES"/basic.tar.lzo \
   "$ARCHIVES"/basic.tar.Z \
+  "$ARCHIVES"/basic-lowercase.tar.z "$ARCHIVES"/basic.taz \
   "$ARCHIVES"/basic.tar.lz4 \
   "$ARCHIVES"/basic.tar.zst \
   "$ARCHIVES"/basic.cpio \
+  "$ARCHIVES"/basic.cpio.gz "$ARCHIVES"/basic.cpgz "$ARCHIVES"/basic.cpio.bz2 "$ARCHIVES"/basic.cpio.xz "$ARCHIVES"/basic.cpio.lzma "$ARCHIVES"/basic.cpio.zst \
   "$ARCHIVES"/basic.cab \
   "$ARCHIVES"/basic.rar \
   "$ARCHIVES"/basic.rpm \
   "$ARCHIVES"/basic.lha \
+  "$ARCHIVES"/basic.lzh \
   "$ARCHIVES"/basic.xar \
   "$ARCHIVES"/basic.warc \
   "$ARCHIVES"/basic.iso \
   "$ARCHIVES"/basic.deb \
   "$ARCHIVES"/basic.ar \
+  "$ARCHIVES"/basic.a "$ARCHIVES"/basic.lib \
   "$ARCHIVES"/basic.dmg \
   "$ARCHIVES"/basic.pkg \
   "$ARCHIVES"/basic.msi \
@@ -43,6 +54,7 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.udf \
   "$ARCHIVES"/basic.mtree \
   "$ARCHIVES"/basic.tzap \
+  "$ARCHIVES"/basic.tzst "$ARCHIVES"/basic.tgz "$ARCHIVES"/basic.aea \
   "$ARCHIVES"/basic.aar \
   "$ARCHIVES"/basic.txt.gz \
   "$ARCHIVES"/basic.txt.bz2 \
@@ -93,6 +105,12 @@ bsdtar -cf - -C "$WORK" payload | lzop -c > "$ARCHIVES/basic.tar.lzo"
 bsdtar -cf - -C "$WORK" payload | compress -c > "$ARCHIVES/basic.tar.Z"
 bsdtar -cf - -C "$WORK" payload | lz4 -q -c > "$ARCHIVES/basic.tar.lz4"
 bsdtar --format=cpio -cf "$ARCHIVES/basic.cpio" -C "$WORK" payload
+gzip -c "$ARCHIVES/basic.cpio" > "$ARCHIVES/basic.cpio.gz"
+cp "$ARCHIVES/basic.cpio.gz" "$ARCHIVES/basic.cpgz"
+bzip2 -c "$ARCHIVES/basic.cpio" > "$ARCHIVES/basic.cpio.bz2"
+xz -c "$ARCHIVES/basic.cpio" > "$ARCHIVES/basic.cpio.xz"
+xz --format=lzma -c "$ARCHIVES/basic.cpio" > "$ARCHIVES/basic.cpio.lzma"
+zstd -q -c "$ARCHIVES/basic.cpio" > "$ARCHIVES/basic.cpio.zst"
 
 # LHA has no maintained native creator in Homebrew. jlha-utils is a small
 # Java implementation available in Debian/Ubuntu, so use Docker when the
@@ -204,7 +222,10 @@ cp "$SRC/README.txt" "$DEB/data/usr/share/zmanager-fixture/README.txt"
 bsdtar -czf "$DEB/control.tar.gz" -C "$DEB/control" control
 bsdtar -cJf "$DEB/data.tar.xz" -C "$DEB/data" .
 bsdtar --format=ar -cf "$ARCHIVES/basic.deb" -C "$DEB" debian-binary control.tar.gz data.tar.xz
-ar -rcs "$ARCHIVES/basic.ar" "$WORK/README.md"
+# Use bsdtar's portable AR writer: Darwin's `ar` adds a linker symbol-table
+# member even for this non-object payload, hiding the fixture member from
+# readers that intentionally expose every archive entry.
+bsdtar --format=ar -cf "$ARCHIVES/basic.ar" -C "$WORK" README.md
 
 # DMG fixture: hdiutil treats the -srcfolder directory as the volume root,
 # so stage the payload tree in a dedicated directory to keep the payload/
@@ -353,6 +374,34 @@ docker run --rm --privileged -v "$WORK:/work" ubuntu:24.04 bash -c '
 ' >/dev/null
 cp "$WORK/basic.udf" "$ARCHIVES/basic.udf"
 
+# Every supported extension spelling gets a checked-in copy of the smallest
+# valid representative for that backend. Git stores identical copies as one
+# blob, while the distinct names exercise path detection in CI.
+for extension in zipx jar war ipa apk appx xpi cbz epub; do
+  cp "$ARCHIVES/basic.zip" "$ARCHIVES/basic.$extension"
+done
+for extension in cb7 sevenz; do
+  cp "$ARCHIVES/basic.7z" "$ARCHIVES/basic.$extension"
+done
+cp "$ARCHIVES/basic.rar" "$ARCHIVES/basic.cbr"
+for extension in cbt pax ustar; do
+  cp "$ARCHIVES/basic.tar" "$ARCHIVES/basic.$extension"
+done
+for extension in tbz2 tbz; do
+  cp "$ARCHIVES/basic.tar.bz2" "$ARCHIVES/basic.$extension"
+done
+cp "$ARCHIVES/basic.tar.xz" "$ARCHIVES/basic.txz"
+cp "$ARCHIVES/basic.tar.lzma" "$ARCHIVES/basic.tlzma"
+cp "$ARCHIVES/basic.tar.Z" "$ARCHIVES/basic-lowercase.tar.z"
+cp "$ARCHIVES/basic.tar.Z" "$ARCHIVES/basic.taz"
+cp "$ARCHIVES/basic.lha" "$ARCHIVES/basic.lzh"
+for extension in a lib; do
+  cp "$ARCHIVES/basic.ar" "$ARCHIVES/basic.$extension"
+done
+cp "$ARCHIVES/basic.tar.zst" "$ARCHIVES/basic.tzst"
+cp "$ARCHIVES/basic.tar.gz" "$ARCHIVES/basic.tgz"
+cp "$ARCHIVES/basic.aar" "$ARCHIVES/basic.aea"
+
 
 sha256_file() {
   if command -v shasum >/dev/null 2>&1; then
@@ -379,27 +428,54 @@ append_manifest() {
 
 printf '# filename\tformat\textract\tpassword\tsha256\tnotes\n' > "$MANIFEST"
 append_manifest "basic.zip" "ZIP" "true" "" "ZIP Deflate fixture created by ZManager"
+for extension in zipx jar war ipa apk appx xpi cbz epub; do
+  append_manifest "basic.$extension" "ZIP" "true" "" "ZIP Deflate fixture under the .$extension extension"
+done
 append_manifest "basic.7z" "7Z" "true" "" "7Z LZMA2 solid fixture created by ZManager"
+for extension in cb7 sevenz; do
+  append_manifest "basic.$extension" "7Z" "true" "" "7Z fixture under the .$extension extension"
+done
+append_manifest "basic.cbr" "RAR" "true" "" "RAR5 fixture under the .cbr extension"
 append_manifest "basic.tar" "TAR" "true" "" "TAR fixture created by bsdtar"
+for extension in cbt pax ustar; do
+  append_manifest "basic.$extension" "TAR" "true" "" "TAR fixture under the .$extension extension"
+done
 append_manifest "basic.tar.gz" "TAR.GZ" "true" "" "Tar fixture compressed with gzip"
+append_manifest "basic.tgz" "TAR.GZ" "true" "" "Tar.GZ fixture under the .tgz extension"
 append_manifest "basic.tar.bz2" "TAR.BZ2" "true" "" "Tar fixture compressed with bzip2"
+for extension in tbz2 tbz; do
+  append_manifest "basic.$extension" "TAR.BZ2" "true" "" "Tar.BZ2 fixture under the .$extension extension"
+done
 append_manifest "basic.tar.xz" "TAR.XZ" "true" "" "Tar fixture compressed with xz"
+append_manifest "basic.txz" "TAR.XZ" "true" "" "Tar.XZ fixture under the .txz extension"
 append_manifest "basic.tar.lzma" "TAR.LZMA" "true" "" "Tar fixture compressed with legacy LZMA"
+append_manifest "basic.tlzma" "TAR.LZMA" "true" "" "Tar.LZMA fixture under the .tlzma extension"
 append_manifest "basic.tar.lz" "TAR.LZ" "true" "" "Tar fixture compressed with lzip"
 append_manifest "basic.tar.lzo" "TAR.LZO" "true" "" "Tar fixture compressed with lzop"
 append_manifest "basic.tar.Z" "TAR.Z" "true" "" "Tar fixture compressed with Unix compress"
+append_manifest "basic-lowercase.tar.z" "TAR.Z" "true" "" "Tar.Z fixture under the lowercase .tar.z extension"
+append_manifest "basic.taz" "TAR.Z" "true" "" "Tar.Z fixture under the .taz extension"
 append_manifest "basic.tar.lz4" "TAR.LZ4" "true" "" "Tar fixture compressed with LZ4"
 append_manifest "basic.tar.zst" "TAR.ZST" "true" "" "Tar fixture compressed with zstd"
 append_manifest "basic.cpio" "CPIO" "true" "" "CPIO fixture created by bsdtar"
+append_manifest "basic.cpio.gz" "CPIO" "true" "" "CPIO fixture compressed with gzip"
+append_manifest "basic.cpgz" "CPIO" "true" "" "CPIO fixture compressed with gzip under the .cpgz extension"
+append_manifest "basic.cpio.bz2" "CPIO" "true" "" "CPIO fixture compressed with bzip2"
+append_manifest "basic.cpio.xz" "CPIO" "true" "" "CPIO fixture compressed with xz"
+append_manifest "basic.cpio.lzma" "CPIO" "true" "" "CPIO fixture compressed with legacy LZMA"
+append_manifest "basic.cpio.zst" "CPIO" "true" "" "CPIO fixture compressed with zstd"
 append_manifest "basic.cab" "CAB" "true" "" "CAB fixture created by gcab"
 append_manifest "basic.rar" "RAR" "true" "" "RAR5 fixture created by the RAR tool"
 append_manifest "basic.lha" "LHA" "true" "" "LHA fixture created by jlha-utils in Docker"
+append_manifest "basic.lzh" "LHA" "true" "" "LHA fixture under the .lzh extension"
 append_manifest "basic.rpm" "RPM" "true" "" "RPM package fixture created by rpmbuild"
 append_manifest "basic.xar" "XAR" "true" "" "XAR fixture created by macOS xar"
 append_manifest "basic.warc" "WARC" "true" "" "WARC fixture created by bsdtar"
 append_manifest "basic.iso" "ISO" "true" "" "ISO fixture created by hdiutil makehybrid"
 append_manifest "basic.deb" "DEB" "true" "" "Debian ar package fixture"
 append_manifest "basic.ar" "AR" "true" "" "AR fixture created by the platform ar tool"
+append_manifest "basic.a" "AR" "true" "" "AR fixture under the .a extension"
+append_manifest "basic.lib" "AR" "true" "" "AR fixture under the .lib extension"
 append_manifest "basic.dmg" "DMG" "true" "" "Disk image fixture created by hdiutil create -srcfolder"
 append_manifest "basic.pkg" "PKG" "true" "" "Apple package fixture created by pkgbuild"
 append_manifest "basic.msi" "MSI" "true" "" "Windows Installer fixture created by wixl (msitools)"
@@ -408,6 +484,8 @@ append_manifest "basic.vmdk" "VMDK" "true" "" "VMware disk image fixture: superf
 append_manifest "basic.udf" "UDF" "true" "" "UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload"
 append_manifest "basic.mtree" "MTREE" "true" "" "MTREE manifest fixture with directories, files, sizes, and a symlink"
 append_manifest "basic.tzap" "TZAP" "true" "" "TZAP fixture created by zmanager-cli"
+append_manifest "basic.tzst" "TAR.ZST" "true" "" "Tar.ZST fixture under the .tzst extension"
+append_manifest "basic.aea" "AAR" "true" "" "Apple Archive fixture under the .aea extension"
 append_manifest "basic.aar" "AAR" "true" "" "Apple Archive fixture created by macOS aa"
 append_manifest "basic.txt.gz" "RAW" "true" "" "Raw gzip stream fixture"
 append_manifest "basic.txt.bz2" "RAW" "true" "" "Raw bzip2 stream fixture"
