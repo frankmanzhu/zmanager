@@ -12,6 +12,7 @@ use flate2::write::ZlibEncoder;
 use std::io::{Cursor, Write};
 use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::backend_test_support::xar_backend;
+use zmanager_core::safety::ExtractionPolicy;
 
 const APFS_BLOCK_SIZE: usize = 4096;
 const APFS_OBJECT_HEADER_SIZE: usize = 32;
@@ -288,5 +289,159 @@ fn pr5_xar_rejects_ambiguous_direct_data_metadata() {
     for (index, xml) in cases.iter().enumerate() {
         let archive = write_xar(&temp, &format!("invalid-{index}.xar"), xml, &[]);
         assert!(matches!(xar_backend::list(&archive), Err(xar_backend::XarError::Parser { .. })), "case {index} was accepted");
+    }
+}
+
+#[test]
+fn pr5_xar_parent_path_is_independent_of_metadata_order() {
+    let xml = br#"<xar><toc><file id="1">
+  <type>directory</type>
+  <file id="2"><type>directory</type>
+    <file id="3"><type>file</type><name>leaf.txt</name></file>
+    <name>child</name>
+  </file>
+  <name>parent</name>
+</file></toc></xar>"#;
+    let temp = TestDir::new("dpp-pr5-xar-late-parent-name");
+    let archive = write_xar(&temp, "late-parent-name.xar", xml, &[]);
+
+    let entries = xar_backend::list(&archive).unwrap();
+    assert_eq!(entries.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), ["parent/child/leaf.txt", "parent/child", "parent"]);
+}
+
+#[test]
+fn pr5_xar_rejects_duplicate_or_invalid_scalar_metadata() {
+    let cases: &[&[u8]] = &[
+        br#"<xar><toc><file id="1"><type>file</type><name>first</name><name>second</name></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type><type>symlink</type><name>entry</name><link>target</link></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type><name>entry</name><data><offset>0</offset><offset>1</offset><length>0</length><size>0</size></data></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type><name>entry</name><data><offset>0</offset><length>0</length><size>0</size><encoding style="a"/><encoding style="b"/></data></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type><name>entry</name><data><offset>0</offset><length>0</length><size>0</size><encoding/></data></file></toc></xar>"#,
+        br#"<xar><toc><file id="1" id="2"><type>file</type><name>entry</name></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type><name>entry</name><data><offset>0</offset><length>0</length><size>0</size><encoding style="a" style="b"/></data></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type><name/></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><name>entry</name></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>symlink</type><name>link</name></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>symlink</type><name>link</name><link/></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>mystery</type><name>entry</name></file></toc></xar>"#,
+        br#"<xar><toc><file id="18446744073709551616"><type>file</type><name>entry</name></file></toc></xar>"#,
+        br#"<xar><toc><file id="1"><type>file</type><name>entry</name><data><offset>-1</offset><length>0</length><size>0</size></data></file></toc></xar>"#,
+    ];
+    let temp = TestDir::new("dpp-pr5-xar-invalid-scalars");
+
+    for (index, xml) in cases.iter().enumerate() {
+        let archive = write_xar(&temp, &format!("invalid-scalar-{index}.xar"), xml, &[]);
+        assert!(matches!(xar_backend::list(&archive), Err(xar_backend::XarError::Parser { .. })), "case {index} was accepted");
+    }
+}
+
+#[test]
+fn pr5_xar_requires_one_well_formed_xar_toc_document() {
+    let cases: &[&[u8]] = &[
+        br"<toc><file><type>file</type><name>entry</name></file></toc>",
+        br"<xar></xar>",
+        br"<xar><toc/><toc/></xar>",
+        br"<xar><extension><toc/></extension></xar>",
+        br"<xar><toc/></xar><second/>",
+    ];
+    let temp = TestDir::new("dpp-pr5-xar-document-structure");
+
+    for (index, xml) in cases.iter().enumerate() {
+        let archive = write_xar(&temp, &format!("invalid-document-{index}.xar"), xml, &[]);
+        assert!(matches!(xar_backend::list(&archive), Err(xar_backend::XarError::Parser { .. })), "case {index} was accepted");
+    }
+}
+
+#[test]
+fn pr5_xar_validates_declared_toc_extents() {
+    let xml = br"<xar><toc/></xar>";
+    let temp = TestDir::new("dpp-pr5-xar-toc-extents");
+
+    for (name, header_range) in [("compressed", 8..16), ("uncompressed", 16..24)] {
+        let mut bytes = build_xar(xml, &[]);
+        let declared = u64::from_be_bytes(bytes[header_range.clone()].try_into().unwrap()) + 1;
+        bytes[header_range].copy_from_slice(&declared.to_be_bytes());
+        let archive = temp.path(format!("invalid-{name}-extent.xar"));
+        std::fs::write(&archive, bytes).unwrap();
+
+        assert!(matches!(xar_backend::list(&archive), Err(xar_backend::XarError::Parser { .. })), "{name} extent mismatch was accepted");
+    }
+}
+
+#[test]
+fn pr5_xar_file_state_is_isolated_across_deep_siblings() {
+    let xml = br#"<xar><toc><file id="1"><type>directory</type><name>root</name>
+  <file id="2"><type>symlink</type><name>first-link</name><link>first-target</link></file>
+  <file id="3"><type>file</type><name>payload.bin</name><data>
+    <offset>0</offset><length>4</length><size>4</size><encoding style="application/octet-stream"/>
+  </data></file>
+  <file id="4"><type>directory</type><name>nested</name>
+    <file id="5"><link>second-target</link><name>second-link</name><type>symlink</type></file>
+  </file>
+</file></toc></xar>"#;
+    let temp = TestDir::new("dpp-pr5-xar-deep-siblings");
+    let archive = write_xar(&temp, "deep-siblings.xar", xml, b"data");
+
+    let entries = xar_backend::list(&archive).unwrap();
+    let first = entries.iter().find(|entry| entry.path.ends_with("first-link")).unwrap();
+    let payload = entries.iter().find(|entry| entry.path.ends_with("payload.bin")).unwrap();
+    let second = entries.iter().find(|entry| entry.path.ends_with("second-link")).unwrap();
+    assert_eq!(first.link_target.as_deref(), Some("first-target"));
+    assert_eq!(payload.link_target, None);
+    assert_eq!(payload.size, 4);
+    assert_eq!(second.link_target.as_deref(), Some("second-target"));
+
+    let mut copied = Vec::new();
+    assert_eq!(xar_backend::copy(&archive, payload.index, &mut copied).unwrap(), 4);
+    assert_eq!(copied, b"data");
+}
+
+#[test]
+fn pr5_xar_heap_extents_encodings_and_decoded_sizes_fail_closed() {
+    let temp = TestDir::new("dpp-pr5-xar-heap-bounds");
+    let mut zlib_encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    zlib_encoder.write_all(b"four").unwrap();
+    let zlib_payload = zlib_encoder.finish().unwrap();
+    let cases: Vec<(&str, Vec<u8>, Vec<u8>)> = vec![
+        (
+            "offset-overflow",
+            br"<xar><toc><file><type>file</type><name>payload</name><data><offset>18446744073709551615</offset><length>1</length><size>1</size></data></file></toc></xar>".to_vec(),
+            vec![0],
+        ),
+        (
+            "offset-beyond-heap",
+            br"<xar><toc><file><type>file</type><name>payload</name><data><offset>4</offset><length>2</length><size>2</size></data></file></toc></xar>".to_vec(),
+            b"data".to_vec(),
+        ),
+        (
+            "stored-size-mismatch",
+            br"<xar><toc><file><type>file</type><name>payload</name><data><offset>0</offset><length>2</length><size>3</size></data></file></toc></xar>".to_vec(),
+            b"ab".to_vec(),
+        ),
+        (
+            "unsupported-encoding",
+            br#"<xar><toc><file><type>file</type><name>payload</name><data><offset>0</offset><length>1</length><size>1</size><encoding style="application/x-unknown"/></data></file></toc></xar>"#.to_vec(),
+            vec![0],
+        ),
+        (
+            "decoded-size-mismatch",
+            format!(
+                "<xar><toc><file><type>file</type><name>payload</name><data><offset>0</offset><length>{}</length><size>2</size><encoding style=\"application/zlib\"/></data></file></toc></xar>",
+                zlib_payload.len()
+            )
+            .into_bytes(),
+            zlib_payload,
+        ),
+    ];
+
+    for (name, xml, heap) in cases {
+        let archive = write_xar(&temp, &format!("{name}.xar"), &xml, &heap);
+        assert_eq!(xar_backend::list(&archive).unwrap().len(), 1, "{name}");
+        assert!(matches!(xar_backend::copy(&archive, 0, &mut Vec::new()), Err(xar_backend::XarError::Parser { .. })), "{name} copied successfully");
+
+        let destination = temp.path(format!("out-{name}"));
+        assert!(xar_backend::extract(&archive, &destination, ExtractionPolicy::default(), None, None).is_err(), "{name} extracted successfully");
+        assert!(!destination.join("payload").exists(), "{name} committed a partial output file");
     }
 }

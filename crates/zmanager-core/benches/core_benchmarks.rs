@@ -275,7 +275,7 @@ fn bench_manifest_walk() {
     {
         let options = PlanOptions { respect_gitignore: false, ..PlanOptions::default() };
         let start = Instant::now();
-        let plan = plan_archives(&[source_dir.to_path_buf()], &options).unwrap();
+        let plan = plan_archives(std::slice::from_ref(source_dir), &options).unwrap();
         let elapsed = start.elapsed();
         println!("plan_archives (clean=false, 5k files): {elapsed:?} ({} entries)", plan.entries.len());
     }
@@ -284,7 +284,7 @@ fn bench_manifest_walk() {
     {
         let options = PlanOptions { respect_gitignore: true, ..PlanOptions::default() };
         let start = Instant::now();
-        let plan = plan_archives(&[source_dir.to_path_buf()], &options).unwrap();
+        let plan = plan_archives(std::slice::from_ref(source_dir), &options).unwrap();
         let elapsed = start.elapsed();
         println!("plan_archives (clean=true,  5k files): {elapsed:?} ({} entries)", plan.entries.len());
     }
