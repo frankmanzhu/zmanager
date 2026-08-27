@@ -215,6 +215,7 @@ struct RawEntry {
 
 fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
     let mut file = open(path)?;
+    let archive_len = file.metadata().map_err(|source| io_error(path, source))?.len();
     let mut magic = [0_u8; AR_MAGIC.len()];
     file.read_exact(&mut magic).map_err(|source| io_error(path, source))?;
     if magic != AR_MAGIC {
@@ -223,12 +224,15 @@ fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
     let mut raw_entries = Vec::new();
     let mut string_table = Vec::new();
     loop {
-        let mut header = [0_u8; 60];
-        match file.read_exact(&mut header) {
-            Ok(()) => {}
-            Err(source) if source.kind() == io::ErrorKind::UnexpectedEof => break,
-            Err(source) => return Err(io_error(path, source)),
+        let header_offset = file.stream_position().map_err(|source| io_error(path, source))?;
+        if header_offset == archive_len {
+            break;
         }
+        if archive_len.saturating_sub(header_offset) < 60 {
+            return Err(ArError::Invalid { path: path.to_path_buf(), message: "truncated member header".to_owned() });
+        }
+        let mut header = [0_u8; 60];
+        file.read_exact(&mut header).map_err(|source| io_error(path, source))?;
         if &header[58..60] != AR_MEMBER_MAGIC {
             return Err(ArError::Invalid { path: path.to_path_buf(), message: "member header has invalid trailer".to_owned() });
         }
@@ -237,6 +241,13 @@ fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
         let mode = parse_octal(path, &header[40..48])?;
         let size = parse_number(path, &header[48..58])?;
         let data_offset = file.stream_position().map_err(|source| io_error(path, source))?;
+        let member_end = data_offset
+            .checked_add(size)
+            .and_then(|end| end.checked_add(size % 2))
+            .ok_or_else(|| ArError::Invalid { path: path.to_path_buf(), message: "member extent overflows".to_owned() })?;
+        if member_end > archive_len {
+            return Err(ArError::Invalid { path: path.to_path_buf(), message: "member payload extends beyond the archive".to_owned() });
+        }
         let mut bsd_name = None;
         let payload_size = if let Some(length) = token.strip_prefix("#1/") {
             let name_length =
@@ -268,7 +279,11 @@ fn parse(path: &Path) -> Result<Vec<ArEntry>, ArError> {
             skip(&mut file, payload_size, path)?;
         }
         if size % 2 == 1 {
-            skip(&mut file, 1, path)?;
+            let mut padding = [0_u8; 1];
+            file.read_exact(&mut padding).map_err(|source| io_error(path, source))?;
+            if padding[0] != b'\n' {
+                return Err(ArError::Invalid { path: path.to_path_buf(), message: "member has invalid padding byte".to_owned() });
+            }
         }
         let is_special_table = token == "//" || token == "/" || token == "/SYM64/" || token.starts_with("__.SYMDEF");
         if !is_special_table {

@@ -4,6 +4,7 @@ use crate::safety::{
     ExtractionDecision, ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner, OverwriteResolver,
 };
 use crate::temp_names::{TempDirAllocError, TemporaryDirectory};
+use std::collections::BTreeSet;
 use std::fmt;
 #[cfg(any(unix, test))]
 use std::fs;
@@ -14,10 +15,11 @@ use std::time::{Duration, UNIX_EPOCH};
 
 const DEB_TEMP_PREFIX: &str = "zmanager-deb";
 const DEBIAN_BINARY_MEMBER: &str = "debian-binary";
-const CONTROL_PAYLOAD_PREFIX: &str = "control.tar.";
-const CONTROL_PAYLOAD_GLOB: &str = "control.tar.*";
-const DATA_PAYLOAD_PREFIX: &str = "data.tar.";
-const DATA_PAYLOAD_GLOB: &str = "data.tar.*";
+const CONTROL_PAYLOAD_BASE: &str = "control.tar";
+const CONTROL_PAYLOAD_GLOB: &str = "control.tar[.*]";
+const DATA_PAYLOAD_BASE: &str = "data.tar";
+const DATA_PAYLOAD_GLOB: &str = "data.tar[.*]";
+const MAX_DEBIAN_BINARY_BYTES: u64 = 64 * 1024;
 const CONTROL_OUTPUT_DIR: &str = "control";
 const DATA_OUTPUT_DIR: &str = "data";
 
@@ -153,21 +155,19 @@ fn extract_deb_nested_inner(
     let archive_path = archive_path.as_ref();
     let temp = TemporaryDirectory::new(DEB_TEMP_PREFIX)?;
     let members = ar_backend::list(archive_path)?;
-    let debian_binary = materialize_member(archive_path, &members, DEBIAN_BINARY_MEMBER, temp.path())?;
-    let control_member = materialize_member_by_prefix(archive_path, &members, CONTROL_PAYLOAD_PREFIX, temp.path())?;
-    let data_member = materialize_member_by_prefix(archive_path, &members, DATA_PAYLOAD_PREFIX, temp.path())?;
+    validate_member_layout(archive_path, &members)?;
+    let debian_binary =
+        materialize_member(archive_path, &members, DEBIAN_BINARY_MEMBER, temp.path())?.ok_or(DebError::MissingMember { member: DEBIAN_BINARY_MEMBER })?;
+    let control_member = materialize_payload_member(archive_path, &members, CONTROL_PAYLOAD_BASE, CONTROL_PAYLOAD_GLOB, temp.path())?;
+    let data_member = materialize_payload_member(archive_path, &members, DATA_PAYLOAD_BASE, DATA_PAYLOAD_GLOB, temp.path())?;
 
     let mut report = DebExtractReport { written_entries: 0, skipped_entries: 0, written_bytes: 0, warnings: Vec::new() };
 
-    if let Some(debian_binary) = debian_binary {
-        match overwrite_resolver {
-            Some(ref mut resolver) => {
-                copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), Some(&mut **resolver), &mut report)?;
-            }
-            None => copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), None, &mut report)?,
+    match overwrite_resolver {
+        Some(ref mut resolver) => {
+            copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), Some(&mut **resolver), &mut report)?;
         }
-    } else {
-        report.warnings.push(format!("deb package did not include {DEBIAN_BINARY_MEMBER}"));
+        None => copy_synthetic_file(&debian_binary, DEBIAN_BINARY_MEMBER, &destination_root, policy.clone(), None, &mut report)?,
     }
 
     let control_policy = policy_with_remaining_budget(policy, &report);
@@ -184,6 +184,87 @@ fn extract_deb_nested_inner(
     absorb_archive_report(DATA_OUTPUT_DIR, data_report, &mut report);
 
     Ok(report)
+}
+
+pub(crate) fn validate_member_layout(archive_path: &Path, members: &[ar_backend::ArEntry]) -> Result<(), DebError> {
+    let mut names = BTreeSet::new();
+    for member in members {
+        if !names.insert(member.path.as_str()) {
+            return Err(invalid_layout(archive_path, format!("duplicate DEB member {}", member.path)));
+        }
+    }
+
+    let Some(debian_binary) = members.first().filter(|entry| entry.path == DEBIAN_BINARY_MEMBER) else {
+        return Err(DebError::MissingMember { member: DEBIAN_BINARY_MEMBER });
+    };
+    if debian_binary.size > MAX_DEBIAN_BINARY_BYTES {
+        return Err(invalid_layout(archive_path, "debian-binary is unreasonably large".to_owned()));
+    }
+    let mut version = Vec::with_capacity(usize::try_from(debian_binary.size).unwrap_or(0));
+    ar_backend::copy(archive_path, debian_binary.index, &mut version)?;
+    validate_debian_binary_version(archive_path, &version)?;
+
+    let control = validate_single_payload_member(archive_path, members, CONTROL_PAYLOAD_BASE, CONTROL_PAYLOAD_GLOB)?;
+    let data = validate_single_payload_member(archive_path, members, DATA_PAYLOAD_BASE, DATA_PAYLOAD_GLOB)?;
+    if control.index >= data.index {
+        return Err(invalid_layout(archive_path, "control payload must precede the data payload".to_owned()));
+    }
+    Ok(())
+}
+
+pub(crate) fn test_payload_members(archive_path: &Path, members: &[ar_backend::ArEntry], options: &crate::engine::TestOptions) -> Result<(), DebError> {
+    let temporary = TemporaryDirectory::new("zmanager-deb-test")?;
+    for (base, required_name) in [(CONTROL_PAYLOAD_BASE, CONTROL_PAYLOAD_GLOB), (DATA_PAYLOAD_BASE, DATA_PAYLOAD_GLOB)] {
+        let member = validate_single_payload_member(archive_path, members, base, required_name)?;
+        if !options.selects(&member.path) {
+            continue;
+        }
+        let payload = materialize_payload_member(archive_path, members, base, required_name, temporary.path())?;
+        let engine = crate::engine::create_default_engine()?;
+        let source = crate::engine::ArchiveSource::from_path_autodetect(&payload);
+        let mut handle = engine.open(source, crate::engine::OpenOptions::default())?;
+        let nested_options = crate::engine::TestOptions { cancellation: options.cancellation.clone(), ..crate::engine::TestOptions::default() };
+        handle.test(&nested_options)?;
+        handle.close()?;
+    }
+    Ok(())
+}
+
+fn validate_single_payload_member<'a>(
+    archive_path: &Path,
+    members: &'a [ar_backend::ArEntry],
+    base: &str,
+    required_name: &'static str,
+) -> Result<&'a ar_backend::ArEntry, DebError> {
+    let mut matches = members.iter().filter(|entry| is_payload_member(&entry.path, base));
+    let Some(member) = matches.next() else {
+        return Err(DebError::MissingMember { member: required_name });
+    };
+    if matches.next().is_some() {
+        return Err(invalid_layout(archive_path, format!("multiple DEB payload members match {required_name}")));
+    }
+    if member.path.bytes().any(|byte| matches!(byte, b'/' | b'\\')) {
+        return Err(invalid_layout(archive_path, format!("DEB payload member name is not a top-level name: {}", member.path)));
+    }
+    Ok(member)
+}
+
+fn validate_debian_binary_version(archive_path: &Path, contents: &[u8]) -> Result<(), DebError> {
+    let first_line = contents.split(|byte| *byte == b'\n').next().unwrap_or_default();
+    let version = std::str::from_utf8(first_line).map_err(|_| invalid_layout(archive_path, "debian-binary version is not UTF-8".to_owned()))?;
+    let major = version.split_once('.').map_or(version, |(major, _)| major);
+    if major != "2" {
+        return Err(invalid_layout(archive_path, format!("unsupported debian-binary major version {major:?}")));
+    }
+    Ok(())
+}
+
+fn is_payload_member(name: &str, base: &str) -> bool {
+    name == base || name.strip_prefix(base).is_some_and(|suffix| suffix.starts_with('.'))
+}
+
+fn invalid_layout(archive_path: &Path, message: String) -> DebError {
+    DebError::Ar(ar_backend::ArError::Invalid { path: archive_path.to_path_buf(), message })
 }
 
 fn policy_with_remaining_budget(policy: &ExtractionPolicy, report: &DebExtractReport) -> ExtractionPolicy {
@@ -326,11 +407,14 @@ fn materialize_member(archive_path: &Path, members: &[ar_backend::ArEntry], memb
     Ok(Some(path))
 }
 
-fn materialize_member_by_prefix(archive_path: &Path, members: &[ar_backend::ArEntry], prefix: &str, destination: &Path) -> Result<PathBuf, DebError> {
-    let member = members
-        .iter()
-        .find(|entry| entry.path.starts_with(prefix))
-        .ok_or(DebError::MissingMember { member: if prefix == CONTROL_PAYLOAD_PREFIX { CONTROL_PAYLOAD_GLOB } else { DATA_PAYLOAD_GLOB } })?;
+fn materialize_payload_member(
+    archive_path: &Path,
+    members: &[ar_backend::ArEntry],
+    base: &str,
+    required_name: &'static str,
+    destination: &Path,
+) -> Result<PathBuf, DebError> {
+    let member = members.iter().find(|entry| is_payload_member(&entry.path, base)).ok_or(DebError::MissingMember { member: required_name })?;
     if member.path.bytes().any(|byte| matches!(byte, b'/' | b'\\')) {
         return Err(DebError::Ar(ar_backend::ArError::Invalid {
             path: archive_path.to_path_buf(),
@@ -482,12 +566,11 @@ mod tests {
         fs::write(&p2, deb_no_data).unwrap();
         assert!(matches!(extract_deb_nested(&p2, temp.path("out2"), &ExtractionPolicy::default()), Err(DebError::MissingMember { .. })));
 
-        // Missing debian-binary emits warning but still proceeds
+        // debian-binary is the required first member of a new-format package.
         let deb_no_bin = build_deb(None, Some(&control_bytes), Some(&data_bytes));
         let p3 = temp.path("no_bin.deb");
         fs::write(&p3, deb_no_bin).unwrap();
-        let r3 = extract_deb_nested(&p3, temp.path("out3"), &ExtractionPolicy::default()).unwrap();
-        assert!(!r3.warnings.is_empty());
+        assert!(matches!(extract_deb_nested(&p3, temp.path("out3"), &ExtractionPolicy::default()), Err(DebError::MissingMember { .. })));
 
         // Error types & Display coverage
         let err_missing = DebError::MissingMember { member: "control.tar.*" };

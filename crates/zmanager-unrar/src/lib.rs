@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 use std::fmt;
+use std::io::Read;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
@@ -34,6 +35,10 @@ const ERAR_LARGE_DICT: c_int = 25;
 
 const ZMU_UNRAR_ABORTED: c_int = -1000;
 const ZMU_UNRAR_DESTINATION_TOO_LONG: c_int = -1001;
+
+const RAR4_SIGNATURE: &[u8] = b"Rar!\x1a\x07\x00";
+const RAR5_SIGNATURE: &[u8] = b"Rar!\x1a\x07\x01\x00";
+const MIN_RAR_BLOCK_HEADER_BYTES: u64 = 7;
 
 const KIBIBYTE_BYTES: u64 = 1024;
 const MEBIBYTE_BYTES: u64 = 1024 * KIBIBYTE_BYTES;
@@ -116,6 +121,8 @@ pub enum RarEntryKind {
 pub enum UnrarError {
     /// Path cannot be passed to the C ABI.
     InvalidPath { path: PathBuf, reason: String },
+    /// The file is too short to contain a RAR block after its signature.
+    InvalidArchive { path: PathBuf, reason: String },
     /// `UnRAR` reported a numeric status.
     Status { code: i32, message: &'static str },
     /// `UnRAR` callback received invalid UTF-8.
@@ -131,6 +138,9 @@ impl fmt::Display for UnrarError {
         match self {
             Self::InvalidPath { path, reason } => {
                 write!(f, "invalid RAR archive path {}: {reason}", path.display())
+            }
+            Self::InvalidArchive { path, reason } => {
+                write!(f, "invalid RAR archive {}: {reason}", path.display())
             }
             Self::Status { code, message } => write!(f, "UnRAR failed with {message} ({code})"),
             Self::InvalidEntryName => write!(f, "UnRAR entry name is not valid UTF-8"),
@@ -160,7 +170,9 @@ pub fn large_dictionary_allowed_bytes(bytes: u64) -> bool {
 /// Returns [`UnrarError`] when the archive cannot be opened, decrypted, or read.
 pub fn list_archive(archive: impl AsRef<Path>, password: Option<&str>) -> Result<Vec<RarEntry>, UnrarError> {
     let _operation_guard = UNRAR_OPERATION_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-    let archive = path_to_cstring(archive.as_ref())?;
+    let archive_path = archive.as_ref();
+    validate_archive_prefix(archive_path)?;
+    let archive = path_to_cstring(archive_path)?;
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ListContext { entries: Vec::new(), error: None };
 
@@ -204,7 +216,9 @@ pub fn extract_selected_with_progress(
     progress: Option<&mut dyn FnMut(String, u64)>,
 ) -> Result<(), UnrarError> {
     let _operation_guard = UNRAR_OPERATION_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-    let archive = path_to_cstring(archive.as_ref())?;
+    let archive_path = archive.as_ref();
+    validate_archive_prefix(archive_path)?;
+    let archive = path_to_cstring(archive_path)?;
     let password = optional_password_to_c_buffer(password)?;
     let mut context = ExtractContext { selections, error: None, progress };
 
@@ -324,6 +338,25 @@ fn entry_kind(flags: u32, redir_type: u32) -> RarEntryKind {
         FSREDIR_FILECOPY => RarEntryKind::FileCopy,
         _ => RarEntryKind::Special,
     }
+}
+
+fn validate_archive_prefix(path: &Path) -> Result<(), UnrarError> {
+    let mut file = std::fs::File::open(path).map_err(|error| UnrarError::InvalidArchive { path: path.to_path_buf(), reason: error.to_string() })?;
+    let archive_len = file.metadata().map_err(|error| UnrarError::InvalidArchive { path: path.to_path_buf(), reason: error.to_string() })?.len();
+    let mut prefix = [0_u8; RAR5_SIGNATURE.len()];
+    file.read_exact(&mut prefix).map_err(|error| UnrarError::InvalidArchive { path: path.to_path_buf(), reason: error.to_string() })?;
+    let signature_len = if prefix.starts_with(RAR5_SIGNATURE) {
+        RAR5_SIGNATURE.len()
+    } else if prefix.starts_with(RAR4_SIGNATURE) {
+        RAR4_SIGNATURE.len()
+    } else {
+        return Err(UnrarError::InvalidArchive { path: path.to_path_buf(), reason: "missing RAR signature".to_owned() });
+    };
+    let minimum_len = u64::try_from(signature_len).unwrap_or(u64::MAX).saturating_add(MIN_RAR_BLOCK_HEADER_BYTES);
+    if archive_len < minimum_len {
+        return Err(UnrarError::InvalidArchive { path: path.to_path_buf(), reason: "truncated first block header".to_owned() });
+    }
+    Ok(())
 }
 
 fn optional_c_path_to_string(path: *const c_char) -> Result<Option<String>, UnrarError> {

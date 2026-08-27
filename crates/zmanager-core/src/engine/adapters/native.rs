@@ -619,12 +619,16 @@ impl NativeReadAdapter for DebListAdapter {
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let path = archive.primary_path();
         let entries = crate::ar_backend::list(path).map_err(|error| ar_error(path, &error))?;
+        crate::deb_backend::validate_member_layout(path, &entries).map_err(|error| deb_error(path, &error))?;
         Ok(ArchiveListing { entries: map_ar_entries(entries) })
     }
 
     fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
         let path = archive.primary_path();
+        let entries = crate::ar_backend::list(path).map_err(|error| ar_error(path, &error))?;
+        crate::deb_backend::validate_member_layout(path, &entries).map_err(|error| deb_error(path, &error))?;
         let report = crate::ar_backend::test(path, test_options).map_err(|error| ar_error(path, &error))?;
+        crate::deb_backend::test_payload_members(path, &entries, test_options).map_err(|error| deb_error(path, &error))?;
         Ok(TestReport {
             tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
             skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),

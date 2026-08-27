@@ -5,9 +5,66 @@ use crate::extract_materialize::DeferredHardlink;
 use crate::jobs::{CancellationToken, JobCancelled, JobContext};
 use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, OverwriteResolver};
 use std::fmt;
-use std::fs;
-use std::io::{self, Read, Write};
+use std::fs::{self, File};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+
+const TAR_BLOCK_BYTES: usize = 512;
+
+/// Observes zero records read at structural TAR header boundaries.
+///
+/// Validation uses `tar::Archive::entries_with_seek` without reading regular
+/// file payloads, so 512-byte reads here are headers (or extension metadata),
+/// never ordinary entry contents. Tracking offsets prevents zero-filled
+/// extension data from being confused with consecutive end records.
+struct TarStructureObserver<R> {
+    inner: R,
+    last_observed_end: Option<u64>,
+    zero_run_start: Option<u64>,
+    zero_run_bytes: u64,
+    consecutive_zero_records: usize,
+}
+
+impl<R> TarStructureObserver<R> {
+    fn new(inner: R) -> Self {
+        Self { inner, last_observed_end: None, zero_run_start: None, zero_run_bytes: 0, consecutive_zero_records: 0 }
+    }
+}
+
+impl<R: Read + Seek> Read for TarStructureObserver<R> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        let offset = self.inner.stream_position()?;
+        let read = self.inner.read(output)?;
+        if self.last_observed_end != Some(offset) {
+            self.zero_run_start = None;
+            self.zero_run_bytes = 0;
+        }
+        for (index, byte) in output[..read].iter().enumerate() {
+            let byte_offset = offset.saturating_add(index as u64);
+            if *byte == 0 {
+                self.zero_run_start.get_or_insert(byte_offset);
+                self.zero_run_bytes = self.zero_run_bytes.saturating_add(1);
+            } else {
+                self.zero_run_start = None;
+                self.zero_run_bytes = 0;
+            }
+        }
+        self.last_observed_end = Some(offset.saturating_add(read as u64));
+        self.consecutive_zero_records = self.zero_run_start.map_or(0, |start| {
+            let block_bytes = TAR_BLOCK_BYTES as u64;
+            let first_full_block = start.saturating_add(block_bytes - 1) / block_bytes * block_bytes;
+            let run_end = start.saturating_add(self.zero_run_bytes);
+            usize::try_from(run_end.saturating_sub(first_full_block) / block_bytes).unwrap_or(usize::MAX)
+        });
+        Ok(read)
+    }
+}
+
+impl<R: Seek> Seek for TarStructureObserver<R> {
+    fn seek(&mut self, position: io::SeekFrom) -> io::Result<u64> {
+        self.inner.seek(position)
+    }
+}
 
 /// One normalized TAR listing entry.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -99,6 +156,7 @@ impl crate::extract_loop::ExtractReport for TarReport {
 
 /// Lists entries from any TAR-compatible decoder.
 pub fn list<R: Read>(reader: R, archive_path: &Path) -> Result<Vec<TarEntry>, TarError> {
+    let (_temporary, reader) = spool_validated_tar(reader, archive_path, &|| false)?;
     let mut archive = tar::Archive::new(reader);
     archive
         .entries()
@@ -123,6 +181,7 @@ pub fn list<R: Read>(reader: R, archive_path: &Path) -> Result<Vec<TarEntry>, Ta
 
 /// Verifies payloads from any TAR-compatible decoder.
 pub fn test<R: Read>(reader: R, archive_path: &Path, selects: impl Fn(&str) -> bool, is_cancelled: impl Fn() -> bool) -> Result<TarReport, TarError> {
+    let (_temporary, reader) = spool_validated_tar(reader, archive_path, &is_cancelled)?;
     let mut archive = tar::Archive::new(reader);
     let mut report = TarReport::default();
     for entry in archive.entries().map_err(|source| io_error(archive_path, source))? {
@@ -226,6 +285,10 @@ fn extract_with_selector<R: Read>(
     cancellation: Option<&CancellationToken>,
     mut context: Option<&mut JobContext<'_>>,
 ) -> Result<TarReport, TarError> {
+    // Validate and spool before touching the destination. This keeps corrupt
+    // TAR input fail-closed even when the missing end records occur after a
+    // large, otherwise readable entry.
+    let (_temporary, reader) = spool_validated_tar(reader, archive_path, &|| cancellation.is_some_and(CancellationToken::is_cancelled))?;
     let root = crate::safety::prepare_destination_root(destination).map_err(|source| io_error(destination, source))?;
     let mut archive = tar::Archive::new(reader);
     let mut planner = crate::safety::ExtractionSafetyPlanner::with_overwrite_resolver(&root, policy, resolver);
@@ -338,6 +401,7 @@ pub fn copy_by_path_occurrence<R: Read>(reader: R, archive_path: &Path, selector
 }
 
 fn copy_with_selector<R: Read>(reader: R, archive_path: &Path, selection: TarSelection<'_>, output: &mut dyn Write) -> Result<u64, TarError> {
+    let (_temporary, reader) = spool_validated_tar(reader, archive_path, &|| false)?;
     let mut archive = tar::Archive::new(reader);
     let mut path_occurrence = 0_usize;
     let mut entry = None;
@@ -370,6 +434,45 @@ fn copy_with_selector<R: Read>(reader: R, archive_path: &Path, selection: TarSel
         return Err(io_error(Path::new(&path), io::Error::new(io::ErrorKind::InvalidInput, "retained TAR entry is not a regular file")));
     }
     io::copy(&mut entry, output).map_err(|source| io_error(Path::new(&path), source))
+}
+
+fn spool_validated_tar<R: Read>(
+    reader: R,
+    archive_path: &Path,
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<(crate::temp_names::TemporaryDirectory, File), TarError> {
+    let temporary = crate::temp_names::TemporaryDirectory::new("zmanager-tar-validation").map_err(|error| io_error(&error.path, error.source))?;
+    let spool_path = temporary.path().join("archive.tar");
+    let mut spool = File::options().read(true).write(true).create_new(true).open(&spool_path).map_err(|source| io_error(&spool_path, source))?;
+    let mut decoded = reader;
+    let mut buffer = vec![0_u8; crate::DEFAULT_IO_BUFFER_BYTES];
+    loop {
+        if is_cancelled() {
+            return Err(TarError::Cancelled);
+        }
+        let read = decoded.read(&mut buffer).map_err(|source| io_error(archive_path, source))?;
+        if read == 0 {
+            break;
+        }
+        spool.write_all(&buffer[..read]).map_err(|source| io_error(&spool_path, source))?;
+    }
+    spool.rewind().map_err(|source| io_error(&spool_path, source))?;
+    let consecutive_zero_records = {
+        let mut archive = tar::Archive::new(TarStructureObserver::new(&mut spool));
+        archive.set_ignore_zeros(true);
+        for entry in archive.entries_with_seek().map_err(|source| io_error(archive_path, source))? {
+            if is_cancelled() {
+                return Err(TarError::Cancelled);
+            }
+            entry.map_err(|source| io_error(archive_path, source))?;
+        }
+        archive.into_inner().consecutive_zero_records
+    };
+    if consecutive_zero_records < 2 {
+        return Err(io_error(archive_path, io::Error::new(io::ErrorKind::UnexpectedEof, "TAR archive is missing its two zero-filled end records")));
+    }
+    spool.rewind().map_err(|source| io_error(&spool_path, source))?;
+    Ok((temporary, spool))
 }
 
 #[derive(Debug, Clone, Copy)]
