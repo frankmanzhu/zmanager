@@ -227,7 +227,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "apfs"
 version = "0.2.4"
-source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#999c3913545478a9a7ba3759f22ec9613f261f64"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "dpp"
 version = "0.4.2"
-source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#999c3913545478a9a7ba3759f22ec9613f261f64"
 dependencies = [
  "apfs",
  "hfsplus",
@@ -1951,7 +1951,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hfsplus"
 version = "0.2.4"
-source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#999c3913545478a9a7ba3759f22ec9613f261f64"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -2973,7 +2973,7 @@ dependencies = [
 [[package]]
 name = "pbzx"
 version = "0.3.1"
-source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#999c3913545478a9a7ba3759f22ec9613f261f64"
 dependencies = [
  "byteorder",
  "thiserror",
@@ -4394,7 +4394,7 @@ dependencies = [
 [[package]]
 name = "udif"
 version = "0.3.4"
-source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#999c3913545478a9a7ba3759f22ec9613f261f64"
 dependencies = [
  "base64",
  "byteorder",
@@ -5131,7 +5131,7 @@ dependencies = [
 [[package]]
 name = "xara"
 version = "0.3.2"
-source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#92081c1fde11264b0427879d949aee76dbc50c76"
+source = "git+https://github.com/frankmanzhu/dpp?branch=zmanager-integration#999c3913545478a9a7ba3759f22ec9613f261f64"
 dependencies = [
  "byteorder",
  "flate2",
