@@ -12,7 +12,7 @@ use crate::jobs::{CancellationToken, JobCancelled};
 use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, ExtractionSafetyError, ExtractionSafetyPlanner};
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Cursor, Read as _, Write as _};
+use std::io::{self, Cursor, Read as _};
 use std::path::{Path, PathBuf};
 
 const MAX_MTREE_BYTES: u64 = 64 * 1024 * 1024;

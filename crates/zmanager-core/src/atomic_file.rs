@@ -146,10 +146,11 @@ fn atomic_no_clobber_rename(from: &Path, to: &Path) -> io::Result<()> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
+    const RENAME_NOREPLACE: libc::c_uint = 1;
+
     let from_c = CString::new(from.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let to_c = CString::new(to.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
-    const RENAME_NOREPLACE: libc::c_uint = 1;
     let ret = unsafe { libc::syscall(libc::SYS_renameat2, libc::AT_FDCWD, from_c.as_ptr(), libc::AT_FDCWD, to_c.as_ptr(), RENAME_NOREPLACE) };
 
     if ret == 0 {

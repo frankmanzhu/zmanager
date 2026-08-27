@@ -1661,7 +1661,7 @@ dependencies = [
  "forensic-vfs",
  "forensic-vfs-resolver",
  "hfsplus-forensic",
- "iso9660-forensic 0.8.0",
+ "iso9660-forensic 0.7.6",
  "luks-core",
  "ntfs-core",
  "qcow2-core",
@@ -2354,13 +2354,16 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "iso9660-forensic"
-version = "0.8.0"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b4b3891bcab834008e60b36e198acbe9b04b9234ec9054ee94c1de07a2811a6"
 dependencies = [
+ "forensic-vfs",
  "forensicnomicon",
- "iso9660-forensic-core 0.1.0",
  "safe-read 0.1.0",
  "sha1 0.10.7",
  "sha2 0.10.9",
+ "thiserror",
 ]
 
 [[package]]
@@ -2369,21 +2372,10 @@ version = "0.8.0"
 source = "git+https://github.com/SecurityRonin/iso9660-forensic?rev=589a93c5c058070426471cf4d39c8d5c12162fc1#589a93c5c058070426471cf4d39c8d5c12162fc1"
 dependencies = [
  "forensicnomicon",
- "iso9660-forensic-core 0.1.0 (git+https://github.com/SecurityRonin/iso9660-forensic?rev=589a93c5c058070426471cf4d39c8d5c12162fc1)",
+ "iso9660-forensic-core",
  "safe-read 0.1.0",
  "sha1 0.10.7",
  "sha2 0.10.9",
-]
-
-[[package]]
-name = "iso9660-forensic-core"
-version = "0.1.0"
-dependencies = [
- "forensic-vfs",
- "safe-read 0.1.0",
- "sha1 0.10.7",
- "sha2 0.10.9",
- "thiserror",
 ]
 
 [[package]]
@@ -5462,7 +5454,7 @@ dependencies = [
  "forensic-vfs",
  "forensic-vfs-engine",
  "hex",
- "iso9660-forensic 0.8.0 (git+https://github.com/SecurityRonin/iso9660-forensic?rev=589a93c5c058070426471cf4d39c8d5c12162fc1)",
+ "iso9660-forensic 0.8.0",
  "libc",
  "lz4_flex 0.14.0",
  "lzma-rust2 0.16.5",

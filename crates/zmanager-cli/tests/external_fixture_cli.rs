@@ -21,6 +21,30 @@ enum ExternalArchiveTool {
     Tar,
 }
 
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
+fn compress_program_for(archive: &Path) -> Option<&'static str> {
+    let name = archive.file_name().and_then(|n| n.to_str())?;
+    if name.ends_with(".lz4") {
+        Some("lz4")
+    } else if name.ends_with(".lz") {
+        Some("lzip")
+    } else if name.ends_with(".lzo") {
+        Some("lzop")
+    } else if name.ends_with(".zst") {
+        Some("zstd")
+    } else if name.ends_with(".tar.Z") || name.ends_with(".taz") {
+        if find_on_path("uncompress").is_some() {
+            Some("uncompress")
+        } else if find_on_path("ncompress").is_some() {
+            Some("ncompress")
+        } else {
+            Some("compress")
+        }
+    } else {
+        None
+    }
+}
+
 impl ExternalArchiveTool {
     fn binary(self) -> Option<PathBuf> {
         match self {
@@ -30,19 +54,39 @@ impl ExternalArchiveTool {
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     fn list(self, binary: &Path, archive: &Path) -> Output {
         match self {
             Self::SevenZip => Command::new(binary).args(["l", "-ba"]).arg(archive).output().unwrap(),
             Self::Unzip => Command::new(binary).args(["-Z1"]).arg(archive).output().unwrap(),
-            Self::Tar => Command::new(binary).arg("-tf").arg(archive).output().unwrap(),
+            Self::Tar => {
+                let mut cmd = Command::new(binary);
+                let binary_name = binary.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if binary_name == "tar" {
+                    if let Some(program) = compress_program_for(archive) {
+                        cmd.arg(format!("--use-compress-program={program}"));
+                    }
+                }
+                cmd.arg("-tf").arg(archive).output().unwrap()
+            }
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     fn extract(self, binary: &Path, archive: &Path, destination: &Path) -> Output {
         match self {
             Self::SevenZip => Command::new(binary).arg("x").arg("-y").arg(format!("-o{}", destination.display())).arg(archive).output().unwrap(),
             Self::Unzip => Command::new(binary).args(["-q", "-o"]).arg(archive).arg("-d").arg(destination).output().unwrap(),
-            Self::Tar => Command::new(binary).arg("-xf").arg(archive).arg("-C").arg(destination).output().unwrap(),
+            Self::Tar => {
+                let mut cmd = Command::new(binary);
+                let binary_name = binary.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if binary_name == "tar" {
+                    if let Some(program) = compress_program_for(archive) {
+                        cmd.arg(format!("--use-compress-program={program}"));
+                    }
+                }
+                cmd.arg("-xf").arg(archive).arg("-C").arg(destination).output().unwrap()
+            }
         }
     }
 }
@@ -51,6 +95,47 @@ impl ExternalArchiveTool {
 struct FixtureCase {
     filename: &'static str,
     tool: ExternalArchiveTool,
+}
+
+impl FixtureCase {
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    fn is_supported(self, binary: &Path) -> bool {
+        let name = binary.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name == "tar" {
+            if self.filename.ends_with(".cpio") {
+                return false;
+            }
+            if self.filename.ends_with(".lz") && find_on_path("lzip").is_none() {
+                return false;
+            }
+            if self.filename.ends_with(".lzo") && find_on_path("lzop").is_none() {
+                return false;
+            }
+            if (self.filename.ends_with(".tar.Z") || self.filename.ends_with(".taz"))
+                && find_on_path("uncompress").is_none()
+                && find_on_path("ncompress").is_none()
+                && find_on_path("compress").is_none()
+            {
+                return false;
+            }
+            if self.filename.ends_with(".lz4") && find_on_path("lz4").is_none() {
+                return false;
+            }
+            if self.filename.ends_with(".zst") && find_on_path("zstd").is_none() {
+                return false;
+            }
+            if (self.filename.ends_with(".xz") || self.filename.ends_with(".lzma")) && find_on_path("xz").is_none() && find_on_path("lzma").is_none() {
+                return false;
+            }
+            if (self.filename.ends_with(".bz2") || self.filename.ends_with(".tbz") || self.filename.ends_with(".tbz2")) && find_on_path("bzip2").is_none() {
+                return false;
+            }
+            if (self.filename.ends_with(".gz") || self.filename.ends_with(".tgz")) && find_on_path("gzip").is_none() {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 #[test]
@@ -82,6 +167,10 @@ fn external_tools_list_and_extract_committed_fixtures() {
             eprintln!("skipping external fixture {}: required tool is not installed", case.filename);
             continue;
         };
+        if !case.is_supported(&binary) {
+            eprintln!("skipping external fixture {}: required helper tool for {} is not installed", case.filename, binary.display());
+            continue;
+        }
         validate_fixture(case, &binary, &archives.join(case.filename));
     }
 }
