@@ -518,16 +518,18 @@ public struct ArchiveEntry {
     public var size: UInt64?
     public var compressedSize: UInt64?
     public var modifiedAt: String?
+    public var linkTarget: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(path: String, kind: ArchiveEntryKind, isDir: Bool, size: UInt64?, compressedSize: UInt64?, modifiedAt: String?) {
+    public init(path: String, kind: ArchiveEntryKind, isDir: Bool, size: UInt64?, compressedSize: UInt64?, modifiedAt: String?, linkTarget: String?) {
         self.path = path
         self.kind = kind
         self.isDir = isDir
         self.size = size
         self.compressedSize = compressedSize
         self.modifiedAt = modifiedAt
+        self.linkTarget = linkTarget
     }
 }
 
@@ -556,6 +558,9 @@ extension ArchiveEntry: Equatable, Hashable {
         if lhs.modifiedAt != rhs.modifiedAt {
             return false
         }
+        if lhs.linkTarget != rhs.linkTarget {
+            return false
+        }
         return true
     }
 
@@ -566,6 +571,7 @@ extension ArchiveEntry: Equatable, Hashable {
         hasher.combine(size)
         hasher.combine(compressedSize)
         hasher.combine(modifiedAt)
+        hasher.combine(linkTarget)
     }
 }
 
@@ -583,7 +589,8 @@ public struct FfiConverterTypeArchiveEntry: FfiConverterRustBuffer {
                 isDir: FfiConverterBool.read(from: &buf), 
                 size: FfiConverterOptionUInt64.read(from: &buf), 
                 compressedSize: FfiConverterOptionUInt64.read(from: &buf), 
-                modifiedAt: FfiConverterOptionString.read(from: &buf)
+                modifiedAt: FfiConverterOptionString.read(from: &buf), 
+                linkTarget: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -594,6 +601,7 @@ public struct FfiConverterTypeArchiveEntry: FfiConverterRustBuffer {
         FfiConverterOptionUInt64.write(value.size, into: &buf)
         FfiConverterOptionUInt64.write(value.compressedSize, into: &buf)
         FfiConverterOptionString.write(value.modifiedAt, into: &buf)
+        FfiConverterOptionString.write(value.linkTarget, into: &buf)
     }
 }
 
@@ -4388,6 +4396,28 @@ public enum ArchiveFormat {
     case tarBz2
     case tarXz
     case tarZst
+    case tarLzma
+    case tarLz
+    case tarLzo
+    case tarCompress
+    case tarLz4
+    case tarUu
+    case iso
+    case cab
+    case cpio
+    case rpm
+    case xar
+    case pkg
+    case dmg
+    case lha
+    case ar
+    case warc
+    case mtree
+    case deb
+    case msi
+    case vhd
+    case vmdk
+    case udf
     case gzip
     case bzip2
     case xz
@@ -4434,23 +4464,67 @@ public struct FfiConverterTypeArchiveFormat: FfiConverterRustBuffer {
         
         case 10: return .tarZst
         
-        case 11: return .gzip
+        case 11: return .tarLzma
         
-        case 12: return .bzip2
+        case 12: return .tarLz
         
-        case 13: return .xz
+        case 13: return .tarLzo
         
-        case 14: return .zstd
+        case 14: return .tarCompress
         
-        case 15: return .tzap
+        case 15: return .tarLz4
         
-        case 16: return .appleArchive
+        case 16: return .tarUu
         
-        case 17: return .xip
+        case 17: return .iso
         
-        case 18: return .rawStream
+        case 18: return .cab
         
-        case 19: return .other
+        case 19: return .cpio
+        
+        case 20: return .rpm
+        
+        case 21: return .xar
+        
+        case 22: return .pkg
+        
+        case 23: return .dmg
+        
+        case 24: return .lha
+        
+        case 25: return .ar
+        
+        case 26: return .warc
+        
+        case 27: return .mtree
+        
+        case 28: return .deb
+        
+        case 29: return .msi
+        
+        case 30: return .vhd
+        
+        case 31: return .vmdk
+        
+        case 32: return .udf
+        
+        case 33: return .gzip
+        
+        case 34: return .bzip2
+        
+        case 35: return .xz
+        
+        case 36: return .zstd
+        
+        case 37: return .tzap
+        
+        case 38: return .appleArchive
+        
+        case 39: return .xip
+        
+        case 40: return .rawStream
+        
+        case 41: return .other
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -4500,40 +4574,128 @@ public struct FfiConverterTypeArchiveFormat: FfiConverterRustBuffer {
             writeInt(&buf, Int32(10))
         
         
-        case .gzip:
+        case .tarLzma:
             writeInt(&buf, Int32(11))
         
         
-        case .bzip2:
+        case .tarLz:
             writeInt(&buf, Int32(12))
         
         
-        case .xz:
+        case .tarLzo:
             writeInt(&buf, Int32(13))
         
         
-        case .zstd:
+        case .tarCompress:
             writeInt(&buf, Int32(14))
         
         
-        case .tzap:
+        case .tarLz4:
             writeInt(&buf, Int32(15))
         
         
-        case .appleArchive:
+        case .tarUu:
             writeInt(&buf, Int32(16))
         
         
-        case .xip:
+        case .iso:
             writeInt(&buf, Int32(17))
         
         
-        case .rawStream:
+        case .cab:
             writeInt(&buf, Int32(18))
         
         
-        case .other:
+        case .cpio:
             writeInt(&buf, Int32(19))
+        
+        
+        case .rpm:
+            writeInt(&buf, Int32(20))
+        
+        
+        case .xar:
+            writeInt(&buf, Int32(21))
+        
+        
+        case .pkg:
+            writeInt(&buf, Int32(22))
+        
+        
+        case .dmg:
+            writeInt(&buf, Int32(23))
+        
+        
+        case .lha:
+            writeInt(&buf, Int32(24))
+        
+        
+        case .ar:
+            writeInt(&buf, Int32(25))
+        
+        
+        case .warc:
+            writeInt(&buf, Int32(26))
+        
+        
+        case .mtree:
+            writeInt(&buf, Int32(27))
+        
+        
+        case .deb:
+            writeInt(&buf, Int32(28))
+        
+        
+        case .msi:
+            writeInt(&buf, Int32(29))
+        
+        
+        case .vhd:
+            writeInt(&buf, Int32(30))
+        
+        
+        case .vmdk:
+            writeInt(&buf, Int32(31))
+        
+        
+        case .udf:
+            writeInt(&buf, Int32(32))
+        
+        
+        case .gzip:
+            writeInt(&buf, Int32(33))
+        
+        
+        case .bzip2:
+            writeInt(&buf, Int32(34))
+        
+        
+        case .xz:
+            writeInt(&buf, Int32(35))
+        
+        
+        case .zstd:
+            writeInt(&buf, Int32(36))
+        
+        
+        case .tzap:
+            writeInt(&buf, Int32(37))
+        
+        
+        case .appleArchive:
+            writeInt(&buf, Int32(38))
+        
+        
+        case .xip:
+            writeInt(&buf, Int32(39))
+        
+        
+        case .rawStream:
+            writeInt(&buf, Int32(40))
+        
+        
+        case .other:
+            writeInt(&buf, Int32(41))
         
         }
     }
@@ -4647,7 +4809,9 @@ public enum CreateArchiveFormat {
     case zip
     case sevenZ
     case tarZst
+    case tarGz
     case tzap
+    case appleArchive
 }
 
 
@@ -4671,7 +4835,11 @@ public struct FfiConverterTypeCreateArchiveFormat: FfiConverterRustBuffer {
         
         case 3: return .tarZst
         
-        case 4: return .tzap
+        case 4: return .tarGz
+        
+        case 5: return .tzap
+        
+        case 6: return .appleArchive
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -4693,8 +4861,16 @@ public struct FfiConverterTypeCreateArchiveFormat: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         
         
-        case .tzap:
+        case .tarGz:
             writeInt(&buf, Int32(4))
+        
+        
+        case .tzap:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .appleArchive:
+            writeInt(&buf, Int32(6))
         
         }
     }
@@ -5753,6 +5929,55 @@ public func listFormats() -> ListFormatsResult  {
     )
 })
 }
+public func localsendCancelSendJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsend_cancel_send_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+public func localsendDiscoverJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsend_discover_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+public func localsendPollEventsJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsend_poll_events_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+public func localsendRespondToTransferJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsend_respond_to_transfer_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+public func localsendSendFileJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsend_send_file_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+public func localsendStartReceiverJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsend_start_receiver_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+public func localsendStopReceiverJson(requestJson: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsend_stop_receiver_json(
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
 public func materializePreview(request: MaterializePreviewRequest)throws  -> MaterializePreviewResult  {
     return try  FfiConverterTypeMaterializePreviewResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
     uniffi_zmanager_ffi_fn_func_materializepreview(
@@ -6025,6 +6250,27 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_listformats() != 4246) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsend_cancel_send_json() != 21496) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsend_discover_json() != 2199) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsend_poll_events_json() != 19107) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsend_respond_to_transfer_json() != 35099) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsend_send_file_json() != 48922) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsend_start_receiver_json() != 33296) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsend_stop_receiver_json() != 23948) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_materializepreview() != 28909) {

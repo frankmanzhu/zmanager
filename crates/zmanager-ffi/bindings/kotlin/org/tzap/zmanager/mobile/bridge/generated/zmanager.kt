@@ -797,6 +797,20 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -835,6 +849,20 @@ fun uniffi_zmanager_ffi_checksum_func_listarchive(
 fun uniffi_zmanager_ffi_checksum_func_listarchivesession(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_listformats(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsend_cancel_send_json(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsend_discover_json(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsend_poll_events_json(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsend_respond_to_transfer_json(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsend_send_file_json(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsend_start_receiver_json(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsend_stop_receiver_json(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_materializepreview(
 ): Short
@@ -966,6 +994,20 @@ fun uniffi_zmanager_ffi_fn_func_listarchive(`request`: RustBuffer.ByValue,uniffi
 fun uniffi_zmanager_ffi_fn_func_listarchivesession(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_listformats(uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsend_cancel_send_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsend_discover_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsend_poll_events_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsend_respond_to_transfer_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsend_send_file_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsend_start_receiver_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsend_stop_receiver_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_materializepreview(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1189,6 +1231,27 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_listformats() != 4246.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_cancel_send_json() != 21496.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_discover_json() != 2199.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_poll_events_json() != 19107.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_respond_to_transfer_json() != 35099.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_send_file_json() != 48922.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_start_receiver_json() != 33296.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_stop_receiver_json() != 23948.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_materializepreview() != 28909.toShort()) {
@@ -1520,7 +1583,8 @@ data class ArchiveEntry (
     var `isDir`: kotlin.Boolean, 
     var `size`: kotlin.ULong?, 
     var `compressedSize`: kotlin.ULong?, 
-    var `modifiedAt`: kotlin.String?
+    var `modifiedAt`: kotlin.String?, 
+    var `linkTarget`: kotlin.String?
 ) {
     
     companion object
@@ -1538,6 +1602,7 @@ public object FfiConverterTypeArchiveEntry: FfiConverterRustBuffer<ArchiveEntry>
             FfiConverterOptionalULong.read(buf),
             FfiConverterOptionalULong.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1547,7 +1612,8 @@ public object FfiConverterTypeArchiveEntry: FfiConverterRustBuffer<ArchiveEntry>
             FfiConverterBoolean.allocationSize(value.`isDir`) +
             FfiConverterOptionalULong.allocationSize(value.`size`) +
             FfiConverterOptionalULong.allocationSize(value.`compressedSize`) +
-            FfiConverterOptionalString.allocationSize(value.`modifiedAt`)
+            FfiConverterOptionalString.allocationSize(value.`modifiedAt`) +
+            FfiConverterOptionalString.allocationSize(value.`linkTarget`)
     )
 
     override fun write(value: ArchiveEntry, buf: ByteBuffer) {
@@ -1557,6 +1623,7 @@ public object FfiConverterTypeArchiveEntry: FfiConverterRustBuffer<ArchiveEntry>
             FfiConverterOptionalULong.write(value.`size`, buf)
             FfiConverterOptionalULong.write(value.`compressedSize`, buf)
             FfiConverterOptionalString.write(value.`modifiedAt`, buf)
+            FfiConverterOptionalString.write(value.`linkTarget`, buf)
     }
 }
 
@@ -3332,6 +3399,28 @@ enum class ArchiveFormat {
     TAR_BZ2,
     TAR_XZ,
     TAR_ZST,
+    TAR_LZMA,
+    TAR_LZ,
+    TAR_LZO,
+    TAR_COMPRESS,
+    TAR_LZ4,
+    TAR_UU,
+    ISO,
+    CAB,
+    CPIO,
+    RPM,
+    XAR,
+    PKG,
+    DMG,
+    LHA,
+    AR,
+    WARC,
+    MTREE,
+    DEB,
+    MSI,
+    VHD,
+    VMDK,
+    UDF,
     GZIP,
     BZIP2,
     XZ,
@@ -3403,7 +3492,9 @@ enum class CreateArchiveFormat {
     ZIP,
     SEVEN_Z,
     TAR_ZST,
-    TZAP;
+    TAR_GZ,
+    TZAP,
+    APPLE_ARCHIVE;
     companion object
 }
 
@@ -4204,6 +4295,69 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_listformats(
         _status)
+}
+    )
+    }
+    
+ fun `localsendCancelSendJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_cancel_send_json(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+    
+ fun `localsendDiscoverJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_discover_json(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+    
+ fun `localsendPollEventsJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_poll_events_json(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+    
+ fun `localsendRespondToTransferJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_respond_to_transfer_json(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+    
+ fun `localsendSendFileJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_send_file_json(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+    
+ fun `localsendStartReceiverJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_start_receiver_json(
+        FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+    
+ fun `localsendStopReceiverJson`(`requestJson`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_stop_receiver_json(
+        FfiConverterString.lower(`requestJson`),_status)
 }
     )
     }
