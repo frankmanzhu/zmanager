@@ -13,6 +13,7 @@ use crate::safety::{ExtractionEntry, ExtractionEntryKind, ExtractionPolicy, Extr
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Cursor, Read as _};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 const MAX_MTREE_BYTES: u64 = 64 * 1024 * 1024;
@@ -107,9 +108,11 @@ impl std::error::Error for MtreeError {
 pub fn list(path: impl AsRef<Path>) -> Result<Vec<MtreeEntry>, MtreeError> {
     let path = path.as_ref();
     let bytes = read_manifest(path)?;
+    let parsed_entries = catch_unwind(AssertUnwindSafe(|| mtree::MTree::from_reader(Cursor::new(bytes)).collect::<Vec<_>>()))
+        .map_err(|_| invalid(path, "MTREE parser panicked while reading the manifest"))?;
     let mut entries = Vec::new();
     let mut used_paths = Vec::new();
-    for result in mtree::MTree::from_reader(Cursor::new(bytes)) {
+    for result in parsed_entries {
         let entry = result.map_err(|source| invalid(path, source))?;
         let normalized = normalize_path(entry.path())?;
         if used_paths.iter().any(|existing| existing == &normalized) {
@@ -249,7 +252,22 @@ fn read_manifest(path: &Path) -> Result<Vec<u8>, MtreeError> {
     if bytes.split(|byte| *byte == b'\n').map(<[u8]>::trim_ascii_start).any(|line| line.starts_with(b"/unset")) {
         return Err(invalid(path, "the selected MTREE parser does not support /unset directives"));
     }
+    validate_type_parameters(path, &bytes)?;
     Ok(bytes)
+}
+
+fn validate_type_parameters(path: &Path, bytes: &[u8]) -> Result<(), MtreeError> {
+    for line in bytes.split(|byte| *byte == b'\n') {
+        for token in line.split(|byte| *byte == b' ').filter(|token| !token.is_empty()) {
+            let Some(value) = token.strip_prefix(b"type=") else {
+                continue;
+            };
+            if !matches!(value, b"block" | b"char" | b"dir" | b"fifo" | b"file" | b"link" | b"socket") {
+                return Err(invalid(path, format!("invalid MTREE file type {:?}", String::from_utf8_lossy(value))));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn map_kind(file_type: mtree::FileType) -> BrowserEntryKind {
