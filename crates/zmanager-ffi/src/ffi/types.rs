@@ -724,3 +724,26 @@ pub struct TzapDocumentVerifyRequest {
 pub struct TzapDocumentVerifyResult {
     pub state: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoverySaveRequest {
+    pub root: String,
+    pub archive_path: String,
+    pub archive_display_name: String,
+    pub selected_paths: Vec<String>,
+    pub staging_root: String,
+    pub destination_label: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryRecord {
+    pub id: String,
+    pub archive_path: String,
+    pub archive_display_name: String,
+    pub selected_paths: Vec<String>,
+    pub staging_root: String,
+    pub destination_label: String,
+    pub message: String,
+    pub created_at_millis: u64,
+}

@@ -108,6 +108,19 @@ namespace zmanager {
     void trustForget(string root, string fingerprint);
     [Throws=ZmanagerGuiError]
     sequence<string> trustFingerprints(string root);
+
+    // Recovery-record store (Track 12c). `recoveryRecords` also performs
+    // retention cleanup (deletes and drops any record older than the
+    // 7-day window) before returning what remains, same as the two
+    // independent per-platform implementations it replaces.
+    [Throws=ZmanagerGuiError]
+    RecoveryRecord recoverySave(RecoverySaveRequest request);
+    [Throws=ZmanagerGuiError]
+    sequence<RecoveryRecord> recoveryRecords(string root, u64 now_millis);
+    [Throws=ZmanagerGuiError]
+    void recoveryDiscard(string root, string id);
+    [Throws=ZmanagerGuiError]
+    sequence<string> recoveryFiles(string root, string id);
 };
 
 enum BridgeSeverity {
@@ -745,6 +758,34 @@ dictionary TzapDocumentVerifyRequest {
 
 dictionary TzapDocumentVerifyResult {
     string state;
+};
+
+// Mobile-only recovery-record store (Track 12c of zmanager-mobile's docs/
+// mobile-code-health-remediation-plan.md): a failed destination commit's
+// staged output, kept for a limited retention window so the user can
+// recover it. Contains no password, bridge token, or provider credential —
+// native validates and canonicalizes `staging_root` before ever handing it
+// here, since only native knows its own platform's safe-staging
+// conventions (Android's cache dir, iOS's temporary directory).
+dictionary RecoverySaveRequest {
+    string root;
+    string archive_path;
+    string archive_display_name;
+    sequence<string> selected_paths;
+    string staging_root;
+    string destination_label;
+    string message;
+};
+
+dictionary RecoveryRecord {
+    string id;
+    string archive_path;
+    string archive_display_name;
+    sequence<string> selected_paths;
+    string staging_root;
+    string destination_label;
+    string message;
+    u64 created_at_millis;
 };
 
 [Error]
