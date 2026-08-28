@@ -7,7 +7,13 @@ use crate::ffi::types::{
 };
 
 fn unavailable(operation: &str) -> ZmanagerGuiError {
-    bridge_error(ERROR_UNSUPPORTED_FORMAT, format!("The {operation} feature is not enabled in this build."), None, crate::ffi::types::BridgeSeverity::Warning, false)
+    bridge_error(
+        ERROR_UNSUPPORTED_FORMAT,
+        format!("The {operation} feature is not enabled in this build."),
+        None,
+        crate::ffi::types::BridgeSeverity::Warning,
+        false,
+    )
 }
 
 #[allow(non_snake_case)]

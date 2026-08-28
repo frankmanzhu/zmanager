@@ -577,46 +577,13 @@ pub struct TransferFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QueuedEvent {
-    PeerRegistered {
-        device: DeviceInfoDto,
-    },
-    TransferRequest {
-        request_id: String,
-        sender: DeviceInfoDto,
-        files: Vec<TransferFile>,
-    },
-    TextReceived {
-        session_id: String,
-        text: String,
-        sender_alias: String,
-    },
-    FileReceiveProgress {
-        session_id: String,
-        file_id: String,
-        file_name: String,
-        sender_alias: String,
-        bytes_received: u64,
-        total_bytes: u64,
-        file_count: u64,
-    },
-    FileReceived {
-        session_id: String,
-        file_id: String,
-        file_name: String,
-        path: String,
-    },
-    SessionDone {
-        session_id: String,
-    },
-    FileSendProgress {
-        send_id: String,
-        session_id: String,
-        file_id: String,
-        file_name: String,
-        bytes_sent: u64,
-        total_bytes: u64,
-        rate_bytes_per_second: f64,
-    },
+    PeerRegistered { device: DeviceInfoDto },
+    TransferRequest { request_id: String, sender: DeviceInfoDto, files: Vec<TransferFile> },
+    TextReceived { session_id: String, text: String, sender_alias: String },
+    FileReceiveProgress { session_id: String, file_id: String, file_name: String, sender_alias: String, bytes_received: u64, total_bytes: u64, file_count: u64 },
+    FileReceived { session_id: String, file_id: String, file_name: String, path: String },
+    SessionDone { session_id: String },
+    FileSendProgress { send_id: String, session_id: String, file_id: String, file_name: String, bytes_sent: u64, total_bytes: u64, rate_bytes_per_second: f64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

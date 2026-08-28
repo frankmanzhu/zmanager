@@ -95,9 +95,7 @@ pub(crate) fn map_archive_engine_error(error: ArchiveError) -> ZmanagerGuiError 
 #[cfg(feature = "localsend")]
 pub(crate) fn map_localsend_error(error: LocalSendBridgeError) -> ZmanagerGuiError {
     match error {
-        LocalSendBridgeError::LocalSend(source) => {
-            bridge_error(ERROR_LOCALSEND_PROTOCOL, source.to_string(), None, BridgeSeverity::Error, false)
-        }
+        LocalSendBridgeError::LocalSend(source) => bridge_error(ERROR_LOCALSEND_PROTOCOL, source.to_string(), None, BridgeSeverity::Error, false),
         LocalSendBridgeError::InvalidRequest(message) => bridge_error(ERROR_INVALID_REQUEST, message, None, BridgeSeverity::Warning, false),
         LocalSendBridgeError::NoReceiverRunning => bridge_error(
             ERROR_LOCALSEND_NO_RECEIVER,
@@ -113,16 +111,10 @@ pub(crate) fn map_localsend_error(error: LocalSendBridgeError) -> ZmanagerGuiErr
             BridgeSeverity::Warning,
             false,
         ),
-        LocalSendBridgeError::UnknownRequestId(request_id) => bridge_error(
-            ERROR_LOCALSEND_UNKNOWN_REQUEST,
-            format!("Unknown LocalSend transfer request: {request_id}"),
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ),
-        LocalSendBridgeError::Io(source) => {
-            bridge_error(ERROR_IO_ERROR, source.to_string(), None, BridgeSeverity::Error, is_retryable_io_error(source.kind()))
+        LocalSendBridgeError::UnknownRequestId(request_id) => {
+            bridge_error(ERROR_LOCALSEND_UNKNOWN_REQUEST, format!("Unknown LocalSend transfer request: {request_id}"), None, BridgeSeverity::Warning, false)
         }
+        LocalSendBridgeError::Io(source) => bridge_error(ERROR_IO_ERROR, source.to_string(), None, BridgeSeverity::Error, is_retryable_io_error(source.kind())),
         LocalSendBridgeError::SendCancelled => bridge_error(ERROR_CANCELLED, "The send was cancelled.".to_string(), None, BridgeSeverity::Info, true),
         LocalSendBridgeError::UnknownSendId(send_id) => {
             bridge_error(ERROR_LOCALSEND_UNKNOWN_SEND, format!("Unknown LocalSend send: {send_id}"), None, BridgeSeverity::Warning, false)

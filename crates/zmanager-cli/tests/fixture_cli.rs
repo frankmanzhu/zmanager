@@ -41,13 +41,22 @@ fn try_create_windows_relative_symlink(path: &Path, target: &str) -> bool {
     path_units.push(0);
     let payload_len = 12 + path_units.len() * 2;
     let mut reparse = Vec::with_capacity(8 + payload_len);
+    let Ok(payload_len) = u16::try_from(payload_len) else {
+        return false;
+    };
+    let Ok(target_bytes) = u16::try_from(target_bytes) else {
+        return false;
+    };
+    let Some(target_bytes_with_nul) = target_bytes.checked_add(2) else {
+        return false;
+    };
     reparse.extend_from_slice(&0xA000_000Cu32.to_le_bytes());
-    reparse.extend_from_slice(&(payload_len as u16).to_le_bytes());
+    reparse.extend_from_slice(&payload_len.to_le_bytes());
     reparse.extend_from_slice(&0u16.to_le_bytes());
     reparse.extend_from_slice(&0u16.to_le_bytes());
-    reparse.extend_from_slice(&(target_bytes as u16).to_le_bytes());
-    reparse.extend_from_slice(&((target_bytes + 2) as u16).to_le_bytes());
-    reparse.extend_from_slice(&(target_bytes as u16).to_le_bytes());
+    reparse.extend_from_slice(&target_bytes.to_le_bytes());
+    reparse.extend_from_slice(&target_bytes_with_nul.to_le_bytes());
+    reparse.extend_from_slice(&target_bytes.to_le_bytes());
     reparse.extend_from_slice(&1u32.to_le_bytes());
     for unit in path_units {
         reparse.extend_from_slice(&unit.to_le_bytes());
@@ -57,15 +66,18 @@ fn try_create_windows_relative_symlink(path: &Path, target: &str) -> bool {
         return false;
     };
     let mut returned = 0u32;
+    let Ok(reparse_len) = u32::try_from(reparse.len()) else {
+        return false;
+    };
     let result = unsafe {
         DeviceIoControl(
             file.as_raw_handle().cast(),
             FSCTL_SET_REPARSE_POINT,
             reparse.as_ptr().cast(),
-            reparse.len() as u32,
+            reparse_len,
             std::ptr::null_mut(),
             0,
-            &mut returned,
+            &raw mut returned,
             std::ptr::null_mut(),
         )
     };
@@ -81,14 +93,13 @@ fn windows_process_is_elevated() -> bool {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     let mut token = std::ptr::null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) } == 0 {
         return false;
     }
     let mut elevation = TOKEN_ELEVATION::default();
     let mut returned = 0u32;
-    let result = unsafe {
-        GetTokenInformation(token, TokenElevation, (&mut elevation as *mut TOKEN_ELEVATION).cast(), size_of::<TOKEN_ELEVATION>() as u32, &mut returned)
-    };
+    let elevation_size = u32::try_from(size_of::<TOKEN_ELEVATION>()).expect("TOKEN_ELEVATION size fits in u32");
+    let result = unsafe { GetTokenInformation(token, TokenElevation, (&raw mut elevation).cast(), elevation_size, &raw mut returned) };
     unsafe {
         CloseHandle(token);
     }
@@ -1569,7 +1580,7 @@ fn zm_extract_tzap_preserves_windows_entry_metadata() {
 
     let policies: &[&str] = if windows_process_is_elevated() { &["portable", "same-os", "system"] } else { &["portable", "same-os"] };
     for &policy in policies {
-        let destination = temp.path(&format!("restore-{policy}"));
+        let destination = temp.path(format!("restore-{policy}"));
         let mut restore_command = Command::new(zm_path());
         restore_command.arg("extract").arg(&archive).arg("-C").arg(&destination).arg("--restore").arg(policy);
         if policy == "portable" {
@@ -1605,6 +1616,7 @@ fn zm_extract_tzap_preserves_windows_entry_metadata() {
     }
 
     let mut permissions = fs::metadata(&source_file).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
     permissions.set_readonly(false);
     fs::set_permissions(&source_file, permissions).unwrap();
 }
