@@ -35,6 +35,8 @@ pub(crate) const ERROR_LOCALSEND_RECEIVER_RUNNING: &str = "localsend_receiver_ru
 pub(crate) const ERROR_LOCALSEND_UNKNOWN_REQUEST: &str = "localsend_unknown_request";
 #[cfg(feature = "localsend")]
 pub(crate) const ERROR_LOCALSEND_UNKNOWN_SEND: &str = "localsend_unknown_send";
+#[cfg(feature = "tzap-online")]
+pub(crate) const ERROR_TZAP_OPERATION_FAILED: &str = "tzap_operation_failed";
 
 /// Turns a path-validation error into the JSON error envelope the tzap
 /// service endpoints use, since they are declared without `[Throws]`.
@@ -159,6 +161,11 @@ pub(crate) fn bridge_error_from_mobile(error: ZmanagerGuiError) -> BridgeError {
             BridgeError { code, message: user_message, recovery_hint, severity, retryable }
         }
     }
+}
+
+#[cfg(feature = "tzap-online")]
+pub(crate) fn map_tzap_error(message: String) -> ZmanagerGuiError {
+    bridge_error(ERROR_TZAP_OPERATION_FAILED, message, None, BridgeSeverity::Warning, false)
 }
 
 pub(crate) fn bridge_warning(message: impl Into<String>) -> BridgeError {

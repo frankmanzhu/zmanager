@@ -40,18 +40,32 @@ namespace zmanager {
     string inspectTzapX509Signer(string archive_path, string? password);
     string inspectTzapX509PublicNoKeySigner(string archive_path);
     string createTzapSelfSignedIdentity(string identity_path, string public_certificate_path, string common_name, string password);
-    string tzap_auth_login_json(string request_json);
-    string tzap_auth_callback_json(string request_json);
-    string tzap_auth_status_json(string request_json);
+    // These seven (login/callback/status/certificate_inventory/cert_enroll/
+    // document_sign/document_verify) are typed (Track 12a of
+    // zmanager-mobile's docs/mobile-code-health-remediation-plan.md) — the
+    // only ones zmanager-mobile calls. zmanager-tzap-hosted's own
+    // tzap_*_json functions underneath are unchanged; the JSON boundary
+    // just moved from native callers into this crate. The rest stay JSON
+    // passthrough: no mobile caller exists yet to type them against.
+    [Throws=ZmanagerGuiError]
+    TzapAuthLoginResult tzapAuthLogin(TzapAuthLoginRequest request);
+    [Throws=ZmanagerGuiError]
+    void tzapAuthCallback(TzapAuthCallbackRequest request);
+    [Throws=ZmanagerGuiError]
+    TzapAuthStatusResult tzapAuthStatus(TzapAuthStatusRequest request);
     string tzap_auth_forget_json(string request_json);
     string tzap_auth_account_url_json(string request_json);
-    string tzap_certificate_inventory_json(string request_json);
-    string tzap_cert_enroll_json(string request_json);
+    [Throws=ZmanagerGuiError]
+    TzapCertificateInventoryResult tzapCertificateInventory(TzapCertificateInventoryRequest request);
+    [Throws=ZmanagerGuiError]
+    void tzapCertEnroll(TzapCertEnrollRequest request);
     string tzap_cert_renew_json(string request_json);
     string tzap_cert_revoke_json(string request_json);
     string tzap_device_retire_json(string request_json);
-    string tzap_document_sign_json(string request_json);
-    string tzap_document_verify_json(string request_json);
+    [Throws=ZmanagerGuiError]
+    TzapDocumentSignResult tzapDocumentSign(TzapDocumentSignRequest request);
+    [Throws=ZmanagerGuiError]
+    TzapDocumentVerifyResult tzapDocumentVerify(TzapDocumentVerifyRequest request);
     string tzap_recipient_key_generate_json(string request_json);
     string tzap_recipient_key_remove_json(string request_json);
     string tzap_contact_export_json(string request_json);
@@ -626,6 +640,95 @@ dictionary SendFileResult {
 
 dictionary CancelSendRequest {
     string send_id;
+};
+
+// ---------------------------------------------------------------------
+// TZAP hosted identity (Track 12a) — request/response shapes for the seven
+// mobile-used functions. zmanager-tzap-hosted's own JSON contract stays
+// dynamic underneath (it reads a serde_json::Value with defaulted optional
+// fields, not a fixed struct); these dictionaries carry only the fields
+// zmanager-mobile actually sends or reads today, trimmed per function
+// rather than the one-size-fits-all request blob every native caller used
+// to build by hand. `envelope_json` stays an opaque JSON string end to end
+// (signed, stored, and replayed byte-for-byte) rather than a modeled
+// dictionary — mobile never inspects its fields.
+// ---------------------------------------------------------------------
+
+dictionary TzapAuthLoginRequest {
+    string state_dir;
+    string account_key;
+    string client_id;
+    string redirect_uri;
+    string auth_base_url;
+    string account_base_url;
+};
+
+dictionary TzapAuthLoginResult {
+    string launch_url;
+};
+
+dictionary TzapAuthCallbackRequest {
+    string state_dir;
+    string account_key;
+    string client_id;
+    string redirect_uri;
+    string auth_base_url;
+    string callback_url;
+    string state;
+    string handoff_code;
+};
+
+dictionary TzapAuthStatusRequest {
+    string state_dir;
+    string account_key;
+};
+
+dictionary TzapAuthStatusResult {
+    boolean authenticated;
+};
+
+dictionary TzapCertEnrollRequest {
+    string state_dir;
+    string account_key;
+    string service_base_url;
+    sequence<string> custom_trust_root_cert_paths;
+    u64 requested_validity_seconds;
+};
+
+dictionary TzapCertificateInventoryRequest {
+    string state_dir;
+    string account_key;
+};
+
+dictionary TzapCertificateInventoryResult {
+    sequence<string> certificate_ids;
+};
+
+dictionary TzapDocumentPayload {
+    u32 tzap_payload_version;
+    string title;
+    string body;
+};
+
+dictionary TzapDocumentSignRequest {
+    string state_dir;
+    string account_key;
+    string certificate_id;
+    TzapDocumentPayload payload;
+};
+
+dictionary TzapDocumentSignResult {
+    string envelope_json;
+};
+
+dictionary TzapDocumentVerifyRequest {
+    string envelope_json;
+    sequence<string> custom_trust_root_cert_paths;
+    u64 verifier_time_unix_seconds;
+};
+
+dictionary TzapDocumentVerifyResult {
+    string state;
 };
 
 [Error]

@@ -628,3 +628,99 @@ pub struct SendFileResult {
 pub struct CancelSendRequest {
     pub send_id: String,
 }
+
+// ---------------------------------------------------------------------
+// TZAP hosted identity (Track 12a) — mirrors the UDL dictionaries above.
+// Conversion to/from zmanager-tzap-hosted's JSON contract lives in
+// ffi/ops/tzap.rs, next to the calls that need it.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapAuthLoginRequest {
+    pub state_dir: String,
+    pub account_key: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub auth_base_url: String,
+    pub account_base_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapAuthLoginResult {
+    pub launch_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapAuthCallbackRequest {
+    pub state_dir: String,
+    pub account_key: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub auth_base_url: String,
+    pub callback_url: String,
+    pub state: String,
+    pub handoff_code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapAuthStatusRequest {
+    pub state_dir: String,
+    pub account_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapAuthStatusResult {
+    pub authenticated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapCertEnrollRequest {
+    pub state_dir: String,
+    pub account_key: String,
+    pub service_base_url: String,
+    pub custom_trust_root_cert_paths: Vec<String>,
+    pub requested_validity_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapCertificateInventoryRequest {
+    pub state_dir: String,
+    pub account_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapCertificateInventoryResult {
+    pub certificate_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapDocumentPayload {
+    pub tzap_payload_version: u32,
+    pub title: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapDocumentSignRequest {
+    pub state_dir: String,
+    pub account_key: String,
+    pub certificate_id: String,
+    pub payload: TzapDocumentPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapDocumentSignResult {
+    pub envelope_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapDocumentVerifyRequest {
+    pub envelope_json: String,
+    pub custom_trust_root_cert_paths: Vec<String>,
+    pub verifier_time_unix_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TzapDocumentVerifyResult {
+    pub state: String,
+}

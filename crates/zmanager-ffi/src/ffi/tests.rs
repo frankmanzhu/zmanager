@@ -35,11 +35,25 @@ fn healthcheck_reports_real_core() {
 #[cfg(not(feature = "tzap-online"))]
 #[test]
 fn offline_profile_keeps_local_tzap_contract_and_blocks_hosted_auth() {
-    let response = tzap_auth_login_json("{}".to_owned());
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&response).unwrap()["error"], "tzap-online feature not enabled in this build");
+    let ZmanagerGuiError::Bridge { user_message, .. } = tzapAuthLogin(TzapAuthLoginRequest {
+        state_dir: String::new(),
+        account_key: String::new(),
+        client_id: String::new(),
+        redirect_uri: String::new(),
+        auth_base_url: String::new(),
+        account_base_url: String::new(),
+    })
+    .expect_err("tzapAuthLogin should be unavailable without the tzap-online feature");
+    assert!(user_message.contains("not enabled in this build"));
 
-    let response = tzap_document_verify_json("{}".to_owned());
-    assert_ne!(serde_json::from_str::<serde_json::Value>(&response).unwrap()["error"], "tzap-online feature not enabled in this build");
+    // Document verification stays available offline (see tzap_offline.rs):
+    // a failure here must be for a different reason than the feature being
+    // disabled.
+    if let Err(ZmanagerGuiError::Bridge { user_message, .. }) =
+        tzapDocumentVerify(TzapDocumentVerifyRequest { envelope_json: "{}".to_owned(), custom_trust_root_cert_paths: vec![], verifier_time_unix_seconds: 0 })
+    {
+        assert!(!user_message.contains("not enabled in this build"));
+    }
 }
 
 #[test]
