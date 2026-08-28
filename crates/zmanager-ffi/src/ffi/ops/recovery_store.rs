@@ -46,10 +46,23 @@ fn read_record(path: &Path) -> Option<RecoveryRecord> {
     serde_json::from_str(&text).ok()
 }
 
+/// What actually lands on disk: every `RecoveryRecord` field, flattened,
+/// plus a human-readable disclaimer for anyone who opens the file directly
+/// (a support engineer, the user via a file browser). `read_record` ignores
+/// the extra `redaction` key on the way back in — serde drops unknown
+/// fields by default.
+#[derive(serde::Serialize)]
+struct PersistedRecoveryRecord<'a> {
+    #[serde(flatten)]
+    record: &'a RecoveryRecord,
+    redaction: &'static str,
+}
+
 fn write_record(root: &str, record: &RecoveryRecord) -> Result<(), ZmanagerGuiError> {
     fs::create_dir_all(root).map_err(io_error)?;
     let path = record_path(root, &record.id);
-    let text = serde_json::to_string_pretty(record).map_err(|error| bridge_error(ERROR_IO_ERROR, error.to_string(), None, BridgeSeverity::Error, false))?;
+    let persisted = PersistedRecoveryRecord { record, redaction: "Passwords, bridge tokens, and provider credentials are never included." };
+    let text = serde_json::to_string_pretty(&persisted).map_err(|error| bridge_error(ERROR_IO_ERROR, error.to_string(), None, BridgeSeverity::Error, false))?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, text).map_err(io_error)?;
     fs::rename(&tmp, &path).map_err(io_error)?;
@@ -186,6 +199,20 @@ mod tests {
         let records = recoveryRecords(root, record.created_at_millis).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].id, record.id);
+    }
+
+    #[test]
+    fn the_persisted_file_carries_a_redaction_disclaimer_and_no_secrets() {
+        let root = temp_root("redaction");
+        let staging = Path::new(&root).join("extractions/rec-1/staging");
+        stage_files(&staging, &["docs/readme.txt"]);
+        let record = recoverySave(save_request(&root, staging.to_str().unwrap())).unwrap();
+
+        let text = fs::read_to_string(record_path(&root, &record.id)).unwrap();
+        assert!(text.contains("never included"));
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(json.get("password").is_none());
+        assert!(json.get("token").is_none());
     }
 
     #[test]
