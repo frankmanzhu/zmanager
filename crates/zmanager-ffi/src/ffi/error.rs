@@ -10,6 +10,8 @@ use zmanager_core::manifest::PlanError;
 use crate::ffi::types::{BridgeError, BridgeSeverity, ZmanagerGuiError};
 #[cfg(feature = "tzap-online")]
 use crate::ffi::util::ensure_existing_tzap_archive_path;
+#[cfg(feature = "localsend")]
+use zmanager_localsend::LocalSendBridgeError;
 
 pub(crate) const ERROR_INVALID_REQUEST: &str = "invalid_request";
 pub(crate) const ERROR_NOT_FOUND: &str = "not_found";
@@ -23,6 +25,16 @@ pub(crate) const ERROR_CANCELLED: &str = "cancelled";
 pub(crate) const ERROR_OPERATION_FAILED: &str = "operation_failed";
 pub(crate) const WARNING_GENERIC: &str = "warning";
 pub(crate) const WARNING_LAUNCH_GATED_FORMAT: &str = "launch_gated_format";
+#[cfg(feature = "localsend")]
+pub(crate) const ERROR_LOCALSEND_PROTOCOL: &str = "localsend_protocol_error";
+#[cfg(feature = "localsend")]
+pub(crate) const ERROR_LOCALSEND_NO_RECEIVER: &str = "localsend_no_receiver";
+#[cfg(feature = "localsend")]
+pub(crate) const ERROR_LOCALSEND_RECEIVER_RUNNING: &str = "localsend_receiver_running";
+#[cfg(feature = "localsend")]
+pub(crate) const ERROR_LOCALSEND_UNKNOWN_REQUEST: &str = "localsend_unknown_request";
+#[cfg(feature = "localsend")]
+pub(crate) const ERROR_LOCALSEND_UNKNOWN_SEND: &str = "localsend_unknown_send";
 
 /// Turns a path-validation error into the JSON error envelope the tzap
 /// service endpoints use, since they are declared without `[Throws]`.
@@ -77,6 +89,44 @@ pub(crate) fn map_archive_engine_error(error: ArchiveError) -> ZmanagerGuiError 
             bridge_error(ERROR_UNSUPPORTED_FORMAT, message, None, BridgeSeverity::Warning, false)
         }
         ErrorKind::Cancelled => bridge_error(ERROR_OPERATION_FAILED, message, None, BridgeSeverity::Warning, true),
+    }
+}
+
+#[cfg(feature = "localsend")]
+pub(crate) fn map_localsend_error(error: LocalSendBridgeError) -> ZmanagerGuiError {
+    match error {
+        LocalSendBridgeError::LocalSend(source) => {
+            bridge_error(ERROR_LOCALSEND_PROTOCOL, source.to_string(), None, BridgeSeverity::Error, false)
+        }
+        LocalSendBridgeError::InvalidRequest(message) => bridge_error(ERROR_INVALID_REQUEST, message, None, BridgeSeverity::Warning, false),
+        LocalSendBridgeError::NoReceiverRunning => bridge_error(
+            ERROR_LOCALSEND_NO_RECEIVER,
+            "No LocalSend receiver is running.".to_string(),
+            hint("Start the LocalSend receiver before using this action."),
+            BridgeSeverity::Warning,
+            false,
+        ),
+        LocalSendBridgeError::ReceiverAlreadyRunning => bridge_error(
+            ERROR_LOCALSEND_RECEIVER_RUNNING,
+            "A LocalSend receiver is already running.".to_string(),
+            hint("Stop the current receiver before starting a new one."),
+            BridgeSeverity::Warning,
+            false,
+        ),
+        LocalSendBridgeError::UnknownRequestId(request_id) => bridge_error(
+            ERROR_LOCALSEND_UNKNOWN_REQUEST,
+            format!("Unknown LocalSend transfer request: {request_id}"),
+            None,
+            BridgeSeverity::Warning,
+            false,
+        ),
+        LocalSendBridgeError::Io(source) => {
+            bridge_error(ERROR_IO_ERROR, source.to_string(), None, BridgeSeverity::Error, is_retryable_io_error(source.kind()))
+        }
+        LocalSendBridgeError::SendCancelled => bridge_error(ERROR_CANCELLED, "The send was cancelled.".to_string(), None, BridgeSeverity::Info, true),
+        LocalSendBridgeError::UnknownSendId(send_id) => {
+            bridge_error(ERROR_LOCALSEND_UNKNOWN_SEND, format!("Unknown LocalSend send: {send_id}"), None, BridgeSeverity::Warning, false)
+        }
     }
 }
 

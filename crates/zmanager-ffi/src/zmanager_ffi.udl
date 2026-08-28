@@ -60,16 +60,24 @@ namespace zmanager {
     string tzap_contact_remove_json(string request_json);
     string tzap_share_create_json(string request_json);
 
-    // LocalSend endpoints. Each returns a JSON response envelope documented
-    // by the zmanager-localsend crate; the underlying protocol is unmodified
+    // LocalSend endpoints. Typed at the FFI boundary (Track 12a of
+    // zmanager-mobile's docs/mobile-code-health-remediation-plan.md) so both
+    // native shells consume UniFFI-generated request/response types instead
+    // of hand-mirrored JSON DTOs; the underlying protocol is unmodified
     // upstream `localsend-rs` — push-only, same as official LocalSend apps.
-    string localsend_discover_json(string request_json);
-    string localsend_start_receiver_json(string request_json);
-    string localsend_stop_receiver_json(string request_json);
-    string localsend_poll_events_json(string request_json);
-    string localsend_respond_to_transfer_json(string request_json);
-    string localsend_send_file_json(string request_json);
-    string localsend_cancel_send_json(string request_json);
+    [Throws=ZmanagerGuiError]
+    sequence<DeviceInfoDto> localsendDiscover(DiscoverRequest request);
+    [Throws=ZmanagerGuiError]
+    void localsendStartReceiver(StartReceiverRequest request);
+    [Throws=ZmanagerGuiError]
+    void localsendStopReceiver();
+    PollEventsResult localsendPollEvents();
+    [Throws=ZmanagerGuiError]
+    void localsendRespondToTransfer(RespondToTransferRequest request);
+    [Throws=ZmanagerGuiError]
+    SendFileResult localsendSendFile(SendFileRequest request);
+    [Throws=ZmanagerGuiError]
+    void localsendCancelSend(CancelSendRequest request);
 };
 
 enum BridgeSeverity {
@@ -516,6 +524,108 @@ dictionary ClearSensitiveStateResult {
     u64 cleared_terminal_jobs;
     u64 cancel_requested_jobs;
     u64 retained_active_jobs;
+};
+
+// ---------------------------------------------------------------------
+// LocalSend (Track 12a) — mirrors zmanager-localsend::registry's request
+// and response shapes one-to-one; PathBuf fields cross the FFI boundary as
+// string, matching every other path field in this file.
+// ---------------------------------------------------------------------
+
+dictionary StartReceiverRequest {
+    string alias;
+    u16 port;
+    boolean https;
+    string save_dir;
+    boolean auto_accept;
+    string? pin;
+};
+
+dictionary DiscoverRequest {
+    string alias;
+    u16 port;
+    boolean https;
+    u64 timeout_ms;
+};
+
+dictionary DeviceInfoDto {
+    string alias;
+    string fingerprint;
+    u16 port;
+    string protocol;
+    string? ip;
+    string? device_model;
+};
+
+dictionary TransferFile {
+    string id;
+    string file_name;
+    u64 size;
+    string file_type;
+};
+
+[Enum]
+interface QueuedEvent {
+    PeerRegistered(DeviceInfoDto device);
+    TransferRequest(string request_id, DeviceInfoDto sender, sequence<TransferFile> files);
+    TextReceived(string session_id, string text, string sender_alias);
+    FileReceiveProgress(
+        string session_id,
+        string file_id,
+        string file_name,
+        string sender_alias,
+        u64 bytes_received,
+        u64 total_bytes,
+        u64 file_count
+    );
+    FileReceived(string session_id, string file_id, string file_name, string path);
+    SessionDone(string session_id);
+    FileSendProgress(
+        string send_id,
+        string session_id,
+        string file_id,
+        string file_name,
+        u64 bytes_sent,
+        u64 total_bytes,
+        double rate_bytes_per_second
+    );
+};
+
+dictionary PollEventsResult {
+    sequence<QueuedEvent> events;
+};
+
+enum TransferDecisionKind {
+    "Accept",
+    "AcceptFiles",
+    "Decline",
+    "Refuse"
+};
+
+dictionary RespondToTransferRequest {
+    string request_id;
+    TransferDecisionKind decision;
+    sequence<string> file_ids;
+    string? reason;
+};
+
+dictionary SendFileRequest {
+    string send_id;
+    string alias;
+    u16 self_port;
+    boolean https;
+    DeviceInfoDto target;
+    string file_path;
+    string? pin;
+};
+
+dictionary SendFileResult {
+    string session_id;
+    string file_id;
+};
+
+dictionary CancelSendRequest {
+    string send_id;
 };
 
 [Error]

@@ -532,3 +532,132 @@ pub struct ClearSensitiveStateResult {
 pub(crate) fn usize_to_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
+
+// ---------------------------------------------------------------------
+// LocalSend (Track 12a) — mirrors zmanager-localsend::registry's request
+// and response shapes; conversions to/from that crate's own types live in
+// ffi/ops/localsend.rs, next to the calls that need them.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartReceiverRequest {
+    pub alias: String,
+    pub port: u16,
+    pub https: bool,
+    pub save_dir: String,
+    pub auto_accept: bool,
+    pub pin: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoverRequest {
+    pub alias: String,
+    pub port: u16,
+    pub https: bool,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInfoDto {
+    pub alias: String,
+    pub fingerprint: String,
+    pub port: u16,
+    pub protocol: String,
+    pub ip: Option<String>,
+    pub device_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferFile {
+    pub id: String,
+    pub file_name: String,
+    pub size: u64,
+    pub file_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum QueuedEvent {
+    PeerRegistered {
+        device: DeviceInfoDto,
+    },
+    TransferRequest {
+        request_id: String,
+        sender: DeviceInfoDto,
+        files: Vec<TransferFile>,
+    },
+    TextReceived {
+        session_id: String,
+        text: String,
+        sender_alias: String,
+    },
+    FileReceiveProgress {
+        session_id: String,
+        file_id: String,
+        file_name: String,
+        sender_alias: String,
+        bytes_received: u64,
+        total_bytes: u64,
+        file_count: u64,
+    },
+    FileReceived {
+        session_id: String,
+        file_id: String,
+        file_name: String,
+        path: String,
+    },
+    SessionDone {
+        session_id: String,
+    },
+    FileSendProgress {
+        send_id: String,
+        session_id: String,
+        file_id: String,
+        file_name: String,
+        bytes_sent: u64,
+        total_bytes: u64,
+        rate_bytes_per_second: f64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollEventsResult {
+    pub events: Vec<QueuedEvent>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum TransferDecisionKind {
+    Accept,
+    AcceptFiles,
+    Decline,
+    Refuse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RespondToTransferRequest {
+    pub request_id: String,
+    pub decision: TransferDecisionKind,
+    pub file_ids: Vec<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendFileRequest {
+    pub send_id: String,
+    pub alias: String,
+    pub self_port: u16,
+    pub https: bool,
+    pub target: DeviceInfoDto,
+    pub file_path: String,
+    pub pin: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendFileResult {
+    pub session_id: String,
+    pub file_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelSendRequest {
+    pub send_id: String,
+}
