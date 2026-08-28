@@ -92,6 +92,22 @@ namespace zmanager {
     SendFileResult localsendSendFile(SendFileRequest request);
     [Throws=ZmanagerGuiError]
     void localsendCancelSend(CancelSendRequest request);
+
+    // Mobile-only native stores (Track 12c of zmanager-mobile's docs/
+    // mobile-code-health-remediation-plan.md): record format and lifecycle
+    // live here; each native shell supplies only a directory path, i.e.
+    // "file placement" per that plan's own phrasing. `root` is always an
+    // app-owned directory the native shell already controls (Android's
+    // internal `filesDir`, iOS's Application Support directory) — never a
+    // user-chosen or provider-backed location.
+    [Throws=ZmanagerGuiError]
+    boolean trustIsTrusted(string root, string fingerprint);
+    [Throws=ZmanagerGuiError]
+    void trustRemember(string root, string fingerprint);
+    [Throws=ZmanagerGuiError]
+    void trustForget(string root, string fingerprint);
+    [Throws=ZmanagerGuiError]
+    sequence<string> trustFingerprints(string root);
 };
 
 enum BridgeSeverity {

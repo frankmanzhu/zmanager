@@ -22,6 +22,7 @@ pub use ops::archive::{
 pub use ops::localsend::{
     localsendCancelSend, localsendDiscover, localsendPollEvents, localsendRespondToTransfer, localsendSendFile, localsendStartReceiver, localsendStopReceiver,
 };
+pub use ops::trust_store::{trustFingerprints, trustForget, trustIsTrusted, trustRemember};
 pub use ops::tzap::{
     createTzapSelfSignedIdentity, inspectTzapX509PublicNoKeySigner, inspectTzapX509Signer, tzap_auth_account_url_json, tzap_auth_forget_json,
     tzap_cert_renew_json, tzap_cert_revoke_json, tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json,
