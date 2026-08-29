@@ -22,8 +22,6 @@ pub use ops::archive::{
 pub use ops::localsend::{
     localsendCancelSend, localsendDiscover, localsendPollEvents, localsendRespondToTransfer, localsendSendFile, localsendStartReceiver, localsendStopReceiver,
 };
-pub use ops::recovery_store::{recoveryDiscard, recoveryFiles, recoveryRecords, recoverySave};
-pub use ops::trust_store::{trustFingerprints, trustForget, trustIsTrusted, trustRemember};
 pub use ops::tzap::{
     createTzapSelfSignedIdentity, inspectTzapX509PublicNoKeySigner, inspectTzapX509Signer, tzap_auth_account_url_json, tzap_auth_forget_json,
     tzap_cert_renew_json, tzap_cert_revoke_json, tzap_contact_export_json, tzap_contact_import_json, tzap_contact_list_json, tzap_contact_remove_json,
@@ -38,9 +36,9 @@ pub use types::{
     DetectArchiveRequest, DetectArchiveResult, DeviceInfoDto, DiscoverRequest, ExtractionCollisionPolicy, ExtractionPlanEntry, ExtractionPlanEntryStatus,
     FormatDescriptor, HealthcheckResult, JobTerminalSummary, ListArchiveRequest, ListArchiveResult, ListFormatsResult, MaterializePreviewRequest,
     MaterializePreviewResult, MobileJobEvent, MobileJobEventKind, MobileJobKind, MobileJobStatus, PlanCreateRequest, PlanCreateResult, PlanExtractRequest,
-    PlanExtractResult, PollEventsResult, PollJobEventsRequest, PollJobEventsResult, QueuedEvent, RecoveryRecord, RecoverySaveRequest, RespondToTransferRequest,
-    SendFileRequest, SendFileResult, StartCreateRequest, StartExtractRequest, StartJobResult, StartReceiverRequest, TestArchiveRequest, TestArchiveResult,
-    TransferDecisionKind, TransferFile, TzapAuthCallbackRequest, TzapAuthLoginRequest, TzapAuthLoginResult, TzapAuthStatusRequest, TzapAuthStatusResult,
-    TzapCertEnrollRequest, TzapCertificateInventoryRequest, TzapCertificateInventoryResult, TzapDocumentPayload, TzapDocumentSignRequest,
-    TzapDocumentSignResult, TzapDocumentVerifyRequest, TzapDocumentVerifyResult, ZmanagerGuiError,
+    PlanExtractResult, PollEventsResult, PollJobEventsRequest, PollJobEventsResult, QueuedEvent, RespondToTransferRequest, SendFileRequest, SendFileResult,
+    StartCreateRequest, StartExtractRequest, StartJobResult, StartReceiverRequest, TestArchiveRequest, TestArchiveResult, TransferDecisionKind, TransferFile,
+    TzapAuthCallbackRequest, TzapAuthLoginRequest, TzapAuthLoginResult, TzapAuthStatusRequest, TzapAuthStatusResult, TzapCertEnrollRequest,
+    TzapCertificateInventoryRequest, TzapCertificateInventoryResult, TzapDocumentPayload, TzapDocumentSignRequest, TzapDocumentSignResult,
+    TzapDocumentVerifyRequest, TzapDocumentVerifyResult, ZmanagerGuiError,
 };
