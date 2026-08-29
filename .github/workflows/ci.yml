@@ -168,7 +168,7 @@ jobs:
 
   uniffi-bindings-check:
     name: UniFFI bindings are up to date
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
 
