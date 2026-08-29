@@ -31,7 +31,12 @@ pub fn is_tzap_archive_path(path: &Path) -> bool {
 }
 
 fn is_tzap_volume_archive_file_name(name: &str) -> bool {
-    parse_volume_file_name(name).is_some()
+    // `tzap-core`'s volume parser assumes the `.tzap` suffix is present before
+    // byte-slicing the filename.  Avoid calling it for unrelated extensions:
+    // a Unicode filename can otherwise put that byte split inside a UTF-8
+    // character and panic while merely checking the archive format.
+    name.get(name.len().saturating_sub(TZAP_EXTENSION_SUFFIX.len())..).is_some_and(|suffix| suffix.eq_ignore_ascii_case(TZAP_EXTENSION_SUFFIX))
+        && parse_volume_file_name(name).is_some()
 }
 
 impl TzapPublicFormatSummary {
@@ -481,5 +486,10 @@ mod tests {
 
         assert!(!is_tzap_archive_path(Path::new("project.tzap.tmp")));
         assert!(!is_tzap_archive_path(Path::new("project.zip.000")));
+    }
+
+    #[test]
+    fn unicode_non_tzap_name_is_safe_to_classify() {
+        assert!(!is_tzap_archive_path(Path::new("游戏存档管理器.zip")));
     }
 }
