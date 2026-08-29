@@ -811,6 +811,22 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -850,19 +866,19 @@ fun uniffi_zmanager_ffi_checksum_func_listarchivesession(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_listformats(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_localsend_cancel_send_json(
+fun uniffi_zmanager_ffi_checksum_func_localsendcancelsend(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_localsend_discover_json(
+fun uniffi_zmanager_ffi_checksum_func_localsenddiscover(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_localsend_poll_events_json(
+fun uniffi_zmanager_ffi_checksum_func_localsendpollevents(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_localsend_respond_to_transfer_json(
+fun uniffi_zmanager_ffi_checksum_func_localsendrespondtotransfer(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_localsend_send_file_json(
+fun uniffi_zmanager_ffi_checksum_func_localsendsendfile(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_localsend_start_receiver_json(
+fun uniffi_zmanager_ffi_checksum_func_localsendstartreceiver(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_localsend_stop_receiver_json(
+fun uniffi_zmanager_ffi_checksum_func_localsendstopreceiver(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_materializepreview(
 ): Short
@@ -874,11 +890,41 @@ fun uniffi_zmanager_ffi_checksum_func_planextract(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_polljobevents(
 ): Short
+fun uniffi_zmanager_ffi_checksum_func_recoverydiscard(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_recoveryfiles(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_recoveryrecords(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_recoverysave(
+): Short
 fun uniffi_zmanager_ffi_checksum_func_startcreate(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_startextract(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_testarchive(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_trustfingerprints(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_trustforget(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_trustistrusted(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_trustremember(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzapauthcallback(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzapauthlogin(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzapauthstatus(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzapcertenroll(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzapcertificateinventory(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzapdocumentsign(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_tzapdocumentverify(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary(
 ): Short
@@ -886,21 +932,11 @@ fun uniffi_zmanager_ffi_checksum_func_tzappublicmetadatasummary(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzap_auth_account_url_json(
 ): Short
-fun uniffi_zmanager_ffi_checksum_func_tzap_auth_callback_json(
-): Short
 fun uniffi_zmanager_ffi_checksum_func_tzap_auth_forget_json(
-): Short
-fun uniffi_zmanager_ffi_checksum_func_tzap_auth_login_json(
-): Short
-fun uniffi_zmanager_ffi_checksum_func_tzap_auth_status_json(
-): Short
-fun uniffi_zmanager_ffi_checksum_func_tzap_cert_enroll_json(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzap_cert_renew_json(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzap_cert_revoke_json(
-): Short
-fun uniffi_zmanager_ffi_checksum_func_tzap_certificate_inventory_json(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzap_contact_export_json(
 ): Short
@@ -911,10 +947,6 @@ fun uniffi_zmanager_ffi_checksum_func_tzap_contact_list_json(
 fun uniffi_zmanager_ffi_checksum_func_tzap_contact_remove_json(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzap_device_retire_json(
-): Short
-fun uniffi_zmanager_ffi_checksum_func_tzap_document_sign_json(
-): Short
-fun uniffi_zmanager_ffi_checksum_func_tzap_document_verify_json(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_tzap_recipient_key_generate_json(
 ): Short
@@ -995,20 +1027,20 @@ fun uniffi_zmanager_ffi_fn_func_listarchivesession(`request`: RustBuffer.ByValue
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_listformats(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_localsend_cancel_send_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_zmanager_ffi_fn_func_localsendcancelsend(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_localsenddiscover(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_localsend_discover_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_zmanager_ffi_fn_func_localsendpollevents(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_localsend_poll_events_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_zmanager_ffi_fn_func_localsendrespondtotransfer(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_localsendsendfile(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_localsend_respond_to_transfer_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_localsend_send_file_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_localsend_start_receiver_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_localsend_stop_receiver_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsendstartreceiver(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_localsendstopreceiver(uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 fun uniffi_zmanager_ffi_fn_func_materializepreview(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_openarchivesession(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1019,11 +1051,41 @@ fun uniffi_zmanager_ffi_fn_func_planextract(`request`: RustBuffer.ByValue,uniffi
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_polljobevents(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_recoverydiscard(`root`: RustBuffer.ByValue,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_recoveryfiles(`root`: RustBuffer.ByValue,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_recoveryrecords(`root`: RustBuffer.ByValue,`nowMillis`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_recoverysave(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_startcreate(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_startextract(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_testarchive(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_trustfingerprints(`root`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_trustforget(`root`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_trustistrusted(`root`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+fun uniffi_zmanager_ffi_fn_func_trustremember(`root`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_tzapauthcallback(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_tzapauthlogin(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_tzapauthstatus(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_tzapcertenroll(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+fun uniffi_zmanager_ffi_fn_func_tzapcertificateinventory(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_tzapdocumentsign(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_tzapdocumentverify(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzappublicmetadatadisplaysummary(`archivePath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1031,21 +1093,11 @@ fun uniffi_zmanager_ffi_fn_func_tzappublicmetadatasummary(`archivePath`: RustBuf
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzap_auth_account_url_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_tzap_auth_callback_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzap_auth_forget_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_tzap_auth_login_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_tzap_auth_status_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_tzap_cert_enroll_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzap_cert_renew_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzap_cert_revoke_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_tzap_certificate_inventory_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzap_contact_export_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1056,10 +1108,6 @@ fun uniffi_zmanager_ffi_fn_func_tzap_contact_list_json(`requestJson`: RustBuffer
 fun uniffi_zmanager_ffi_fn_func_tzap_contact_remove_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzap_device_retire_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_tzap_document_sign_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_zmanager_ffi_fn_func_tzap_document_verify_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_zmanager_ffi_fn_func_tzap_recipient_key_generate_json(`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1233,25 +1281,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_zmanager_ffi_checksum_func_listformats() != 4246.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_cancel_send_json() != 21496.toShort()) {
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsendcancelsend() != 10232.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_discover_json() != 2199.toShort()) {
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsenddiscover() != 25325.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_poll_events_json() != 19107.toShort()) {
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsendpollevents() != 65508.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_respond_to_transfer_json() != 35099.toShort()) {
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsendrespondtotransfer() != 63487.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_send_file_json() != 48922.toShort()) {
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsendsendfile() != 46136.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_start_receiver_json() != 33296.toShort()) {
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsendstartreceiver() != 29828.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_localsend_stop_receiver_json() != 23948.toShort()) {
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsendstopreceiver() != 47333.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_materializepreview() != 28909.toShort()) {
@@ -1269,6 +1317,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_zmanager_ffi_checksum_func_polljobevents() != 20889.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_zmanager_ffi_checksum_func_recoverydiscard() != 18158.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_recoveryfiles() != 65523.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_recoveryrecords() != 37516.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_recoverysave() != 64099.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_zmanager_ffi_checksum_func_startcreate() != 43846.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1276,6 +1336,39 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_testarchive() != 25757.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_trustfingerprints() != 15412.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_trustforget() != 20665.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_trustistrusted() != 58476.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_trustremember() != 50041.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzapauthcallback() != 11426.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzapauthlogin() != 44020.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzapauthstatus() != 59057.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzapcertenroll() != 26904.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzapcertificateinventory() != 10762.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzapdocumentsign() != 32984.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_tzapdocumentverify() != 49442.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary() != 19687.toShort()) {
@@ -1287,28 +1380,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_zmanager_ffi_checksum_func_tzap_auth_account_url_json() != 57360.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_zmanager_ffi_checksum_func_tzap_auth_callback_json() != 65497.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzap_auth_forget_json() != 58927.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_zmanager_ffi_checksum_func_tzap_auth_login_json() != 10840.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_zmanager_ffi_checksum_func_tzap_auth_status_json() != 16972.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_zmanager_ffi_checksum_func_tzap_cert_enroll_json() != 47168.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzap_cert_renew_json() != 57002.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzap_cert_revoke_json() != 40153.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_zmanager_ffi_checksum_func_tzap_certificate_inventory_json() != 39989.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzap_contact_export_json() != 37408.toShort()) {
@@ -1324,12 +1402,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzap_device_retire_json() != 19687.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_zmanager_ffi_checksum_func_tzap_document_sign_json() != 27930.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_zmanager_ffi_checksum_func_tzap_document_verify_json() != 11931.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_tzap_recipient_key_generate_json() != 1528.toShort()) {
@@ -1452,6 +1524,29 @@ public object FfiConverterUByte: FfiConverter<UByte, Byte> {
 /**
  * @suppress
  */
+public object FfiConverterUShort: FfiConverter<UShort, Short> {
+    override fun lift(value: Short): UShort {
+        return value.toUShort()
+    }
+
+    override fun read(buf: ByteBuffer): UShort {
+        return lift(buf.getShort())
+    }
+
+    override fun lower(value: UShort): Short {
+        return value.toShort()
+    }
+
+    override fun allocationSize(value: UShort) = 2UL
+
+    override fun write(value: UShort, buf: ByteBuffer) {
+        buf.putShort(value.toShort())
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterUInt: FfiConverter<UInt, Int> {
     override fun lift(value: Int): UInt {
         return value.toUInt()
@@ -1492,6 +1587,29 @@ public object FfiConverterULong: FfiConverter<ULong, Long> {
 
     override fun write(value: ULong, buf: ByteBuffer) {
         buf.putLong(value.toLong())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterDouble: FfiConverter<Double, Double> {
+    override fun lift(value: Double): Double {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Double {
+        return buf.getDouble()
+    }
+
+    override fun lower(value: Double): Double {
+        return value
+    }
+
+    override fun allocationSize(value: Double) = 8UL
+
+    override fun write(value: Double, buf: ByteBuffer) {
+        buf.putDouble(value)
     }
 }
 
@@ -2033,6 +2151,34 @@ public object FfiConverterTypeCancelJobResult: FfiConverterRustBuffer<CancelJobR
 
 
 
+data class CancelSendRequest (
+    var `sendId`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCancelSendRequest: FfiConverterRustBuffer<CancelSendRequest> {
+    override fun read(buf: ByteBuffer): CancelSendRequest {
+        return CancelSendRequest(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CancelSendRequest) = (
+            FfiConverterString.allocationSize(value.`sendId`)
+    )
+
+    override fun write(value: CancelSendRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sendId`, buf)
+    }
+}
+
+
+
 data class ClearSensitiveStateResult (
     var `clearedTerminalJobs`: kotlin.ULong, 
     var `cancelRequestedJobs`: kotlin.ULong, 
@@ -2192,6 +2338,94 @@ public object FfiConverterTypeDetectArchiveResult: FfiConverterRustBuffer<Detect
             FfiConverterBoolean.write(value.`canExtract`, buf)
             FfiConverterBoolean.write(value.`canCreate`, buf)
             FfiConverterSequenceTypeBridgeError.write(value.`warnings`, buf)
+    }
+}
+
+
+
+data class DeviceInfoDto (
+    var `alias`: kotlin.String, 
+    var `fingerprint`: kotlin.String, 
+    var `port`: kotlin.UShort, 
+    var `protocol`: kotlin.String, 
+    var `ip`: kotlin.String?, 
+    var `deviceModel`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDeviceInfoDto: FfiConverterRustBuffer<DeviceInfoDto> {
+    override fun read(buf: ByteBuffer): DeviceInfoDto {
+        return DeviceInfoDto(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DeviceInfoDto) = (
+            FfiConverterString.allocationSize(value.`alias`) +
+            FfiConverterString.allocationSize(value.`fingerprint`) +
+            FfiConverterUShort.allocationSize(value.`port`) +
+            FfiConverterString.allocationSize(value.`protocol`) +
+            FfiConverterOptionalString.allocationSize(value.`ip`) +
+            FfiConverterOptionalString.allocationSize(value.`deviceModel`)
+    )
+
+    override fun write(value: DeviceInfoDto, buf: ByteBuffer) {
+            FfiConverterString.write(value.`alias`, buf)
+            FfiConverterString.write(value.`fingerprint`, buf)
+            FfiConverterUShort.write(value.`port`, buf)
+            FfiConverterString.write(value.`protocol`, buf)
+            FfiConverterOptionalString.write(value.`ip`, buf)
+            FfiConverterOptionalString.write(value.`deviceModel`, buf)
+    }
+}
+
+
+
+data class DiscoverRequest (
+    var `alias`: kotlin.String, 
+    var `port`: kotlin.UShort, 
+    var `https`: kotlin.Boolean, 
+    var `timeoutMs`: kotlin.ULong
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDiscoverRequest: FfiConverterRustBuffer<DiscoverRequest> {
+    override fun read(buf: ByteBuffer): DiscoverRequest {
+        return DiscoverRequest(
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DiscoverRequest) = (
+            FfiConverterString.allocationSize(value.`alias`) +
+            FfiConverterUShort.allocationSize(value.`port`) +
+            FfiConverterBoolean.allocationSize(value.`https`) +
+            FfiConverterULong.allocationSize(value.`timeoutMs`)
+    )
+
+    override fun write(value: DiscoverRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`alias`, buf)
+            FfiConverterUShort.write(value.`port`, buf)
+            FfiConverterBoolean.write(value.`https`, buf)
+            FfiConverterULong.write(value.`timeoutMs`, buf)
     }
 }
 
@@ -2981,6 +3215,34 @@ public object FfiConverterTypePlanExtractResult: FfiConverterRustBuffer<PlanExtr
 
 
 
+data class PollEventsResult (
+    var `events`: List<QueuedEvent>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePollEventsResult: FfiConverterRustBuffer<PollEventsResult> {
+    override fun read(buf: ByteBuffer): PollEventsResult {
+        return PollEventsResult(
+            FfiConverterSequenceTypeQueuedEvent.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PollEventsResult) = (
+            FfiConverterSequenceTypeQueuedEvent.allocationSize(value.`events`)
+    )
+
+    override fun write(value: PollEventsResult, buf: ByteBuffer) {
+            FfiConverterSequenceTypeQueuedEvent.write(value.`events`, buf)
+    }
+}
+
+
+
 data class PollJobEventsRequest (
     var `jobId`: kotlin.String, 
     var `cursor`: kotlin.ULong
@@ -3064,6 +3326,238 @@ public object FfiConverterTypePollJobEventsResult: FfiConverterRustBuffer<PollJo
             FfiConverterULong.write(value.`minRetainedSequence`, buf)
             FfiConverterBoolean.write(value.`isTerminal`, buf)
             FfiConverterOptionalTypeJobTerminalSummary.write(value.`terminalSummary`, buf)
+    }
+}
+
+
+
+data class RecoveryRecord (
+    var `id`: kotlin.String, 
+    var `archivePath`: kotlin.String, 
+    var `archiveDisplayName`: kotlin.String, 
+    var `selectedPaths`: List<kotlin.String>, 
+    var `stagingRoot`: kotlin.String, 
+    var `destinationLabel`: kotlin.String, 
+    var `message`: kotlin.String, 
+    var `createdAtMillis`: kotlin.ULong
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoveryRecord: FfiConverterRustBuffer<RecoveryRecord> {
+    override fun read(buf: ByteBuffer): RecoveryRecord {
+        return RecoveryRecord(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RecoveryRecord) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`archivePath`) +
+            FfiConverterString.allocationSize(value.`archiveDisplayName`) +
+            FfiConverterSequenceString.allocationSize(value.`selectedPaths`) +
+            FfiConverterString.allocationSize(value.`stagingRoot`) +
+            FfiConverterString.allocationSize(value.`destinationLabel`) +
+            FfiConverterString.allocationSize(value.`message`) +
+            FfiConverterULong.allocationSize(value.`createdAtMillis`)
+    )
+
+    override fun write(value: RecoveryRecord, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`archivePath`, buf)
+            FfiConverterString.write(value.`archiveDisplayName`, buf)
+            FfiConverterSequenceString.write(value.`selectedPaths`, buf)
+            FfiConverterString.write(value.`stagingRoot`, buf)
+            FfiConverterString.write(value.`destinationLabel`, buf)
+            FfiConverterString.write(value.`message`, buf)
+            FfiConverterULong.write(value.`createdAtMillis`, buf)
+    }
+}
+
+
+
+data class RecoverySaveRequest (
+    var `root`: kotlin.String, 
+    var `archivePath`: kotlin.String, 
+    var `archiveDisplayName`: kotlin.String, 
+    var `selectedPaths`: List<kotlin.String>, 
+    var `stagingRoot`: kotlin.String, 
+    var `destinationLabel`: kotlin.String, 
+    var `message`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecoverySaveRequest: FfiConverterRustBuffer<RecoverySaveRequest> {
+    override fun read(buf: ByteBuffer): RecoverySaveRequest {
+        return RecoverySaveRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RecoverySaveRequest) = (
+            FfiConverterString.allocationSize(value.`root`) +
+            FfiConverterString.allocationSize(value.`archivePath`) +
+            FfiConverterString.allocationSize(value.`archiveDisplayName`) +
+            FfiConverterSequenceString.allocationSize(value.`selectedPaths`) +
+            FfiConverterString.allocationSize(value.`stagingRoot`) +
+            FfiConverterString.allocationSize(value.`destinationLabel`) +
+            FfiConverterString.allocationSize(value.`message`)
+    )
+
+    override fun write(value: RecoverySaveRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`root`, buf)
+            FfiConverterString.write(value.`archivePath`, buf)
+            FfiConverterString.write(value.`archiveDisplayName`, buf)
+            FfiConverterSequenceString.write(value.`selectedPaths`, buf)
+            FfiConverterString.write(value.`stagingRoot`, buf)
+            FfiConverterString.write(value.`destinationLabel`, buf)
+            FfiConverterString.write(value.`message`, buf)
+    }
+}
+
+
+
+data class RespondToTransferRequest (
+    var `requestId`: kotlin.String, 
+    var `decision`: TransferDecisionKind, 
+    var `fileIds`: List<kotlin.String>, 
+    var `reason`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRespondToTransferRequest: FfiConverterRustBuffer<RespondToTransferRequest> {
+    override fun read(buf: ByteBuffer): RespondToTransferRequest {
+        return RespondToTransferRequest(
+            FfiConverterString.read(buf),
+            FfiConverterTypeTransferDecisionKind.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RespondToTransferRequest) = (
+            FfiConverterString.allocationSize(value.`requestId`) +
+            FfiConverterTypeTransferDecisionKind.allocationSize(value.`decision`) +
+            FfiConverterSequenceString.allocationSize(value.`fileIds`) +
+            FfiConverterOptionalString.allocationSize(value.`reason`)
+    )
+
+    override fun write(value: RespondToTransferRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`requestId`, buf)
+            FfiConverterTypeTransferDecisionKind.write(value.`decision`, buf)
+            FfiConverterSequenceString.write(value.`fileIds`, buf)
+            FfiConverterOptionalString.write(value.`reason`, buf)
+    }
+}
+
+
+
+data class SendFileRequest (
+    var `sendId`: kotlin.String, 
+    var `alias`: kotlin.String, 
+    var `selfPort`: kotlin.UShort, 
+    var `https`: kotlin.Boolean, 
+    var `target`: DeviceInfoDto, 
+    var `filePath`: kotlin.String, 
+    var `pin`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSendFileRequest: FfiConverterRustBuffer<SendFileRequest> {
+    override fun read(buf: ByteBuffer): SendFileRequest {
+        return SendFileRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterTypeDeviceInfoDto.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SendFileRequest) = (
+            FfiConverterString.allocationSize(value.`sendId`) +
+            FfiConverterString.allocationSize(value.`alias`) +
+            FfiConverterUShort.allocationSize(value.`selfPort`) +
+            FfiConverterBoolean.allocationSize(value.`https`) +
+            FfiConverterTypeDeviceInfoDto.allocationSize(value.`target`) +
+            FfiConverterString.allocationSize(value.`filePath`) +
+            FfiConverterOptionalString.allocationSize(value.`pin`)
+    )
+
+    override fun write(value: SendFileRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sendId`, buf)
+            FfiConverterString.write(value.`alias`, buf)
+            FfiConverterUShort.write(value.`selfPort`, buf)
+            FfiConverterBoolean.write(value.`https`, buf)
+            FfiConverterTypeDeviceInfoDto.write(value.`target`, buf)
+            FfiConverterString.write(value.`filePath`, buf)
+            FfiConverterOptionalString.write(value.`pin`, buf)
+    }
+}
+
+
+
+data class SendFileResult (
+    var `sessionId`: kotlin.String, 
+    var `fileId`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSendFileResult: FfiConverterRustBuffer<SendFileResult> {
+    override fun read(buf: ByteBuffer): SendFileResult {
+        return SendFileResult(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SendFileResult) = (
+            FfiConverterString.allocationSize(value.`sessionId`) +
+            FfiConverterString.allocationSize(value.`fileId`)
+    )
+
+    override fun write(value: SendFileResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sessionId`, buf)
+            FfiConverterString.write(value.`fileId`, buf)
     }
 }
 
@@ -3257,6 +3751,54 @@ public object FfiConverterTypeStartJobResult: FfiConverterRustBuffer<StartJobRes
 
 
 
+data class StartReceiverRequest (
+    var `alias`: kotlin.String, 
+    var `port`: kotlin.UShort, 
+    var `https`: kotlin.Boolean, 
+    var `saveDir`: kotlin.String, 
+    var `autoAccept`: kotlin.Boolean, 
+    var `pin`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStartReceiverRequest: FfiConverterRustBuffer<StartReceiverRequest> {
+    override fun read(buf: ByteBuffer): StartReceiverRequest {
+        return StartReceiverRequest(
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: StartReceiverRequest) = (
+            FfiConverterString.allocationSize(value.`alias`) +
+            FfiConverterUShort.allocationSize(value.`port`) +
+            FfiConverterBoolean.allocationSize(value.`https`) +
+            FfiConverterString.allocationSize(value.`saveDir`) +
+            FfiConverterBoolean.allocationSize(value.`autoAccept`) +
+            FfiConverterOptionalString.allocationSize(value.`pin`)
+    )
+
+    override fun write(value: StartReceiverRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`alias`, buf)
+            FfiConverterUShort.write(value.`port`, buf)
+            FfiConverterBoolean.write(value.`https`, buf)
+            FfiConverterString.write(value.`saveDir`, buf)
+            FfiConverterBoolean.write(value.`autoAccept`, buf)
+            FfiConverterOptionalString.write(value.`pin`, buf)
+    }
+}
+
+
+
 data class TestArchiveRequest (
     var `archivePath`: kotlin.String, 
     var `password`: kotlin.String?, 
@@ -3348,6 +3890,510 @@ public object FfiConverterTypeTestArchiveResult: FfiConverterRustBuffer<TestArch
             FfiConverterULong.write(value.`totalEntries`, buf)
             FfiConverterULong.write(value.`testedBytes`, buf)
             FfiConverterSequenceTypeBridgeError.write(value.`warnings`, buf)
+    }
+}
+
+
+
+data class TransferFile (
+    var `id`: kotlin.String, 
+    var `fileName`: kotlin.String, 
+    var `size`: kotlin.ULong, 
+    var `fileType`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTransferFile: FfiConverterRustBuffer<TransferFile> {
+    override fun read(buf: ByteBuffer): TransferFile {
+        return TransferFile(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TransferFile) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`fileName`) +
+            FfiConverterULong.allocationSize(value.`size`) +
+            FfiConverterString.allocationSize(value.`fileType`)
+    )
+
+    override fun write(value: TransferFile, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`fileName`, buf)
+            FfiConverterULong.write(value.`size`, buf)
+            FfiConverterString.write(value.`fileType`, buf)
+    }
+}
+
+
+
+data class TzapAuthCallbackRequest (
+    var `stateDir`: kotlin.String, 
+    var `accountKey`: kotlin.String, 
+    var `clientId`: kotlin.String, 
+    var `redirectUri`: kotlin.String, 
+    var `authBaseUrl`: kotlin.String, 
+    var `callbackUrl`: kotlin.String, 
+    var `state`: kotlin.String, 
+    var `handoffCode`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapAuthCallbackRequest: FfiConverterRustBuffer<TzapAuthCallbackRequest> {
+    override fun read(buf: ByteBuffer): TzapAuthCallbackRequest {
+        return TzapAuthCallbackRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapAuthCallbackRequest) = (
+            FfiConverterString.allocationSize(value.`stateDir`) +
+            FfiConverterString.allocationSize(value.`accountKey`) +
+            FfiConverterString.allocationSize(value.`clientId`) +
+            FfiConverterString.allocationSize(value.`redirectUri`) +
+            FfiConverterString.allocationSize(value.`authBaseUrl`) +
+            FfiConverterString.allocationSize(value.`callbackUrl`) +
+            FfiConverterString.allocationSize(value.`state`) +
+            FfiConverterString.allocationSize(value.`handoffCode`)
+    )
+
+    override fun write(value: TzapAuthCallbackRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stateDir`, buf)
+            FfiConverterString.write(value.`accountKey`, buf)
+            FfiConverterString.write(value.`clientId`, buf)
+            FfiConverterString.write(value.`redirectUri`, buf)
+            FfiConverterString.write(value.`authBaseUrl`, buf)
+            FfiConverterString.write(value.`callbackUrl`, buf)
+            FfiConverterString.write(value.`state`, buf)
+            FfiConverterString.write(value.`handoffCode`, buf)
+    }
+}
+
+
+
+data class TzapAuthLoginRequest (
+    var `stateDir`: kotlin.String, 
+    var `accountKey`: kotlin.String, 
+    var `clientId`: kotlin.String, 
+    var `redirectUri`: kotlin.String, 
+    var `authBaseUrl`: kotlin.String, 
+    var `accountBaseUrl`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapAuthLoginRequest: FfiConverterRustBuffer<TzapAuthLoginRequest> {
+    override fun read(buf: ByteBuffer): TzapAuthLoginRequest {
+        return TzapAuthLoginRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapAuthLoginRequest) = (
+            FfiConverterString.allocationSize(value.`stateDir`) +
+            FfiConverterString.allocationSize(value.`accountKey`) +
+            FfiConverterString.allocationSize(value.`clientId`) +
+            FfiConverterString.allocationSize(value.`redirectUri`) +
+            FfiConverterString.allocationSize(value.`authBaseUrl`) +
+            FfiConverterString.allocationSize(value.`accountBaseUrl`)
+    )
+
+    override fun write(value: TzapAuthLoginRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stateDir`, buf)
+            FfiConverterString.write(value.`accountKey`, buf)
+            FfiConverterString.write(value.`clientId`, buf)
+            FfiConverterString.write(value.`redirectUri`, buf)
+            FfiConverterString.write(value.`authBaseUrl`, buf)
+            FfiConverterString.write(value.`accountBaseUrl`, buf)
+    }
+}
+
+
+
+data class TzapAuthLoginResult (
+    var `launchUrl`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapAuthLoginResult: FfiConverterRustBuffer<TzapAuthLoginResult> {
+    override fun read(buf: ByteBuffer): TzapAuthLoginResult {
+        return TzapAuthLoginResult(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapAuthLoginResult) = (
+            FfiConverterString.allocationSize(value.`launchUrl`)
+    )
+
+    override fun write(value: TzapAuthLoginResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`launchUrl`, buf)
+    }
+}
+
+
+
+data class TzapAuthStatusRequest (
+    var `stateDir`: kotlin.String, 
+    var `accountKey`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapAuthStatusRequest: FfiConverterRustBuffer<TzapAuthStatusRequest> {
+    override fun read(buf: ByteBuffer): TzapAuthStatusRequest {
+        return TzapAuthStatusRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapAuthStatusRequest) = (
+            FfiConverterString.allocationSize(value.`stateDir`) +
+            FfiConverterString.allocationSize(value.`accountKey`)
+    )
+
+    override fun write(value: TzapAuthStatusRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stateDir`, buf)
+            FfiConverterString.write(value.`accountKey`, buf)
+    }
+}
+
+
+
+data class TzapAuthStatusResult (
+    var `authenticated`: kotlin.Boolean
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapAuthStatusResult: FfiConverterRustBuffer<TzapAuthStatusResult> {
+    override fun read(buf: ByteBuffer): TzapAuthStatusResult {
+        return TzapAuthStatusResult(
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapAuthStatusResult) = (
+            FfiConverterBoolean.allocationSize(value.`authenticated`)
+    )
+
+    override fun write(value: TzapAuthStatusResult, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`authenticated`, buf)
+    }
+}
+
+
+
+data class TzapCertEnrollRequest (
+    var `stateDir`: kotlin.String, 
+    var `accountKey`: kotlin.String, 
+    var `serviceBaseUrl`: kotlin.String, 
+    var `customTrustRootCertPaths`: List<kotlin.String>, 
+    var `requestedValiditySeconds`: kotlin.ULong
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapCertEnrollRequest: FfiConverterRustBuffer<TzapCertEnrollRequest> {
+    override fun read(buf: ByteBuffer): TzapCertEnrollRequest {
+        return TzapCertEnrollRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapCertEnrollRequest) = (
+            FfiConverterString.allocationSize(value.`stateDir`) +
+            FfiConverterString.allocationSize(value.`accountKey`) +
+            FfiConverterString.allocationSize(value.`serviceBaseUrl`) +
+            FfiConverterSequenceString.allocationSize(value.`customTrustRootCertPaths`) +
+            FfiConverterULong.allocationSize(value.`requestedValiditySeconds`)
+    )
+
+    override fun write(value: TzapCertEnrollRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stateDir`, buf)
+            FfiConverterString.write(value.`accountKey`, buf)
+            FfiConverterString.write(value.`serviceBaseUrl`, buf)
+            FfiConverterSequenceString.write(value.`customTrustRootCertPaths`, buf)
+            FfiConverterULong.write(value.`requestedValiditySeconds`, buf)
+    }
+}
+
+
+
+data class TzapCertificateInventoryRequest (
+    var `stateDir`: kotlin.String, 
+    var `accountKey`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapCertificateInventoryRequest: FfiConverterRustBuffer<TzapCertificateInventoryRequest> {
+    override fun read(buf: ByteBuffer): TzapCertificateInventoryRequest {
+        return TzapCertificateInventoryRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapCertificateInventoryRequest) = (
+            FfiConverterString.allocationSize(value.`stateDir`) +
+            FfiConverterString.allocationSize(value.`accountKey`)
+    )
+
+    override fun write(value: TzapCertificateInventoryRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stateDir`, buf)
+            FfiConverterString.write(value.`accountKey`, buf)
+    }
+}
+
+
+
+data class TzapCertificateInventoryResult (
+    var `certificateIds`: List<kotlin.String>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapCertificateInventoryResult: FfiConverterRustBuffer<TzapCertificateInventoryResult> {
+    override fun read(buf: ByteBuffer): TzapCertificateInventoryResult {
+        return TzapCertificateInventoryResult(
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapCertificateInventoryResult) = (
+            FfiConverterSequenceString.allocationSize(value.`certificateIds`)
+    )
+
+    override fun write(value: TzapCertificateInventoryResult, buf: ByteBuffer) {
+            FfiConverterSequenceString.write(value.`certificateIds`, buf)
+    }
+}
+
+
+
+data class TzapDocumentPayload (
+    var `tzapPayloadVersion`: kotlin.UInt, 
+    var `title`: kotlin.String, 
+    var `body`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapDocumentPayload: FfiConverterRustBuffer<TzapDocumentPayload> {
+    override fun read(buf: ByteBuffer): TzapDocumentPayload {
+        return TzapDocumentPayload(
+            FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapDocumentPayload) = (
+            FfiConverterUInt.allocationSize(value.`tzapPayloadVersion`) +
+            FfiConverterString.allocationSize(value.`title`) +
+            FfiConverterString.allocationSize(value.`body`)
+    )
+
+    override fun write(value: TzapDocumentPayload, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`tzapPayloadVersion`, buf)
+            FfiConverterString.write(value.`title`, buf)
+            FfiConverterString.write(value.`body`, buf)
+    }
+}
+
+
+
+data class TzapDocumentSignRequest (
+    var `stateDir`: kotlin.String, 
+    var `accountKey`: kotlin.String, 
+    var `certificateId`: kotlin.String, 
+    var `payload`: TzapDocumentPayload
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapDocumentSignRequest: FfiConverterRustBuffer<TzapDocumentSignRequest> {
+    override fun read(buf: ByteBuffer): TzapDocumentSignRequest {
+        return TzapDocumentSignRequest(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeTzapDocumentPayload.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapDocumentSignRequest) = (
+            FfiConverterString.allocationSize(value.`stateDir`) +
+            FfiConverterString.allocationSize(value.`accountKey`) +
+            FfiConverterString.allocationSize(value.`certificateId`) +
+            FfiConverterTypeTzapDocumentPayload.allocationSize(value.`payload`)
+    )
+
+    override fun write(value: TzapDocumentSignRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`stateDir`, buf)
+            FfiConverterString.write(value.`accountKey`, buf)
+            FfiConverterString.write(value.`certificateId`, buf)
+            FfiConverterTypeTzapDocumentPayload.write(value.`payload`, buf)
+    }
+}
+
+
+
+data class TzapDocumentSignResult (
+    var `envelopeJson`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapDocumentSignResult: FfiConverterRustBuffer<TzapDocumentSignResult> {
+    override fun read(buf: ByteBuffer): TzapDocumentSignResult {
+        return TzapDocumentSignResult(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapDocumentSignResult) = (
+            FfiConverterString.allocationSize(value.`envelopeJson`)
+    )
+
+    override fun write(value: TzapDocumentSignResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`envelopeJson`, buf)
+    }
+}
+
+
+
+data class TzapDocumentVerifyRequest (
+    var `envelopeJson`: kotlin.String, 
+    var `customTrustRootCertPaths`: List<kotlin.String>, 
+    var `verifierTimeUnixSeconds`: kotlin.ULong
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapDocumentVerifyRequest: FfiConverterRustBuffer<TzapDocumentVerifyRequest> {
+    override fun read(buf: ByteBuffer): TzapDocumentVerifyRequest {
+        return TzapDocumentVerifyRequest(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapDocumentVerifyRequest) = (
+            FfiConverterString.allocationSize(value.`envelopeJson`) +
+            FfiConverterSequenceString.allocationSize(value.`customTrustRootCertPaths`) +
+            FfiConverterULong.allocationSize(value.`verifierTimeUnixSeconds`)
+    )
+
+    override fun write(value: TzapDocumentVerifyRequest, buf: ByteBuffer) {
+            FfiConverterString.write(value.`envelopeJson`, buf)
+            FfiConverterSequenceString.write(value.`customTrustRootCertPaths`, buf)
+            FfiConverterULong.write(value.`verifierTimeUnixSeconds`, buf)
+    }
+}
+
+
+
+data class TzapDocumentVerifyResult (
+    var `state`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTzapDocumentVerifyResult: FfiConverterRustBuffer<TzapDocumentVerifyResult> {
+    override fun read(buf: ByteBuffer): TzapDocumentVerifyResult {
+        return TzapDocumentVerifyResult(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TzapDocumentVerifyResult) = (
+            FfiConverterString.allocationSize(value.`state`)
+    )
+
+    override fun write(value: TzapDocumentVerifyResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`state`, buf)
     }
 }
 
@@ -3686,6 +4732,284 @@ public object FfiConverterTypeMobileJobStatus: FfiConverterRustBuffer<MobileJobS
     override fun allocationSize(value: MobileJobStatus) = 4UL
 
     override fun write(value: MobileJobStatus, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+sealed class QueuedEvent {
+    
+    data class PeerRegistered(
+        val `device`: DeviceInfoDto) : QueuedEvent() {
+        companion object
+    }
+    
+    data class TransferRequest(
+        val `requestId`: kotlin.String, 
+        val `sender`: DeviceInfoDto, 
+        val `files`: List<TransferFile>) : QueuedEvent() {
+        companion object
+    }
+    
+    data class TextReceived(
+        val `sessionId`: kotlin.String, 
+        val `text`: kotlin.String, 
+        val `senderAlias`: kotlin.String) : QueuedEvent() {
+        companion object
+    }
+    
+    data class FileReceiveProgress(
+        val `sessionId`: kotlin.String, 
+        val `fileId`: kotlin.String, 
+        val `fileName`: kotlin.String, 
+        val `senderAlias`: kotlin.String, 
+        val `bytesReceived`: kotlin.ULong, 
+        val `totalBytes`: kotlin.ULong, 
+        val `fileCount`: kotlin.ULong) : QueuedEvent() {
+        companion object
+    }
+    
+    data class FileReceived(
+        val `sessionId`: kotlin.String, 
+        val `fileId`: kotlin.String, 
+        val `fileName`: kotlin.String, 
+        val `path`: kotlin.String) : QueuedEvent() {
+        companion object
+    }
+    
+    data class SessionDone(
+        val `sessionId`: kotlin.String) : QueuedEvent() {
+        companion object
+    }
+    
+    data class FileSendProgress(
+        val `sendId`: kotlin.String, 
+        val `sessionId`: kotlin.String, 
+        val `fileId`: kotlin.String, 
+        val `fileName`: kotlin.String, 
+        val `bytesSent`: kotlin.ULong, 
+        val `totalBytes`: kotlin.ULong, 
+        val `rateBytesPerSecond`: kotlin.Double) : QueuedEvent() {
+        companion object
+    }
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeQueuedEvent : FfiConverterRustBuffer<QueuedEvent>{
+    override fun read(buf: ByteBuffer): QueuedEvent {
+        return when(buf.getInt()) {
+            1 -> QueuedEvent.PeerRegistered(
+                FfiConverterTypeDeviceInfoDto.read(buf),
+                )
+            2 -> QueuedEvent.TransferRequest(
+                FfiConverterString.read(buf),
+                FfiConverterTypeDeviceInfoDto.read(buf),
+                FfiConverterSequenceTypeTransferFile.read(buf),
+                )
+            3 -> QueuedEvent.TextReceived(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            4 -> QueuedEvent.FileReceiveProgress(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                FfiConverterULong.read(buf),
+                FfiConverterULong.read(buf),
+                )
+            5 -> QueuedEvent.FileReceived(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            6 -> QueuedEvent.SessionDone(
+                FfiConverterString.read(buf),
+                )
+            7 -> QueuedEvent.FileSendProgress(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                FfiConverterULong.read(buf),
+                FfiConverterDouble.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: QueuedEvent) = when(value) {
+        is QueuedEvent.PeerRegistered -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeDeviceInfoDto.allocationSize(value.`device`)
+            )
+        }
+        is QueuedEvent.TransferRequest -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`requestId`)
+                + FfiConverterTypeDeviceInfoDto.allocationSize(value.`sender`)
+                + FfiConverterSequenceTypeTransferFile.allocationSize(value.`files`)
+            )
+        }
+        is QueuedEvent.TextReceived -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sessionId`)
+                + FfiConverterString.allocationSize(value.`text`)
+                + FfiConverterString.allocationSize(value.`senderAlias`)
+            )
+        }
+        is QueuedEvent.FileReceiveProgress -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sessionId`)
+                + FfiConverterString.allocationSize(value.`fileId`)
+                + FfiConverterString.allocationSize(value.`fileName`)
+                + FfiConverterString.allocationSize(value.`senderAlias`)
+                + FfiConverterULong.allocationSize(value.`bytesReceived`)
+                + FfiConverterULong.allocationSize(value.`totalBytes`)
+                + FfiConverterULong.allocationSize(value.`fileCount`)
+            )
+        }
+        is QueuedEvent.FileReceived -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sessionId`)
+                + FfiConverterString.allocationSize(value.`fileId`)
+                + FfiConverterString.allocationSize(value.`fileName`)
+                + FfiConverterString.allocationSize(value.`path`)
+            )
+        }
+        is QueuedEvent.SessionDone -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sessionId`)
+            )
+        }
+        is QueuedEvent.FileSendProgress -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`sendId`)
+                + FfiConverterString.allocationSize(value.`sessionId`)
+                + FfiConverterString.allocationSize(value.`fileId`)
+                + FfiConverterString.allocationSize(value.`fileName`)
+                + FfiConverterULong.allocationSize(value.`bytesSent`)
+                + FfiConverterULong.allocationSize(value.`totalBytes`)
+                + FfiConverterDouble.allocationSize(value.`rateBytesPerSecond`)
+            )
+        }
+    }
+
+    override fun write(value: QueuedEvent, buf: ByteBuffer) {
+        when(value) {
+            is QueuedEvent.PeerRegistered -> {
+                buf.putInt(1)
+                FfiConverterTypeDeviceInfoDto.write(value.`device`, buf)
+                Unit
+            }
+            is QueuedEvent.TransferRequest -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`requestId`, buf)
+                FfiConverterTypeDeviceInfoDto.write(value.`sender`, buf)
+                FfiConverterSequenceTypeTransferFile.write(value.`files`, buf)
+                Unit
+            }
+            is QueuedEvent.TextReceived -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`sessionId`, buf)
+                FfiConverterString.write(value.`text`, buf)
+                FfiConverterString.write(value.`senderAlias`, buf)
+                Unit
+            }
+            is QueuedEvent.FileReceiveProgress -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`sessionId`, buf)
+                FfiConverterString.write(value.`fileId`, buf)
+                FfiConverterString.write(value.`fileName`, buf)
+                FfiConverterString.write(value.`senderAlias`, buf)
+                FfiConverterULong.write(value.`bytesReceived`, buf)
+                FfiConverterULong.write(value.`totalBytes`, buf)
+                FfiConverterULong.write(value.`fileCount`, buf)
+                Unit
+            }
+            is QueuedEvent.FileReceived -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`sessionId`, buf)
+                FfiConverterString.write(value.`fileId`, buf)
+                FfiConverterString.write(value.`fileName`, buf)
+                FfiConverterString.write(value.`path`, buf)
+                Unit
+            }
+            is QueuedEvent.SessionDone -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`sessionId`, buf)
+                Unit
+            }
+            is QueuedEvent.FileSendProgress -> {
+                buf.putInt(7)
+                FfiConverterString.write(value.`sendId`, buf)
+                FfiConverterString.write(value.`sessionId`, buf)
+                FfiConverterString.write(value.`fileId`, buf)
+                FfiConverterString.write(value.`fileName`, buf)
+                FfiConverterULong.write(value.`bytesSent`, buf)
+                FfiConverterULong.write(value.`totalBytes`, buf)
+                FfiConverterDouble.write(value.`rateBytesPerSecond`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class TransferDecisionKind {
+    
+    ACCEPT,
+    ACCEPT_FILES,
+    DECLINE,
+    REFUSE;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTransferDecisionKind: FfiConverterRustBuffer<TransferDecisionKind> {
+    override fun read(buf: ByteBuffer) = try {
+        TransferDecisionKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: TransferDecisionKind) = 4UL
+
+    override fun write(value: TransferDecisionKind, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -4109,6 +5433,34 @@ public object FfiConverterSequenceTypeCreatePlanEntry: FfiConverterRustBuffer<Li
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeDeviceInfoDto: FfiConverterRustBuffer<List<DeviceInfoDto>> {
+    override fun read(buf: ByteBuffer): List<DeviceInfoDto> {
+        val len = buf.getInt()
+        return List<DeviceInfoDto>(len) {
+            FfiConverterTypeDeviceInfoDto.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<DeviceInfoDto>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeDeviceInfoDto.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<DeviceInfoDto>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeDeviceInfoDto.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeExtractionPlanEntry: FfiConverterRustBuffer<List<ExtractionPlanEntry>> {
     override fun read(buf: ByteBuffer): List<ExtractionPlanEntry> {
         val len = buf.getInt()
@@ -4183,6 +5535,90 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeMobileJobEvent.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeRecoveryRecord: FfiConverterRustBuffer<List<RecoveryRecord>> {
+    override fun read(buf: ByteBuffer): List<RecoveryRecord> {
+        val len = buf.getInt()
+        return List<RecoveryRecord>(len) {
+            FfiConverterTypeRecoveryRecord.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RecoveryRecord>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRecoveryRecord.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RecoveryRecord>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRecoveryRecord.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTransferFile: FfiConverterRustBuffer<List<TransferFile>> {
+    override fun read(buf: ByteBuffer): List<TransferFile> {
+        val len = buf.getInt()
+        return List<TransferFile>(len) {
+            FfiConverterTypeTransferFile.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TransferFile>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTransferFile.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TransferFile>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTransferFile.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeQueuedEvent: FfiConverterRustBuffer<List<QueuedEvent>> {
+    override fun read(buf: ByteBuffer): List<QueuedEvent> {
+        val len = buf.getInt()
+        return List<QueuedEvent>(len) {
+            FfiConverterTypeQueuedEvent.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<QueuedEvent>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeQueuedEvent.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<QueuedEvent>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeQueuedEvent.write(it, buf)
         }
     }
 }
@@ -4299,68 +5735,70 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     )
     }
     
- fun `localsendCancelSendJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_cancel_send_json(
-        FfiConverterString.lower(`requestJson`),_status)
+
+    @Throws(ZmanagerGuiException::class) fun `localsendCancelSend`(`request`: CancelSendRequest)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsendcancelsend(
+        FfiConverterTypeCancelSendRequest.lower(`request`),_status)
+}
+    
+    
+
+    @Throws(ZmanagerGuiException::class) fun `localsendDiscover`(`request`: DiscoverRequest): List<DeviceInfoDto> {
+            return FfiConverterSequenceTypeDeviceInfoDto.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsenddiscover(
+        FfiConverterTypeDiscoverRequest.lower(`request`),_status)
 }
     )
     }
     
- fun `localsendDiscoverJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
+ fun `localsendPollEvents`(): PollEventsResult {
+            return FfiConverterTypePollEventsResult.lift(
     uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_discover_json(
-        FfiConverterString.lower(`requestJson`),_status)
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsendpollevents(
+        _status)
 }
     )
     }
     
- fun `localsendPollEventsJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_poll_events_json(
-        FfiConverterString.lower(`requestJson`),_status)
+
+    @Throws(ZmanagerGuiException::class) fun `localsendRespondToTransfer`(`request`: RespondToTransferRequest)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsendrespondtotransfer(
+        FfiConverterTypeRespondToTransferRequest.lower(`request`),_status)
+}
+    
+    
+
+    @Throws(ZmanagerGuiException::class) fun `localsendSendFile`(`request`: SendFileRequest): SendFileResult {
+            return FfiConverterTypeSendFileResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsendsendfile(
+        FfiConverterTypeSendFileRequest.lower(`request`),_status)
 }
     )
     }
     
- fun `localsendRespondToTransferJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_respond_to_transfer_json(
-        FfiConverterString.lower(`requestJson`),_status)
+
+    @Throws(ZmanagerGuiException::class) fun `localsendStartReceiver`(`request`: StartReceiverRequest)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsendstartreceiver(
+        FfiConverterTypeStartReceiverRequest.lower(`request`),_status)
 }
-    )
-    }
     
- fun `localsendSendFileJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_send_file_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
     
- fun `localsendStartReceiverJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_start_receiver_json(
-        FfiConverterString.lower(`requestJson`),_status)
+
+    @Throws(ZmanagerGuiException::class) fun `localsendStopReceiver`()
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsendstopreceiver(
+        _status)
 }
-    )
-    }
     
- fun `localsendStopReceiverJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsend_stop_receiver_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
     
 
     @Throws(ZmanagerGuiException::class) fun `materializePreview`(`request`: MaterializePreviewRequest): MaterializePreviewResult {
@@ -4413,6 +5851,45 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     }
     
 
+    @Throws(ZmanagerGuiException::class) fun `recoveryDiscard`(`root`: kotlin.String, `id`: kotlin.String)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_recoverydiscard(
+        FfiConverterString.lower(`root`),FfiConverterString.lower(`id`),_status)
+}
+    
+    
+
+    @Throws(ZmanagerGuiException::class) fun `recoveryFiles`(`root`: kotlin.String, `id`: kotlin.String): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_recoveryfiles(
+        FfiConverterString.lower(`root`),FfiConverterString.lower(`id`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `recoveryRecords`(`root`: kotlin.String, `nowMillis`: kotlin.ULong): List<RecoveryRecord> {
+            return FfiConverterSequenceTypeRecoveryRecord.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_recoveryrecords(
+        FfiConverterString.lower(`root`),FfiConverterULong.lower(`nowMillis`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `recoverySave`(`request`: RecoverySaveRequest): RecoveryRecord {
+            return FfiConverterTypeRecoveryRecord.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_recoverysave(
+        FfiConverterTypeRecoverySaveRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
     @Throws(ZmanagerGuiException::class) fun `startCreate`(`request`: StartCreateRequest): StartJobResult {
             return FfiConverterTypeStartJobResult.lift(
     uniffiRustCallWithError(ZmanagerGuiException) { _status ->
@@ -4438,6 +5915,112 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     uniffiRustCallWithError(ZmanagerGuiException) { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_testarchive(
         FfiConverterTypeTestArchiveRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `trustFingerprints`(`root`: kotlin.String): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_trustfingerprints(
+        FfiConverterString.lower(`root`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `trustForget`(`root`: kotlin.String, `fingerprint`: kotlin.String)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_trustforget(
+        FfiConverterString.lower(`root`),FfiConverterString.lower(`fingerprint`),_status)
+}
+    
+    
+
+    @Throws(ZmanagerGuiException::class) fun `trustIsTrusted`(`root`: kotlin.String, `fingerprint`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_trustistrusted(
+        FfiConverterString.lower(`root`),FfiConverterString.lower(`fingerprint`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `trustRemember`(`root`: kotlin.String, `fingerprint`: kotlin.String)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_trustremember(
+        FfiConverterString.lower(`root`),FfiConverterString.lower(`fingerprint`),_status)
+}
+    
+    
+
+    @Throws(ZmanagerGuiException::class) fun `tzapAuthCallback`(`request`: TzapAuthCallbackRequest)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzapauthcallback(
+        FfiConverterTypeTzapAuthCallbackRequest.lower(`request`),_status)
+}
+    
+    
+
+    @Throws(ZmanagerGuiException::class) fun `tzapAuthLogin`(`request`: TzapAuthLoginRequest): TzapAuthLoginResult {
+            return FfiConverterTypeTzapAuthLoginResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzapauthlogin(
+        FfiConverterTypeTzapAuthLoginRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `tzapAuthStatus`(`request`: TzapAuthStatusRequest): TzapAuthStatusResult {
+            return FfiConverterTypeTzapAuthStatusResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzapauthstatus(
+        FfiConverterTypeTzapAuthStatusRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `tzapCertEnroll`(`request`: TzapCertEnrollRequest)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzapcertenroll(
+        FfiConverterTypeTzapCertEnrollRequest.lower(`request`),_status)
+}
+    
+    
+
+    @Throws(ZmanagerGuiException::class) fun `tzapCertificateInventory`(`request`: TzapCertificateInventoryRequest): TzapCertificateInventoryResult {
+            return FfiConverterTypeTzapCertificateInventoryResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzapcertificateinventory(
+        FfiConverterTypeTzapCertificateInventoryRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `tzapDocumentSign`(`request`: TzapDocumentSignRequest): TzapDocumentSignResult {
+            return FfiConverterTypeTzapDocumentSignResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzapdocumentsign(
+        FfiConverterTypeTzapDocumentSignRequest.lower(`request`),_status)
+}
+    )
+    }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `tzapDocumentVerify`(`request`: TzapDocumentVerifyRequest): TzapDocumentVerifyResult {
+            return FfiConverterTypeTzapDocumentVerifyResult.lift(
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzapdocumentverify(
+        FfiConverterTypeTzapDocumentVerifyRequest.lower(`request`),_status)
 }
     )
     }
@@ -4469,46 +6052,10 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
     )
     }
     
- fun `tzapAuthCallbackJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_auth_callback_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
-    
  fun `tzapAuthForgetJson`(`requestJson`: kotlin.String): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_auth_forget_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
-    
- fun `tzapAuthLoginJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_auth_login_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
-    
- fun `tzapAuthStatusJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_auth_status_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
-    
- fun `tzapCertEnrollJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_cert_enroll_json(
         FfiConverterString.lower(`requestJson`),_status)
 }
     )
@@ -4527,15 +6074,6 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_cert_revoke_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
-    
- fun `tzapCertificateInventoryJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_certificate_inventory_json(
         FfiConverterString.lower(`requestJson`),_status)
 }
     )
@@ -4581,24 +6119,6 @@ public object FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffer<Lis
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_device_retire_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
-    
- fun `tzapDocumentSignJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_document_sign_json(
-        FfiConverterString.lower(`requestJson`),_status)
-}
-    )
-    }
-    
- fun `tzapDocumentVerifyJson`(`requestJson`: kotlin.String): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_tzap_document_verify_json(
         FfiConverterString.lower(`requestJson`),_status)
 }
     )

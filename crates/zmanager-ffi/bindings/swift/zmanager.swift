@@ -416,6 +416,22 @@ fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
+    typealias FfiType = UInt16
+    typealias SwiftType = UInt16
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -442,6 +458,22 @@ fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
+    typealias FfiType = Double
+    typealias SwiftType = Double
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+        return try lift(readDouble(&buf))
+    }
+
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
+        writeDouble(&buf, lower(value))
     }
 }
 
@@ -1501,6 +1533,68 @@ public func FfiConverterTypeCancelJobResult_lower(_ value: CancelJobResult) -> R
 }
 
 
+public struct CancelSendRequest {
+    public var sendId: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(sendId: String) {
+        self.sendId = sendId
+    }
+}
+
+#if compiler(>=6)
+extension CancelSendRequest: Sendable {}
+#endif
+
+
+extension CancelSendRequest: Equatable, Hashable {
+    public static func ==(lhs: CancelSendRequest, rhs: CancelSendRequest) -> Bool {
+        if lhs.sendId != rhs.sendId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(sendId)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCancelSendRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CancelSendRequest {
+        return
+            try CancelSendRequest(
+                sendId: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CancelSendRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.sendId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCancelSendRequest_lift(_ buf: RustBuffer) throws -> CancelSendRequest {
+    return try FfiConverterTypeCancelSendRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCancelSendRequest_lower(_ value: CancelSendRequest) -> RustBuffer {
+    return FfiConverterTypeCancelSendRequest.lower(value)
+}
+
+
 public struct ClearSensitiveStateResult {
     public var clearedTerminalJobs: UInt64
     public var cancelRequestedJobs: UInt64
@@ -1850,6 +1944,194 @@ public func FfiConverterTypeDetectArchiveResult_lift(_ buf: RustBuffer) throws -
 #endif
 public func FfiConverterTypeDetectArchiveResult_lower(_ value: DetectArchiveResult) -> RustBuffer {
     return FfiConverterTypeDetectArchiveResult.lower(value)
+}
+
+
+public struct DeviceInfoDto {
+    public var alias: String
+    public var fingerprint: String
+    public var port: UInt16
+    public var `protocol`: String
+    public var ip: String?
+    public var deviceModel: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(alias: String, fingerprint: String, port: UInt16, `protocol`: String, ip: String?, deviceModel: String?) {
+        self.alias = alias
+        self.fingerprint = fingerprint
+        self.port = port
+        self.`protocol` = `protocol`
+        self.ip = ip
+        self.deviceModel = deviceModel
+    }
+}
+
+#if compiler(>=6)
+extension DeviceInfoDto: Sendable {}
+#endif
+
+
+extension DeviceInfoDto: Equatable, Hashable {
+    public static func ==(lhs: DeviceInfoDto, rhs: DeviceInfoDto) -> Bool {
+        if lhs.alias != rhs.alias {
+            return false
+        }
+        if lhs.fingerprint != rhs.fingerprint {
+            return false
+        }
+        if lhs.port != rhs.port {
+            return false
+        }
+        if lhs.`protocol` != rhs.`protocol` {
+            return false
+        }
+        if lhs.ip != rhs.ip {
+            return false
+        }
+        if lhs.deviceModel != rhs.deviceModel {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(alias)
+        hasher.combine(fingerprint)
+        hasher.combine(port)
+        hasher.combine(`protocol`)
+        hasher.combine(ip)
+        hasher.combine(deviceModel)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDeviceInfoDto: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DeviceInfoDto {
+        return
+            try DeviceInfoDto(
+                alias: FfiConverterString.read(from: &buf), 
+                fingerprint: FfiConverterString.read(from: &buf), 
+                port: FfiConverterUInt16.read(from: &buf), 
+                protocol: FfiConverterString.read(from: &buf), 
+                ip: FfiConverterOptionString.read(from: &buf), 
+                deviceModel: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DeviceInfoDto, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.alias, into: &buf)
+        FfiConverterString.write(value.fingerprint, into: &buf)
+        FfiConverterUInt16.write(value.port, into: &buf)
+        FfiConverterString.write(value.`protocol`, into: &buf)
+        FfiConverterOptionString.write(value.ip, into: &buf)
+        FfiConverterOptionString.write(value.deviceModel, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceInfoDto_lift(_ buf: RustBuffer) throws -> DeviceInfoDto {
+    return try FfiConverterTypeDeviceInfoDto.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDeviceInfoDto_lower(_ value: DeviceInfoDto) -> RustBuffer {
+    return FfiConverterTypeDeviceInfoDto.lower(value)
+}
+
+
+public struct DiscoverRequest {
+    public var alias: String
+    public var port: UInt16
+    public var https: Bool
+    public var timeoutMs: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(alias: String, port: UInt16, https: Bool, timeoutMs: UInt64) {
+        self.alias = alias
+        self.port = port
+        self.https = https
+        self.timeoutMs = timeoutMs
+    }
+}
+
+#if compiler(>=6)
+extension DiscoverRequest: Sendable {}
+#endif
+
+
+extension DiscoverRequest: Equatable, Hashable {
+    public static func ==(lhs: DiscoverRequest, rhs: DiscoverRequest) -> Bool {
+        if lhs.alias != rhs.alias {
+            return false
+        }
+        if lhs.port != rhs.port {
+            return false
+        }
+        if lhs.https != rhs.https {
+            return false
+        }
+        if lhs.timeoutMs != rhs.timeoutMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(alias)
+        hasher.combine(port)
+        hasher.combine(https)
+        hasher.combine(timeoutMs)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDiscoverRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DiscoverRequest {
+        return
+            try DiscoverRequest(
+                alias: FfiConverterString.read(from: &buf), 
+                port: FfiConverterUInt16.read(from: &buf), 
+                https: FfiConverterBool.read(from: &buf), 
+                timeoutMs: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DiscoverRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.alias, into: &buf)
+        FfiConverterUInt16.write(value.port, into: &buf)
+        FfiConverterBool.write(value.https, into: &buf)
+        FfiConverterUInt64.write(value.timeoutMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiscoverRequest_lift(_ buf: RustBuffer) throws -> DiscoverRequest {
+    return try FfiConverterTypeDiscoverRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiscoverRequest_lower(_ value: DiscoverRequest) -> RustBuffer {
+    return FfiConverterTypeDiscoverRequest.lower(value)
 }
 
 
@@ -3505,6 +3787,68 @@ public func FfiConverterTypePlanExtractResult_lower(_ value: PlanExtractResult) 
 }
 
 
+public struct PollEventsResult {
+    public var events: [QueuedEvent]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(events: [QueuedEvent]) {
+        self.events = events
+    }
+}
+
+#if compiler(>=6)
+extension PollEventsResult: Sendable {}
+#endif
+
+
+extension PollEventsResult: Equatable, Hashable {
+    public static func ==(lhs: PollEventsResult, rhs: PollEventsResult) -> Bool {
+        if lhs.events != rhs.events {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(events)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePollEventsResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PollEventsResult {
+        return
+            try PollEventsResult(
+                events: FfiConverterSequenceTypeQueuedEvent.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PollEventsResult, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeQueuedEvent.write(value.events, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePollEventsResult_lift(_ buf: RustBuffer) throws -> PollEventsResult {
+    return try FfiConverterTypePollEventsResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePollEventsResult_lower(_ value: PollEventsResult) -> RustBuffer {
+    return FfiConverterTypePollEventsResult.lower(value)
+}
+
+
 public struct PollJobEventsRequest {
     public var jobId: String
     public var cursor: UInt64
@@ -3690,6 +4034,500 @@ public func FfiConverterTypePollJobEventsResult_lift(_ buf: RustBuffer) throws -
 #endif
 public func FfiConverterTypePollJobEventsResult_lower(_ value: PollJobEventsResult) -> RustBuffer {
     return FfiConverterTypePollJobEventsResult.lower(value)
+}
+
+
+public struct RecoveryRecord {
+    public var id: String
+    public var archivePath: String
+    public var archiveDisplayName: String
+    public var selectedPaths: [String]
+    public var stagingRoot: String
+    public var destinationLabel: String
+    public var message: String
+    public var createdAtMillis: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, archivePath: String, archiveDisplayName: String, selectedPaths: [String], stagingRoot: String, destinationLabel: String, message: String, createdAtMillis: UInt64) {
+        self.id = id
+        self.archivePath = archivePath
+        self.archiveDisplayName = archiveDisplayName
+        self.selectedPaths = selectedPaths
+        self.stagingRoot = stagingRoot
+        self.destinationLabel = destinationLabel
+        self.message = message
+        self.createdAtMillis = createdAtMillis
+    }
+}
+
+#if compiler(>=6)
+extension RecoveryRecord: Sendable {}
+#endif
+
+
+extension RecoveryRecord: Equatable, Hashable {
+    public static func ==(lhs: RecoveryRecord, rhs: RecoveryRecord) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.archivePath != rhs.archivePath {
+            return false
+        }
+        if lhs.archiveDisplayName != rhs.archiveDisplayName {
+            return false
+        }
+        if lhs.selectedPaths != rhs.selectedPaths {
+            return false
+        }
+        if lhs.stagingRoot != rhs.stagingRoot {
+            return false
+        }
+        if lhs.destinationLabel != rhs.destinationLabel {
+            return false
+        }
+        if lhs.message != rhs.message {
+            return false
+        }
+        if lhs.createdAtMillis != rhs.createdAtMillis {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(archivePath)
+        hasher.combine(archiveDisplayName)
+        hasher.combine(selectedPaths)
+        hasher.combine(stagingRoot)
+        hasher.combine(destinationLabel)
+        hasher.combine(message)
+        hasher.combine(createdAtMillis)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoveryRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoveryRecord {
+        return
+            try RecoveryRecord(
+                id: FfiConverterString.read(from: &buf), 
+                archivePath: FfiConverterString.read(from: &buf), 
+                archiveDisplayName: FfiConverterString.read(from: &buf), 
+                selectedPaths: FfiConverterSequenceString.read(from: &buf), 
+                stagingRoot: FfiConverterString.read(from: &buf), 
+                destinationLabel: FfiConverterString.read(from: &buf), 
+                message: FfiConverterString.read(from: &buf), 
+                createdAtMillis: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RecoveryRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.archivePath, into: &buf)
+        FfiConverterString.write(value.archiveDisplayName, into: &buf)
+        FfiConverterSequenceString.write(value.selectedPaths, into: &buf)
+        FfiConverterString.write(value.stagingRoot, into: &buf)
+        FfiConverterString.write(value.destinationLabel, into: &buf)
+        FfiConverterString.write(value.message, into: &buf)
+        FfiConverterUInt64.write(value.createdAtMillis, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryRecord_lift(_ buf: RustBuffer) throws -> RecoveryRecord {
+    return try FfiConverterTypeRecoveryRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoveryRecord_lower(_ value: RecoveryRecord) -> RustBuffer {
+    return FfiConverterTypeRecoveryRecord.lower(value)
+}
+
+
+public struct RecoverySaveRequest {
+    public var root: String
+    public var archivePath: String
+    public var archiveDisplayName: String
+    public var selectedPaths: [String]
+    public var stagingRoot: String
+    public var destinationLabel: String
+    public var message: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(root: String, archivePath: String, archiveDisplayName: String, selectedPaths: [String], stagingRoot: String, destinationLabel: String, message: String) {
+        self.root = root
+        self.archivePath = archivePath
+        self.archiveDisplayName = archiveDisplayName
+        self.selectedPaths = selectedPaths
+        self.stagingRoot = stagingRoot
+        self.destinationLabel = destinationLabel
+        self.message = message
+    }
+}
+
+#if compiler(>=6)
+extension RecoverySaveRequest: Sendable {}
+#endif
+
+
+extension RecoverySaveRequest: Equatable, Hashable {
+    public static func ==(lhs: RecoverySaveRequest, rhs: RecoverySaveRequest) -> Bool {
+        if lhs.root != rhs.root {
+            return false
+        }
+        if lhs.archivePath != rhs.archivePath {
+            return false
+        }
+        if lhs.archiveDisplayName != rhs.archiveDisplayName {
+            return false
+        }
+        if lhs.selectedPaths != rhs.selectedPaths {
+            return false
+        }
+        if lhs.stagingRoot != rhs.stagingRoot {
+            return false
+        }
+        if lhs.destinationLabel != rhs.destinationLabel {
+            return false
+        }
+        if lhs.message != rhs.message {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(root)
+        hasher.combine(archivePath)
+        hasher.combine(archiveDisplayName)
+        hasher.combine(selectedPaths)
+        hasher.combine(stagingRoot)
+        hasher.combine(destinationLabel)
+        hasher.combine(message)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRecoverySaveRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecoverySaveRequest {
+        return
+            try RecoverySaveRequest(
+                root: FfiConverterString.read(from: &buf), 
+                archivePath: FfiConverterString.read(from: &buf), 
+                archiveDisplayName: FfiConverterString.read(from: &buf), 
+                selectedPaths: FfiConverterSequenceString.read(from: &buf), 
+                stagingRoot: FfiConverterString.read(from: &buf), 
+                destinationLabel: FfiConverterString.read(from: &buf), 
+                message: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RecoverySaveRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.root, into: &buf)
+        FfiConverterString.write(value.archivePath, into: &buf)
+        FfiConverterString.write(value.archiveDisplayName, into: &buf)
+        FfiConverterSequenceString.write(value.selectedPaths, into: &buf)
+        FfiConverterString.write(value.stagingRoot, into: &buf)
+        FfiConverterString.write(value.destinationLabel, into: &buf)
+        FfiConverterString.write(value.message, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoverySaveRequest_lift(_ buf: RustBuffer) throws -> RecoverySaveRequest {
+    return try FfiConverterTypeRecoverySaveRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRecoverySaveRequest_lower(_ value: RecoverySaveRequest) -> RustBuffer {
+    return FfiConverterTypeRecoverySaveRequest.lower(value)
+}
+
+
+public struct RespondToTransferRequest {
+    public var requestId: String
+    public var decision: TransferDecisionKind
+    public var fileIds: [String]
+    public var reason: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(requestId: String, decision: TransferDecisionKind, fileIds: [String], reason: String?) {
+        self.requestId = requestId
+        self.decision = decision
+        self.fileIds = fileIds
+        self.reason = reason
+    }
+}
+
+#if compiler(>=6)
+extension RespondToTransferRequest: Sendable {}
+#endif
+
+
+extension RespondToTransferRequest: Equatable, Hashable {
+    public static func ==(lhs: RespondToTransferRequest, rhs: RespondToTransferRequest) -> Bool {
+        if lhs.requestId != rhs.requestId {
+            return false
+        }
+        if lhs.decision != rhs.decision {
+            return false
+        }
+        if lhs.fileIds != rhs.fileIds {
+            return false
+        }
+        if lhs.reason != rhs.reason {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(requestId)
+        hasher.combine(decision)
+        hasher.combine(fileIds)
+        hasher.combine(reason)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRespondToTransferRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RespondToTransferRequest {
+        return
+            try RespondToTransferRequest(
+                requestId: FfiConverterString.read(from: &buf), 
+                decision: FfiConverterTypeTransferDecisionKind.read(from: &buf), 
+                fileIds: FfiConverterSequenceString.read(from: &buf), 
+                reason: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RespondToTransferRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.requestId, into: &buf)
+        FfiConverterTypeTransferDecisionKind.write(value.decision, into: &buf)
+        FfiConverterSequenceString.write(value.fileIds, into: &buf)
+        FfiConverterOptionString.write(value.reason, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRespondToTransferRequest_lift(_ buf: RustBuffer) throws -> RespondToTransferRequest {
+    return try FfiConverterTypeRespondToTransferRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRespondToTransferRequest_lower(_ value: RespondToTransferRequest) -> RustBuffer {
+    return FfiConverterTypeRespondToTransferRequest.lower(value)
+}
+
+
+public struct SendFileRequest {
+    public var sendId: String
+    public var alias: String
+    public var selfPort: UInt16
+    public var https: Bool
+    public var target: DeviceInfoDto
+    public var filePath: String
+    public var pin: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(sendId: String, alias: String, selfPort: UInt16, https: Bool, target: DeviceInfoDto, filePath: String, pin: String?) {
+        self.sendId = sendId
+        self.alias = alias
+        self.selfPort = selfPort
+        self.https = https
+        self.target = target
+        self.filePath = filePath
+        self.pin = pin
+    }
+}
+
+#if compiler(>=6)
+extension SendFileRequest: Sendable {}
+#endif
+
+
+extension SendFileRequest: Equatable, Hashable {
+    public static func ==(lhs: SendFileRequest, rhs: SendFileRequest) -> Bool {
+        if lhs.sendId != rhs.sendId {
+            return false
+        }
+        if lhs.alias != rhs.alias {
+            return false
+        }
+        if lhs.selfPort != rhs.selfPort {
+            return false
+        }
+        if lhs.https != rhs.https {
+            return false
+        }
+        if lhs.target != rhs.target {
+            return false
+        }
+        if lhs.filePath != rhs.filePath {
+            return false
+        }
+        if lhs.pin != rhs.pin {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(sendId)
+        hasher.combine(alias)
+        hasher.combine(selfPort)
+        hasher.combine(https)
+        hasher.combine(target)
+        hasher.combine(filePath)
+        hasher.combine(pin)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSendFileRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SendFileRequest {
+        return
+            try SendFileRequest(
+                sendId: FfiConverterString.read(from: &buf), 
+                alias: FfiConverterString.read(from: &buf), 
+                selfPort: FfiConverterUInt16.read(from: &buf), 
+                https: FfiConverterBool.read(from: &buf), 
+                target: FfiConverterTypeDeviceInfoDto.read(from: &buf), 
+                filePath: FfiConverterString.read(from: &buf), 
+                pin: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SendFileRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.sendId, into: &buf)
+        FfiConverterString.write(value.alias, into: &buf)
+        FfiConverterUInt16.write(value.selfPort, into: &buf)
+        FfiConverterBool.write(value.https, into: &buf)
+        FfiConverterTypeDeviceInfoDto.write(value.target, into: &buf)
+        FfiConverterString.write(value.filePath, into: &buf)
+        FfiConverterOptionString.write(value.pin, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendFileRequest_lift(_ buf: RustBuffer) throws -> SendFileRequest {
+    return try FfiConverterTypeSendFileRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendFileRequest_lower(_ value: SendFileRequest) -> RustBuffer {
+    return FfiConverterTypeSendFileRequest.lower(value)
+}
+
+
+public struct SendFileResult {
+    public var sessionId: String
+    public var fileId: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(sessionId: String, fileId: String) {
+        self.sessionId = sessionId
+        self.fileId = fileId
+    }
+}
+
+#if compiler(>=6)
+extension SendFileResult: Sendable {}
+#endif
+
+
+extension SendFileResult: Equatable, Hashable {
+    public static func ==(lhs: SendFileResult, rhs: SendFileResult) -> Bool {
+        if lhs.sessionId != rhs.sessionId {
+            return false
+        }
+        if lhs.fileId != rhs.fileId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(sessionId)
+        hasher.combine(fileId)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSendFileResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SendFileResult {
+        return
+            try SendFileResult(
+                sessionId: FfiConverterString.read(from: &buf), 
+                fileId: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SendFileResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.sessionId, into: &buf)
+        FfiConverterString.write(value.fileId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendFileResult_lift(_ buf: RustBuffer) throws -> SendFileResult {
+    return try FfiConverterTypeSendFileResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendFileResult_lower(_ value: SendFileResult) -> RustBuffer {
+    return FfiConverterTypeSendFileResult.lower(value)
 }
 
 
@@ -4087,6 +4925,108 @@ public func FfiConverterTypeStartJobResult_lower(_ value: StartJobResult) -> Rus
 }
 
 
+public struct StartReceiverRequest {
+    public var alias: String
+    public var port: UInt16
+    public var https: Bool
+    public var saveDir: String
+    public var autoAccept: Bool
+    public var pin: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(alias: String, port: UInt16, https: Bool, saveDir: String, autoAccept: Bool, pin: String?) {
+        self.alias = alias
+        self.port = port
+        self.https = https
+        self.saveDir = saveDir
+        self.autoAccept = autoAccept
+        self.pin = pin
+    }
+}
+
+#if compiler(>=6)
+extension StartReceiverRequest: Sendable {}
+#endif
+
+
+extension StartReceiverRequest: Equatable, Hashable {
+    public static func ==(lhs: StartReceiverRequest, rhs: StartReceiverRequest) -> Bool {
+        if lhs.alias != rhs.alias {
+            return false
+        }
+        if lhs.port != rhs.port {
+            return false
+        }
+        if lhs.https != rhs.https {
+            return false
+        }
+        if lhs.saveDir != rhs.saveDir {
+            return false
+        }
+        if lhs.autoAccept != rhs.autoAccept {
+            return false
+        }
+        if lhs.pin != rhs.pin {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(alias)
+        hasher.combine(port)
+        hasher.combine(https)
+        hasher.combine(saveDir)
+        hasher.combine(autoAccept)
+        hasher.combine(pin)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStartReceiverRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StartReceiverRequest {
+        return
+            try StartReceiverRequest(
+                alias: FfiConverterString.read(from: &buf), 
+                port: FfiConverterUInt16.read(from: &buf), 
+                https: FfiConverterBool.read(from: &buf), 
+                saveDir: FfiConverterString.read(from: &buf), 
+                autoAccept: FfiConverterBool.read(from: &buf), 
+                pin: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: StartReceiverRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.alias, into: &buf)
+        FfiConverterUInt16.write(value.port, into: &buf)
+        FfiConverterBool.write(value.https, into: &buf)
+        FfiConverterString.write(value.saveDir, into: &buf)
+        FfiConverterBool.write(value.autoAccept, into: &buf)
+        FfiConverterOptionString.write(value.pin, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStartReceiverRequest_lift(_ buf: RustBuffer) throws -> StartReceiverRequest {
+    return try FfiConverterTypeStartReceiverRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStartReceiverRequest_lower(_ value: StartReceiverRequest) -> RustBuffer {
+    return FfiConverterTypeStartReceiverRequest.lower(value)
+}
+
+
 public struct TestArchiveRequest {
     public var archivePath: String
     public var password: String?
@@ -4288,6 +5228,1098 @@ public func FfiConverterTypeTestArchiveResult_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeTestArchiveResult_lower(_ value: TestArchiveResult) -> RustBuffer {
     return FfiConverterTypeTestArchiveResult.lower(value)
+}
+
+
+public struct TransferFile {
+    public var id: String
+    public var fileName: String
+    public var size: UInt64
+    public var fileType: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, fileName: String, size: UInt64, fileType: String) {
+        self.id = id
+        self.fileName = fileName
+        self.size = size
+        self.fileType = fileType
+    }
+}
+
+#if compiler(>=6)
+extension TransferFile: Sendable {}
+#endif
+
+
+extension TransferFile: Equatable, Hashable {
+    public static func ==(lhs: TransferFile, rhs: TransferFile) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.fileName != rhs.fileName {
+            return false
+        }
+        if lhs.size != rhs.size {
+            return false
+        }
+        if lhs.fileType != rhs.fileType {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(fileName)
+        hasher.combine(size)
+        hasher.combine(fileType)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTransferFile: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TransferFile {
+        return
+            try TransferFile(
+                id: FfiConverterString.read(from: &buf), 
+                fileName: FfiConverterString.read(from: &buf), 
+                size: FfiConverterUInt64.read(from: &buf), 
+                fileType: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TransferFile, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.fileName, into: &buf)
+        FfiConverterUInt64.write(value.size, into: &buf)
+        FfiConverterString.write(value.fileType, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTransferFile_lift(_ buf: RustBuffer) throws -> TransferFile {
+    return try FfiConverterTypeTransferFile.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTransferFile_lower(_ value: TransferFile) -> RustBuffer {
+    return FfiConverterTypeTransferFile.lower(value)
+}
+
+
+public struct TzapAuthCallbackRequest {
+    public var stateDir: String
+    public var accountKey: String
+    public var clientId: String
+    public var redirectUri: String
+    public var authBaseUrl: String
+    public var callbackUrl: String
+    public var state: String
+    public var handoffCode: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(stateDir: String, accountKey: String, clientId: String, redirectUri: String, authBaseUrl: String, callbackUrl: String, state: String, handoffCode: String) {
+        self.stateDir = stateDir
+        self.accountKey = accountKey
+        self.clientId = clientId
+        self.redirectUri = redirectUri
+        self.authBaseUrl = authBaseUrl
+        self.callbackUrl = callbackUrl
+        self.state = state
+        self.handoffCode = handoffCode
+    }
+}
+
+#if compiler(>=6)
+extension TzapAuthCallbackRequest: Sendable {}
+#endif
+
+
+extension TzapAuthCallbackRequest: Equatable, Hashable {
+    public static func ==(lhs: TzapAuthCallbackRequest, rhs: TzapAuthCallbackRequest) -> Bool {
+        if lhs.stateDir != rhs.stateDir {
+            return false
+        }
+        if lhs.accountKey != rhs.accountKey {
+            return false
+        }
+        if lhs.clientId != rhs.clientId {
+            return false
+        }
+        if lhs.redirectUri != rhs.redirectUri {
+            return false
+        }
+        if lhs.authBaseUrl != rhs.authBaseUrl {
+            return false
+        }
+        if lhs.callbackUrl != rhs.callbackUrl {
+            return false
+        }
+        if lhs.state != rhs.state {
+            return false
+        }
+        if lhs.handoffCode != rhs.handoffCode {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(stateDir)
+        hasher.combine(accountKey)
+        hasher.combine(clientId)
+        hasher.combine(redirectUri)
+        hasher.combine(authBaseUrl)
+        hasher.combine(callbackUrl)
+        hasher.combine(state)
+        hasher.combine(handoffCode)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapAuthCallbackRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapAuthCallbackRequest {
+        return
+            try TzapAuthCallbackRequest(
+                stateDir: FfiConverterString.read(from: &buf), 
+                accountKey: FfiConverterString.read(from: &buf), 
+                clientId: FfiConverterString.read(from: &buf), 
+                redirectUri: FfiConverterString.read(from: &buf), 
+                authBaseUrl: FfiConverterString.read(from: &buf), 
+                callbackUrl: FfiConverterString.read(from: &buf), 
+                state: FfiConverterString.read(from: &buf), 
+                handoffCode: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapAuthCallbackRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.stateDir, into: &buf)
+        FfiConverterString.write(value.accountKey, into: &buf)
+        FfiConverterString.write(value.clientId, into: &buf)
+        FfiConverterString.write(value.redirectUri, into: &buf)
+        FfiConverterString.write(value.authBaseUrl, into: &buf)
+        FfiConverterString.write(value.callbackUrl, into: &buf)
+        FfiConverterString.write(value.state, into: &buf)
+        FfiConverterString.write(value.handoffCode, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthCallbackRequest_lift(_ buf: RustBuffer) throws -> TzapAuthCallbackRequest {
+    return try FfiConverterTypeTzapAuthCallbackRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthCallbackRequest_lower(_ value: TzapAuthCallbackRequest) -> RustBuffer {
+    return FfiConverterTypeTzapAuthCallbackRequest.lower(value)
+}
+
+
+public struct TzapAuthLoginRequest {
+    public var stateDir: String
+    public var accountKey: String
+    public var clientId: String
+    public var redirectUri: String
+    public var authBaseUrl: String
+    public var accountBaseUrl: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(stateDir: String, accountKey: String, clientId: String, redirectUri: String, authBaseUrl: String, accountBaseUrl: String) {
+        self.stateDir = stateDir
+        self.accountKey = accountKey
+        self.clientId = clientId
+        self.redirectUri = redirectUri
+        self.authBaseUrl = authBaseUrl
+        self.accountBaseUrl = accountBaseUrl
+    }
+}
+
+#if compiler(>=6)
+extension TzapAuthLoginRequest: Sendable {}
+#endif
+
+
+extension TzapAuthLoginRequest: Equatable, Hashable {
+    public static func ==(lhs: TzapAuthLoginRequest, rhs: TzapAuthLoginRequest) -> Bool {
+        if lhs.stateDir != rhs.stateDir {
+            return false
+        }
+        if lhs.accountKey != rhs.accountKey {
+            return false
+        }
+        if lhs.clientId != rhs.clientId {
+            return false
+        }
+        if lhs.redirectUri != rhs.redirectUri {
+            return false
+        }
+        if lhs.authBaseUrl != rhs.authBaseUrl {
+            return false
+        }
+        if lhs.accountBaseUrl != rhs.accountBaseUrl {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(stateDir)
+        hasher.combine(accountKey)
+        hasher.combine(clientId)
+        hasher.combine(redirectUri)
+        hasher.combine(authBaseUrl)
+        hasher.combine(accountBaseUrl)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapAuthLoginRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapAuthLoginRequest {
+        return
+            try TzapAuthLoginRequest(
+                stateDir: FfiConverterString.read(from: &buf), 
+                accountKey: FfiConverterString.read(from: &buf), 
+                clientId: FfiConverterString.read(from: &buf), 
+                redirectUri: FfiConverterString.read(from: &buf), 
+                authBaseUrl: FfiConverterString.read(from: &buf), 
+                accountBaseUrl: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapAuthLoginRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.stateDir, into: &buf)
+        FfiConverterString.write(value.accountKey, into: &buf)
+        FfiConverterString.write(value.clientId, into: &buf)
+        FfiConverterString.write(value.redirectUri, into: &buf)
+        FfiConverterString.write(value.authBaseUrl, into: &buf)
+        FfiConverterString.write(value.accountBaseUrl, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthLoginRequest_lift(_ buf: RustBuffer) throws -> TzapAuthLoginRequest {
+    return try FfiConverterTypeTzapAuthLoginRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthLoginRequest_lower(_ value: TzapAuthLoginRequest) -> RustBuffer {
+    return FfiConverterTypeTzapAuthLoginRequest.lower(value)
+}
+
+
+public struct TzapAuthLoginResult {
+    public var launchUrl: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(launchUrl: String) {
+        self.launchUrl = launchUrl
+    }
+}
+
+#if compiler(>=6)
+extension TzapAuthLoginResult: Sendable {}
+#endif
+
+
+extension TzapAuthLoginResult: Equatable, Hashable {
+    public static func ==(lhs: TzapAuthLoginResult, rhs: TzapAuthLoginResult) -> Bool {
+        if lhs.launchUrl != rhs.launchUrl {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(launchUrl)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapAuthLoginResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapAuthLoginResult {
+        return
+            try TzapAuthLoginResult(
+                launchUrl: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapAuthLoginResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.launchUrl, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthLoginResult_lift(_ buf: RustBuffer) throws -> TzapAuthLoginResult {
+    return try FfiConverterTypeTzapAuthLoginResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthLoginResult_lower(_ value: TzapAuthLoginResult) -> RustBuffer {
+    return FfiConverterTypeTzapAuthLoginResult.lower(value)
+}
+
+
+public struct TzapAuthStatusRequest {
+    public var stateDir: String
+    public var accountKey: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(stateDir: String, accountKey: String) {
+        self.stateDir = stateDir
+        self.accountKey = accountKey
+    }
+}
+
+#if compiler(>=6)
+extension TzapAuthStatusRequest: Sendable {}
+#endif
+
+
+extension TzapAuthStatusRequest: Equatable, Hashable {
+    public static func ==(lhs: TzapAuthStatusRequest, rhs: TzapAuthStatusRequest) -> Bool {
+        if lhs.stateDir != rhs.stateDir {
+            return false
+        }
+        if lhs.accountKey != rhs.accountKey {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(stateDir)
+        hasher.combine(accountKey)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapAuthStatusRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapAuthStatusRequest {
+        return
+            try TzapAuthStatusRequest(
+                stateDir: FfiConverterString.read(from: &buf), 
+                accountKey: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapAuthStatusRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.stateDir, into: &buf)
+        FfiConverterString.write(value.accountKey, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthStatusRequest_lift(_ buf: RustBuffer) throws -> TzapAuthStatusRequest {
+    return try FfiConverterTypeTzapAuthStatusRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthStatusRequest_lower(_ value: TzapAuthStatusRequest) -> RustBuffer {
+    return FfiConverterTypeTzapAuthStatusRequest.lower(value)
+}
+
+
+public struct TzapAuthStatusResult {
+    public var authenticated: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(authenticated: Bool) {
+        self.authenticated = authenticated
+    }
+}
+
+#if compiler(>=6)
+extension TzapAuthStatusResult: Sendable {}
+#endif
+
+
+extension TzapAuthStatusResult: Equatable, Hashable {
+    public static func ==(lhs: TzapAuthStatusResult, rhs: TzapAuthStatusResult) -> Bool {
+        if lhs.authenticated != rhs.authenticated {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(authenticated)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapAuthStatusResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapAuthStatusResult {
+        return
+            try TzapAuthStatusResult(
+                authenticated: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapAuthStatusResult, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.authenticated, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthStatusResult_lift(_ buf: RustBuffer) throws -> TzapAuthStatusResult {
+    return try FfiConverterTypeTzapAuthStatusResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapAuthStatusResult_lower(_ value: TzapAuthStatusResult) -> RustBuffer {
+    return FfiConverterTypeTzapAuthStatusResult.lower(value)
+}
+
+
+public struct TzapCertEnrollRequest {
+    public var stateDir: String
+    public var accountKey: String
+    public var serviceBaseUrl: String
+    public var customTrustRootCertPaths: [String]
+    public var requestedValiditySeconds: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(stateDir: String, accountKey: String, serviceBaseUrl: String, customTrustRootCertPaths: [String], requestedValiditySeconds: UInt64) {
+        self.stateDir = stateDir
+        self.accountKey = accountKey
+        self.serviceBaseUrl = serviceBaseUrl
+        self.customTrustRootCertPaths = customTrustRootCertPaths
+        self.requestedValiditySeconds = requestedValiditySeconds
+    }
+}
+
+#if compiler(>=6)
+extension TzapCertEnrollRequest: Sendable {}
+#endif
+
+
+extension TzapCertEnrollRequest: Equatable, Hashable {
+    public static func ==(lhs: TzapCertEnrollRequest, rhs: TzapCertEnrollRequest) -> Bool {
+        if lhs.stateDir != rhs.stateDir {
+            return false
+        }
+        if lhs.accountKey != rhs.accountKey {
+            return false
+        }
+        if lhs.serviceBaseUrl != rhs.serviceBaseUrl {
+            return false
+        }
+        if lhs.customTrustRootCertPaths != rhs.customTrustRootCertPaths {
+            return false
+        }
+        if lhs.requestedValiditySeconds != rhs.requestedValiditySeconds {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(stateDir)
+        hasher.combine(accountKey)
+        hasher.combine(serviceBaseUrl)
+        hasher.combine(customTrustRootCertPaths)
+        hasher.combine(requestedValiditySeconds)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapCertEnrollRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapCertEnrollRequest {
+        return
+            try TzapCertEnrollRequest(
+                stateDir: FfiConverterString.read(from: &buf), 
+                accountKey: FfiConverterString.read(from: &buf), 
+                serviceBaseUrl: FfiConverterString.read(from: &buf), 
+                customTrustRootCertPaths: FfiConverterSequenceString.read(from: &buf), 
+                requestedValiditySeconds: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapCertEnrollRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.stateDir, into: &buf)
+        FfiConverterString.write(value.accountKey, into: &buf)
+        FfiConverterString.write(value.serviceBaseUrl, into: &buf)
+        FfiConverterSequenceString.write(value.customTrustRootCertPaths, into: &buf)
+        FfiConverterUInt64.write(value.requestedValiditySeconds, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapCertEnrollRequest_lift(_ buf: RustBuffer) throws -> TzapCertEnrollRequest {
+    return try FfiConverterTypeTzapCertEnrollRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapCertEnrollRequest_lower(_ value: TzapCertEnrollRequest) -> RustBuffer {
+    return FfiConverterTypeTzapCertEnrollRequest.lower(value)
+}
+
+
+public struct TzapCertificateInventoryRequest {
+    public var stateDir: String
+    public var accountKey: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(stateDir: String, accountKey: String) {
+        self.stateDir = stateDir
+        self.accountKey = accountKey
+    }
+}
+
+#if compiler(>=6)
+extension TzapCertificateInventoryRequest: Sendable {}
+#endif
+
+
+extension TzapCertificateInventoryRequest: Equatable, Hashable {
+    public static func ==(lhs: TzapCertificateInventoryRequest, rhs: TzapCertificateInventoryRequest) -> Bool {
+        if lhs.stateDir != rhs.stateDir {
+            return false
+        }
+        if lhs.accountKey != rhs.accountKey {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(stateDir)
+        hasher.combine(accountKey)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapCertificateInventoryRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapCertificateInventoryRequest {
+        return
+            try TzapCertificateInventoryRequest(
+                stateDir: FfiConverterString.read(from: &buf), 
+                accountKey: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapCertificateInventoryRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.stateDir, into: &buf)
+        FfiConverterString.write(value.accountKey, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapCertificateInventoryRequest_lift(_ buf: RustBuffer) throws -> TzapCertificateInventoryRequest {
+    return try FfiConverterTypeTzapCertificateInventoryRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapCertificateInventoryRequest_lower(_ value: TzapCertificateInventoryRequest) -> RustBuffer {
+    return FfiConverterTypeTzapCertificateInventoryRequest.lower(value)
+}
+
+
+public struct TzapCertificateInventoryResult {
+    public var certificateIds: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(certificateIds: [String]) {
+        self.certificateIds = certificateIds
+    }
+}
+
+#if compiler(>=6)
+extension TzapCertificateInventoryResult: Sendable {}
+#endif
+
+
+extension TzapCertificateInventoryResult: Equatable, Hashable {
+    public static func ==(lhs: TzapCertificateInventoryResult, rhs: TzapCertificateInventoryResult) -> Bool {
+        if lhs.certificateIds != rhs.certificateIds {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(certificateIds)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapCertificateInventoryResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapCertificateInventoryResult {
+        return
+            try TzapCertificateInventoryResult(
+                certificateIds: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapCertificateInventoryResult, into buf: inout [UInt8]) {
+        FfiConverterSequenceString.write(value.certificateIds, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapCertificateInventoryResult_lift(_ buf: RustBuffer) throws -> TzapCertificateInventoryResult {
+    return try FfiConverterTypeTzapCertificateInventoryResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapCertificateInventoryResult_lower(_ value: TzapCertificateInventoryResult) -> RustBuffer {
+    return FfiConverterTypeTzapCertificateInventoryResult.lower(value)
+}
+
+
+public struct TzapDocumentPayload {
+    public var tzapPayloadVersion: UInt32
+    public var title: String
+    public var body: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(tzapPayloadVersion: UInt32, title: String, body: String) {
+        self.tzapPayloadVersion = tzapPayloadVersion
+        self.title = title
+        self.body = body
+    }
+}
+
+#if compiler(>=6)
+extension TzapDocumentPayload: Sendable {}
+#endif
+
+
+extension TzapDocumentPayload: Equatable, Hashable {
+    public static func ==(lhs: TzapDocumentPayload, rhs: TzapDocumentPayload) -> Bool {
+        if lhs.tzapPayloadVersion != rhs.tzapPayloadVersion {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.body != rhs.body {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(tzapPayloadVersion)
+        hasher.combine(title)
+        hasher.combine(body)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapDocumentPayload: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapDocumentPayload {
+        return
+            try TzapDocumentPayload(
+                tzapPayloadVersion: FfiConverterUInt32.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                body: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapDocumentPayload, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.tzapPayloadVersion, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterString.write(value.body, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentPayload_lift(_ buf: RustBuffer) throws -> TzapDocumentPayload {
+    return try FfiConverterTypeTzapDocumentPayload.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentPayload_lower(_ value: TzapDocumentPayload) -> RustBuffer {
+    return FfiConverterTypeTzapDocumentPayload.lower(value)
+}
+
+
+public struct TzapDocumentSignRequest {
+    public var stateDir: String
+    public var accountKey: String
+    public var certificateId: String
+    public var payload: TzapDocumentPayload
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(stateDir: String, accountKey: String, certificateId: String, payload: TzapDocumentPayload) {
+        self.stateDir = stateDir
+        self.accountKey = accountKey
+        self.certificateId = certificateId
+        self.payload = payload
+    }
+}
+
+#if compiler(>=6)
+extension TzapDocumentSignRequest: Sendable {}
+#endif
+
+
+extension TzapDocumentSignRequest: Equatable, Hashable {
+    public static func ==(lhs: TzapDocumentSignRequest, rhs: TzapDocumentSignRequest) -> Bool {
+        if lhs.stateDir != rhs.stateDir {
+            return false
+        }
+        if lhs.accountKey != rhs.accountKey {
+            return false
+        }
+        if lhs.certificateId != rhs.certificateId {
+            return false
+        }
+        if lhs.payload != rhs.payload {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(stateDir)
+        hasher.combine(accountKey)
+        hasher.combine(certificateId)
+        hasher.combine(payload)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapDocumentSignRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapDocumentSignRequest {
+        return
+            try TzapDocumentSignRequest(
+                stateDir: FfiConverterString.read(from: &buf), 
+                accountKey: FfiConverterString.read(from: &buf), 
+                certificateId: FfiConverterString.read(from: &buf), 
+                payload: FfiConverterTypeTzapDocumentPayload.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapDocumentSignRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.stateDir, into: &buf)
+        FfiConverterString.write(value.accountKey, into: &buf)
+        FfiConverterString.write(value.certificateId, into: &buf)
+        FfiConverterTypeTzapDocumentPayload.write(value.payload, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentSignRequest_lift(_ buf: RustBuffer) throws -> TzapDocumentSignRequest {
+    return try FfiConverterTypeTzapDocumentSignRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentSignRequest_lower(_ value: TzapDocumentSignRequest) -> RustBuffer {
+    return FfiConverterTypeTzapDocumentSignRequest.lower(value)
+}
+
+
+public struct TzapDocumentSignResult {
+    public var envelopeJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(envelopeJson: String) {
+        self.envelopeJson = envelopeJson
+    }
+}
+
+#if compiler(>=6)
+extension TzapDocumentSignResult: Sendable {}
+#endif
+
+
+extension TzapDocumentSignResult: Equatable, Hashable {
+    public static func ==(lhs: TzapDocumentSignResult, rhs: TzapDocumentSignResult) -> Bool {
+        if lhs.envelopeJson != rhs.envelopeJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(envelopeJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapDocumentSignResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapDocumentSignResult {
+        return
+            try TzapDocumentSignResult(
+                envelopeJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapDocumentSignResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.envelopeJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentSignResult_lift(_ buf: RustBuffer) throws -> TzapDocumentSignResult {
+    return try FfiConverterTypeTzapDocumentSignResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentSignResult_lower(_ value: TzapDocumentSignResult) -> RustBuffer {
+    return FfiConverterTypeTzapDocumentSignResult.lower(value)
+}
+
+
+public struct TzapDocumentVerifyRequest {
+    public var envelopeJson: String
+    public var customTrustRootCertPaths: [String]
+    public var verifierTimeUnixSeconds: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(envelopeJson: String, customTrustRootCertPaths: [String], verifierTimeUnixSeconds: UInt64) {
+        self.envelopeJson = envelopeJson
+        self.customTrustRootCertPaths = customTrustRootCertPaths
+        self.verifierTimeUnixSeconds = verifierTimeUnixSeconds
+    }
+}
+
+#if compiler(>=6)
+extension TzapDocumentVerifyRequest: Sendable {}
+#endif
+
+
+extension TzapDocumentVerifyRequest: Equatable, Hashable {
+    public static func ==(lhs: TzapDocumentVerifyRequest, rhs: TzapDocumentVerifyRequest) -> Bool {
+        if lhs.envelopeJson != rhs.envelopeJson {
+            return false
+        }
+        if lhs.customTrustRootCertPaths != rhs.customTrustRootCertPaths {
+            return false
+        }
+        if lhs.verifierTimeUnixSeconds != rhs.verifierTimeUnixSeconds {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(envelopeJson)
+        hasher.combine(customTrustRootCertPaths)
+        hasher.combine(verifierTimeUnixSeconds)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapDocumentVerifyRequest: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapDocumentVerifyRequest {
+        return
+            try TzapDocumentVerifyRequest(
+                envelopeJson: FfiConverterString.read(from: &buf), 
+                customTrustRootCertPaths: FfiConverterSequenceString.read(from: &buf), 
+                verifierTimeUnixSeconds: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapDocumentVerifyRequest, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.envelopeJson, into: &buf)
+        FfiConverterSequenceString.write(value.customTrustRootCertPaths, into: &buf)
+        FfiConverterUInt64.write(value.verifierTimeUnixSeconds, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentVerifyRequest_lift(_ buf: RustBuffer) throws -> TzapDocumentVerifyRequest {
+    return try FfiConverterTypeTzapDocumentVerifyRequest.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentVerifyRequest_lower(_ value: TzapDocumentVerifyRequest) -> RustBuffer {
+    return FfiConverterTypeTzapDocumentVerifyRequest.lower(value)
+}
+
+
+public struct TzapDocumentVerifyResult {
+    public var state: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(state: String) {
+        self.state = state
+    }
+}
+
+#if compiler(>=6)
+extension TzapDocumentVerifyResult: Sendable {}
+#endif
+
+
+extension TzapDocumentVerifyResult: Equatable, Hashable {
+    public static func ==(lhs: TzapDocumentVerifyResult, rhs: TzapDocumentVerifyResult) -> Bool {
+        if lhs.state != rhs.state {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(state)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTzapDocumentVerifyResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TzapDocumentVerifyResult {
+        return
+            try TzapDocumentVerifyResult(
+                state: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TzapDocumentVerifyResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.state, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentVerifyResult_lift(_ buf: RustBuffer) throws -> TzapDocumentVerifyResult {
+    return try FfiConverterTypeTzapDocumentVerifyResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTzapDocumentVerifyResult_lower(_ value: TzapDocumentVerifyResult) -> RustBuffer {
+    return FfiConverterTypeTzapDocumentVerifyResult.lower(value)
 }
 
 // Note that we don't yet support `indirect` for enums.
@@ -5417,6 +7449,235 @@ extension MobileJobStatus: Equatable, Hashable {}
 
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum QueuedEvent {
+    
+    case peerRegistered(device: DeviceInfoDto
+    )
+    case transferRequest(requestId: String, sender: DeviceInfoDto, files: [TransferFile]
+    )
+    case textReceived(sessionId: String, text: String, senderAlias: String
+    )
+    case fileReceiveProgress(sessionId: String, fileId: String, fileName: String, senderAlias: String, bytesReceived: UInt64, totalBytes: UInt64, fileCount: UInt64
+    )
+    case fileReceived(sessionId: String, fileId: String, fileName: String, path: String
+    )
+    case sessionDone(sessionId: String
+    )
+    case fileSendProgress(sendId: String, sessionId: String, fileId: String, fileName: String, bytesSent: UInt64, totalBytes: UInt64, rateBytesPerSecond: Double
+    )
+}
+
+
+#if compiler(>=6)
+extension QueuedEvent: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeQueuedEvent: FfiConverterRustBuffer {
+    typealias SwiftType = QueuedEvent
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> QueuedEvent {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .peerRegistered(device: try FfiConverterTypeDeviceInfoDto.read(from: &buf)
+        )
+        
+        case 2: return .transferRequest(requestId: try FfiConverterString.read(from: &buf), sender: try FfiConverterTypeDeviceInfoDto.read(from: &buf), files: try FfiConverterSequenceTypeTransferFile.read(from: &buf)
+        )
+        
+        case 3: return .textReceived(sessionId: try FfiConverterString.read(from: &buf), text: try FfiConverterString.read(from: &buf), senderAlias: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .fileReceiveProgress(sessionId: try FfiConverterString.read(from: &buf), fileId: try FfiConverterString.read(from: &buf), fileName: try FfiConverterString.read(from: &buf), senderAlias: try FfiConverterString.read(from: &buf), bytesReceived: try FfiConverterUInt64.read(from: &buf), totalBytes: try FfiConverterUInt64.read(from: &buf), fileCount: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        case 5: return .fileReceived(sessionId: try FfiConverterString.read(from: &buf), fileId: try FfiConverterString.read(from: &buf), fileName: try FfiConverterString.read(from: &buf), path: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 6: return .sessionDone(sessionId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 7: return .fileSendProgress(sendId: try FfiConverterString.read(from: &buf), sessionId: try FfiConverterString.read(from: &buf), fileId: try FfiConverterString.read(from: &buf), fileName: try FfiConverterString.read(from: &buf), bytesSent: try FfiConverterUInt64.read(from: &buf), totalBytes: try FfiConverterUInt64.read(from: &buf), rateBytesPerSecond: try FfiConverterDouble.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: QueuedEvent, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .peerRegistered(device):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeDeviceInfoDto.write(device, into: &buf)
+            
+        
+        case let .transferRequest(requestId,sender,files):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(requestId, into: &buf)
+            FfiConverterTypeDeviceInfoDto.write(sender, into: &buf)
+            FfiConverterSequenceTypeTransferFile.write(files, into: &buf)
+            
+        
+        case let .textReceived(sessionId,text,senderAlias):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(sessionId, into: &buf)
+            FfiConverterString.write(text, into: &buf)
+            FfiConverterString.write(senderAlias, into: &buf)
+            
+        
+        case let .fileReceiveProgress(sessionId,fileId,fileName,senderAlias,bytesReceived,totalBytes,fileCount):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(sessionId, into: &buf)
+            FfiConverterString.write(fileId, into: &buf)
+            FfiConverterString.write(fileName, into: &buf)
+            FfiConverterString.write(senderAlias, into: &buf)
+            FfiConverterUInt64.write(bytesReceived, into: &buf)
+            FfiConverterUInt64.write(totalBytes, into: &buf)
+            FfiConverterUInt64.write(fileCount, into: &buf)
+            
+        
+        case let .fileReceived(sessionId,fileId,fileName,path):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(sessionId, into: &buf)
+            FfiConverterString.write(fileId, into: &buf)
+            FfiConverterString.write(fileName, into: &buf)
+            FfiConverterString.write(path, into: &buf)
+            
+        
+        case let .sessionDone(sessionId):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(sessionId, into: &buf)
+            
+        
+        case let .fileSendProgress(sendId,sessionId,fileId,fileName,bytesSent,totalBytes,rateBytesPerSecond):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(sendId, into: &buf)
+            FfiConverterString.write(sessionId, into: &buf)
+            FfiConverterString.write(fileId, into: &buf)
+            FfiConverterString.write(fileName, into: &buf)
+            FfiConverterUInt64.write(bytesSent, into: &buf)
+            FfiConverterUInt64.write(totalBytes, into: &buf)
+            FfiConverterDouble.write(rateBytesPerSecond, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQueuedEvent_lift(_ buf: RustBuffer) throws -> QueuedEvent {
+    return try FfiConverterTypeQueuedEvent.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeQueuedEvent_lower(_ value: QueuedEvent) -> RustBuffer {
+    return FfiConverterTypeQueuedEvent.lower(value)
+}
+
+
+extension QueuedEvent: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum TransferDecisionKind {
+    
+    case accept
+    case acceptFiles
+    case decline
+    case refuse
+}
+
+
+#if compiler(>=6)
+extension TransferDecisionKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTransferDecisionKind: FfiConverterRustBuffer {
+    typealias SwiftType = TransferDecisionKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TransferDecisionKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .accept
+        
+        case 2: return .acceptFiles
+        
+        case 3: return .decline
+        
+        case 4: return .refuse
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TransferDecisionKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .accept:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .acceptFiles:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .decline:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .refuse:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTransferDecisionKind_lift(_ buf: RustBuffer) throws -> TransferDecisionKind {
+    return try FfiConverterTypeTransferDecisionKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTransferDecisionKind_lower(_ value: TransferDecisionKind) -> RustBuffer {
+    return FfiConverterTypeTransferDecisionKind.lower(value)
+}
+
+
+extension TransferDecisionKind: Equatable, Hashable {}
+
+
+
+
+
+
 
 public enum ZmanagerGuiError: Swift.Error {
 
@@ -5773,6 +8034,31 @@ fileprivate struct FfiConverterSequenceTypeCreatePlanEntry: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeDeviceInfoDto: FfiConverterRustBuffer {
+    typealias SwiftType = [DeviceInfoDto]
+
+    public static func write(_ value: [DeviceInfoDto], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDeviceInfoDto.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DeviceInfoDto] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DeviceInfoDto]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDeviceInfoDto.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeExtractionPlanEntry: FfiConverterRustBuffer {
     typealias SwiftType = [ExtractionPlanEntry]
 
@@ -5840,6 +8126,81 @@ fileprivate struct FfiConverterSequenceTypeMobileJobEvent: FfiConverterRustBuffe
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeMobileJobEvent.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRecoveryRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [RecoveryRecord]
+
+    public static func write(_ value: [RecoveryRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRecoveryRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RecoveryRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RecoveryRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRecoveryRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTransferFile: FfiConverterRustBuffer {
+    typealias SwiftType = [TransferFile]
+
+    public static func write(_ value: [TransferFile], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTransferFile.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [TransferFile] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [TransferFile]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTransferFile.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeQueuedEvent: FfiConverterRustBuffer {
+    typealias SwiftType = [QueuedEvent]
+
+    public static func write(_ value: [QueuedEvent], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeQueuedEvent.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [QueuedEvent] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [QueuedEvent]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeQueuedEvent.read(from: &buf))
         }
         return seq
     }
@@ -5929,54 +8290,48 @@ public func listFormats() -> ListFormatsResult  {
     )
 })
 }
-public func localsendCancelSendJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_localsend_cancel_send_json(
-        FfiConverterString.lower(requestJson),$0
+public func localsendCancelSend(request: CancelSendRequest)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_localsendcancelsend(
+        FfiConverterTypeCancelSendRequest_lower(request),$0
+    )
+}
+}
+public func localsendDiscover(request: DiscoverRequest)throws  -> [DeviceInfoDto]  {
+    return try  FfiConverterSequenceTypeDeviceInfoDto.lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_localsenddiscover(
+        FfiConverterTypeDiscoverRequest_lower(request),$0
     )
 })
 }
-public func localsendDiscoverJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_localsend_discover_json(
-        FfiConverterString.lower(requestJson),$0
+public func localsendPollEvents() -> PollEventsResult  {
+    return try!  FfiConverterTypePollEventsResult_lift(try! rustCall() {
+    uniffi_zmanager_ffi_fn_func_localsendpollevents($0
     )
 })
 }
-public func localsendPollEventsJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_localsend_poll_events_json(
-        FfiConverterString.lower(requestJson),$0
+public func localsendRespondToTransfer(request: RespondToTransferRequest)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_localsendrespondtotransfer(
+        FfiConverterTypeRespondToTransferRequest_lower(request),$0
+    )
+}
+}
+public func localsendSendFile(request: SendFileRequest)throws  -> SendFileResult  {
+    return try  FfiConverterTypeSendFileResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_localsendsendfile(
+        FfiConverterTypeSendFileRequest_lower(request),$0
     )
 })
 }
-public func localsendRespondToTransferJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_localsend_respond_to_transfer_json(
-        FfiConverterString.lower(requestJson),$0
+public func localsendStartReceiver(request: StartReceiverRequest)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_localsendstartreceiver(
+        FfiConverterTypeStartReceiverRequest_lower(request),$0
     )
-})
 }
-public func localsendSendFileJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_localsend_send_file_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
 }
-public func localsendStartReceiverJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_localsend_start_receiver_json(
-        FfiConverterString.lower(requestJson),$0
+public func localsendStopReceiver()throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_localsendstopreceiver($0
     )
-})
 }
-public func localsendStopReceiverJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_localsend_stop_receiver_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
 }
 public func materializePreview(request: MaterializePreviewRequest)throws  -> MaterializePreviewResult  {
     return try  FfiConverterTypeMaterializePreviewResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
@@ -6013,6 +8368,36 @@ public func pollJobEvents(request: PollJobEventsRequest)throws  -> PollJobEvents
     )
 })
 }
+public func recoveryDiscard(root: String, id: String)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_recoverydiscard(
+        FfiConverterString.lower(root),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+public func recoveryFiles(root: String, id: String)throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_recoveryfiles(
+        FfiConverterString.lower(root),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+public func recoveryRecords(root: String, nowMillis: UInt64)throws  -> [RecoveryRecord]  {
+    return try  FfiConverterSequenceTypeRecoveryRecord.lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_recoveryrecords(
+        FfiConverterString.lower(root),
+        FfiConverterUInt64.lower(nowMillis),$0
+    )
+})
+}
+public func recoverySave(request: RecoverySaveRequest)throws  -> RecoveryRecord  {
+    return try  FfiConverterTypeRecoveryRecord_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_recoverysave(
+        FfiConverterTypeRecoverySaveRequest_lower(request),$0
+    )
+})
+}
 public func startCreate(request: StartCreateRequest)throws  -> StartJobResult  {
     return try  FfiConverterTypeStartJobResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
     uniffi_zmanager_ffi_fn_func_startcreate(
@@ -6031,6 +8416,82 @@ public func testArchive(request: TestArchiveRequest)throws  -> TestArchiveResult
     return try  FfiConverterTypeTestArchiveResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
     uniffi_zmanager_ffi_fn_func_testarchive(
         FfiConverterTypeTestArchiveRequest_lower(request),$0
+    )
+})
+}
+public func trustFingerprints(root: String)throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_trustfingerprints(
+        FfiConverterString.lower(root),$0
+    )
+})
+}
+public func trustForget(root: String, fingerprint: String)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_trustforget(
+        FfiConverterString.lower(root),
+        FfiConverterString.lower(fingerprint),$0
+    )
+}
+}
+public func trustIsTrusted(root: String, fingerprint: String)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_trustistrusted(
+        FfiConverterString.lower(root),
+        FfiConverterString.lower(fingerprint),$0
+    )
+})
+}
+public func trustRemember(root: String, fingerprint: String)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_trustremember(
+        FfiConverterString.lower(root),
+        FfiConverterString.lower(fingerprint),$0
+    )
+}
+}
+public func tzapAuthCallback(request: TzapAuthCallbackRequest)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_tzapauthcallback(
+        FfiConverterTypeTzapAuthCallbackRequest_lower(request),$0
+    )
+}
+}
+public func tzapAuthLogin(request: TzapAuthLoginRequest)throws  -> TzapAuthLoginResult  {
+    return try  FfiConverterTypeTzapAuthLoginResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_tzapauthlogin(
+        FfiConverterTypeTzapAuthLoginRequest_lower(request),$0
+    )
+})
+}
+public func tzapAuthStatus(request: TzapAuthStatusRequest)throws  -> TzapAuthStatusResult  {
+    return try  FfiConverterTypeTzapAuthStatusResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_tzapauthstatus(
+        FfiConverterTypeTzapAuthStatusRequest_lower(request),$0
+    )
+})
+}
+public func tzapCertEnroll(request: TzapCertEnrollRequest)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_tzapcertenroll(
+        FfiConverterTypeTzapCertEnrollRequest_lower(request),$0
+    )
+}
+}
+public func tzapCertificateInventory(request: TzapCertificateInventoryRequest)throws  -> TzapCertificateInventoryResult  {
+    return try  FfiConverterTypeTzapCertificateInventoryResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_tzapcertificateinventory(
+        FfiConverterTypeTzapCertificateInventoryRequest_lower(request),$0
+    )
+})
+}
+public func tzapDocumentSign(request: TzapDocumentSignRequest)throws  -> TzapDocumentSignResult  {
+    return try  FfiConverterTypeTzapDocumentSignResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_tzapdocumentsign(
+        FfiConverterTypeTzapDocumentSignRequest_lower(request),$0
+    )
+})
+}
+public func tzapDocumentVerify(request: TzapDocumentVerifyRequest)throws  -> TzapDocumentVerifyResult  {
+    return try  FfiConverterTypeTzapDocumentVerifyResult_lift(try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_tzapdocumentverify(
+        FfiConverterTypeTzapDocumentVerifyRequest_lower(request),$0
     )
 })
 }
@@ -6055,37 +8516,9 @@ public func tzapAuthAccountUrlJson(requestJson: String) -> String  {
     )
 })
 }
-public func tzapAuthCallbackJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_tzap_auth_callback_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
 public func tzapAuthForgetJson(requestJson: String) -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_zmanager_ffi_fn_func_tzap_auth_forget_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-public func tzapAuthLoginJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_tzap_auth_login_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-public func tzapAuthStatusJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_tzap_auth_status_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-public func tzapCertEnrollJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_tzap_cert_enroll_json(
         FfiConverterString.lower(requestJson),$0
     )
 })
@@ -6100,13 +8533,6 @@ public func tzapCertRenewJson(requestJson: String) -> String  {
 public func tzapCertRevokeJson(requestJson: String) -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_zmanager_ffi_fn_func_tzap_cert_revoke_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-public func tzapCertificateInventoryJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_tzap_certificate_inventory_json(
         FfiConverterString.lower(requestJson),$0
     )
 })
@@ -6142,20 +8568,6 @@ public func tzapContactRemoveJson(requestJson: String) -> String  {
 public func tzapDeviceRetireJson(requestJson: String) -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_zmanager_ffi_fn_func_tzap_device_retire_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-public func tzapDocumentSignJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_tzap_document_sign_json(
-        FfiConverterString.lower(requestJson),$0
-    )
-})
-}
-public func tzapDocumentVerifyJson(requestJson: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_zmanager_ffi_fn_func_tzap_document_verify_json(
         FfiConverterString.lower(requestJson),$0
     )
 })
@@ -6252,25 +8664,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zmanager_ffi_checksum_func_listformats() != 4246) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_localsend_cancel_send_json() != 21496) {
+    if (uniffi_zmanager_ffi_checksum_func_localsendcancelsend() != 10232) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_localsend_discover_json() != 2199) {
+    if (uniffi_zmanager_ffi_checksum_func_localsenddiscover() != 25325) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_localsend_poll_events_json() != 19107) {
+    if (uniffi_zmanager_ffi_checksum_func_localsendpollevents() != 65508) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_localsend_respond_to_transfer_json() != 35099) {
+    if (uniffi_zmanager_ffi_checksum_func_localsendrespondtotransfer() != 63487) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_localsend_send_file_json() != 48922) {
+    if (uniffi_zmanager_ffi_checksum_func_localsendsendfile() != 46136) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_localsend_start_receiver_json() != 33296) {
+    if (uniffi_zmanager_ffi_checksum_func_localsendstartreceiver() != 29828) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_localsend_stop_receiver_json() != 23948) {
+    if (uniffi_zmanager_ffi_checksum_func_localsendstopreceiver() != 47333) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_materializepreview() != 28909) {
@@ -6288,6 +8700,18 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zmanager_ffi_checksum_func_polljobevents() != 20889) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_zmanager_ffi_checksum_func_recoverydiscard() != 18158) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_recoveryfiles() != 65523) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_recoveryrecords() != 37516) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_recoverysave() != 64099) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_zmanager_ffi_checksum_func_startcreate() != 43846) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6295,6 +8719,39 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_testarchive() != 25757) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_trustfingerprints() != 15412) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_trustforget() != 20665) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_trustistrusted() != 58476) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_trustremember() != 50041) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzapauthcallback() != 11426) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzapauthlogin() != 44020) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzapauthstatus() != 59057) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzapcertenroll() != 26904) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzapcertificateinventory() != 10762) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzapdocumentsign() != 32984) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_tzapdocumentverify() != 49442) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_tzappublicmetadatadisplaysummary() != 19687) {
@@ -6306,28 +8763,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_zmanager_ffi_checksum_func_tzap_auth_account_url_json() != 57360) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_zmanager_ffi_checksum_func_tzap_auth_callback_json() != 65497) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_zmanager_ffi_checksum_func_tzap_auth_forget_json() != 58927) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_zmanager_ffi_checksum_func_tzap_auth_login_json() != 10840) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_zmanager_ffi_checksum_func_tzap_auth_status_json() != 16972) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_zmanager_ffi_checksum_func_tzap_cert_enroll_json() != 47168) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_tzap_cert_renew_json() != 57002) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_tzap_cert_revoke_json() != 40153) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_zmanager_ffi_checksum_func_tzap_certificate_inventory_json() != 39989) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_tzap_contact_export_json() != 37408) {
@@ -6343,12 +8785,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_tzap_device_retire_json() != 19687) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_zmanager_ffi_checksum_func_tzap_document_sign_json() != 27930) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_zmanager_ffi_checksum_func_tzap_document_verify_json() != 11931) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_tzap_recipient_key_generate_json() != 1528) {
