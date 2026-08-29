@@ -9,13 +9,7 @@ use zmanager_core::archive_browser::BrowserEntryKind;
 use zmanager_core::engine::{has_existing_tzap_input_volume, is_tzap_archive_path};
 
 use crate::ffi::error::{ERROR_INVALID_REQUEST, ERROR_NOT_FOUND, bridge_error, hint, map_io_error};
-use crate::ffi::types::{ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CreateArchiveFormat, ZmanagerGuiError};
-
-/// Empty passwords are treated as absent: callers that own the value use
-/// this, callers that only borrow it use [`password_ref`].
-pub(crate) fn sanitize_password(password: Option<String>) -> Option<String> {
-    password.filter(|value| !value.is_empty())
-}
+use crate::ffi::types::{ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, ZmanagerGuiError};
 
 pub(crate) fn password_ref(password: &Option<String>) -> Option<&str> {
     password.as_deref().filter(|value| !value.is_empty())
@@ -46,92 +40,6 @@ fn sanitize_path_value(value: String, field: &str, provider_hint: &str) -> Resul
 pub(crate) fn ensure_non_empty_entry_path(value: String) -> Result<String, ZmanagerGuiError> {
     if value.is_empty() {
         return Err(bridge_error(ERROR_INVALID_REQUEST, "entryPath cannot be empty", None, BridgeSeverity::Warning, false));
-    }
-
-    Ok(value)
-}
-
-pub(crate) fn ensure_destination_root_path(value: String) -> Result<String, ZmanagerGuiError> {
-    let value = sanitize_path_value(value, "destinationRoot", "Resolve provider destinations to app-controlled staging before calling the Rust bridge.")?;
-
-    let path = Path::new(&value);
-    match fs::metadata(path) {
-        Ok(metadata) if !metadata.is_dir() => {
-            Err(bridge_error(ERROR_INVALID_REQUEST, "destinationRoot must point to a directory when it already exists", None, BridgeSeverity::Warning, false))
-        }
-        Ok(_) => Ok(value),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(value),
-        Err(source) => Err(map_io_error(path.to_path_buf(), source)),
-    }
-}
-
-pub(crate) fn ensure_existing_source_paths(values: Vec<String>) -> Result<Vec<String>, ZmanagerGuiError> {
-    if values.is_empty() {
-        return Err(bridge_error(ERROR_INVALID_REQUEST, "sourcePaths cannot be empty", None, BridgeSeverity::Warning, false));
-    }
-
-    values.into_iter().enumerate().map(|(index, value)| ensure_existing_source_path(value, &format!("sourcePaths[{index}]"))).collect()
-}
-
-pub(crate) fn ensure_existing_source_path(value: String, field: &str) -> Result<String, ZmanagerGuiError> {
-    let value = sanitize_path_value(value, field, "Copy provider-backed files into app cache before calling the Rust bridge.")?;
-
-    let path = Path::new(&value);
-    fs::metadata(path).map_err(|source| {
-        if source.kind() == io::ErrorKind::NotFound {
-            bridge_error(
-                ERROR_NOT_FOUND,
-                format!("{field} does not exist"),
-                hint("Choose sources that have already been copied into app-controlled storage."),
-                BridgeSeverity::Warning,
-                false,
-            )
-        } else {
-            map_io_error(path.to_path_buf(), source)
-        }
-    })?;
-
-    Ok(value)
-}
-
-pub(crate) fn ensure_destination_archive_path(value: String) -> Result<String, ZmanagerGuiError> {
-    let value =
-        sanitize_path_value(value, "destinationArchivePath", "Use an app-controlled staging path for archive creation, then let the native shell commit it.")?;
-
-    let path = Path::new(&value);
-    if path.parent().is_none_or(|parent| parent.as_os_str().is_empty()) {
-        return Err(bridge_error(ERROR_INVALID_REQUEST, "destinationArchivePath must include a parent directory", None, BridgeSeverity::Warning, false));
-    }
-
-    if let Some(parent) = path.parent() {
-        match fs::metadata(parent) {
-            Ok(metadata) if !metadata.is_dir() => {
-                return Err(bridge_error(ERROR_INVALID_REQUEST, "destinationArchivePath parent must be a directory", None, BridgeSeverity::Warning, false));
-            }
-            Ok(_) => {}
-            Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                return Err(bridge_error(
-                    ERROR_NOT_FOUND,
-                    "destinationArchivePath parent does not exist",
-                    hint("Create the app-controlled staging directory before calling the bridge."),
-                    BridgeSeverity::Warning,
-                    false,
-                ));
-            }
-            Err(source) => return Err(map_io_error(parent.to_path_buf(), source)),
-        }
-    }
-
-    if let Ok(metadata) = fs::metadata(path)
-        && metadata.is_dir()
-    {
-        return Err(bridge_error(
-            ERROR_INVALID_REQUEST,
-            "destinationArchivePath must point to an archive file, not a directory",
-            None,
-            BridgeSeverity::Warning,
-            false,
-        ));
     }
 
     Ok(value)
@@ -439,17 +347,6 @@ pub(crate) fn format_label(format: ArchiveFormat) -> &'static str {
         ArchiveFormat::Xip => "XIP",
         ArchiveFormat::RawStream => "Raw stream",
         ArchiveFormat::Other => "Archive",
-    }
-}
-
-pub(crate) fn create_format_label(format: CreateArchiveFormat) -> &'static str {
-    match format {
-        CreateArchiveFormat::Zip => "ZIP",
-        CreateArchiveFormat::SevenZ => "7z",
-        CreateArchiveFormat::TarZst => "TAR.ZST",
-        CreateArchiveFormat::TarGz => "TAR.GZ",
-        CreateArchiveFormat::Tzap => "TZAP",
-        CreateArchiveFormat::AppleArchive => "AppleArchive / AAR",
     }
 }
 

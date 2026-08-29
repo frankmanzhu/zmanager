@@ -6,19 +6,14 @@
 //! reach the exported surface.
 
 mod error;
-mod event;
 mod ops;
-pub mod session;
 mod types;
 mod util;
 
 #[cfg(test)]
 mod tests;
 
-pub use ops::archive::{
-    cancelJob, clearSensitiveState, closeArchiveSession, detectArchive, extractArchiveSessionEntry, healthcheck, listArchive, listArchiveSession, listFormats,
-    materializePreview, openArchiveSession, planCreate, planExtract, pollJobEvents, startCreate, startExtract, testArchive,
-};
+pub use ops::archive::{detectArchive, healthcheck, listArchive, listFormats, materializePreview, testArchive};
 pub use ops::localsend::{
     localsendCancelSend, localsendDiscover, localsendPollEvents, localsendRespondToTransfer, localsendSendFile, localsendStartReceiver, localsendStopReceiver,
 };
@@ -30,15 +25,10 @@ pub use ops::tzap::{
     tzapPublicMetadataSummary, verifyTzapX509, verifyTzapX509PublicNoKey,
 };
 pub use types::{
-    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, ArchiveSessionCloseRequest, ArchiveSessionCloseResult, ArchiveSessionEntry, ArchiveSessionExtractRequest,
-    ArchiveSessionExtractResult, ArchiveSessionListRequest, ArchiveSessionListResult, ArchiveSessionOpenRequest, ArchiveSessionOpenResult, BridgeError,
-    BridgeSeverity, CancelJobRequest, CancelJobResult, CancelSendRequest, ClearSensitiveStateResult, CreateArchiveFormat, CreatePlanEntry,
-    DetectArchiveRequest, DetectArchiveResult, DeviceInfoDto, DiscoverRequest, ExtractionCollisionPolicy, ExtractionPlanEntry, ExtractionPlanEntryStatus,
-    FormatDescriptor, HealthcheckResult, JobTerminalSummary, ListArchiveRequest, ListArchiveResult, ListFormatsResult, MaterializePreviewRequest,
-    MaterializePreviewResult, MobileJobEvent, MobileJobEventKind, MobileJobKind, MobileJobStatus, PlanCreateRequest, PlanCreateResult, PlanExtractRequest,
-    PlanExtractResult, PollEventsResult, PollJobEventsRequest, PollJobEventsResult, QueuedEvent, RespondToTransferRequest, SendFileRequest, SendFileResult,
-    StartCreateRequest, StartExtractRequest, StartJobResult, StartReceiverRequest, TestArchiveRequest, TestArchiveResult, TransferDecisionKind, TransferFile,
-    TzapAuthCallbackRequest, TzapAuthLoginRequest, TzapAuthLoginResult, TzapAuthStatusRequest, TzapAuthStatusResult, TzapCertEnrollRequest,
-    TzapCertificateInventoryRequest, TzapCertificateInventoryResult, TzapDocumentPayload, TzapDocumentSignRequest, TzapDocumentSignResult,
-    TzapDocumentVerifyRequest, TzapDocumentVerifyResult, ZmanagerGuiError,
+    ArchiveEntry, ArchiveEntryKind, ArchiveFormat, BridgeError, BridgeSeverity, CancelSendRequest, DetectArchiveRequest, DetectArchiveResult, DeviceInfoDto,
+    DiscoverRequest, FormatDescriptor, HealthcheckResult, ListArchiveRequest, ListArchiveResult, ListFormatsResult, MaterializePreviewRequest,
+    MaterializePreviewResult, PollEventsResult, QueuedEvent, RespondToTransferRequest, SendFileRequest, SendFileResult, StartReceiverRequest,
+    TestArchiveRequest, TestArchiveResult, TransferDecisionKind, TransferFile, TzapAuthCallbackRequest, TzapAuthLoginRequest, TzapAuthLoginResult,
+    TzapAuthStatusRequest, TzapAuthStatusResult, TzapCertEnrollRequest, TzapCertificateInventoryRequest, TzapCertificateInventoryResult, TzapDocumentPayload,
+    TzapDocumentSignRequest, TzapDocumentSignResult, TzapDocumentVerifyRequest, TzapDocumentVerifyResult, ZmanagerGuiError,
 };

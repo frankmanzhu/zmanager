@@ -1,5 +1,4 @@
 pub mod archive;
-pub mod jobs;
 #[cfg(feature = "localsend")]
 pub mod localsend;
 #[cfg(not(feature = "localsend"))]

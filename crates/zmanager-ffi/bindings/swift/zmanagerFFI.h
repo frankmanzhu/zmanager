@@ -251,22 +251,6 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
     );
 
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CANCELJOB
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CANCELJOB
-RustBuffer uniffi_zmanager_ffi_fn_func_canceljob(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CLEARSENSITIVESTATE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CLEARSENSITIVESTATE
-RustBuffer uniffi_zmanager_ffi_fn_func_clearsensitivestate(RustCallStatus *_Nonnull out_status
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CLOSEARCHIVESESSION
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CLOSEARCHIVESESSION
-RustBuffer uniffi_zmanager_ffi_fn_func_closearchivesession(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CREATETZAPSELFSIGNEDIDENTITY
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_CREATETZAPSELFSIGNEDIDENTITY
 RustBuffer uniffi_zmanager_ffi_fn_func_createtzapselfsignedidentity(RustBuffer identity_path, RustBuffer public_certificate_path, RustBuffer common_name, RustBuffer password, RustCallStatus *_Nonnull out_status
@@ -275,11 +259,6 @@ RustBuffer uniffi_zmanager_ffi_fn_func_createtzapselfsignedidentity(RustBuffer i
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_DETECTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_DETECTARCHIVE
 RustBuffer uniffi_zmanager_ffi_fn_func_detectarchive(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_EXTRACTARCHIVESESSIONENTRY
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_EXTRACTARCHIVESESSIONENTRY
-RustBuffer uniffi_zmanager_ffi_fn_func_extractarchivesessionentry(RustBuffer request, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_HEALTHCHECK
@@ -301,11 +280,6 @@ RustBuffer uniffi_zmanager_ffi_fn_func_inspecttzapx509signer(RustBuffer archive_
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTARCHIVE
 RustBuffer uniffi_zmanager_ffi_fn_func_listarchive(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTARCHIVESESSION
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTARCHIVESESSION
-RustBuffer uniffi_zmanager_ffi_fn_func_listarchivesession(RustBuffer request, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LISTFORMATS
@@ -356,79 +330,9 @@ void uniffi_zmanager_ffi_fn_func_localsendstopreceiver(RustCallStatus *_Nonnull 
 RustBuffer uniffi_zmanager_ffi_fn_func_materializepreview(RustBuffer request, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_OPENARCHIVESESSION
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_OPENARCHIVESESSION
-RustBuffer uniffi_zmanager_ffi_fn_func_openarchivesession(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_PLANCREATE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_PLANCREATE
-RustBuffer uniffi_zmanager_ffi_fn_func_plancreate(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_PLANEXTRACT
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_PLANEXTRACT
-RustBuffer uniffi_zmanager_ffi_fn_func_planextract(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_POLLJOBEVENTS
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_POLLJOBEVENTS
-RustBuffer uniffi_zmanager_ffi_fn_func_polljobevents(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYDISCARD
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYDISCARD
-void uniffi_zmanager_ffi_fn_func_recoverydiscard(RustBuffer root, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYFILES
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYFILES
-RustBuffer uniffi_zmanager_ffi_fn_func_recoveryfiles(RustBuffer root, RustBuffer id, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYRECORDS
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYRECORDS
-RustBuffer uniffi_zmanager_ffi_fn_func_recoveryrecords(RustBuffer root, uint64_t now_millis, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYSAVE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_RECOVERYSAVE
-RustBuffer uniffi_zmanager_ffi_fn_func_recoverysave(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_STARTCREATE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_STARTCREATE
-RustBuffer uniffi_zmanager_ffi_fn_func_startcreate(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_STARTEXTRACT
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_STARTEXTRACT
-RustBuffer uniffi_zmanager_ffi_fn_func_startextract(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TESTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TESTARCHIVE
 RustBuffer uniffi_zmanager_ffi_fn_func_testarchive(RustBuffer request, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTFINGERPRINTS
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTFINGERPRINTS
-RustBuffer uniffi_zmanager_ffi_fn_func_trustfingerprints(RustBuffer root, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTFORGET
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTFORGET
-void uniffi_zmanager_ffi_fn_func_trustforget(RustBuffer root, RustBuffer fingerprint, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTISTRUSTED
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTISTRUSTED
-int8_t uniffi_zmanager_ffi_fn_func_trustistrusted(RustBuffer root, RustBuffer fingerprint, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTREMEMBER
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TRUSTREMEMBER
-void uniffi_zmanager_ffi_fn_func_trustremember(RustBuffer root, RustBuffer fingerprint, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_TZAPAUTHCALLBACK
@@ -826,24 +730,6 @@ void ffi_zmanager_ffi_rust_future_free_void(uint64_t handle
 void ffi_zmanager_ffi_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CANCELJOB
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CANCELJOB
-uint16_t uniffi_zmanager_ffi_checksum_func_canceljob(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CLEARSENSITIVESTATE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CLEARSENSITIVESTATE
-uint16_t uniffi_zmanager_ffi_checksum_func_clearsensitivestate(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CLOSEARCHIVESESSION
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CLOSEARCHIVESESSION
-uint16_t uniffi_zmanager_ffi_checksum_func_closearchivesession(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CREATETZAPSELFSIGNEDIDENTITY
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_CREATETZAPSELFSIGNEDIDENTITY
 uint16_t uniffi_zmanager_ffi_checksum_func_createtzapselfsignedidentity(void
@@ -853,12 +739,6 @@ uint16_t uniffi_zmanager_ffi_checksum_func_createtzapselfsignedidentity(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_DETECTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_DETECTARCHIVE
 uint16_t uniffi_zmanager_ffi_checksum_func_detectarchive(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_EXTRACTARCHIVESESSIONENTRY
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_EXTRACTARCHIVESESSIONENTRY
-uint16_t uniffi_zmanager_ffi_checksum_func_extractarchivesessionentry(void
     
 );
 #endif
@@ -883,12 +763,6 @@ uint16_t uniffi_zmanager_ffi_checksum_func_inspecttzapx509signer(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTARCHIVE
 uint16_t uniffi_zmanager_ffi_checksum_func_listarchive(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTARCHIVESESSION
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LISTARCHIVESESSION
-uint16_t uniffi_zmanager_ffi_checksum_func_listarchivesession(void
     
 );
 #endif
@@ -946,93 +820,9 @@ uint16_t uniffi_zmanager_ffi_checksum_func_materializepreview(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_OPENARCHIVESESSION
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_OPENARCHIVESESSION
-uint16_t uniffi_zmanager_ffi_checksum_func_openarchivesession(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANCREATE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANCREATE
-uint16_t uniffi_zmanager_ffi_checksum_func_plancreate(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANEXTRACT
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_PLANEXTRACT
-uint16_t uniffi_zmanager_ffi_checksum_func_planextract(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_POLLJOBEVENTS
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_POLLJOBEVENTS
-uint16_t uniffi_zmanager_ffi_checksum_func_polljobevents(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYDISCARD
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYDISCARD
-uint16_t uniffi_zmanager_ffi_checksum_func_recoverydiscard(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYFILES
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYFILES
-uint16_t uniffi_zmanager_ffi_checksum_func_recoveryfiles(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYRECORDS
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYRECORDS
-uint16_t uniffi_zmanager_ffi_checksum_func_recoveryrecords(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYSAVE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_RECOVERYSAVE
-uint16_t uniffi_zmanager_ffi_checksum_func_recoverysave(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTCREATE
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTCREATE
-uint16_t uniffi_zmanager_ffi_checksum_func_startcreate(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTEXTRACT
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_STARTEXTRACT
-uint16_t uniffi_zmanager_ffi_checksum_func_startextract(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TESTARCHIVE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TESTARCHIVE
 uint16_t uniffi_zmanager_ffi_checksum_func_testarchive(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTFINGERPRINTS
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTFINGERPRINTS
-uint16_t uniffi_zmanager_ffi_checksum_func_trustfingerprints(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTFORGET
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTFORGET
-uint16_t uniffi_zmanager_ffi_checksum_func_trustforget(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTISTRUSTED
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTISTRUSTED
-uint16_t uniffi_zmanager_ffi_checksum_func_trustistrusted(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTREMEMBER
-#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_TRUSTREMEMBER
-uint16_t uniffi_zmanager_ffi_checksum_func_trustremember(void
     
 );
 #endif

@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 use zmanager_core::archive_browser::ArchiveBrowserError;
 use zmanager_core::engine::{ArchiveError, ErrorKind};
-use zmanager_core::manifest::PlanError;
 
 use crate::ffi::types::{BridgeError, BridgeSeverity, ZmanagerGuiError};
 #[cfg(feature = "tzap-online")]
@@ -21,6 +20,7 @@ pub(crate) const ERROR_UNSAFE_ARCHIVE: &str = "unsafe_archive";
 pub(crate) const ERROR_IO_ERROR: &str = "io_error";
 pub(crate) const ERROR_UNSUPPORTED_FORMAT: &str = "unsupported_format";
 pub(crate) const ERROR_DAMAGED_ARCHIVE: &str = "damaged_archive";
+#[cfg(feature = "localsend")]
 pub(crate) const ERROR_CANCELLED: &str = "cancelled";
 pub(crate) const ERROR_OPERATION_FAILED: &str = "operation_failed";
 pub(crate) const WARNING_GENERIC: &str = "warning";
@@ -124,15 +124,6 @@ pub(crate) fn map_localsend_error(error: LocalSendBridgeError) -> ZmanagerGuiErr
     }
 }
 
-pub(crate) fn map_plan_error(error: PlanError) -> ZmanagerGuiError {
-    match error {
-        PlanError::MissingFileName { path } => {
-            bridge_error(ERROR_INVALID_REQUEST, format!("Source path has no archive name: {}", path.display()), None, BridgeSeverity::Warning, false)
-        }
-        PlanError::Metadata { path, source } | PlanError::ReadDir { path, source } => map_io_error(path, source),
-    }
-}
-
 pub(crate) fn map_io_error(path: PathBuf, source: io::Error) -> ZmanagerGuiError {
     if source.kind() == io::ErrorKind::NotFound {
         bridge_error(
@@ -149,18 +140,6 @@ pub(crate) fn map_io_error(path: PathBuf, source: io::Error) -> ZmanagerGuiError
 
 pub(crate) fn damaged_archive(message: impl Into<String>) -> ZmanagerGuiError {
     bridge_error(ERROR_DAMAGED_ARCHIVE, message, hint("Choose a different archive or verify the source file."), BridgeSeverity::Warning, false)
-}
-
-pub(crate) fn cancelled_bridge_error(message: impl Into<String>) -> ZmanagerGuiError {
-    bridge_error(ERROR_CANCELLED, message, None, BridgeSeverity::Info, true)
-}
-
-pub(crate) fn bridge_error_from_mobile(error: ZmanagerGuiError) -> BridgeError {
-    match error {
-        ZmanagerGuiError::Bridge { code, user_message, recovery_hint, severity, retryable } => {
-            BridgeError { code, message: user_message, recovery_hint, severity, retryable }
-        }
-    }
 }
 
 #[cfg(feature = "tzap-online")]
@@ -212,14 +191,6 @@ mod tests {
             ZmanagerGuiError::Bridge { code, recovery_hint, .. } => {
                 assert_eq!(code, ERROR_DAMAGED_ARCHIVE);
                 assert!(recovery_hint.is_some());
-            }
-        }
-
-        let cancelled = cancelled_bridge_error("cancelled op");
-        match cancelled {
-            ZmanagerGuiError::Bridge { code, retryable, .. } => {
-                assert_eq!(code, ERROR_CANCELLED);
-                assert!(retryable);
             }
         }
 
