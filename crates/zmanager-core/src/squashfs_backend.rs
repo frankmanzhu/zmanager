@@ -163,6 +163,13 @@ impl CompressionAction for XzCapableCompressor {
                 reader.read_to_end(out).map_err(|error| backhand::BackhandError::UnsupportedCompression(format!("lzma block: {error}")))?;
                 Ok(())
             }
+            Compressor::Lzo => {
+                // Raw LZO1X block decode via the Apache-2.0 `lzo` crate.
+                let uncompressed =
+                    lzo::decompress(bytes, out.capacity()).map_err(|error| backhand::BackhandError::UnsupportedCompression(format!("lzo block: {error}")))?;
+                out.extend_from_slice(&uncompressed);
+                Ok(())
+            }
             other => DefaultCompressor.decompress(bytes, out, other),
         }
     }

@@ -129,6 +129,51 @@ fn native_tar_hostile_fixtures_are_rejected() {
 }
 
 #[test]
+fn squashfs_hostile_fixtures_are_rejected() {
+    use backhand::compression::Compressor as CompressorId;
+    use backhand::{FilesystemCompressor, FilesystemWriter, NodeHeader};
+
+    let temp = TestDir::new("squashfs_hostile");
+    let mut writer = FilesystemWriter::default();
+    writer.set_compressor(FilesystemCompressor::new(CompressorId::Gzip, None).unwrap());
+    writer.push_symlink("../escape.txt", "sym_escape", NodeHeader::new(0o777, 0, 0, 0)).unwrap();
+    let mut out_bytes = std::io::Cursor::new(Vec::new());
+    writer.write(&mut out_bytes).unwrap();
+
+    let archive = temp.path("traversal.squashfs");
+    fs::write(&archive, out_bytes.into_inner()).unwrap();
+
+    let engine = zmanager_core::engine::create_default_engine().unwrap();
+    let source = zmanager_core::engine::ArchiveSource::from_path_autodetect(&archive);
+    let mut handle = engine.open(source, zmanager_core::engine::OpenOptions::default()).unwrap();
+    let mut options = zmanager_core::engine::ExtractOptions { destination: temp.path("out"), policy: ExtractionPolicy::default(), ..Default::default() };
+    let error = handle.extract(&mut options);
+    assert!(error.is_err(), "traversal in squashfs must be rejected");
+    assert!(!temp.path("escape.txt").exists());
+}
+
+#[test]
+fn wim_hostile_size_and_limits_are_enforced() {
+    let temp = TestDir::new("wim_limits");
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.wim");
+    if !archive.exists() {
+        return;
+    }
+
+    let policy = ExtractionPolicy {
+        limits: ExtractionLimits { max_expanded_bytes: Some(5), max_entry_expansion_ratio: None, max_entries: None },
+        ..ExtractionPolicy::default()
+    };
+
+    let engine = zmanager_core::engine::create_default_engine().unwrap();
+    let source = zmanager_core::engine::ArchiveSource::from_path_autodetect(&archive);
+    let mut handle = engine.open(source, zmanager_core::engine::OpenOptions::default()).unwrap();
+    let mut options = zmanager_core::engine::ExtractOptions { destination: temp.path("out"), policy, ..Default::default() };
+    let error = handle.extract(&mut options);
+    assert!(error.is_err(), "exceeding max_expanded_bytes in WIM must be rejected");
+}
+
+#[test]
 fn truncated_and_corrupt_archives_fail_closed() {
     let temp = TestDir::new("truncated_and_corrupt_archives_fail_closed");
     let zip = zip_file_case(temp.path("valid.zip"), "payload/file.txt", b"hello");

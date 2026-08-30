@@ -26,6 +26,7 @@ impl zmanager_core::jobs::JobEventSink for NoopSink {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn default_engine_registers_every_phase_two_native_listing_adapter() {
     let engine = create_default_engine().unwrap();
     let expected = [
@@ -49,6 +50,22 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         (FormatId::TAR_UU, SourceAccess::Seekable),
         (FormatId::LHA, SourceAccess::Seekable),
         (FormatId::WARC, SourceAccess::Seekable),
+        (FormatId::SQUASHFS, SourceAccess::Seekable),
+        (FormatId::APPIMAGE, SourceAccess::Seekable),
+        (FormatId::WIM, SourceAccess::Seekable),
+        (FormatId::VDI, SourceAccess::Seekable),
+        (FormatId::NRG, SourceAccess::Seekable),
+        (FormatId::MDF, SourceAccess::Seekable),
+        (FormatId::CDI, SourceAccess::Seekable),
+        (FormatId::ISZ, SourceAccess::Seekable),
+        (FormatId::CCD, SourceAccess::Seekable),
+        (FormatId::CUE, SourceAccess::Seekable),
+        (FormatId::AR, SourceAccess::Seekable),
+        (FormatId::CPIO, SourceAccess::Seekable),
+        (FormatId::DEB, SourceAccess::Seekable),
+        (FormatId::RPM, SourceAccess::Seekable),
+        (FormatId::CAB, SourceAccess::Seekable),
+        (FormatId::XAR, SourceAccess::Seekable),
     ];
 
     for (format, source_access) in expected {
@@ -71,9 +88,27 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         assert!(mtree.operations.contains(&ArchiveOperation::Test));
         assert!(mtree.operations.contains(&ArchiveOperation::Extract));
     }
-    for format in
-        [FormatId::ZIP, FormatId::SPLIT_ZIP, FormatId::SEVEN_Z, FormatId::TAR_ZST, FormatId::TZAP, FormatId::RAR, FormatId::RAW_STREAM, FormatId::APPLE_ARCHIVE]
-    {
+    for format in [
+        FormatId::ZIP,
+        FormatId::SPLIT_ZIP,
+        FormatId::SEVEN_Z,
+        FormatId::TAR_ZST,
+        FormatId::TZAP,
+        FormatId::RAR,
+        FormatId::RAW_STREAM,
+        FormatId::APPLE_ARCHIVE,
+        FormatId::SQUASHFS,
+        FormatId::APPIMAGE,
+        FormatId::WIM,
+        FormatId::VDI,
+        FormatId::ISO,
+        FormatId::NRG,
+        FormatId::MDF,
+        FormatId::CDI,
+        FormatId::ISZ,
+        FormatId::CCD,
+        FormatId::CUE,
+    ] {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::Test), "{format} must claim data testing");
     }
@@ -93,6 +128,30 @@ fn default_engine_registers_every_phase_two_native_listing_adapter() {
         FormatId::TAR_COMPRESS,
         FormatId::TAR_LZ4,
         FormatId::TAR_UU,
+        FormatId::SQUASHFS,
+        FormatId::APPIMAGE,
+        FormatId::WIM,
+        FormatId::VHD,
+        FormatId::VMDK,
+        FormatId::UDF,
+        FormatId::VDI,
+        FormatId::NRG,
+        FormatId::MDF,
+        FormatId::CDI,
+        FormatId::ISZ,
+        FormatId::CCD,
+        FormatId::CUE,
+        FormatId::AR,
+        FormatId::CPIO,
+        FormatId::DEB,
+        FormatId::RPM,
+        FormatId::CAB,
+        FormatId::XAR,
+        FormatId::PKG,
+        FormatId::DMG,
+        FormatId::MSI,
+        FormatId::LHA,
+        FormatId::WARC,
     ] {
         let capabilities = engine.registry().capabilities_for_format(format).unwrap_or_else(|| panic!("missing capabilities for {format}"));
         assert!(capabilities.operations.contains(&ArchiveOperation::Extract), "{format} must claim full extraction");
@@ -1554,6 +1613,142 @@ fn engine_batch_selected_extract_covers_seven_z() {
     assert!(written("first.txt").is_some(), "selected first.txt should be written");
     assert!(written("third.txt").is_some(), "selected third.txt should be written");
     assert!(written("second.txt").is_none(), "unselected second.txt must not be written");
+}
+
+#[test]
+fn engine_lists_tests_and_extracts_squashfs_fixture() {
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.squashfs");
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+
+    assert_eq!(handle.detected().format, FormatId::SQUASHFS);
+    let listing = handle.list().unwrap();
+    assert!(listing.entries.iter().any(|e| e.path == "README.txt"));
+    assert!(listing.entries.iter().any(|e| e.path == "nested/file.txt"));
+
+    let test_report = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert!(test_report.tested_entries > 0);
+    assert!(test_report.tested_bytes > 0);
+
+    let temp = TestDir::new("engine-conformance-squashfs");
+    let out = temp.path("out");
+    let mut options = ExtractOptions { destination: out.clone(), ..Default::default() };
+    let extract_report = handle.extract(&mut options).unwrap();
+    assert!(extract_report.written_entries > 0);
+    assert_eq!(fs::read(out.join("README.txt")).unwrap(), b"ZManager fixture payload\n");
+
+    let readme_id = listing.entries.iter().find(|e| e.path == "README.txt").unwrap().id;
+    let mut writer = Vec::new();
+    let copy_report = handle.copy_entry(readme_id, &mut writer).unwrap();
+    assert_eq!(writer, b"ZManager fixture payload\n");
+    assert_eq!(copy_report.written_bytes, writer.len() as u64);
+}
+
+#[test]
+fn engine_lists_tests_and_extracts_appimage_fixture() {
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.AppImage");
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+
+    assert_eq!(handle.detected().format, FormatId::APPIMAGE);
+    let listing = handle.list().unwrap();
+    assert!(listing.entries.iter().any(|e| e.path == "README.txt"));
+
+    let test_report = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert!(test_report.tested_entries > 0);
+
+    let temp = TestDir::new("engine-conformance-appimage");
+    let out = temp.path("out");
+    let mut options = ExtractOptions { destination: out.clone(), ..Default::default() };
+    let extract_report = handle.extract(&mut options).unwrap();
+    assert!(extract_report.written_entries > 0);
+    assert_eq!(fs::read(out.join("README.txt")).unwrap(), b"ZManager fixture payload\n");
+}
+
+#[test]
+fn engine_lists_tests_and_extracts_wim_fixture() {
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.wim");
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+
+    assert_eq!(handle.detected().format, FormatId::WIM);
+    let listing = handle.list().unwrap();
+    assert!(listing.entries.iter().any(|e| e.path == "README.txt"));
+    assert!(listing.entries.iter().any(|e| e.path == "nested/file.txt"));
+
+    let test_report = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert!(test_report.tested_entries > 0);
+    assert!(test_report.tested_bytes > 0);
+
+    let temp = TestDir::new("engine-conformance-wim");
+    let out = temp.path("out");
+    let mut options = ExtractOptions { destination: out.clone(), ..Default::default() };
+    let extract_report = handle.extract(&mut options).unwrap();
+    assert!(extract_report.written_entries > 0);
+    assert_eq!(fs::read(out.join("README.txt")).unwrap(), b"ZManager fixture payload\n");
+
+    let readme_id = listing.entries.iter().find(|e| e.path == "README.txt").unwrap().id;
+    let mut writer = Vec::new();
+    let copy_report = handle.copy_entry(readme_id, &mut writer).unwrap();
+    assert_eq!(writer, b"ZManager fixture payload\n");
+    assert_eq!(copy_report.written_bytes, writer.len() as u64);
+}
+
+#[test]
+fn engine_lists_tests_and_extracts_vdi_fixture() {
+    let archive = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.vdi");
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&archive), OpenOptions::default()).unwrap();
+
+    assert_eq!(handle.detected().format, FormatId::VDI);
+    let listing = handle.list().unwrap();
+    assert!(listing.entries.iter().any(|e| e.path == "payload/README.txt"));
+    assert!(listing.entries.iter().any(|e| e.path == "payload/nested/file.txt"));
+
+    let test_report = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert!(test_report.tested_entries > 0);
+
+    let temp = TestDir::new("engine-conformance-vdi");
+    let out = temp.path("out");
+    let mut options = ExtractOptions { destination: out.clone(), ..Default::default() };
+    let extract_report = handle.extract(&mut options).unwrap();
+    assert!(extract_report.written_entries > 0);
+    assert_eq!(fs::read(out.join("payload/README.txt")).unwrap(), b"ZManager fixture payload\n");
+
+    let readme_id = listing.entries.iter().find(|e| e.path == "payload/README.txt").unwrap().id;
+    let mut writer = Vec::new();
+    let copy_report = handle.copy_entry(readme_id, &mut writer).unwrap();
+    assert_eq!(writer, b"ZManager fixture payload\n");
+    assert_eq!(copy_report.written_bytes, writer.len() as u64);
+}
+
+#[test]
+fn engine_lists_tests_and_extracts_optical_images() {
+    let iso_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives/basic.iso");
+    let iso_bytes = fs::read(&iso_path).unwrap();
+    let temp = TestDir::new("engine-conformance-optical");
+
+    // Test CUE sheet through engine
+    let bin_path = temp.path("disc.bin");
+    let cue_path = temp.path("disc.cue");
+    fs::write(&bin_path, &iso_bytes).unwrap();
+    fs::write(&cue_path, "FILE \"disc.bin\" BINARY\r\n  TRACK 01 MODE1/2048\r\n    INDEX 01 00:00:00\r\n").unwrap();
+
+    let engine = create_default_engine().unwrap();
+    let mut handle = engine.open(ArchiveSource::from_path_autodetect(&cue_path), OpenOptions::default()).unwrap();
+    assert_eq!(handle.detected().format, FormatId::CUE);
+
+    let listing = handle.list().unwrap();
+    assert!(listing.entries.iter().any(|e| e.path == "README.TXT"));
+
+    let test_report = handle.test(&zmanager_core::engine::TestOptions::default()).unwrap();
+    assert!(test_report.tested_entries > 0);
+
+    let out = temp.path("out_cue");
+    let mut options = ExtractOptions { destination: out.clone(), ..Default::default() };
+    let extract_report = handle.extract(&mut options).unwrap();
+    assert!(extract_report.written_entries > 0);
+    assert_eq!(fs::read(out.join("README.TXT")).unwrap(), b"ZManager fixture payload\n");
 }
 
 /// Collects every regular file below `root`, so a test can assert on extraction

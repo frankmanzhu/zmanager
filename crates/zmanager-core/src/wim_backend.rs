@@ -228,3 +228,143 @@ pub fn copy_to_writer(path: impl AsRef<Path>, target_path: &str, writer: &mut dy
     writer.write_all(&data).map_err(|source| io_error(path, source))?;
     Ok(data.len() as u64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestDir;
+    use std::fs;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    fn fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/archives").join(name)
+    }
+
+    fn require_fixture(name: &str) -> PathBuf {
+        let path = fixture(name);
+        assert!(path.is_file(), "missing fixture {name}; run scripts/generate_fixtures.sh");
+        path
+    }
+
+    fn paths_of(entries: &[WimEntry]) -> Vec<&str> {
+        entries.iter().map(|entry| entry.path.as_str()).collect()
+    }
+
+    #[test]
+    fn reference_wim_fixtures_list_and_extract_for_all_compressions() {
+        for name in ["basic-none.wim", "basic-XPRESS.wim", "basic-LZX.wim", "basic.wim"] {
+            let archive = require_fixture(name);
+
+            let entries = list(&archive).unwrap_or_else(|error| panic!("{name}: list failed: {error}"));
+            let paths = paths_of(&entries);
+            for expected in ["README.txt", "nested", "nested/file.txt", "nested/empty-dir", "dir with spaces/file with spaces.txt", "unicode/こんにちは.txt"]
+            {
+                assert!(paths.contains(&expected), "{name}: missing {expected} in {paths:?}");
+            }
+            assert!(entries.iter().all(|entry| !entry.path.starts_with('/') && !entry.path.starts_with("./")), "{name}: paths must be normalized: {paths:?}");
+
+            let temp = TestDir::new(&format!("wim-{name}"));
+            let dest = temp.path("out");
+            let extract_report =
+                extract(&archive, &dest, ExtractionPolicy::default(), None, None).unwrap_or_else(|error| panic!("{name}: extract failed: {error}"));
+            assert_eq!(fs::read_to_string(dest.join("README.txt")).unwrap(), "ZManager fixture payload\n", "{name}");
+            assert_eq!(fs::read_to_string(dest.join("nested/file.txt")).unwrap(), "nested fixture file\n", "{name}");
+            assert_eq!(fs::read_to_string(dest.join("dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n", "{name}");
+            assert_eq!(fs::read_to_string(dest.join("unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n", "{name}");
+            assert!(dest.join("nested/empty-dir").is_dir(), "{name}");
+
+            let declared: u64 = entries.iter().filter(|entry| entry.kind == WimEntryKind::File).map(|entry| entry.size).sum();
+            assert_eq!(extract_report.bytes, declared, "{name}: written bytes must sum declared file sizes");
+
+            let test_report = test(&archive, &TestOptions::default()).unwrap_or_else(|error| panic!("{name}: test failed: {error}"));
+            assert_eq!(test_report.bytes, declared, "{name}: verified bytes must match declared total");
+            assert_eq!(test_report.entries, entries.len(), "{name}: test entries must count all entries");
+        }
+    }
+
+    #[test]
+    fn multi_image_and_split_wim_list_and_extract() {
+        let multi = require_fixture("multi-image.wim");
+        let multi_entries = list(&multi).unwrap();
+        let multi_paths = paths_of(&multi_entries);
+        assert!(multi_paths.iter().any(|path| path.starts_with("image1/")), "multi-image WIM must expose image1/: {multi_paths:?}");
+        assert!(multi_paths.iter().any(|path| path.starts_with("image2/")), "multi-image WIM must expose image2/: {multi_paths:?}");
+
+        let temp_multi = TestDir::new("wim-multi");
+        let dest_multi = temp_multi.path("out");
+        let multi_report = extract(&multi, &dest_multi, ExtractionPolicy::default(), None, None).unwrap();
+        assert!(multi_report.entries > 0);
+        assert!(dest_multi.join("image1/README.txt").is_file());
+        assert!(dest_multi.join("image2/README.txt").is_file());
+
+        let split = require_fixture("split.swm");
+        let split_entries = list(&split).unwrap();
+        assert!(!split_entries.is_empty());
+        let temp_split = TestDir::new("wim-split");
+        let dest_split = temp_split.path("out");
+        let split_report = extract(&split, &dest_split, ExtractionPolicy::default(), None, None).unwrap();
+        assert!(split_report.entries > 0);
+        assert_eq!(fs::read_to_string(dest_split.join("README.txt")).unwrap(), "ZManager fixture payload\n");
+    }
+
+    #[test]
+    fn copy_to_writer_streams_selected_entry() {
+        let archive = require_fixture("basic.wim");
+        let mut readme_bytes = Vec::new();
+        let written = copy_to_writer(&archive, "README.txt", &mut readme_bytes).unwrap();
+        assert_eq!(readme_bytes, b"ZManager fixture payload\n");
+        assert_eq!(written, readme_bytes.len() as u64);
+
+        let mut nested_bytes = Vec::new();
+        let written_nested = copy_to_writer(&archive, "nested/file.txt", &mut nested_bytes).unwrap();
+        assert_eq!(nested_bytes, b"nested fixture file\n");
+        assert_eq!(written_nested, nested_bytes.len() as u64);
+
+        let mut missing_bytes = Vec::new();
+        let error = copy_to_writer(&archive, "nonexistent.txt", &mut missing_bytes).unwrap_err();
+        assert!(error.to_string().contains("not found"), "{error}");
+    }
+
+    #[test]
+    fn test_honours_selection_and_cancellation() {
+        let archive = require_fixture("basic.wim");
+
+        let options = TestOptions { selected_paths: vec!["README.txt".to_owned()], ..TestOptions::default() };
+        let report = test(&archive, &options).unwrap();
+        assert_eq!(report.entries, 1);
+        assert_eq!(report.bytes, "ZManager fixture payload\n".len() as u64);
+        assert!(report.skipped_entries > 0);
+
+        let cancelled_token = Arc::new(AtomicBool::new(true));
+        let options_cancelled = TestOptions { cancellation: Some(cancelled_token), ..TestOptions::default() };
+        assert!(matches!(test(&archive, &options_cancelled), Err(WimBackendError::Cancelled)));
+
+        let cancel_job = crate::jobs::CancellationToken::new();
+        cancel_job.cancel();
+        let temp = TestDir::new("wim-cancel-extract");
+        let dest = temp.path("out");
+        assert!(matches!(extract(&archive, &dest, ExtractionPolicy::default(), None, Some(&cancel_job)), Err(WimBackendError::Cancelled)));
+    }
+
+    #[test]
+    fn non_wim_and_corrupt_inputs_are_rejected() {
+        let temp = TestDir::new("wim-reject");
+
+        fs::write(temp.path("empty.wim"), b"").unwrap();
+        assert!(list(temp.path("empty.wim")).is_err());
+
+        fs::write(temp.path("garbage.wim"), b"not a wim archive at all").unwrap();
+        let error = list(temp.path("garbage.wim")).unwrap_err();
+        assert!(error.to_string().contains("invalid WIM") || error.to_string().contains("I/O failed"), "{error}");
+
+        let mut bytes = fs::read(require_fixture("basic-none.wim")).unwrap();
+        bytes[0..4].copy_from_slice(b"JUNK");
+        fs::write(temp.path("corrupt.wim"), &bytes).unwrap();
+        assert!(list(temp.path("corrupt.wim")).is_err());
+
+        let truncated = &bytes[..bytes.len() / 2];
+        fs::write(temp.path("truncated.wim"), truncated).unwrap();
+        assert!(list(temp.path("truncated.wim")).is_err());
+    }
+}

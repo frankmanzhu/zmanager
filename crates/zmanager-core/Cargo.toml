@@ -55,15 +55,12 @@ zmanager-wim = { workspace = true }
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
-# SquashFS reader. `lzo` and `parallel` are on because real images use LZO
-# (snaps) and the reader parallelizes block decode. backhand's own `xz`
-# feature is deliberately OFF: it pulls `liblzma`, which declares
-# `links = "lzma"` and so collides with the `lzma-sys` already linked through
-# `dpp` -> `pbzx` -> `xz2`. XZ — the dominant compressor for distribution root
-# filesystems — is instead supplied by `squashfs_backend::XzCapableCompressor`,
-# a `CompressionAction` backed by the pure-Rust `lzma-rust2` already in this
-# crate's tree.
-backhand = { version = "0.25", default-features = false, features = ["gzip", "zstd", "lz4", "lzo", "parallel"] }
+# SquashFS reader. `parallel` is on because the reader parallelizes block decode.
+# backhand's own `xz` and `lzo` features are deliberately OFF: `xz` pulls `liblzma`
+# (which declares `links = "lzma"` and collides with `lzma-sys`), while `lzo` pulls
+# `rust-lzo` (GPL-2.0). XZ, LZMA, and LZO are instead supplied under Apache-2.0 / MIT
+# by `squashfs_backend::XzCapableCompressor`, backed by `lzma-rust2` and `lzo`.
+backhand = { version = "0.25", default-features = false, features = ["gzip", "zstd", "lz4", "parallel"] }
 # Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4),
 # XAR symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/5), and XAR
 # <name enctype="base64"> decoding (non-ASCII filenames; not yet filed upstream — pushed to

@@ -62,6 +62,16 @@ fn truncated_container_matrix_fails_integrity_and_extraction_closed() {
         CorruptCase { name: "truncated.iso", expected_format: ArchiveFormatKind::Iso, bytes: b"CD001" },
         CorruptCase { name: "truncated.tzap", expected_format: ArchiveFormatKind::Tzap, bytes: b"TZAP" },
         CorruptCase { name: "truncated.gz", expected_format: ArchiveFormatKind::RawStream, bytes: b"\x1f\x8b\x08\0" },
+        CorruptCase { name: "truncated.squashfs", expected_format: ArchiveFormatKind::Squashfs, bytes: b"hsqs\0\0\0\0" },
+        CorruptCase { name: "truncated.appimage", expected_format: ArchiveFormatKind::AppImage, bytes: b"\x7fELF\x02\x01\x01\0\x41\x49\x02" },
+        CorruptCase { name: "truncated.wim", expected_format: ArchiveFormatKind::Wim, bytes: b"MSWIM\0\0\0" },
+        CorruptCase { name: "truncated.vdi", expected_format: ArchiveFormatKind::Vdi, bytes: &[0; 100] },
+        CorruptCase { name: "truncated.isz", expected_format: ArchiveFormatKind::Isz, bytes: b"IsZ!" },
+        CorruptCase { name: "truncated.nrg", expected_format: ArchiveFormatKind::Nrg, bytes: b"NERO\0\0\0\0" },
+        CorruptCase { name: "truncated.mdf", expected_format: ArchiveFormatKind::Mdf, bytes: b"MDF\0" },
+        CorruptCase { name: "truncated.cdi", expected_format: ArchiveFormatKind::Cdi, bytes: b"CDI\0" },
+        CorruptCase { name: "truncated.ccd", expected_format: ArchiveFormatKind::Ccd, bytes: b"[CloneCD]\r\n" },
+        CorruptCase { name: "truncated.cue", expected_format: ArchiveFormatKind::Cue, bytes: b"FILE \"missing.bin\" BINARY\r\n" },
     ];
     let temp = TestDir::new("truncated-container-matrix");
     let mut failures = Vec::new();
@@ -170,6 +180,29 @@ fn tar_requires_explicit_end_of_archive_records() {
         assert!(engine_extract_rejects(&archive, &destination), "{name} extracted successfully");
         assert!(directory_is_empty_or_absent(&destination), "{name} left materialized output behind");
     }
+}
+
+#[test]
+fn squashfs_and_wim_malformed_inputs_are_rejected() {
+    let temp = TestDir::new("squashfs-wim-malformed");
+
+    // SquashFS with invalid compression ID
+    let mut sqfs_bad = vec![0_u8; 1024];
+    sqfs_bad[0..4].copy_from_slice(b"hsqs");
+    sqfs_bad[20..22].copy_from_slice(&0x9999_u16.to_le_bytes()); // invalid compressor
+    temp.write_file("bad-compressor.squashfs", &sqfs_bad);
+    assert!(engine_test_rejects(&temp.path("bad-compressor.squashfs")));
+    assert!(engine_extract_rejects(&temp.path("bad-compressor.squashfs"), &temp.path("out-sqfs")));
+
+    // WIM with corrupt size fields
+    let mut wim_bad = vec![0_u8; 512];
+    wim_bad[0..8].copy_from_slice(b"MSWIM\0\0\0");
+    wim_bad[8..12].copy_from_slice(&208_u32.to_le_bytes()); // header size
+    wim_bad[12..16].copy_from_slice(&0x0001_0d00_u32.to_le_bytes()); // version
+    wim_bad[16..20].copy_from_slice(&0x0002_0000_u32.to_le_bytes()); // XPRESS flag
+    temp.write_file("bad-header.wim", &wim_bad);
+    assert!(engine_test_rejects(&temp.path("bad-header.wim")));
+    assert!(engine_extract_rejects(&temp.path("bad-header.wim"), &temp.path("out-wim")));
 }
 
 #[test]

@@ -162,6 +162,10 @@ fn fixture_manifest_covers_every_supported_extension() {
         zmanager_core::archive_format::VHD_EXTENSIONS,
         zmanager_core::archive_format::VMDK_EXTENSIONS,
         zmanager_core::archive_format::UDF_EXTENSIONS,
+        zmanager_core::archive_format::SQUASHFS_EXTENSIONS,
+        zmanager_core::archive_format::APPIMAGE_EXTENSIONS,
+        zmanager_core::archive_format::WIM_EXTENSIONS,
+        zmanager_core::archive_format::VDI_EXTENSIONS,
         zmanager_core::engine::raw_stream_suffixes(),
     ];
 
@@ -318,6 +322,52 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
         (
             "basic.udf",
             &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
+        ),
+        (
+            "basic.vdi",
+            &[
+                ("payload", "directory"),
+                ("payload/nested", "directory"),
+                ("payload/README.txt", "file"),
+                ("payload/nested/file.txt", "file"),
+                ("payload/dir with spaces/file with spaces.txt", "file"),
+                ("payload/unicode/こんにちは.txt", "file"),
+            ],
+        ),
+        (
+            "basic.squashfs",
+            &[
+                ("README.txt", "file"),
+                ("run.sh", "file"),
+                ("nested", "directory"),
+                ("nested/file.txt", "file"),
+                ("nested/empty-dir", "directory"),
+                ("dir with spaces/file with spaces.txt", "file"),
+                ("unicode/こんにちは.txt", "file"),
+            ],
+        ),
+        (
+            "basic.AppImage",
+            &[
+                ("README.txt", "file"),
+                ("run.sh", "file"),
+                ("nested", "directory"),
+                ("nested/file.txt", "file"),
+                ("nested/empty-dir", "directory"),
+                ("dir with spaces/file with spaces.txt", "file"),
+                ("unicode/こんにちは.txt", "file"),
+            ],
+        ),
+        (
+            "basic.wim",
+            &[
+                ("README.txt", "file"),
+                ("nested", "directory"),
+                ("nested/file.txt", "file"),
+                ("nested/empty-dir", "directory"),
+                ("dir with spaces/file with spaces.txt", "file"),
+                ("unicode/こんにちは.txt", "file"),
+            ],
         ),
     ];
 
@@ -516,6 +566,186 @@ fn cli_lists_tests_and_extracts_hybrid_iso_fixture() {
     assert_success("zm extract basic.iso --include", &selected);
     assert_eq!(fs::read(selected_out.join("NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
     assert!(!selected_out.join("README.TXT").exists());
+}
+
+#[test]
+fn cli_lists_tests_and_extracts_squashfs_fixtures() {
+    for filename in ["basic.squashfs", "basic-xz.squashfs", "basic-gzip.squashfs", "basic-zstd.squashfs", "basic.sqfs"] {
+        let fixture = archives_dir().join(filename);
+        if !fixture.exists() {
+            continue;
+        }
+        let temp = TestDir::new("fixture-cli-squashfs");
+
+        let list = Command::new(cli_path()).arg("list").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm list {filename}"), &list);
+        let list_stdout = String::from_utf8_lossy(&list.stdout);
+        assert!(list_stdout.contains("README.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("nested/file.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("dir with spaces/file with spaces.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("unicode/こんにちは.txt"), "{list_stdout}");
+        assert!(list_stdout.contains("nested/empty-dir"), "{list_stdout}");
+
+        let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm test {filename}"), &test);
+
+        let out = temp.path("out");
+        let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
+        assert_success(&format!("zm extract {filename}"), &extract);
+        assert_eq!(fs::read_to_string(out.join("README.txt")).unwrap(), "ZManager fixture payload\n");
+        assert_eq!(fs::read_to_string(out.join("nested/file.txt")).unwrap(), "nested fixture file\n");
+        assert_eq!(fs::read_to_string(out.join("dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
+        assert_eq!(fs::read_to_string(out.join("unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
+        assert!(out.join("nested/empty-dir").is_dir());
+
+        let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("README.txt").arg("--to-stdout").output().unwrap();
+        assert_success(&format!("zm extract {filename} --to-stdout"), &stdout);
+        assert_eq!(stdout.stdout, b"ZManager fixture payload\n", "{filename}");
+    }
+}
+
+#[test]
+fn cli_lists_tests_and_extracts_appimage_fixture() {
+    let fixture = archives_dir().join("basic.AppImage");
+    if !fixture.exists() {
+        return;
+    }
+    let temp = TestDir::new("fixture-cli-appimage");
+
+    let list = Command::new(cli_path()).arg("list").arg(&fixture).output().unwrap();
+    assert_success("zm list basic.AppImage", &list);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(list_stdout.contains("README.txt"), "{list_stdout}");
+    assert!(list_stdout.contains("nested/file.txt"), "{list_stdout}");
+    assert!(list_stdout.contains("dir with spaces/file with spaces.txt"), "{list_stdout}");
+    assert!(list_stdout.contains("unicode/こんにちは.txt"), "{list_stdout}");
+
+    let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
+    assert_success("zm test basic.AppImage", &test);
+
+    let out = temp.path("out");
+    let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
+    assert_success("zm extract basic.AppImage", &extract);
+    assert_eq!(fs::read_to_string(out.join("README.txt")).unwrap(), "ZManager fixture payload\n");
+    assert_eq!(fs::read_to_string(out.join("nested/file.txt")).unwrap(), "nested fixture file\n");
+
+    let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("README.txt").arg("--to-stdout").output().unwrap();
+    assert_success("zm extract basic.AppImage --to-stdout", &stdout);
+    assert_eq!(stdout.stdout, b"ZManager fixture payload\n");
+}
+
+#[test]
+fn cli_lists_tests_and_extracts_wim_fixtures() {
+    for filename in ["basic.wim", "basic-none.wim", "basic-LZX.wim", "basic-XPRESS.wim", "multi-image.wim", "split.swm"] {
+        let fixture = archives_dir().join(filename);
+        if !fixture.exists() {
+            continue;
+        }
+        let temp = TestDir::new("fixture-cli-wim");
+
+        let list = Command::new(cli_path()).arg("list").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm list {filename}"), &list);
+        let list_stdout = String::from_utf8_lossy(&list.stdout);
+        assert!(list_stdout.contains("README.txt"), "{list_stdout}");
+
+        let test = Command::new(cli_path()).arg("test").arg(&fixture).output().unwrap();
+        assert_success(&format!("zm test {filename}"), &test);
+
+        let out = temp.path("out");
+        let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
+        assert_success(&format!("zm extract {filename}"), &extract);
+        if filename == "multi-image.wim" {
+            assert!(out.join("image1/README.txt").is_file());
+            assert!(out.join("image2/README.txt").is_file());
+        } else {
+            assert_eq!(fs::read_to_string(out.join("README.txt")).unwrap(), "ZManager fixture payload\n");
+            assert_eq!(fs::read_to_string(out.join("nested/file.txt")).unwrap(), "nested fixture file\n");
+        }
+
+        if filename != "multi-image.wim" {
+            let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("README.txt").arg("--to-stdout").output().unwrap();
+            assert_success(&format!("zm extract {filename} --to-stdout"), &stdout);
+            assert_eq!(stdout.stdout, b"ZManager fixture payload\n", "{filename}");
+        }
+    }
+}
+
+#[test]
+fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
+    let iso_path = archives_dir().join("basic.iso");
+    if !iso_path.exists() {
+        return;
+    }
+    let iso_bytes = fs::read(&iso_path).unwrap();
+    let iso_len = u32::try_from(iso_bytes.len()).unwrap();
+    let temp = TestDir::new("fixture-cli-optical");
+
+    // 1. NRG
+    let nrg_path = temp.path("disc.nrg");
+    let mut nrg_bytes = iso_bytes.clone();
+    nrg_bytes.extend_from_slice(b"ETNF");
+    nrg_bytes.extend_from_slice(&20_u32.to_be_bytes());
+    nrg_bytes.extend_from_slice(&0_u32.to_be_bytes());
+    nrg_bytes.extend_from_slice(&iso_len.to_be_bytes());
+    nrg_bytes.extend_from_slice(&[0, 0, 0, 5]);
+    nrg_bytes.extend_from_slice(&0_u32.to_be_bytes());
+    nrg_bytes.extend_from_slice(b"END!");
+    nrg_bytes.extend_from_slice(&0_u32.to_be_bytes());
+    nrg_bytes.extend_from_slice(b"NERO");
+    nrg_bytes.extend_from_slice(&iso_len.to_be_bytes());
+    fs::write(&nrg_path, &nrg_bytes).unwrap();
+
+    let list_nrg = Command::new(cli_path()).arg("list").arg(&nrg_path).output().unwrap();
+    assert_success("zm list disc.nrg", &list_nrg);
+    let test_nrg = Command::new(cli_path()).arg("test").arg(&nrg_path).output().unwrap();
+    assert_success("zm test disc.nrg", &test_nrg);
+    let out_nrg = temp.path("out_nrg");
+    let extract_nrg = Command::new(cli_path()).arg("extract").arg(&nrg_path).arg("-C").arg(&out_nrg).output().unwrap();
+    assert_success("zm extract disc.nrg", &extract_nrg);
+    assert!(out_nrg.join("README.TXT").is_file());
+
+    // 2. CUE/BIN
+    let bin_path = temp.path("disc.bin");
+    let cue_path = temp.path("disc.cue");
+    fs::write(&bin_path, &iso_bytes).unwrap();
+    fs::write(&cue_path, "FILE \"disc.bin\" BINARY\r\n  TRACK 01 MODE1/2048\r\n    INDEX 01 00:00:00\r\n").unwrap();
+
+    let list_cue = Command::new(cli_path()).arg("list").arg(&cue_path).output().unwrap();
+    assert_success("zm list disc.cue", &list_cue);
+    let test_cue = Command::new(cli_path()).arg("test").arg(&cue_path).output().unwrap();
+    assert_success("zm test disc.cue", &test_cue);
+    let out_cue = temp.path("out_cue");
+    let extract_cue = Command::new(cli_path()).arg("extract").arg(&cue_path).arg("-C").arg(&out_cue).output().unwrap();
+    assert_success("zm extract disc.cue", &extract_cue);
+    assert!(out_cue.join("README.TXT").is_file());
+
+    // 3. CCD/IMG
+    let img_path = temp.path("disc.img");
+    let ccd_path = temp.path("disc.ccd");
+    fs::write(&img_path, &iso_bytes).unwrap();
+    fs::write(&ccd_path, "[CloneCD]\r\nVersion=3\r\n[Disc]\r\nTracks=1\r\n[Track 1]\r\nMode=1\r\n").unwrap();
+
+    let list_ccd = Command::new(cli_path()).arg("list").arg(&ccd_path).output().unwrap();
+    assert_success("zm list disc.ccd", &list_ccd);
+    let test_ccd = Command::new(cli_path()).arg("test").arg(&ccd_path).output().unwrap();
+    assert_success("zm test disc.ccd", &test_ccd);
+    let out_ccd = temp.path("out_ccd");
+    let extract_ccd = Command::new(cli_path()).arg("extract").arg(&ccd_path).arg("-C").arg(&out_ccd).output().unwrap();
+    assert_success("zm extract disc.ccd", &extract_ccd);
+    assert!(out_ccd.join("README.TXT").is_file());
+
+    // 4. MDF
+    let mdf_path = temp.path("disc.mdf");
+    fs::write(&mdf_path, &iso_bytes).unwrap();
+
+    let list_mdf = Command::new(cli_path()).arg("list").arg(&mdf_path).output().unwrap();
+    assert_success("zm list disc.mdf", &list_mdf);
+    let test_mdf = Command::new(cli_path()).arg("test").arg(&mdf_path).output().unwrap();
+    assert_success("zm test disc.mdf", &test_mdf);
+    let out_mdf = temp.path("out_mdf");
+    let extract_mdf = Command::new(cli_path()).arg("extract").arg(&mdf_path).arg("-C").arg(&out_mdf).output().unwrap();
+    assert_success("zm extract disc.mdf", &extract_mdf);
+    assert!(out_mdf.join("README.TXT").is_file());
 }
 
 /// Extracts the VHD and VMDK fixtures with 7-Zip (which reads VPC and VMDK
