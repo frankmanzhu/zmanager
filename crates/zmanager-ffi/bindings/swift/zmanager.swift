@@ -3698,6 +3698,13 @@ public enum ArchiveFormat {
     case isz
     case ccd
     case cue
+    case vhdx
+    case qcow2
+    case ewf
+    case ad1
+    case dar
+    case aff4
+    case rawDisk
     case gzip
     case bzip2
     case xz
@@ -3808,23 +3815,37 @@ public struct FfiConverterTypeArchiveFormat: FfiConverterRustBuffer {
         
         case 42: return .cue
         
-        case 43: return .gzip
+        case 43: return .vhdx
         
-        case 44: return .bzip2
+        case 44: return .qcow2
         
-        case 45: return .xz
+        case 45: return .ewf
         
-        case 46: return .zstd
+        case 46: return .ad1
         
-        case 47: return .tzap
+        case 47: return .dar
         
-        case 48: return .appleArchive
+        case 48: return .aff4
         
-        case 49: return .xip
+        case 49: return .rawDisk
         
-        case 50: return .rawStream
+        case 50: return .gzip
         
-        case 51: return .other
+        case 51: return .bzip2
+        
+        case 52: return .xz
+        
+        case 53: return .zstd
+        
+        case 54: return .tzap
+        
+        case 55: return .appleArchive
+        
+        case 56: return .xip
+        
+        case 57: return .rawStream
+        
+        case 58: return .other
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -4002,40 +4023,68 @@ public struct FfiConverterTypeArchiveFormat: FfiConverterRustBuffer {
             writeInt(&buf, Int32(42))
         
         
-        case .gzip:
+        case .vhdx:
             writeInt(&buf, Int32(43))
         
         
-        case .bzip2:
+        case .qcow2:
             writeInt(&buf, Int32(44))
         
         
-        case .xz:
+        case .ewf:
             writeInt(&buf, Int32(45))
         
         
-        case .zstd:
+        case .ad1:
             writeInt(&buf, Int32(46))
         
         
-        case .tzap:
+        case .dar:
             writeInt(&buf, Int32(47))
         
         
-        case .appleArchive:
+        case .aff4:
             writeInt(&buf, Int32(48))
         
         
-        case .xip:
+        case .rawDisk:
             writeInt(&buf, Int32(49))
         
         
-        case .rawStream:
+        case .gzip:
             writeInt(&buf, Int32(50))
         
         
-        case .other:
+        case .bzip2:
             writeInt(&buf, Int32(51))
+        
+        
+        case .xz:
+            writeInt(&buf, Int32(52))
+        
+        
+        case .zstd:
+            writeInt(&buf, Int32(53))
+        
+        
+        case .tzap:
+            writeInt(&buf, Int32(54))
+        
+        
+        case .appleArchive:
+            writeInt(&buf, Int32(55))
+        
+        
+        case .xip:
+            writeInt(&buf, Int32(56))
+        
+        
+        case .rawStream:
+            writeInt(&buf, Int32(57))
+        
+        
+        case .other:
+            writeInt(&buf, Int32(58))
         
         }
     }
