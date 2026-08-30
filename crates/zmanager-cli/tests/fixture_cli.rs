@@ -263,10 +263,20 @@ const FULL_PAYLOAD_TREE_FIXTURES: &[(&str, &str)] = &[
     ("basic.zip", "file"),
     ("basic.7z", "file"),
     ("basic.tzap", "file"),
-    // TAR-family and the remaining container formats preserve it.
+    // TAR-family and the remaining container formats preserve it. Every
+    // distinct bsdtar-produced byte stream is listed here (not just its alias
+    // spellings, which are byte-identical copies) so a regression that
+    // reintroduces AppleDouble `._` pollution into any one of them is caught
+    // rather than passing silently.
     ("basic.tar", "symlink"),
     ("basic.tar.gz", "symlink"),
+    ("basic.tar.bz2", "symlink"),
     ("basic.tar.xz", "symlink"),
+    ("basic.tar.lzma", "symlink"),
+    ("basic.tar.lz", "symlink"),
+    ("basic.tar.lzo", "symlink"),
+    ("basic.tar.Z", "symlink"),
+    ("basic.tar.lz4", "symlink"),
     ("basic.tar.zst", "symlink"),
     ("basic.cpio", "symlink"),
     ("basic.pkg", "symlink"),
