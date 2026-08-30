@@ -171,7 +171,10 @@ Passwords are not accepted as command arguments. Use the prompt or
 | TZAP | `.tzap` — a modern, open-source RAR alternative. Secure passphrase or multi-recipient encryption, cryptographic signatures, and self-healing error recovery; passphrase-protected create/list/test/extract |
 | Raw compressed files | `.zst`, `.gz`, `.bz2`, `.xz`, `.lzma`, `.lz`, `.br`, `.lz4`, `.lzo`, `.Z`, `.uu`, `.b64` |
 | Packages and containers | `.deb`, `.rpm`, `.a`, `.ar`, `.lib`, `.cpio`, `.cpio.gz`, `.cpio.bz2`, `.cpio.xz`, `.cpio.lzma`, `.cpio.zst`, `.cpgz`, `.spk`, `.iso`, `.xar`, `.cab`, `.msi`, `.pkg`, `.lha`, `.lzh`, `.warc`, `.mtree` |
-| Disk images | `.dmg` (Apple Disk Image), `.vhd` (Virtual PC/Hyper-V), `.vmdk` (VMware), `.udf` (optical) — extraction resolves MBR/GPT partitions and the inner filesystem (NTFS, FAT/exFAT, ext4, UDF) |
+| Disk images | `.dmg` (Apple Disk Image), `.vhd` (Virtual PC/Hyper-V), `.vmdk` (VMware), `.vdi` (Oracle VirtualBox), `.udf` (optical) — extraction resolves MBR/GPT partitions and the inner filesystem (NTFS, FAT/exFAT, ext4, UDF) |
+| Optical sector dumps | `.iso`, `.nrg` (Nero), `.mds`/`.mdf` (Alcohol 120%), `.cdi` (DiscJuggler), `.isz` (UltraISO Compressed ISO), `.ccd` (CloneCD), `.cue` (CUE/BIN) — raw 2352/2448 and Mode 2 sectors are mapped to logical 2048-byte sectors |
+| Linux filesystem images | `.squashfs`, `.sqfs`, and `.appimage` (type 2) — gzip, XZ, LZO, LZ4, and zstd blocks; Unix modes and mtimes are restored |
+| Windows imaging | `.wim` and `.swm` split sets — stored, XPRESS-Huffman, and WIM-LZX resources: every image in a multi-image WIM, sibling-part resolution, and reparse-point symlinks. LZMS/`.esd` resources are recognized and rejected with the reason and a `wimlib-imagex export` conversion command |
 | Apple Archive | `.aar`, `.aea` encrypted Apple Archives (macOS/iOS) |
 | Passwords | ZIP, 7z, TZAP, Apple Archive, and RAR list/test/extract through prompt or `--password-stdin` |
 
@@ -250,6 +253,8 @@ resulting tree with `zm`.
   the desktop and mobile GUI apps.
 - `crates/zmanager-unrar`: bundled extraction-only UnRAR bridge for passworded
   RAR extraction.
+- `crates/zmanager-wim`: publishable WIM parser and resource decoder for stored,
+  XPRESS-Huffman, and WIM-LZX resources; LZMS/ESD is intentionally unsupported.
 - `fixtures/`: committed compatibility fixtures used by integration tests.
 - `fuzz/`: `cargo-fuzz` targets for hostile archive and parser surfaces.
 - `packaging/`: Homebrew and WinGet metadata templates.

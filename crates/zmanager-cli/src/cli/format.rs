@@ -19,6 +19,16 @@ pub(crate) const FORMAT_AR: &str = "ar";
 pub(crate) const FORMAT_WARC: &str = "warc";
 pub(crate) const FORMAT_MTREE: &str = "mtree";
 pub(crate) const FORMAT_RAW_STREAM: &str = "raw-stream";
+pub(crate) const FORMAT_SQUASHFS: &str = "squashfs";
+pub(crate) const FORMAT_APPIMAGE: &str = "appimage";
+pub(crate) const FORMAT_WIM: &str = "wim";
+pub(crate) const FORMAT_VDI: &str = "vdi";
+pub(crate) const FORMAT_NRG: &str = "nrg";
+pub(crate) const FORMAT_MDF: &str = "mdf";
+pub(crate) const FORMAT_CDI: &str = "cdi";
+pub(crate) const FORMAT_ISZ: &str = "isz";
+pub(crate) const FORMAT_CCD: &str = "ccd";
+pub(crate) const FORMAT_CUE: &str = "cue";
 pub(crate) const TZAP_DEFAULT_RECOVERY_PERCENTAGE: u8 = 5;
 pub(crate) const TZAP_SINGLE_VOLUME_LOSS_TOLERANCE: u8 = 0;
 pub(crate) const TZAP_SPLIT_VOLUME_LOSS_TOLERANCE: u8 = 1;
@@ -38,9 +48,11 @@ pub(crate) const TGZ_FORMAT_ALIASES: &[&str] = &[FORMAT_TGZ, "tar.gz", "gz"];
 // Extension lists are canonical in `zmanager_core::archive_format` (CR-114);
 // this crate re-exports them for display and option validation.
 pub(crate) use zmanager_core::archive_format::{
-    APPLE_ARCHIVE_EXTENSIONS, AR_EXTENSIONS, CAB_EXTENSIONS, CPIO_EXTENSIONS, DEB_EXTENSIONS, ISO_EXTENSIONS, LHA_EXTENSIONS, MSI_EXTENSIONS, MTREE_EXTENSIONS,
-    RAR_EXTENSIONS, RPM_EXTENSIONS, SEVEN_Z_EXTENSIONS, TAR_BZ2_EXTENSIONS, TAR_EXTENSIONS, TAR_LZMA_EXTENSIONS, TAR_XZ_EXTENSIONS, TAR_ZST_EXTENSIONS,
-    TGZ_EXTENSIONS, TZAP_EXTENSIONS, UDF_EXTENSIONS, VHD_EXTENSIONS, VMDK_EXTENSIONS, WARC_EXTENSIONS, XAR_EXTENSIONS, ZIP_FAMILY_EXTENSIONS,
+    APPIMAGE_EXTENSIONS, APPLE_ARCHIVE_EXTENSIONS, AR_EXTENSIONS, CAB_EXTENSIONS, CCD_EXTENSIONS, CDI_EXTENSIONS, CPIO_EXTENSIONS, CUE_EXTENSIONS,
+    DEB_EXTENSIONS, ISO_EXTENSIONS, ISZ_EXTENSIONS, LHA_EXTENSIONS, MDF_EXTENSIONS, MSI_EXTENSIONS, MTREE_EXTENSIONS, NRG_EXTENSIONS, RAR_EXTENSIONS,
+    RPM_EXTENSIONS, SEVEN_Z_EXTENSIONS, SQUASHFS_EXTENSIONS, TAR_BZ2_EXTENSIONS, TAR_EXTENSIONS, TAR_LZMA_EXTENSIONS, TAR_XZ_EXTENSIONS, TAR_ZST_EXTENSIONS,
+    TGZ_EXTENSIONS, TZAP_EXTENSIONS, UDF_EXTENSIONS, VDI_EXTENSIONS, VHD_EXTENSIONS, VMDK_EXTENSIONS, WARC_EXTENSIONS, WIM_EXTENSIONS, XAR_EXTENSIONS,
+    ZIP_FAMILY_EXTENSIONS,
 };
 
 pub(crate) const ZIP_CREATE_EXTENSIONS: &[&str] = &[".zip"];
@@ -86,6 +98,16 @@ pub(crate) const EXTRACT_FORMATS: &[FormatDescriptor] = &[
     FormatDescriptor { name: FORMAT_VHD, extensions: VHD_EXTENSIONS, kind: ArchiveFormatKind::Vhd },
     FormatDescriptor { name: FORMAT_VMDK, extensions: VMDK_EXTENSIONS, kind: ArchiveFormatKind::Vmdk },
     FormatDescriptor { name: FORMAT_UDF, extensions: UDF_EXTENSIONS, kind: ArchiveFormatKind::Udf },
+    FormatDescriptor { name: FORMAT_SQUASHFS, extensions: SQUASHFS_EXTENSIONS, kind: ArchiveFormatKind::Squashfs },
+    FormatDescriptor { name: FORMAT_APPIMAGE, extensions: APPIMAGE_EXTENSIONS, kind: ArchiveFormatKind::AppImage },
+    FormatDescriptor { name: FORMAT_WIM, extensions: WIM_EXTENSIONS, kind: ArchiveFormatKind::Wim },
+    FormatDescriptor { name: FORMAT_VDI, extensions: VDI_EXTENSIONS, kind: ArchiveFormatKind::Vdi },
+    FormatDescriptor { name: FORMAT_NRG, extensions: NRG_EXTENSIONS, kind: ArchiveFormatKind::Nrg },
+    FormatDescriptor { name: FORMAT_MDF, extensions: MDF_EXTENSIONS, kind: ArchiveFormatKind::Mdf },
+    FormatDescriptor { name: FORMAT_CDI, extensions: CDI_EXTENSIONS, kind: ArchiveFormatKind::Cdi },
+    FormatDescriptor { name: FORMAT_ISZ, extensions: ISZ_EXTENSIONS, kind: ArchiveFormatKind::Isz },
+    FormatDescriptor { name: FORMAT_CCD, extensions: CCD_EXTENSIONS, kind: ArchiveFormatKind::Ccd },
+    FormatDescriptor { name: FORMAT_CUE, extensions: CUE_EXTENSIONS, kind: ArchiveFormatKind::Cue },
     FormatDescriptor { name: FORMAT_LHA, extensions: LHA_EXTENSIONS, kind: ArchiveFormatKind::Lha },
     FormatDescriptor { name: FORMAT_AR, extensions: AR_EXTENSIONS, kind: ArchiveFormatKind::Ar },
     FormatDescriptor { name: FORMAT_WARC, extensions: WARC_EXTENSIONS, kind: ArchiveFormatKind::Warc },

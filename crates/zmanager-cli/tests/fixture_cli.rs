@@ -422,7 +422,7 @@ fn cli_lists_tests_and_extracts_msi_fixture() {
 
 #[test]
 fn cli_lists_tests_and_extracts_virtual_disk_fixtures() {
-    for filename in ["basic.vhd", "basic.vmdk", "basic.udf"] {
+    for filename in ["basic.vhd", "basic.vmdk", "basic.udf", "basic.vdi"] {
         let fixture = archives_dir().join(filename);
         if !fixture.exists() {
             continue;
@@ -474,14 +474,11 @@ fn cli_lists_tests_and_extracts_virtual_disk_fixtures() {
         assert!(out_sel.join("payload/nested/file.txt").is_file());
         assert!(!out_sel.join("payload/README.txt").exists());
 
-        // --to-stdout is explicitly unsupported for the disk formats.
+        // The disk formats copy a single entry through the shared
+        // path/occurrence selector, so --to-stdout works for them.
         let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("payload/README.txt").arg("--to-stdout").output().unwrap();
-        assert_failure(&format!("zm extract {filename} --to-stdout"), &stdout);
-        assert!(
-            String::from_utf8_lossy(&stdout.stderr).contains("do not currently support extracting to stdout"),
-            "stderr:\n{}",
-            String::from_utf8_lossy(&stdout.stderr)
-        );
+        assert_success(&format!("zm extract {filename} --to-stdout"), &stdout);
+        assert_eq!(stdout.stdout, b"ZManager fixture payload\n", "{filename}");
     }
 }
 

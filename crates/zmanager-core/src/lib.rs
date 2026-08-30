@@ -44,8 +44,8 @@ mod strings;
 pub(crate) use backend_impl::mtree_backend;
 pub(crate) use backend_impl::{
     apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, lzop_decoder, msi_backend,
-    rar_backend, raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, unix_compress_decoder, uu_decoder,
-    virtual_disk_backend, warc_backend, xar_backend, zip_backend,
+    rar_backend, raw_stream_backend, rpm_backend, sevenz_backend, squashfs_backend, tar_backend, tar_gz_backend, tar_zst_backend, unix_compress_decoder,
+    uu_decoder, virtual_disk_backend, warc_backend, wim_backend, xar_backend, zip_backend,
 };
 mod tar_metadata;
 mod temp_names;
@@ -104,8 +104,8 @@ pub mod backend_test_support {
     pub use super::backend_impl::mtree_backend;
     pub use super::backend_impl::{
         apple_archive_backend, apple_dmg_backend, apple_pkg_backend, ar_backend, cab_backend, cpio_backend, deb_backend, lha_backend, msi_backend, rar_backend,
-        raw_stream_backend, rpm_backend, sevenz_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend, warc_backend, xar_backend,
-        zip_backend,
+        raw_stream_backend, rpm_backend, sevenz_backend, squashfs_backend, tar_backend, tar_gz_backend, tar_zst_backend, virtual_disk_backend, warc_backend,
+        wim_backend, xar_backend, zip_backend,
     };
     pub mod tzap {
         pub use crate::tzap::*;

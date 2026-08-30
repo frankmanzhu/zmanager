@@ -51,6 +51,16 @@ impl FormatId {
     pub const VHD: FormatId = FormatId("vhd");
     pub const VMDK: FormatId = FormatId("vmdk");
     pub const UDF: FormatId = FormatId("udf");
+    pub const SQUASHFS: FormatId = FormatId("squashfs");
+    pub const APPIMAGE: FormatId = FormatId("appimage");
+    pub const WIM: FormatId = FormatId("wim");
+    pub const VDI: FormatId = FormatId("vdi");
+    pub const NRG: FormatId = FormatId("nrg");
+    pub const MDF: FormatId = FormatId("mdf");
+    pub const CDI: FormatId = FormatId("cdi");
+    pub const ISZ: FormatId = FormatId("isz");
+    pub const CCD: FormatId = FormatId("ccd");
+    pub const CUE: FormatId = FormatId("cue");
     pub const RAW_STREAM: FormatId = FormatId("raw_stream");
 
     /// Converts a canonical archive-format kind into its engine identity.
@@ -91,6 +101,16 @@ impl FormatId {
             ArchiveFormatKind::Vhd => Some(Self::VHD),
             ArchiveFormatKind::Vmdk => Some(Self::VMDK),
             ArchiveFormatKind::Udf => Some(Self::UDF),
+            ArchiveFormatKind::Squashfs => Some(Self::SQUASHFS),
+            ArchiveFormatKind::AppImage => Some(Self::APPIMAGE),
+            ArchiveFormatKind::Wim => Some(Self::WIM),
+            ArchiveFormatKind::Vdi => Some(Self::VDI),
+            ArchiveFormatKind::Nrg => Some(Self::NRG),
+            ArchiveFormatKind::Mdf => Some(Self::MDF),
+            ArchiveFormatKind::Cdi => Some(Self::CDI),
+            ArchiveFormatKind::Isz => Some(Self::ISZ),
+            ArchiveFormatKind::Ccd => Some(Self::CCD),
+            ArchiveFormatKind::Cue => Some(Self::CUE),
             ArchiveFormatKind::RawStream => Some(Self::RAW_STREAM),
         }
     }

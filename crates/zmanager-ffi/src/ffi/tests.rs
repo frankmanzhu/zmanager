@@ -659,3 +659,69 @@ impl Drop for TestDir {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
+
+#[cfg(test)]
+mod disk_and_filesystem_formats {
+    use crate::ffi::types::ArchiveFormat;
+    use crate::ffi::util::{classify_archive_path, format_capabilities, format_label, kind_for_format};
+    use std::path::Path;
+
+    /// Every format kind added for the disk-image and filesystem backends,
+    /// paired with a path that must classify as it.
+    const CASES: &[(&str, ArchiveFormat)] = &[
+        ("image.squashfs", ArchiveFormat::Squashfs),
+        ("image.sqfs", ArchiveFormat::Squashfs),
+        ("Tool-x86_64.AppImage", ArchiveFormat::AppImage),
+        ("install.wim", ArchiveFormat::Wim),
+        ("install.swm", ArchiveFormat::Wim),
+        ("disk.vdi", ArchiveFormat::Vdi),
+        ("disc.nrg", ArchiveFormat::Nrg),
+        ("disc.mdf", ArchiveFormat::Mdf),
+        ("disc.mds", ArchiveFormat::Mdf),
+        ("disc.cdi", ArchiveFormat::Cdi),
+        ("disc.isz", ArchiveFormat::Isz),
+        ("disc.ccd", ArchiveFormat::Ccd),
+        ("disc.cue", ArchiveFormat::Cue),
+    ];
+
+    #[test]
+    fn new_formats_classify_as_themselves_rather_than_other() {
+        // Before the bridge learned these variants they all fell through to
+        // `ArchiveFormat::Other`, which reports `can_list: false` — so the
+        // formats existed in the CLI and were invisible to every FFI caller.
+        for (name, expected) in CASES {
+            let (format, warnings) = classify_archive_path(Path::new(name));
+            assert_eq!(format, *expected, "{name} classified as {format:?}");
+            assert!(warnings.is_empty(), "{name}: {warnings:?}");
+        }
+    }
+
+    #[test]
+    fn new_formats_report_list_and_extract_capability() {
+        for (name, format) in CASES {
+            let (can_list, can_extract, can_create) = format_capabilities(*format);
+            assert!(can_list, "{name}: the bridge must report list support");
+            assert!(can_extract, "{name}: the bridge must report extract support");
+            assert!(!can_create, "{name}: these backends are read-only");
+        }
+    }
+
+    #[test]
+    fn format_and_kind_mappings_are_round_trip_consistent() {
+        for (_, format) in CASES {
+            let kind = kind_for_format(*format);
+            assert_ne!(kind, zmanager_core::archive_format::ArchiveFormatKind::Unknown, "{format:?} must map to a core kind");
+            assert!(!format_label(*format).is_empty(), "{format:?} must have a label");
+        }
+    }
+
+    #[test]
+    fn generic_and_unimplemented_extensions_stay_unclaimed() {
+        // `.img` is a generic raw-image extension, and `.esd` images are LZMS
+        // solid WIMs this build cannot decode; neither is advertised.
+        for name in ["raspios.img", "sdcard.img"] {
+            let (format, _) = classify_archive_path(Path::new(name));
+            assert_eq!(format, ArchiveFormat::Other, "{name} must not be claimed as CloneCD");
+        }
+    }
+}

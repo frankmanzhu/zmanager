@@ -47,6 +47,24 @@ pub const MSI_EXTENSIONS: &[&str] = &[".msi"];
 pub const VHD_EXTENSIONS: &[&str] = &[".vhd"];
 pub const VMDK_EXTENSIONS: &[&str] = &[".vmdk"];
 pub const UDF_EXTENSIONS: &[&str] = &[".udf"];
+pub const SQUASHFS_EXTENSIONS: &[&str] = &[".squashfs", ".sqfs"];
+pub const APPIMAGE_EXTENSIONS: &[&str] = &[".appimage"];
+// `.esd` is intentionally absent: distribution ESDs are LZMS-compressed solid
+// images, which the WIM backend does not decode. Content detection still maps
+// the `MSWIM` magic to `Wim`, so an ESD passed by name fails with the precise
+// "LZMS is not supported" message instead of "unknown format".
+pub const WIM_EXTENSIONS: &[&str] = &[".wim", ".swm"];
+pub const VDI_EXTENSIONS: &[&str] = &[".vdi"];
+pub const NRG_EXTENSIONS: &[&str] = &[".nrg"];
+pub const MDF_EXTENSIONS: &[&str] = &[".mdf", ".mds"];
+pub const CDI_EXTENSIONS: &[&str] = &[".cdi"];
+pub const ISZ_EXTENSIONS: &[&str] = &[".isz"];
+// `.img` is intentionally absent: it is a generic raw-image extension used by
+// SD-card, floppy, and disk dumps, and claiming it as CloneCD mislabels every
+// one of them. A CloneCD set is entered through its `.ccd` control file, which
+// resolves the sibling `.img` itself.
+pub const CCD_EXTENSIONS: &[&str] = &[".ccd"];
+pub const CUE_EXTENSIONS: &[&str] = &[".cue"];
 
 /// Compile-time availability of a format's backend on this target.
 ///
@@ -134,6 +152,26 @@ pub enum ArchiveFormatKind {
     Vmdk,
     /// Universal Disk Format optical image (`.udf`).
     Udf,
+    /// `SquashFS` compressed filesystem (`.squashfs`, `.sqfs`).
+    Squashfs,
+    /// Linux `AppImage` executable package (`.appimage`).
+    AppImage,
+    /// Microsoft Windows Imaging package (`.wim`, `.swm`, `.esd`).
+    Wim,
+    /// Oracle `VirtualBox` disk image (`.vdi`).
+    Vdi,
+    /// Nero Burning ROM image (`.nrg`).
+    Nrg,
+    /// Alcohol 120% image (`.mdf`, `.mds`).
+    Mdf,
+    /// `DiscJuggler` image (`.cdi`).
+    Cdi,
+    /// Compressed ISO image (`.isz`).
+    Isz,
+    /// `CloneCD` image (`.ccd`, `.img`).
+    Ccd,
+    /// `CUE/BIN` optical disc sheet (`.cue`).
+    Cue,
     /// Raw single-file compression stream.
     RawStream,
     /// Not recognized as any archive format.
@@ -192,6 +230,16 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
     FormatCapability { kind: ArchiveFormatKind::Vhd, extensions: VHD_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Vmdk, extensions: VMDK_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Udf, extensions: UDF_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Squashfs, extensions: SQUASHFS_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::AppImage, extensions: APPIMAGE_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Wim, extensions: WIM_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Vdi, extensions: VDI_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Nrg, extensions: NRG_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Mdf, extensions: MDF_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Cdi, extensions: CDI_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Isz, extensions: ISZ_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Ccd, extensions: CCD_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Cue, extensions: CUE_EXTENSIONS, status: BackendStatus::Available },
 ];
 
 /// Availability of the native Apple Archive backend on this target.
@@ -280,6 +328,23 @@ fn detect_content_format(path: &Path) -> Option<ArchiveFormatKind> {
             return Some(ArchiveFormatKind::Cpio);
         }
     }
+    if prefix.starts_with(b"MSWIM\0\0\0") {
+        return Some(ArchiveFormatKind::Wim);
+    }
+    if prefix.starts_with(b"hsqs") {
+        return Some(ArchiveFormatKind::Squashfs);
+    }
+    if prefix.starts_with(b"\x7fELF") && prefix.len() >= 11 && prefix[8..11] == [0x41, 0x49, 0x02] {
+        return Some(ArchiveFormatKind::AppImage);
+    }
+    // VirtualBox's VDI_IMAGE_SIGNATURE (0xbeda107f) stored little-endian at
+    // offset 64.
+    if prefix.len() >= 68 && prefix[64..68] == [0x7f, 0x10, 0xda, 0xbe] {
+        return Some(ArchiveFormatKind::Vdi);
+    }
+    if prefix.starts_with(b"IsZ!") {
+        return Some(ArchiveFormatKind::Isz);
+    }
     None
 }
 
@@ -315,6 +380,7 @@ mod tests {
             ArchiveFormatKind::TarLzo,
             ArchiveFormatKind::TarCompress,
             ArchiveFormatKind::TarLz4,
+            ArchiveFormatKind::TarUu,
             ArchiveFormatKind::Iso,
             ArchiveFormatKind::Cab,
             ArchiveFormatKind::Cpio,
@@ -334,6 +400,16 @@ mod tests {
             ArchiveFormatKind::Vhd,
             ArchiveFormatKind::Vmdk,
             ArchiveFormatKind::Udf,
+            ArchiveFormatKind::Squashfs,
+            ArchiveFormatKind::AppImage,
+            ArchiveFormatKind::Wim,
+            ArchiveFormatKind::Vdi,
+            ArchiveFormatKind::Nrg,
+            ArchiveFormatKind::Mdf,
+            ArchiveFormatKind::Cdi,
+            ArchiveFormatKind::Isz,
+            ArchiveFormatKind::Ccd,
+            ArchiveFormatKind::Cue,
             ArchiveFormatKind::RawStream,
         ] {
             assert!(table_kinds.contains(&kind), "capability table is missing a row for {kind:?}");
@@ -431,6 +507,74 @@ mod tests {
         input[257..263].copy_from_slice(b"ustar\0");
         fs::write(dir.path("payload.data"), input).unwrap();
         assert_eq!(detect_archive_format(dir.path("payload.data")), ArchiveFormatKind::Tar);
+    }
+
+    #[test]
+    fn new_disk_and_filesystem_formats_detect_by_extension() {
+        assert_eq!(detect("image.squashfs"), ArchiveFormatKind::Squashfs);
+        assert_eq!(detect("image.sqfs"), ArchiveFormatKind::Squashfs);
+        assert_eq!(detect("Tool-x86_64.AppImage"), ArchiveFormatKind::AppImage);
+        assert_eq!(detect("install.wim"), ArchiveFormatKind::Wim);
+        assert_eq!(detect("install.swm"), ArchiveFormatKind::Wim);
+        assert_eq!(detect("disk.vdi"), ArchiveFormatKind::Vdi);
+        assert_eq!(detect("disc.nrg"), ArchiveFormatKind::Nrg);
+        assert_eq!(detect("disc.mdf"), ArchiveFormatKind::Mdf);
+        assert_eq!(detect("disc.mds"), ArchiveFormatKind::Mdf);
+        assert_eq!(detect("disc.cdi"), ArchiveFormatKind::Cdi);
+        assert_eq!(detect("disc.isz"), ArchiveFormatKind::Isz);
+        assert_eq!(detect("disc.ccd"), ArchiveFormatKind::Ccd);
+        assert_eq!(detect("disc.cue"), ArchiveFormatKind::Cue);
+    }
+
+    #[test]
+    fn generic_and_unimplemented_extensions_are_not_claimed() {
+        // `.img` is used by SD-card, floppy, and raw disk dumps; claiming it
+        // as CloneCD mislabels all of them. A CloneCD set is entered through
+        // its `.ccd` control file, which resolves the sibling `.img` itself.
+        assert_eq!(detect("raspios.img"), ArchiveFormatKind::Unknown);
+
+        // `.esd` images are LZMS-compressed solid WIMs, which the WIM backend
+        // does not decode, so the extension is not advertised.
+        assert!(!WIM_EXTENSIONS.contains(&".esd"));
+        assert!(!CCD_EXTENSIONS.contains(&".img"));
+    }
+
+    #[test]
+    fn content_detection_recognizes_the_new_image_magics() {
+        let dir = TestDir::new("detect-image-content");
+
+        let mut squashfs = vec![0_u8; 128];
+        squashfs[0..4].copy_from_slice(b"hsqs");
+        fs::write(dir.path("payload.bin"), &squashfs).unwrap();
+        assert_eq!(detect_archive_format(dir.path("payload.bin")), ArchiveFormatKind::Squashfs);
+
+        let mut wim = vec![0_u8; 256];
+        wim[0..8].copy_from_slice(b"MSWIM\0\0\0");
+        fs::write(dir.path("image.data"), &wim).unwrap();
+        assert_eq!(detect_archive_format(dir.path("image.data")), ArchiveFormatKind::Wim);
+
+        // An `.esd` reaches the WIM backend through content detection even
+        // though the extension is not advertised, so the failure names LZMS
+        // rather than "unknown format".
+        fs::write(dir.path("install.esd"), &wim).unwrap();
+        assert_eq!(detect_archive_format(dir.path("install.esd")), ArchiveFormatKind::Wim);
+
+        // VirtualBox's signature is 0xbeda107f, little-endian at offset 64.
+        let mut vdi = vec![0_u8; 512];
+        vdi[64..68].copy_from_slice(&0xbeda_107f_u32.to_le_bytes());
+        fs::write(dir.path("disk.data"), &vdi).unwrap();
+        assert_eq!(detect_archive_format(dir.path("disk.data")), ArchiveFormatKind::Vdi);
+
+        let mut appimage = vec![0_u8; 128];
+        appimage[0..4].copy_from_slice(b"\x7fELF");
+        appimage[8..11].copy_from_slice(&[0x41, 0x49, 0x02]);
+        fs::write(dir.path("tool.run"), &appimage).unwrap();
+        assert_eq!(detect_archive_format(dir.path("tool.run")), ArchiveFormatKind::AppImage);
+
+        let mut isz = vec![0_u8; 64];
+        isz[0..4].copy_from_slice(b"IsZ!");
+        fs::write(dir.path("compressed.data"), &isz).unwrap();
+        assert_eq!(detect_archive_format(dir.path("compressed.data")), ArchiveFormatKind::Isz);
     }
 
     #[test]

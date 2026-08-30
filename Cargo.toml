@@ -5,6 +5,7 @@ members = [
     "crates/zmanager-core",
     "crates/zmanager-ffi",
     "crates/zmanager-localsend",
+    "crates/zmanager-wim",
     "crates/zmanager-tzap-hosted",
     "crates/zmanager-unrar",
 ]
@@ -37,6 +38,7 @@ zmanager-core = { path = "crates/zmanager-core", version = "2.1.2", default-feat
 zmanager-tzap-hosted = { path = "crates/zmanager-tzap-hosted", version = "2.1.2" }
 zmanager-localsend = { path = "crates/zmanager-localsend", version = "2.1.2" }
 zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.1.2" }
+zmanager-wim = { path = "crates/zmanager-wim", version = "2.1.2" }
 zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.1.2" }
 
 [profile.release]

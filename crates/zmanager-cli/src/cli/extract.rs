@@ -173,6 +173,7 @@ fn run_extract_request(request: ExtractRequest, global: &GlobalOptions) -> ExitC
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_engine_extract(
     archive: impl AsRef<Path>,
     destination: impl AsRef<Path>,
@@ -201,6 +202,16 @@ fn run_engine_extract(
         ArchiveFormatKind::Vhd => "vhd",
         ArchiveFormatKind::Vmdk => "vmdk",
         ArchiveFormatKind::Udf => "udf",
+        ArchiveFormatKind::Squashfs => "squashfs",
+        ArchiveFormatKind::AppImage => "appimage",
+        ArchiveFormatKind::Wim => "wim",
+        ArchiveFormatKind::Vdi => "vdi",
+        ArchiveFormatKind::Nrg => "nrg",
+        ArchiveFormatKind::Mdf => "mdf",
+        ArchiveFormatKind::Cdi => "cdi",
+        ArchiveFormatKind::Isz => "isz",
+        ArchiveFormatKind::Ccd => "ccd",
+        ArchiveFormatKind::Cue => "cue",
         _ => "archive",
     };
     let mut progress = crate::cli::app::ProgressReporter::from_global(Some(global));
@@ -300,17 +311,12 @@ fn run_extract_to_stdout(request: &ExtractRequest, global: &GlobalOptions) -> Ex
         Ok(password) => password,
         Err(code) => return code,
     };
+    // The virtual-disk and optical families now expose `copy_to_writer`
+    // through the shared path/occurrence selector, so only the container
+    // formats whose adapters still lack it are refused here.
     match detect_archive_format(&request.archive) {
-        ArchiveFormatKind::Dmg
-        | ArchiveFormatKind::Pkg
-        | ArchiveFormatKind::Msi
-        | ArchiveFormatKind::Vhd
-        | ArchiveFormatKind::Vmdk
-        | ArchiveFormatKind::Udf => {
-            print_error_line(
-                global,
-                format_args!("extract to stdout failed: DMG, PKG, MSI, VHD, VMDK, and UDF formats do not currently support extracting to stdout"),
-            );
+        ArchiveFormatKind::Dmg | ArchiveFormatKind::Pkg | ArchiveFormatKind::Msi => {
+            print_error_line(global, format_args!("extract to stdout failed: DMG, PKG, and MSI formats do not currently support extracting to stdout"));
             ExitCode::FAILURE
         }
         _ => copy_archive_to_stdout_via_engine(request, password.as_deref(), global),

@@ -94,6 +94,52 @@ fi
 
 aa archive -d "$WORK" -o "$ARCHIVES/basic.aar" -a lz4 >/dev/null
 
+# SquashFS fixtures are authored by squashfs-tools, the reference
+# implementation, so the reader is exercised against real mksquashfs output
+# rather than against an image this repository's own encoder produced.
+# `-noappend` keeps reruns idempotent; `-all-root` keeps ownership stable
+# across machines.
+if command -v mksquashfs >/dev/null 2>&1; then
+  for comp in xz gzip zstd; do
+    rm -f "$ARCHIVES/basic-$comp.squashfs"
+    mksquashfs "$SRC" "$ARCHIVES/basic-$comp.squashfs" \
+      -comp "$comp" -noappend -all-root -no-xattrs -no-progress -quiet >/dev/null
+  done
+  cp "$ARCHIVES/basic-xz.squashfs" "$ARCHIVES/basic.squashfs"
+
+  # A type-2 AppImage is an ELF runtime with the SquashFS appended directly
+  # after its section-header table. Synthesize the smallest ELF with that
+  # shape so the payload offset must be computed, not guessed.
+  python3 "$ROOT/scripts/make_appimage_fixture.py" \
+    "$ARCHIVES/basic-gzip.squashfs" "$ARCHIVES/basic.AppImage"
+else
+  echo "warning: mksquashfs not found; SquashFS/AppImage fixtures not regenerated" >&2
+fi
+
+# WIM fixtures come from wimlib-imagex, the reference implementation. The
+# all three compression variants exercise end-to-end decoding, and the split
+# set exercises sibling-part resolution.
+if command -v wimlib-imagex >/dev/null 2>&1; then
+  WIMSRC="$WORK/wim-src"
+  rm -rf "$WIMSRC"; mkdir -p "$WIMSRC"
+  cp -R "$SRC/." "$WIMSRC/"
+  for comp in none LZX XPRESS; do
+    rm -f "$ARCHIVES/basic-$comp.wim"
+    wimlib-imagex capture "$WIMSRC" "$ARCHIVES/basic-$comp.wim" "Image-$comp" \
+      --compress=$comp --norpfix >/dev/null 2>&1
+  done
+  cp "$ARCHIVES/basic-none.wim" "$ARCHIVES/basic.wim"
+
+  rm -f "$ARCHIVES/multi-image.wim"
+  wimlib-imagex capture "$WIMSRC" "$ARCHIVES/multi-image.wim" "First" --compress=none --norpfix >/dev/null 2>&1
+  wimlib-imagex append  "$WIMSRC" "$ARCHIVES/multi-image.wim" "Second" --norpfix >/dev/null 2>&1
+
+  rm -f "$ARCHIVES"/split*.swm
+  wimlib-imagex split "$ARCHIVES/basic-none.wim" "$ARCHIVES/split.swm" 0.001 >/dev/null 2>&1
+else
+  echo "warning: wimlib-imagex not found (brew install wimlib); WIM fixtures not regenerated" >&2
+fi
+
 cp "$SRC/README.txt" "$WORK/README.md"
 # Every bsdtar invocation that archives the payload/ tree needs
 # COPYFILE_DISABLE, or macOS copyfile metadata comes along as AppleDouble
@@ -339,6 +385,12 @@ mformat -F -i "$WORK/raw-fat.img" ::
 mcopy -s -i "$WORK/raw-fat.img" "$DISK_SRC/payload" ::
 qemu-img convert -f raw -O vmdk "$WORK/raw-fat.img" "$ARCHIVES/basic.vmdk"
 
+# VDI fixture: the same superfloppy FAT32 volume converted to Oracle
+# VirtualBox's format by qemu-img. `-o static=off` keeps the image sparse so
+# the block map exercises unallocated entries, which is where the
+# BLOCK_FREE / BLOCK_ZERO sentinels matter.
+qemu-img convert -f raw -O vdi "$WORK/raw-fat.img" "$ARCHIVES/basic.vdi"
+
 # VHD fixture: MBR + NTFS. ntfs-3g's tools are Linux-only on recent versions,
 # so the NTFS volume is authored inside a privileged Ubuntu container (loop
 # mount, mkntfs, cp -a — no FUSE). The MBR wrapper is written with printf/dd
@@ -489,6 +541,7 @@ append_manifest "basic.pkg" "PKG" "true" "" "Apple package fixture created by pk
 append_manifest "basic.msi" "MSI" "true" "" "Windows Installer fixture created by wixl (msitools)"
 append_manifest "basic.vhd" "VHD" "true" "" "VPC disk image fixture: MBR + NTFS, qemu-img -O vpc (docker ntfs-3g populates)"
 append_manifest "basic.vmdk" "VMDK" "true" "" "VMware disk image fixture: superfloppy FAT32, qemu-img -O vmdk (mtools populates)"
+append_manifest "basic.vdi" "VDI" "true" "" "Oracle VirtualBox disk image fixture: superfloppy FAT32, qemu-img -O vdi (mtools populates)"
 append_manifest "basic.udf" "UDF" "true" "" "UDF 2.01 optical fixture authored by mkudffs (docker) with a populated payload"
 append_manifest "basic.mtree" "MTREE" "true" "" "MTREE manifest fixture with directories, files, sizes, and a symlink"
 append_manifest "basic.tzap" "TZAP" "true" "" "TZAP fixture created by zmanager-cli"
@@ -509,5 +562,16 @@ append_manifest "basic.txt.uu" "RAW" "true" "" "Raw uuencode stream fixture"
 append_manifest "basic.txt.b64" "RAW" "true" "" "Raw base64 stream fixture"
 append_manifest "basic.tar.uu" "TAR.UU" "true" "" "Tar fixture encoded with uuencode"
 append_manifest "basic.tar.b64" "TAR.B64" "true" "" "Tar fixture encoded with base64"
+append_manifest "basic.squashfs" "SQUASHFS" "true" "" "SquashFS fixture (xz) authored by mksquashfs"
+append_manifest "basic-xz.squashfs" "SQUASHFS" "true" "" "SquashFS fixture compressed with xz, the dominant distribution choice"
+append_manifest "basic-gzip.squashfs" "SQUASHFS" "true" "" "SquashFS fixture compressed with gzip"
+append_manifest "basic-zstd.squashfs" "SQUASHFS" "true" "" "SquashFS fixture compressed with zstd"
+append_manifest "basic.AppImage" "APPIMAGE" "true" "" "Type-2 AppImage: ELF runtime with the SquashFS appended after the section-header table"
+append_manifest "basic.wim" "WIM" "true" "" "Uncompressed WIM authored by wimlib-imagex; decoded end to end"
+append_manifest "basic-none.wim" "WIM" "true" "" "Uncompressed WIM authored by wimlib-imagex"
+append_manifest "basic-LZX.wim" "WIM" "true" "" "WIM-LZX image authored by wimlib-imagex"
+append_manifest "basic-XPRESS.wim" "WIM" "true" "" "XPRESS-Huffman WIM image authored by wimlib-imagex"
+append_manifest "multi-image.wim" "WIM" "true" "" "Two-image WIM: every image is exposed under its own imageN/ prefix"
+append_manifest "split.swm" "WIM" "true" "" "Split WIM set (with split2.swm) authored by wimlib-imagex split"
 
 echo "Generated fixtures in $ARCHIVES"

@@ -1,0 +1,20 @@
+[package]
+name = "zmanager-wim"
+version.workspace = true
+description = "Read-only Windows Imaging (WIM) parsing and decompression."
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0"
+repository.workspace = true
+readme = "README.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hex = "0.4"
+sha1 = "0.10.7"
+xpress-huffman = "0.1.3"
+
+[lints]
+workspace = true

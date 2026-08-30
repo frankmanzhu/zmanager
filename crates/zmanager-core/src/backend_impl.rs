@@ -31,6 +31,8 @@ pub mod raw_stream_backend;
 pub mod rpm_backend;
 #[path = "sevenz_backend.rs"]
 pub mod sevenz_backend;
+#[path = "squashfs_backend.rs"]
+pub mod squashfs_backend;
 #[path = "tar_backend.rs"]
 pub mod tar_backend;
 #[path = "tar_gz_backend.rs"]
@@ -45,6 +47,8 @@ pub mod uu_decoder;
 pub mod virtual_disk_backend;
 #[path = "warc_backend.rs"]
 pub mod warc_backend;
+#[path = "wim_backend.rs"]
+pub mod wim_backend;
 #[path = "xar_backend.rs"]
 pub mod xar_backend;
 #[path = "zip_backend.rs"]

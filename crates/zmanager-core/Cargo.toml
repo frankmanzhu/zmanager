@@ -38,6 +38,7 @@ rand = "0.9.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.140"
 serde_json_canonicalizer = "0.3.2"
+sha1 = "0.10.7"
 sha2 = "0.10.8"
 time = { version = "0.3.47", features = ["parsing"] }
 x509-parser = "0.18.1"
@@ -50,9 +51,19 @@ zip = "8.6.0"
 zeroize = "1.8.2"
 rayon = "1.10"
 memchr = "2.7"
+zmanager-wim = { workspace = true }
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
+# SquashFS reader. `lzo` and `parallel` are on because real images use LZO
+# (snaps) and the reader parallelizes block decode. backhand's own `xz`
+# feature is deliberately OFF: it pulls `liblzma`, which declares
+# `links = "lzma"` and so collides with the `lzma-sys` already linked through
+# `dpp` -> `pbzx` -> `xz2`. XZ — the dominant compressor for distribution root
+# filesystems — is instead supplied by `squashfs_backend::XzCapableCompressor`,
+# a `CompressionAction` backed by the pure-Rust `lzma-rust2` already in this
+# crate's tree.
+backhand = { version = "0.25", default-features = false, features = ["gzip", "zstd", "lz4", "lzo", "parallel"] }
 # Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4),
 # XAR symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/5), and XAR
 # <name enctype="base64"> decoding (non-ASCII filenames; not yet filed upstream — pushed to

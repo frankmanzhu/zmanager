@@ -1217,8 +1217,9 @@ fn assert_zm_extracts_complex_matrix_inner(label: &str, archive: &Path, temp: &T
     assert!(out_sel.join("project/nested/deep_file.txt").exists(), "missing selective file");
     assert!(!out_sel.join("project/root_file.txt").exists(), "unexpected root file");
 
-    // Matrix 3: Stdout Extract (unsupported for DMG and PKG, which must fail
-    // with the explicit rejection message instead)
+    // Matrix 3: Stdout Extract. The virtual-disk and optical families copy
+    // through the shared path/occurrence selector, so they support it; DMG,
+    // PKG, and MSI must still fail with the explicit rejection message.
     let output = Command::new(zm_path()).arg("extract").arg(archive).arg("--include").arg("project/root_file.txt").arg("--to-stdout").output().unwrap();
     if stdout_supported {
         assert_success(&format!("zm extract {label} (stdout)"), &output);
@@ -1522,7 +1523,7 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
         "qemu-img converts raw to vmdk",
         &Command::new(&qemu_img).arg("convert").arg("-f").arg("raw").arg("-O").arg("vmdk").arg(&raw_fat).arg(&project_vmdk).output().unwrap(),
     );
-    assert_zm_extracts_complex_matrix_without_stdout("qemu-img-created vmdk (FAT32)", &project_vmdk, &temp);
+    assert_zm_extracts_complex_matrix("qemu-img-created vmdk (FAT32)", &project_vmdk, &temp);
     assert_zm_extracts_virtual_disk_extra_entries("qemu-img-created vmdk (FAT32)", &project_vmdk, &temp);
 
     let project_vhd = archive_temp.path("project.vhd");
@@ -1530,7 +1531,7 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
         "qemu-img converts raw to vpc",
         &Command::new(&qemu_img).arg("convert").arg("-f").arg("raw").arg("-O").arg("vpc").arg(&raw_fat).arg(&project_vhd).output().unwrap(),
     );
-    assert_zm_extracts_complex_matrix_without_stdout("qemu-img-created vhd (FAT32)", &project_vhd, &temp);
+    assert_zm_extracts_complex_matrix("qemu-img-created vhd (FAT32)", &project_vhd, &temp);
     assert_zm_extracts_virtual_disk_extra_entries("qemu-img-created vhd (FAT32)", &project_vhd, &temp);
 
     // NTFS and UDF legs: authored inside a privileged Ubuntu container (loop
@@ -1567,7 +1568,7 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
         "qemu-img converts ntfs raw to vpc",
         &Command::new(&qemu_img).arg("convert").arg("-f").arg("raw").arg("-O").arg("vpc").arg(work.join("ntfs.img")).arg(&ntfs_vhd).output().unwrap(),
     );
-    assert_zm_extracts_complex_matrix_without_stdout("docker-created ntfs vhd", &ntfs_vhd, &temp);
+    assert_zm_extracts_complex_matrix("docker-created ntfs vhd", &ntfs_vhd, &temp);
     assert_zm_extracts_virtual_disk_extra_entries("docker-created ntfs vhd", &ntfs_vhd, &temp);
     #[cfg(unix)]
     {
@@ -1589,7 +1590,7 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
         .output()
         .unwrap();
     assert_success("docker authors UDF image", &udf_build);
-    assert_zm_extracts_complex_matrix_without_stdout("docker-created udf", &udf_image, &temp);
+    assert_zm_extracts_complex_matrix("docker-created udf", &udf_image, &temp);
     assert_zm_extracts_virtual_disk_extra_entries("docker-created udf", &udf_image, &temp);
     #[cfg(unix)]
     {

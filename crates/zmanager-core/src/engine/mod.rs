@@ -160,7 +160,22 @@ impl ArchivePlugin for DefaultArchivePlugin {
         builder.register_read_adapter(Arc::new(adapters::native::DmgListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::PkgListAdapter))?;
         builder.register_read_adapter(Arc::new(adapters::native::MsiListAdapter))?;
-        for format in [FormatId::VHD, FormatId::VMDK, FormatId::UDF, FormatId::ISO] {
+        builder.register_read_adapter(Arc::new(adapters::native::SquashfsListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::AppImageListAdapter))?;
+        builder.register_read_adapter(Arc::new(adapters::native::WimListAdapter))?;
+        for format in [
+            FormatId::VHD,
+            FormatId::VMDK,
+            FormatId::UDF,
+            FormatId::ISO,
+            FormatId::VDI,
+            FormatId::NRG,
+            FormatId::MDF,
+            FormatId::CDI,
+            FormatId::ISZ,
+            FormatId::CCD,
+            FormatId::CUE,
+        ] {
             let adapter = adapters::native::VirtualDiskListAdapter::new(format)
                 .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("unsupported virtual disk adapter format '{format}'")))?;
             builder.register_read_adapter(Arc::new(adapter))?;

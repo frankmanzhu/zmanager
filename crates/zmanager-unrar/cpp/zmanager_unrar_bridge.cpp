@@ -122,7 +122,10 @@ int CALLBACK unrar_callback(UINT msg, LPARAM user_data, LPARAM p1, LPARAM p2) {
   }
 
   if (msg == UCM_CHANGEVOLUME || msg == UCM_CHANGEVOLUMEW) {
-    return 1;
+    // This bridge has no interactive volume picker.  Returning the unchanged
+    // name for an ASK callback makes UnRAR retry a missing volume forever;
+    // abort the operation so the caller receives ERAR_EOPEN instead.
+    return p2 == RAR_VOL_ASK ? -1 : 1;
   }
 
   if (msg == UCM_LARGEDICT) {

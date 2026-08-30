@@ -2680,7 +2680,7 @@ static ISO_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 static VHD_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_virtual_disk_lister",
     format: FormatId::VHD,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -2688,7 +2688,7 @@ static VHD_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 static VMDK_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_virtual_disk_lister",
     format: FormatId::VMDK,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
@@ -2696,10 +2696,297 @@ static VMDK_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
 static UDF_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_virtual_disk_lister",
     format: FormatId::UDF,
-    operations: &[ArchiveOperation::List, ArchiveOperation::Extract],
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
     required_source_access: SourceAccess::Seekable,
     supports_encryption: false,
 };
+
+static VDI_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::VDI,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static NRG_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_nrg_adapter",
+    format: FormatId::NRG,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static MDF_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_mdf_adapter",
+    format: FormatId::MDF,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static CDI_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_cdi_adapter",
+    format: FormatId::CDI,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static ISZ_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_isz_adapter",
+    format: FormatId::ISZ,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static CCD_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_ccd_adapter",
+    format: FormatId::CCD,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static CUE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_cue_adapter",
+    format: FormatId::CUE,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static SQUASHFS_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_squashfs_adapter",
+    format: FormatId::SQUASHFS,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static APPIMAGE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_appimage_adapter",
+    format: FormatId::APPIMAGE,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static WIM_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_wim_adapter",
+    format: FormatId::WIM,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Test, ArchiveOperation::Extract, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+/// Native `SquashFS` listing and extraction adapter.
+#[derive(Debug, Default)]
+pub struct SquashfsListAdapter;
+
+impl NativeReadAdapter for SquashfsListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &SQUASHFS_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
+        let entries = crate::squashfs_backend::list(path).map_err(|error| squashfs_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_squashfs_entries(entries) })
+    }
+
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = crate::squashfs_backend::test(path, test_options).map_err(|error| squashfs_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = crate::squashfs_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| squashfs_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes = crate::squashfs_backend::copy_to_writer(path, &selector.path, writer).map_err(|error| squashfs_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn map_squashfs_entries(entries: Vec<crate::squashfs_backend::SquashfsEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| EngineEntry {
+            id: crate::engine::adapters::listing_entry_id(entry.index),
+            path: entry.path,
+            kind: entry.kind,
+            size: Some(entry.size),
+            compressed_size: None,
+            link_target: entry.link_target,
+            encrypted: Some(false),
+            method: Some("squashfs".to_owned()),
+            ..EngineEntry::default()
+        })
+        .collect()
+}
+
+fn squashfs_error(path: &std::path::Path, error: &crate::squashfs_backend::SquashfsBackendError) -> ArchiveError {
+    let kind = match error {
+        crate::squashfs_backend::SquashfsBackendError::Io { .. } => ErrorKind::Io,
+        crate::squashfs_backend::SquashfsBackendError::Invalid { .. }
+        | crate::squashfs_backend::SquashfsBackendError::Backhand(_)
+        | crate::squashfs_backend::SquashfsBackendError::Plan(_) => ErrorKind::CorruptData,
+        crate::squashfs_backend::SquashfsBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::squashfs_backend::SquashfsBackendError::Cancelled => ErrorKind::Cancelled,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
+}
+
+/// Native Linux `AppImage` adapter.
+#[derive(Debug, Default)]
+pub struct AppImageListAdapter;
+
+impl NativeReadAdapter for AppImageListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &APPIMAGE_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
+        let entries = crate::squashfs_backend::list(path).map_err(|error| squashfs_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_squashfs_entries(entries) })
+    }
+
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = crate::squashfs_backend::test(path, test_options).map_err(|error| squashfs_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = crate::squashfs_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| squashfs_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes = crate::squashfs_backend::copy_to_writer(path, &selector.path, writer).map_err(|error| squashfs_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+/// Native Microsoft Windows Imaging (WIM) adapter.
+#[derive(Debug, Default)]
+pub struct WimListAdapter;
+
+impl NativeReadAdapter for WimListAdapter {
+    fn descriptor(&self) -> &'static AdapterDescriptor {
+        &WIM_DESCRIPTOR
+    }
+
+    fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
+        let path = archive.primary_path();
+        let entries = crate::wim_backend::list(path).map_err(|error| wim_error(path, &error))?;
+        Ok(ArchiveListing { entries: map_wim_entries(entries) })
+    }
+
+    fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = crate::wim_backend::test(path, test_options).map_err(|error| wim_error(path, &error))?;
+        Ok(TestReport {
+            tested_entries: u64::try_from(report.entries).unwrap_or(u64::MAX),
+            skipped_entries: u64::try_from(report.skipped_entries).unwrap_or(u64::MAX),
+            tested_bytes: report.bytes,
+            warnings: report.warnings,
+        })
+    }
+
+    fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
+        let path = archive.primary_path();
+        let report = crate::wim_backend::extract(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            options.overwrite_resolver.as_deref_mut(),
+            options.cancellation.as_ref(),
+        )
+        .map_err(|error| wim_error(path, &error))?;
+        Ok(crate::engine::adapters::extract_report(report.entries, report.skipped_entries, report.bytes, report.warnings))
+    }
+
+    fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
+        let path = archive.primary_path();
+        let selector = archive.selected_entry_selector(entry_id)?;
+        let written_bytes = crate::wim_backend::copy_to_writer(path, &selector.path, writer).map_err(|error| wim_error(path, &error))?;
+        Ok(CopyReport { written_bytes })
+    }
+}
+
+fn map_wim_entries(entries: Vec<crate::wim_backend::WimEntry>) -> Vec<EngineEntry> {
+    entries
+        .into_iter()
+        .map(|entry| {
+            let kind = match entry.kind {
+                crate::wim_backend::WimEntryKind::File => BrowserEntryKind::File,
+                crate::wim_backend::WimEntryKind::Directory => BrowserEntryKind::Directory,
+                crate::wim_backend::WimEntryKind::Symlink => BrowserEntryKind::Symlink,
+            };
+            EngineEntry {
+                id: crate::engine::adapters::listing_entry_id(entry.index),
+                path: entry.path,
+                kind,
+                size: Some(entry.size),
+                compressed_size: None,
+                link_target: entry.link_target,
+                encrypted: Some(false),
+                method: Some("wim".to_owned()),
+                ..EngineEntry::default()
+            }
+        })
+        .collect()
+}
+
+fn wim_error(path: &std::path::Path, error: &crate::wim_backend::WimBackendError) -> ArchiveError {
+    let kind = match error {
+        crate::wim_backend::WimBackendError::Io { .. } => ErrorKind::Io,
+        crate::wim_backend::WimBackendError::Invalid { .. } | crate::wim_backend::WimBackendError::Plan(_) => ErrorKind::CorruptData,
+        // LZMS and solid resources are a well-formed image this build cannot
+        // decode, not corruption; the message names the conversion command.
+        crate::wim_backend::WimBackendError::Unsupported { .. } => ErrorKind::UnsupportedOperation,
+        crate::wim_backend::WimBackendError::Safety(source) => crate::engine::adapters::safety_error_kind(source),
+        crate::wim_backend::WimBackendError::Cancelled => ErrorKind::Cancelled,
+    };
+    crate::engine::adapters::adapter_error(path, kind, error.to_string())
+}
 
 /// Native Virtual Disk listing adapter factory.
 #[derive(Debug)]
@@ -2708,11 +2995,21 @@ pub struct VirtualDiskListAdapter {
 }
 
 impl VirtualDiskListAdapter {
-    /// Creates a virtual disk or optical filesystem adapter for VHD, VMDK, UDF, or ISO.
+    /// Creates a virtual disk or optical filesystem adapter for VHD, VMDK, UDF, ISO, VDI, NRG, MDF, CDI, ISZ, CCD, or CUE.
     #[must_use]
     pub(crate) fn new(format: FormatId) -> Option<Self> {
         match format {
-            FormatId::VHD | FormatId::VMDK | FormatId::UDF | FormatId::ISO => Some(Self { format }),
+            FormatId::VHD
+            | FormatId::VMDK
+            | FormatId::UDF
+            | FormatId::ISO
+            | FormatId::VDI
+            | FormatId::NRG
+            | FormatId::MDF
+            | FormatId::CDI
+            | FormatId::ISZ
+            | FormatId::CCD
+            | FormatId::CUE => Some(Self { format }),
             _ => None,
         }
     }
@@ -2725,21 +3022,31 @@ impl NativeReadAdapter for VirtualDiskListAdapter {
             FormatId::VHD => &VHD_DESCRIPTOR,
             FormatId::VMDK => &VMDK_DESCRIPTOR,
             FormatId::UDF => &UDF_DESCRIPTOR,
-            _ => unreachable!("VirtualDiskListAdapter only accepts virtual disk formats"),
+            FormatId::VDI => &VDI_DESCRIPTOR,
+            FormatId::NRG => &NRG_DESCRIPTOR,
+            FormatId::MDF => &MDF_DESCRIPTOR,
+            FormatId::CDI => &CDI_DESCRIPTOR,
+            FormatId::ISZ => &ISZ_DESCRIPTOR,
+            FormatId::CCD => &CCD_DESCRIPTOR,
+            FormatId::CUE => &CUE_DESCRIPTOR,
+            _ => unreachable!("VirtualDiskListAdapter only accepts virtual disk and optical formats"),
         }
     }
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
-        if self.format == FormatId::ISO {
-            let raw_entries = virtual_disk_backend::list_iso(primary_path).map_err(|error| virtual_disk_error(primary_path, &error))?;
-            return Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) });
-        }
         let raw_entries = match self.format {
             FormatId::VHD => virtual_disk_backend::list_vhd(primary_path),
             FormatId::VMDK => virtual_disk_backend::list_vmdk(primary_path),
             FormatId::UDF => virtual_disk_backend::list_udf(primary_path),
             FormatId::ISO => virtual_disk_backend::list_iso(primary_path),
+            FormatId::VDI => virtual_disk_backend::list_vdi(primary_path),
+            FormatId::NRG => virtual_disk_backend::list_nrg(primary_path),
+            FormatId::MDF => virtual_disk_backend::list_mdf(primary_path),
+            FormatId::CDI => virtual_disk_backend::list_cdi(primary_path),
+            FormatId::ISZ => virtual_disk_backend::list_isz(primary_path),
+            FormatId::CCD => virtual_disk_backend::list_ccd(primary_path),
+            FormatId::CUE => virtual_disk_backend::list_cue(primary_path),
             _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
         }
         .map_err(|error| virtual_disk_error(primary_path, &error))?;
@@ -2755,6 +3062,13 @@ impl NativeReadAdapter for VirtualDiskListAdapter {
                 FormatId::VMDK => virtual_disk_backend::extract_vmdk_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
                 FormatId::UDF => virtual_disk_backend::extract_udf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
                 FormatId::ISO => virtual_disk_backend::extract_iso_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::VDI => virtual_disk_backend::extract_vdi_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::NRG => virtual_disk_backend::extract_nrg_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::MDF => virtual_disk_backend::extract_mdf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::CDI => virtual_disk_backend::extract_cdi_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::ISZ => virtual_disk_backend::extract_isz_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::CCD => virtual_disk_backend::extract_ccd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
+                FormatId::CUE => virtual_disk_backend::extract_cue_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
                 _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
             }
         } else {
@@ -2765,20 +3079,22 @@ impl NativeReadAdapter for VirtualDiskListAdapter {
     }
 
     fn test(&self, archive: &NativeReadContext, options: &TestOptions) -> Result<TestReport, ArchiveError> {
-        if self.format != FormatId::ISO {
-            return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk test format '{}'", self.format)));
-        }
         let path = archive.primary_path();
-        virtual_disk_backend::test_iso(path, options).map_err(|error| virtual_disk_error(path, &error))
+        match self.format {
+            FormatId::ISO | FormatId::NRG | FormatId::MDF | FormatId::CDI | FormatId::ISZ | FormatId::CCD | FormatId::CUE => {
+                virtual_disk_backend::test_optical(path, options).map_err(|error| virtual_disk_error(path, &error))
+            }
+            FormatId::VDI | FormatId::VHD | FormatId::VMDK | FormatId::UDF => {
+                virtual_disk_backend::test_virtual_disk(path, options).map_err(|error| virtual_disk_error(path, &error))
+            }
+            _ => Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk test format '{}'", self.format))),
+        }
     }
 
     fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
-        if self.format != FormatId::ISO {
-            return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk copy format '{}'", self.format)));
-        }
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let written_bytes = virtual_disk_backend::copy_iso_by_path_occurrence(path, &selector.path, selector.occurrence, writer)
+        let written_bytes = virtual_disk_backend::copy_virtual_disk_by_path_occurrence(path, &selector.path, selector.occurrence, writer)
             .map_err(|error| virtual_disk_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
