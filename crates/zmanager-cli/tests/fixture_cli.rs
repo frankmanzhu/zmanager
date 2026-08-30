@@ -204,12 +204,14 @@ fn payload_tree_with_symlink(symlink_kind: &'static str) -> Vec<(&'static str, &
 
 /// Entries the fixture corpus is allowed to carry beyond the documented tree.
 ///
-/// The bsdtar-generated fixtures were produced on macOS without
-/// `COPYFILE_DISABLE=1`, so they contain `AppleDouble` sidecars. Those are
-/// generation artifacts rather than intended fixture content, so completeness
-/// checks ignore them instead of asserting them.
-fn is_generation_artifact(name: &str) -> bool {
-    name.split('/').next_back().is_some_and(|leaf| leaf.starts_with("._"))
+/// Every `bsdtar`-generated fixture is built with `COPYFILE_DISABLE=1` and
+/// carries no `AppleDouble` sidecars. `basic.pkg` is the sole documented
+/// exception: `pkgbuild`'s payload cpio embeds `._` entries regardless (see
+/// `fixtures/archives/README.md`), so this stays scoped to that one fixture
+/// rather than a blanket allowance — otherwise a future macOS regeneration
+/// could silently regrow `._` pollution in the rest of the corpus.
+fn is_generation_artifact(archive_filename: &str, name: &str) -> bool {
+    archive_filename == "basic.pkg" && name.split('/').next_back().is_some_and(|leaf| leaf.starts_with("._"))
 }
 
 fn assert_listing_kinds(archive: &Path, expected: &[(&str, &str)]) {
@@ -238,10 +240,11 @@ fn assert_listing_is_exactly(archive: &Path, expected: &[(&str, &str)]) {
     let listing: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let entries = listing["entries"].as_array().expect("JSON listing entries array");
 
+    let archive_filename = archive.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     let unexpected = entries
         .iter()
         .filter_map(|entry| entry["name"].as_str())
-        .filter(|name| !name.is_empty() && !is_generation_artifact(name))
+        .filter(|name| !name.is_empty() && !is_generation_artifact(archive_filename, name))
         .filter(|name| !expected.iter().any(|&(path, _)| path == *name))
         .collect::<Vec<_>>();
 
@@ -266,6 +269,7 @@ const FULL_PAYLOAD_TREE_FIXTURES: &[(&str, &str)] = &[
     ("basic.tar.xz", "symlink"),
     ("basic.tar.zst", "symlink"),
     ("basic.cpio", "symlink"),
+    ("basic.pkg", "symlink"),
 ];
 
 #[test]
@@ -296,10 +300,6 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
         ("basic.ar", &[("README.md", "file")]),
         (
             "basic.dmg",
-            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
-        ),
-        (
-            "basic.pkg",
             &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
         ),
         // MSI has no symlink entries and `wixl` cannot encode the Unicode name.

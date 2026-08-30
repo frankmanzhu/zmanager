@@ -95,6 +95,13 @@ fi
 aa archive -d "$WORK" -o "$ARCHIVES/basic.aar" -a lz4 >/dev/null
 
 cp "$SRC/README.txt" "$WORK/README.md"
+# Every bsdtar invocation that archives the payload/ tree needs
+# COPYFILE_DISABLE, or macOS copyfile metadata comes along as AppleDouble
+# `._` sidecar entries. Scope the export to just this block: the DMG/PKG/
+# disk-image staging further down uses plain `cp -PR`, which COPYFILE_DISABLE
+# would also silence, and those steps already handle xattrs on their own
+# terms (see the `xattr -cr` call before the PKG copy).
+export COPYFILE_DISABLE=1
 bsdtar -czf "$ARCHIVES/basic.tar.gz" -C "$WORK" payload
 bsdtar -cjf "$ARCHIVES/basic.tar.bz2" -C "$WORK" payload
 bsdtar -cf "$ARCHIVES/basic.tar" -C "$WORK" payload
@@ -105,6 +112,7 @@ bsdtar -cf - -C "$WORK" payload | lzop -c > "$ARCHIVES/basic.tar.lzo"
 bsdtar -cf - -C "$WORK" payload | compress -c > "$ARCHIVES/basic.tar.Z"
 bsdtar -cf - -C "$WORK" payload | lz4 -q -c > "$ARCHIVES/basic.tar.lz4"
 bsdtar --format=cpio -cf "$ARCHIVES/basic.cpio" -C "$WORK" payload
+unset COPYFILE_DISABLE
 gzip -c "$ARCHIVES/basic.cpio" > "$ARCHIVES/basic.cpio.gz"
 cp "$ARCHIVES/basic.cpio.gz" "$ARCHIVES/basic.cpgz"
 bzip2 -c "$ARCHIVES/basic.cpio" > "$ARCHIVES/basic.cpio.bz2"
