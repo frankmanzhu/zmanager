@@ -13,10 +13,10 @@ basic.7z	7Z	true		1ad775eaa8bc4a8f4f8bac8f5fa0a8417bfabd00f4e04545b9480c9fe2815d
 basic.cb7	7Z	true		1ad775eaa8bc4a8f4f8bac8f5fa0a8417bfabd00f4e04545b9480c9fe2815dab	7Z fixture under the .cb7 extension
 basic.sevenz	7Z	true		1ad775eaa8bc4a8f4f8bac8f5fa0a8417bfabd00f4e04545b9480c9fe2815dab	7Z fixture under the .sevenz extension
 basic.cbr	RAR	true		b1b541ad0e8d2d8a52d64f73bf0526a232d2160f04b92b00c82a8eb3f9ce9d39	RAR5 fixture under the .cbr extension
-basic.tar	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture created by bsdtar
-basic.cbt	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture under the .cbt extension
-basic.pax	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture under the .pax extension
-basic.ustar	TAR	true		b91d4e58b58eb15e2b448e04fc7ef30d620398f11b7a0d4cd36b280cfdcdcd51	TAR fixture under the .ustar extension
+basic.tar	TAR	true		c9cc07ae66405da45d66b43e9b78fa184293e31f0b259e1bad1e87055e06a7f5	TAR fixture created by bsdtar
+basic.cbt	TAR	true		c9cc07ae66405da45d66b43e9b78fa184293e31f0b259e1bad1e87055e06a7f5	TAR fixture under the .cbt extension
+basic.pax	TAR	true		c9cc07ae66405da45d66b43e9b78fa184293e31f0b259e1bad1e87055e06a7f5	TAR fixture under the .pax extension
+basic.ustar	TAR	true		c9cc07ae66405da45d66b43e9b78fa184293e31f0b259e1bad1e87055e06a7f5	TAR fixture under the .ustar extension
 basic.tar.gz	TAR.GZ	true		17adf304bee108974c6f8c5f448a393a343c7725b2550514cd68ce24f1b705d4	Tar fixture compressed with gzip
 basic.tgz	TAR.GZ	true		17adf304bee108974c6f8c5f448a393a343c7725b2550514cd68ce24f1b705d4	Tar.GZ fixture under the .tgz extension
 basic.tar.bz2	TAR.BZ2	true		504067aa58e1ea02972a98da722bd44bb4dcaebf47ebb2a20d3ab0cf95a2a884	Tar fixture compressed with bzip2

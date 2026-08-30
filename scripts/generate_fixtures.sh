@@ -97,7 +97,7 @@ aa archive -d "$WORK" -o "$ARCHIVES/basic.aar" -a lz4 >/dev/null
 cp "$SRC/README.txt" "$WORK/README.md"
 bsdtar -czf "$ARCHIVES/basic.tar.gz" -C "$WORK" payload
 bsdtar -cjf "$ARCHIVES/basic.tar.bz2" -C "$WORK" payload
-bsdtar -cf "$ARCHIVES/basic.tar" -C "$WORK" README.md
+bsdtar -cf "$ARCHIVES/basic.tar" -C "$WORK" payload
 bsdtar -cJf "$ARCHIVES/basic.tar.xz" -C "$WORK" payload
 bsdtar -cf - -C "$WORK" payload | xz --format=lzma -c > "$ARCHIVES/basic.tar.lzma"
 bsdtar -cf - -C "$WORK" payload | lzip -c > "$ARCHIVES/basic.tar.lz"

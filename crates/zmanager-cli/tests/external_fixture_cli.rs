@@ -204,8 +204,40 @@ fn validate_fixture(case: FixtureCase, binary: &Path, archive: &Path) {
     assert_trees_match(&format!("external and zm trees for {}", case.filename), &external_out, &zm_out);
 }
 
+/// Decodes the `\NNN` octal escapes bsdtar writes for non-ASCII bytes in its
+/// listing output.
+///
+/// This runs before the backslash-to-slash normalization in
+/// [`assert_external_listing_contains_all_entries`], which would otherwise
+/// destroy the escape markers. Decoding keeps the oracle strict for Unicode
+/// names instead of skipping them: GNU tar on Linux prints the bytes
+/// literally, so without this the same assertion passes on CI and fails on a
+/// macOS developer machine.
+fn decode_tar_octal_escapes(raw: &[u8]) -> Vec<u8> {
+    let mut decoded = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < raw.len() {
+        let is_octal_escape = raw[index] == b'\\' && index + 3 < raw.len() && raw[index + 1..index + 4].iter().all(|byte| (b'0'..=b'7').contains(byte));
+        if is_octal_escape {
+            let value = raw[index + 1..index + 4].iter().fold(0u16, |accumulator, byte| accumulator * 8 + u16::from(byte - b'0'));
+            if let Ok(byte) = u8::try_from(value) {
+                decoded.push(byte);
+                index += 4;
+                continue;
+            }
+        }
+        decoded.push(raw[index]);
+        index += 1;
+    }
+    decoded
+}
+
 fn assert_external_listing_contains_all_entries(tool: ExternalArchiveTool, filename: &str, output: &Output, root: &Path, entries: &[PathBuf]) {
-    let listing = String::from_utf8_lossy(&output.stdout).replace('\\', "/");
+    let raw = match tool {
+        ExternalArchiveTool::Tar => decode_tar_octal_escapes(&output.stdout),
+        _ => output.stdout.clone(),
+    };
+    let listing = String::from_utf8_lossy(&raw).replace('\\', "/");
     assert!(!listing.trim().is_empty(), "external listing for {filename} was empty");
     for entry in entries {
         // Some 7-Zip codecs (notably CAB and LHA) synthesize parent

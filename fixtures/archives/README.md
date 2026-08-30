@@ -51,7 +51,7 @@ installed on a developer machine.
 | `basic.7z` | 7Z LZMA2 solid | `zmanager-cli source-small` | Symlink is skipped by the 7z v1 writer. |
 | `basic.cb7`, `basic.sevenz` | 7Z aliases | copied from `basic.7z` | Alias spellings exercise 7z detection. |
 | `basic.cbr` | RAR5 alias | copied from `basic.rar` | Alias spelling exercises RAR detection. |
-| `basic.tar` | TAR | `bsdtar -cf` | Plain TAR fixture for mandatory list/test/extract coverage. |
+| `basic.tar` | TAR | `bsdtar -cf` | Plain TAR fixture for mandatory list/test/extract coverage. Carries the full `payload/` tree and preserves the symlink, like every other TAR-family fixture. |
 | `basic.tar.gz`, `basic.tgz` | TAR.GZ | `bsdtar -czf` | Both supported TAR.GZ spellings. |
 | `basic.tar.bz2`, `basic.tbz2`, `basic.tbz` | TAR.BZ2 | `bsdtar -cjf` | All supported bzip2-compressed TAR spellings. |
 | `basic.tar.xz`, `basic.txz` | TAR.XZ | `bsdtar -cJf` | Both supported XZ-compressed TAR spellings. |

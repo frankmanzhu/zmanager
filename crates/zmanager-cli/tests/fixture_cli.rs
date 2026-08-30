@@ -174,6 +174,44 @@ fn fixture_manifest_covers_every_supported_extension() {
     }
 }
 
+/// Members of the shared `payload/` fixture tree that every container format
+/// carries, excluding the symlink. See `fixtures/archives/README.md` for how
+/// the tree is generated.
+///
+/// The symlink is deliberately not listed here: formats disagree on whether
+/// they can represent one, so each case supplies its own symlink expectation
+/// through [`payload_tree_with_symlink`].
+const PAYLOAD_TREE_WITHOUT_SYMLINK: &[(&str, &str)] = &[
+    ("payload", "directory"),
+    ("payload/README.txt", "file"),
+    ("payload/nested", "directory"),
+    ("payload/nested/file.txt", "file"),
+    ("payload/nested/empty-dir", "directory"),
+    ("payload/dir with spaces", "directory"),
+    ("payload/dir with spaces/file with spaces.txt", "file"),
+    ("payload/unicode", "directory"),
+    ("payload/unicode/こんにちは.txt", "file"),
+];
+
+/// The full shared payload tree, with the symlink entry recorded as the kind
+/// the given format is expected to produce: `"symlink"` where the format
+/// preserves it, `"file"` where the writer materializes it instead.
+fn payload_tree_with_symlink(symlink_kind: &'static str) -> Vec<(&'static str, &'static str)> {
+    let mut tree = PAYLOAD_TREE_WITHOUT_SYMLINK.to_vec();
+    tree.push(("payload/nested/readme-link.txt", symlink_kind));
+    tree
+}
+
+/// Entries the fixture corpus is allowed to carry beyond the documented tree.
+///
+/// The bsdtar-generated fixtures were produced on macOS without
+/// `COPYFILE_DISABLE=1`, so they contain `AppleDouble` sidecars. Those are
+/// generation artifacts rather than intended fixture content, so completeness
+/// checks ignore them instead of asserting them.
+fn is_generation_artifact(name: &str) -> bool {
+    name.split('/').next_back().is_some_and(|leaf| leaf.starts_with("._"))
+}
+
 fn assert_listing_kinds(archive: &Path, expected: &[(&str, &str)]) {
     let output = Command::new(cli_path()).arg("list").arg(archive).arg("--json").output().unwrap();
     assert_success(&format!("zm list {} --json", archive.display()), &output);
@@ -189,33 +227,71 @@ fn assert_listing_kinds(archive: &Path, expected: &[(&str, &str)]) {
     }
 }
 
+/// Asserts the listing is exactly `expected` — every expected entry present
+/// with the right kind, and no unexpected entries beyond known generation
+/// artifacts. Subset assertions let a format silently drop payload members, so
+/// formats that carry the whole tree are held to the stricter check.
+fn assert_listing_is_exactly(archive: &Path, expected: &[(&str, &str)]) {
+    assert_listing_kinds(archive, expected);
+
+    let output = Command::new(cli_path()).arg("list").arg(archive).arg("--json").output().unwrap();
+    let listing: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = listing["entries"].as_array().expect("JSON listing entries array");
+
+    let unexpected = entries
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .filter(|name| !name.is_empty() && !is_generation_artifact(name))
+        .filter(|name| !expected.iter().any(|&(path, _)| path == *name))
+        .collect::<Vec<_>>();
+
+    assert!(unexpected.is_empty(), "unexpected listing entries in {}: {unexpected:?}", archive.display());
+}
+
+/// Formats that carry the complete shared payload tree. Each is held to an
+/// exact listing so a regression that drops the empty directory, the
+/// spaces-in-name file, or the Unicode file fails here rather than surviving a
+/// subset check.
+///
+/// The second field is the kind the format is expected to report for the
+/// symlink member.
+const FULL_PAYLOAD_TREE_FIXTURES: &[(&str, &str)] = &[
+    // The ZIP and 7z v1 writers materialize the symlink as a regular file.
+    ("basic.zip", "file"),
+    ("basic.7z", "file"),
+    ("basic.tzap", "file"),
+    // TAR-family and the remaining container formats preserve it.
+    ("basic.tar", "symlink"),
+    ("basic.tar.gz", "symlink"),
+    ("basic.tar.xz", "symlink"),
+    ("basic.tar.zst", "symlink"),
+    ("basic.cpio", "symlink"),
+];
+
+#[test]
+fn cli_fixture_listings_carry_the_whole_payload_tree() {
+    for &(filename, symlink_kind) in FULL_PAYLOAD_TREE_FIXTURES {
+        let archive = archives_dir().join(filename);
+        assert!(archive.is_file(), "committed fixture is missing: {}", archive.display());
+        assert_listing_is_exactly(&archive, &payload_tree_with_symlink(symlink_kind));
+    }
+}
+
 #[test]
 fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
+    // Formats whose listing legitimately deviates from the shared payload tree.
+    // Every deviation here is documented in `fixtures/archives/README.md`;
+    // these stay subset assertions because the deviations are format-inherent.
     let cases: &[(&str, &[(&str, &str)])] = &[
-        ("basic.zip", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "file")]),
-        ("basic.7z", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "file")]),
-        ("basic.tar", &[("README.md", "file")]),
-        (
-            "basic.tar.gz",
-            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
-        ),
-        (
-            "basic.tar.xz",
-            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
-        ),
-        (
-            "basic.tar.zst",
-            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
-        ),
-        (
-            "basic.cpio",
-            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
-        ),
+        // XAR stores the Unicode member under a base64-encoded name, so the
+        // Unicode entry is asserted separately rather than through the shared tree.
         (
             "basic.xar",
             &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
         ),
+        // ISO 9660/Joliet upcases names and is generated without the symlink.
         ("basic.iso", &[("NESTED", "directory"), ("README.TXT", "file"), ("NESTED/FILE.TXT", "file")]),
+        // Package containers expose their members, not the payload tree.
         ("basic.deb", &[("debian-binary", "file"), ("control.tar.gz", "file"), ("data.tar.xz", "file")]),
         ("basic.ar", &[("README.md", "file")]),
         (
@@ -226,11 +302,13 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
             "basic.pkg",
             &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
         ),
+        // MSI has no symlink entries and `wixl` cannot encode the Unicode name.
         ("basic.msi", &[("payload/README.txt", "file"), ("payload/nested/file.txt", "file"), ("payload/dir with spaces/file with spaces.txt", "file")]),
         (
             "basic.vhd",
             &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
         ),
+        // FAT32 has no symlinks.
         ("basic.vmdk", &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/file.txt", "file")]),
         (
             "basic.udf",
@@ -240,15 +318,13 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
 
     for &(filename, expected) in cases {
         let archive = archives_dir().join(filename);
-        if archive.exists() {
-            assert_listing_kinds(&archive, expected);
-        }
+        assert!(archive.is_file(), "committed fixture is missing: {}", archive.display());
+        assert_listing_kinds(&archive, expected);
     }
 
     let rar = archives_dir().join("rar5-multipart.part1.rar");
-    if rar.exists() {
-        assert_listing_kinds(&rar, &[("rar-fixture", "directory"), ("rar-fixture/docs/readme.txt", "file")]);
-    }
+    assert!(rar.is_file(), "committed fixture is missing: {}", rar.display());
+    assert_listing_kinds(&rar, &[("rar-fixture", "directory"), ("rar-fixture/docs/readme.txt", "file")]);
 
     #[cfg(unix)]
     assert_listing_kinds(
