@@ -166,6 +166,13 @@ fn fixture_manifest_covers_every_supported_extension() {
         zmanager_core::archive_format::APPIMAGE_EXTENSIONS,
         zmanager_core::archive_format::WIM_EXTENSIONS,
         zmanager_core::archive_format::VDI_EXTENSIONS,
+        zmanager_core::archive_format::VHDX_EXTENSIONS,
+        zmanager_core::archive_format::QCOW2_EXTENSIONS,
+        zmanager_core::archive_format::EWF_EXTENSIONS,
+        zmanager_core::archive_format::AD1_EXTENSIONS,
+        zmanager_core::archive_format::DAR_EXTENSIONS,
+        zmanager_core::archive_format::AFF4_EXTENSIONS,
+        zmanager_core::archive_format::RAW_DISK_EXTENSIONS,
         zmanager_core::engine::raw_stream_suffixes(),
     ];
 

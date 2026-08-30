@@ -59,12 +59,26 @@ pub const NRG_EXTENSIONS: &[&str] = &[".nrg"];
 pub const MDF_EXTENSIONS: &[&str] = &[".mdf", ".mds"];
 pub const CDI_EXTENSIONS: &[&str] = &[".cdi"];
 pub const ISZ_EXTENSIONS: &[&str] = &[".isz"];
-// `.img` is intentionally absent: it is a generic raw-image extension used by
-// SD-card, floppy, and disk dumps, and claiming it as CloneCD mislabels every
+// `.img` is intentionally absent here: it is a generic raw-image extension used
+// by SD-card, floppy, and disk dumps, and claiming it as CloneCD mislabels every
 // one of them. A CloneCD set is entered through its `.ccd` control file, which
-// resolves the sibling `.img` itself.
+// resolves the sibling `.img` itself. `.img` is claimed by `RAW_DISK_EXTENSIONS`
+// instead, which is what those dumps actually are.
 pub const CCD_EXTENSIONS: &[&str] = &[".ccd"];
 pub const CUE_EXTENSIONS: &[&str] = &[".cue"];
+pub const VHDX_EXTENSIONS: &[&str] = &[".vhdx"];
+pub const QCOW2_EXTENSIONS: &[&str] = &[".qcow2", ".qcow"];
+// Only the physical EnCase images the EWF reader opens. `.s01` (SMART), `.l01`
+// and `.lx01` (EnCase *logical* evidence) are deliberately absent: the reader
+// resolves an EWF segment set by the `.e01`/`.ex01` extension alone, so claiming
+// the others advertises a backend that cannot open them. They are also logical
+// containers, so they would need the logical-container route, not the disk route.
+pub const EWF_EXTENSIONS: &[&str] = &[".e01", ".ex01"];
+pub const AD1_EXTENSIONS: &[&str] = &[".ad1"];
+// Every DAR slice (`basename.N.dar`) ends in `.dar`, so the one suffix covers the set.
+pub const DAR_EXTENSIONS: &[&str] = &[".dar"];
+pub const AFF4_EXTENSIONS: &[&str] = &[".aff4"];
+pub const RAW_DISK_EXTENSIONS: &[&str] = &[".raw", ".dd", ".dsk", ".img"];
 
 /// Compile-time availability of a format's backend on this target.
 ///
@@ -172,6 +186,20 @@ pub enum ArchiveFormatKind {
     Ccd,
     /// `CUE/BIN` optical disc sheet (`.cue`).
     Cue,
+    /// Microsoft Hyper-V Virtual Hard Disk v2 (`.vhdx`).
+    Vhdx,
+    /// QEMU Copy-On-Write disk image (`.qcow2`, `.qcow`).
+    Qcow2,
+    /// Expert Witness Format / `EnCase` physical forensic image (`.e01`, `.ex01`).
+    Ewf,
+    /// `AccessData` / FTK Imager Logical Image (`.ad1`).
+    Ad1,
+    /// Disk `ARchiver` backup package (`.dar`).
+    Dar,
+    /// Advanced Forensic Format 4 container (`.aff4`).
+    Aff4,
+    /// Raw sector disk or partition dump (`.raw`, `.dd`, `.dsk`, `.img`).
+    RawDisk,
     /// Raw single-file compression stream.
     RawStream,
     /// Not recognized as any archive format.
@@ -240,6 +268,13 @@ pub const FORMAT_CAPABILITIES: &[FormatCapability] = &[
     FormatCapability { kind: ArchiveFormatKind::Isz, extensions: ISZ_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Ccd, extensions: CCD_EXTENSIONS, status: BackendStatus::Available },
     FormatCapability { kind: ArchiveFormatKind::Cue, extensions: CUE_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Vhdx, extensions: VHDX_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Qcow2, extensions: QCOW2_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Ewf, extensions: EWF_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Ad1, extensions: AD1_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Dar, extensions: DAR_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::Aff4, extensions: AFF4_EXTENSIONS, status: BackendStatus::Available },
+    FormatCapability { kind: ArchiveFormatKind::RawDisk, extensions: RAW_DISK_EXTENSIONS, status: BackendStatus::Available },
 ];
 
 /// Availability of the native Apple Archive backend on this target.
@@ -345,6 +380,22 @@ fn detect_content_format(path: &Path) -> Option<ArchiveFormatKind> {
     if prefix.starts_with(b"IsZ!") {
         return Some(ArchiveFormatKind::Isz);
     }
+    // VHDX carries exactly one file identifier, `vhdxfile`, at offset 0.
+    if prefix.starts_with(b"vhdxfile") {
+        return Some(ArchiveFormatKind::Vhdx);
+    }
+    if prefix.starts_with(&[0x51, 0x46, 0x49, 0xfb]) {
+        return Some(ArchiveFormatKind::Qcow2);
+    }
+    // EWF v1 (`EVF`) and v2 (`EVF2`) *physical* images. The logical siblings
+    // (`LVF`, `LEF2`) are not detected: the EWF reader cannot open them, so
+    // claiming the magic would route an unopenable file into the disk backend.
+    if prefix.starts_with(b"EVF\x09\x0d\x0a\xff\x00") || prefix.starts_with(b"EVF2\x0d\x0a\x81\x00") {
+        return Some(ArchiveFormatKind::Ewf);
+    }
+    if prefix.starts_with(b"ADSEGMENTEDFILE\0") {
+        return Some(ArchiveFormatKind::Ad1);
+    }
     None
 }
 
@@ -410,6 +461,13 @@ mod tests {
             ArchiveFormatKind::Isz,
             ArchiveFormatKind::Ccd,
             ArchiveFormatKind::Cue,
+            ArchiveFormatKind::Vhdx,
+            ArchiveFormatKind::Qcow2,
+            ArchiveFormatKind::Ewf,
+            ArchiveFormatKind::Ad1,
+            ArchiveFormatKind::Dar,
+            ArchiveFormatKind::Aff4,
+            ArchiveFormatKind::RawDisk,
             ArchiveFormatKind::RawStream,
         ] {
             assert!(table_kinds.contains(&kind), "capability table is missing a row for {kind:?}");
@@ -434,6 +492,13 @@ mod tests {
         assert_eq!(format_status(ArchiveFormatKind::TarZst), BackendStatus::Available);
         assert_eq!(format_status(ArchiveFormatKind::SevenZ), BackendStatus::Available);
         assert_eq!(format_status(ArchiveFormatKind::Deb), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::Vhdx), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::Qcow2), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::Ewf), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::Ad1), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::Dar), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::Aff4), BackendStatus::Available);
+        assert_eq!(format_status(ArchiveFormatKind::RawDisk), BackendStatus::Available);
     }
 
     #[test]
@@ -479,6 +544,21 @@ mod tests {
         assert_eq!(detect("archive.vhd"), ArchiveFormatKind::Vhd);
         assert_eq!(detect("archive.VMDK"), ArchiveFormatKind::Vmdk);
         assert_eq!(detect("archive.udf"), ArchiveFormatKind::Udf);
+        assert_eq!(detect("archive.vhdx"), ArchiveFormatKind::Vhdx);
+        assert_eq!(detect("archive.qcow2"), ArchiveFormatKind::Qcow2);
+        assert_eq!(detect("archive.qcow"), ArchiveFormatKind::Qcow2);
+        assert_eq!(detect("archive.e01"), ArchiveFormatKind::Ewf);
+        assert_eq!(detect("archive.ex01"), ArchiveFormatKind::Ewf);
+        assert_eq!(detect("archive.ad1"), ArchiveFormatKind::Ad1);
+        assert_eq!(detect("archive.dar"), ArchiveFormatKind::Dar);
+        // Every DAR slice ends in `.dar`, so the multi-slice names resolve too.
+        assert_eq!(detect("archive.1.dar"), ArchiveFormatKind::Dar);
+        assert_eq!(detect("archive.17.dar"), ArchiveFormatKind::Dar);
+        assert_eq!(detect("archive.aff4"), ArchiveFormatKind::Aff4);
+        assert_eq!(detect("archive.raw"), ArchiveFormatKind::RawDisk);
+        assert_eq!(detect("archive.dd"), ArchiveFormatKind::RawDisk);
+        assert_eq!(detect("archive.dsk"), ArchiveFormatKind::RawDisk);
+        assert_eq!(detect("archive.img"), ArchiveFormatKind::RawDisk);
         assert_eq!(detect("archive.unknown"), ArchiveFormatKind::Unknown);
     }
 
@@ -524,19 +604,91 @@ mod tests {
         assert_eq!(detect("disc.isz"), ArchiveFormatKind::Isz);
         assert_eq!(detect("disc.ccd"), ArchiveFormatKind::Ccd);
         assert_eq!(detect("disc.cue"), ArchiveFormatKind::Cue);
+        assert_eq!(detect("disk.vhdx"), ArchiveFormatKind::Vhdx);
+        assert_eq!(detect("disk.qcow2"), ArchiveFormatKind::Qcow2);
+        assert_eq!(detect("disk.qcow"), ArchiveFormatKind::Qcow2);
+        assert_eq!(detect("evidence.e01"), ArchiveFormatKind::Ewf);
+        assert_eq!(detect("evidence.ex01"), ArchiveFormatKind::Ewf);
+        assert_eq!(detect("evidence.ad1"), ArchiveFormatKind::Ad1);
+        assert_eq!(detect("backup.dar"), ArchiveFormatKind::Dar);
+        assert_eq!(detect("backup.1.dar"), ArchiveFormatKind::Dar);
+        assert_eq!(detect("container.aff4"), ArchiveFormatKind::Aff4);
+        assert_eq!(detect("disk.raw"), ArchiveFormatKind::RawDisk);
+        assert_eq!(detect("disk.dd"), ArchiveFormatKind::RawDisk);
+        assert_eq!(detect("disk.dsk"), ArchiveFormatKind::RawDisk);
+        assert_eq!(detect("disk.img"), ArchiveFormatKind::RawDisk);
+    }
+
+    #[test]
+    fn no_two_formats_claim_the_same_extension() {
+        // `detect_archive_format` returns the first capability row whose suffix
+        // matches, so an exact duplicate would silently hand one format's files
+        // to whichever row is registered first.
+        let mut seen: Vec<(String, ArchiveFormatKind)> = Vec::new();
+        for capability in FORMAT_CAPABILITIES {
+            for extension in capability.extensions {
+                let lowered = extension.to_ascii_lowercase();
+                assert!(
+                    !seen.iter().any(|(seen_extension, _)| *seen_extension == lowered),
+                    "{extension} is claimed by both {:?} and {:?}",
+                    capability.kind,
+                    seen.iter().find(|(seen_extension, _)| *seen_extension == lowered).map(|(_, kind)| *kind),
+                );
+                seen.push((lowered, capability.kind));
+            }
+        }
+        assert!(seen.len() > 100, "expected the capability table to cover a large extension set, saw {}", seen.len());
+    }
+
+    #[test]
+    fn nested_extensions_are_registered_before_the_suffix_they_contain() {
+        // Compound suffixes legitimately nest (`.tar.zst` inside `.zst`,
+        // `.cpio.gz` inside `.gz`). `detect_archive_format` takes the first
+        // match, so the *more specific* row must come first or the compound
+        // format is unreachable. RawStream is exempt: it is resolved by
+        // `detect_raw_stream_format` ahead of the table walk.
+        let rows: Vec<(&str, ArchiveFormatKind, usize)> = FORMAT_CAPABILITIES
+            .iter()
+            .enumerate()
+            .filter(|(_, capability)| capability.kind != ArchiveFormatKind::RawStream)
+            .flat_map(|(index, capability)| capability.extensions.iter().map(move |extension| (*extension, capability.kind, index)))
+            .collect();
+        for (specific, specific_kind, specific_index) in &rows {
+            for (general, general_kind, general_index) in &rows {
+                if specific_kind == general_kind || specific == general || !specific.ends_with(general) {
+                    continue;
+                }
+                assert!(
+                    specific_index < general_index,
+                    "{specific} ({specific_kind:?}) is shadowed by {general} ({general_kind:?}): register the specific suffix first"
+                );
+            }
+        }
     }
 
     #[test]
     fn generic_and_unimplemented_extensions_are_not_claimed() {
-        // `.img` is used by SD-card, floppy, and raw disk dumps; claiming it
-        // as CloneCD mislabels all of them. A CloneCD set is entered through
-        // its `.ccd` control file, which resolves the sibling `.img` itself.
-        assert_eq!(detect("raspios.img"), ArchiveFormatKind::Unknown);
+        // `.img` is used by SD-card, floppy, and raw disk dumps: it resolves to
+        // `RawDisk`, never to CloneCD. A CloneCD set is entered through its
+        // `.ccd` control file, which resolves the sibling `.img` itself.
+        assert_eq!(detect("raspios.img"), ArchiveFormatKind::RawDisk);
+
+        // EnCase *logical* evidence (`.l01`/`.lx01`) and SMART (`.s01`) are not
+        // claimed: the EWF reader resolves a segment set by the `.e01`/`.ex01`
+        // extension alone and cannot open these, so advertising them would
+        // promise a backend that always fails. See `EWF_EXTENSIONS`.
+        for unsupported in ["evidence.s01", "evidence.l01", "evidence.lx01"] {
+            assert_eq!(detect(unsupported), ArchiveFormatKind::Unknown, "{unsupported}");
+        }
+        for absent in [".s01", ".l01", ".lx01"] {
+            assert!(!EWF_EXTENSIONS.contains(&absent), "{absent} must not be advertised as EWF");
+        }
 
         // `.esd` images are LZMS-compressed solid WIMs, which the WIM backend
         // does not decode, so the extension is not advertised.
         assert!(!WIM_EXTENSIONS.contains(&".esd"));
         assert!(!CCD_EXTENSIONS.contains(&".img"));
+        assert!(RAW_DISK_EXTENSIONS.contains(&".img"));
     }
 
     #[test]
@@ -575,6 +727,41 @@ mod tests {
         isz[0..4].copy_from_slice(b"IsZ!");
         fs::write(dir.path("compressed.data"), &isz).unwrap();
         assert_eq!(detect_archive_format(dir.path("compressed.data")), ArchiveFormatKind::Isz);
+
+        let mut vhdx = vec![0_u8; 64];
+        vhdx[0..8].copy_from_slice(b"vhdxfile");
+        fs::write(dir.path("hyperv.data"), &vhdx).unwrap();
+        assert_eq!(detect_archive_format(dir.path("hyperv.data")), ArchiveFormatKind::Vhdx);
+
+        let mut qcow2 = vec![0_u8; 64];
+        qcow2[0..4].copy_from_slice(&[0x51, 0x46, 0x49, 0xfb]);
+        fs::write(dir.path("qemu.data"), &qcow2).unwrap();
+        assert_eq!(detect_archive_format(dir.path("qemu.data")), ArchiveFormatKind::Qcow2);
+
+        let mut ewf = vec![0_u8; 64];
+        ewf[0..8].copy_from_slice(b"EVF\x09\x0d\x0a\xff\x00");
+        fs::write(dir.path("encase.data"), &ewf).unwrap();
+        assert_eq!(detect_archive_format(dir.path("encase.data")), ArchiveFormatKind::Ewf);
+
+        let mut ewf2 = vec![0_u8; 64];
+        ewf2[0..8].copy_from_slice(b"EVF2\x0d\x0a\x81\x00");
+        fs::write(dir.path("encase2.data"), &ewf2).unwrap();
+        assert_eq!(detect_archive_format(dir.path("encase2.data")), ArchiveFormatKind::Ewf);
+
+        // The *logical* EWF signatures stay unclaimed: the reader cannot open
+        // them, so detecting them would route an unopenable file at the disk
+        // backend instead of reporting an honest "unknown format".
+        for logical_magic in [&b"LVF\x09\x0d\x0a\xff\x00"[..], &b"LEF2\x0d\x0a\x81\x00"[..]] {
+            let mut logical = vec![0_u8; 64];
+            logical[0..8].copy_from_slice(logical_magic);
+            fs::write(dir.path("logical.data"), &logical).unwrap();
+            assert_eq!(detect_archive_format(dir.path("logical.data")), ArchiveFormatKind::Unknown, "{logical_magic:?}");
+        }
+
+        let mut ad1 = vec![0_u8; 64];
+        ad1[0..16].copy_from_slice(b"ADSEGMENTEDFILE\0");
+        fs::write(dir.path("ftk.data"), &ad1).unwrap();
+        assert_eq!(detect_archive_format(dir.path("ftk.data")), ArchiveFormatKind::Ad1);
     }
 
     #[test]

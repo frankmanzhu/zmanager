@@ -61,6 +61,13 @@ impl FormatId {
     pub const ISZ: FormatId = FormatId("isz");
     pub const CCD: FormatId = FormatId("ccd");
     pub const CUE: FormatId = FormatId("cue");
+    pub const VHDX: FormatId = FormatId("vhdx");
+    pub const QCOW2: FormatId = FormatId("qcow2");
+    pub const EWF: FormatId = FormatId("ewf");
+    pub const AD1: FormatId = FormatId("ad1");
+    pub const DAR: FormatId = FormatId("dar");
+    pub const AFF4: FormatId = FormatId("aff4");
+    pub const RAW_DISK: FormatId = FormatId("raw_disk");
     pub const RAW_STREAM: FormatId = FormatId("raw_stream");
 
     /// Converts a canonical archive-format kind into its engine identity.
@@ -111,6 +118,13 @@ impl FormatId {
             ArchiveFormatKind::Isz => Some(Self::ISZ),
             ArchiveFormatKind::Ccd => Some(Self::CCD),
             ArchiveFormatKind::Cue => Some(Self::CUE),
+            ArchiveFormatKind::Vhdx => Some(Self::VHDX),
+            ArchiveFormatKind::Qcow2 => Some(Self::QCOW2),
+            ArchiveFormatKind::Ewf => Some(Self::EWF),
+            ArchiveFormatKind::Ad1 => Some(Self::AD1),
+            ArchiveFormatKind::Dar => Some(Self::DAR),
+            ArchiveFormatKind::Aff4 => Some(Self::AFF4),
+            ArchiveFormatKind::RawDisk => Some(Self::RAW_DISK),
             ArchiveFormatKind::RawStream => Some(Self::RAW_STREAM),
         }
     }

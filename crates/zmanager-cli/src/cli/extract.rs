@@ -212,6 +212,13 @@ fn run_engine_extract(
         ArchiveFormatKind::Isz => "isz",
         ArchiveFormatKind::Ccd => "ccd",
         ArchiveFormatKind::Cue => "cue",
+        ArchiveFormatKind::Vhdx => "vhdx",
+        ArchiveFormatKind::Qcow2 => "qcow2",
+        ArchiveFormatKind::Ewf => "ewf",
+        ArchiveFormatKind::Ad1 => "ad1",
+        ArchiveFormatKind::Dar => "dar",
+        ArchiveFormatKind::Aff4 => "aff4",
+        ArchiveFormatKind::RawDisk => "raw-disk",
         _ => "archive",
     };
     let mut progress = crate::cli::app::ProgressReporter::from_global(Some(global));

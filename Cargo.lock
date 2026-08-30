@@ -10,7 +10,9 @@ checksum = "47b45df3a1aa6af515fdfc8b900b43fd50035e82e97003e4981e06fca5e74b9e"
 dependencies = [
  "flate2",
  "forensic-vfs",
+ "md-5",
  "safe-read 0.2.2",
+ "sha1 0.10.7",
  "thiserror",
 ]
 
@@ -129,6 +131,7 @@ dependencies = [
  "snap",
  "thiserror",
  "xts-mode",
+ "zip 2.4.2",
  "zip-forensic-core 0.1.0",
 ]
 
@@ -254,6 +257,15 @@ name = "apm-partition-core"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c97cf104bef24eb29862e957fe9a478af6e9534f31f6b35f5b39ea662447a70"
+
+[[package]]
+name = "arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+dependencies = [
+ "derive_arbitrary",
+]
 
 [[package]]
 name = "arc-swap"
@@ -1436,6 +1448,17 @@ name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "digest"
@@ -5521,6 +5544,23 @@ dependencies = [
 
 [[package]]
 name = "zip"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "crossbeam-utils",
+ "displaydoc",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "thiserror",
+ "zopfli",
+]
+
+[[package]]
+name = "zip"
 version = "8.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
@@ -5606,6 +5646,8 @@ dependencies = [
 name = "zmanager-cli"
 version = "2.1.2"
 dependencies = [
+ "ad1-core",
+ "aff4",
  "anstream",
  "anstyle",
  "flate2",
@@ -5617,7 +5659,7 @@ dependencies = [
  "tar",
  "windows-sys 0.61.2",
  "xattr",
- "zip",
+ "zip 8.6.0",
  "zmanager-core",
  "zmanager-tzap-hosted",
  "zstd",
@@ -5627,7 +5669,9 @@ dependencies = [
 name = "zmanager-core"
 version = "2.1.2"
 dependencies = [
+ "ad1-core",
  "adler2",
+ "aff4",
  "backhand",
  "base64",
  "brotli",
@@ -5669,7 +5713,7 @@ dependencies = [
  "x509-parser",
  "xattr",
  "zeroize",
- "zip",
+ "zip 8.6.0",
  "zmanager-apple-archive",
  "zmanager-unrar",
  "zmanager-wim",

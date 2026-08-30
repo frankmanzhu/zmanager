@@ -105,6 +105,8 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+ad1 = { version = "0.1.1", package = "ad1-core", features = ["testfix"] }
+aff4 = { version = "0.2", features = ["test-helpers"] }
 crc32c = "0.6"
 
 [[bench]]

@@ -150,6 +150,22 @@ def collect_bundled_notices(workspace: Path, license_dir: Path, notice_path: Pat
             ],
             "notes": "Used only for RAR handling; not used to create RAR archives or recreate RAR compression.",
         },
+        {
+            "name": "lzxd",
+            "version": "0.2.7 (vendored source, adapted)",
+            "source": "crates/zmanager-wim/src/lzx",
+            "license": "MIT OR Apache-2.0",
+            "files": [
+                workspace / "crates/zmanager-wim/vendor/LICENSE-MIT",
+                workspace / "crates/zmanager-wim/vendor/LICENSE-APACHE",
+            ],
+            "all_files": True,
+            "notes": (
+                "Copyright (c) 2020 Lonami <gh@lonami.dev>. The WIM-LZX decoder in "
+                "crates/zmanager-wim/src/lzx is adapted from the lzxd crate; MIT requires the "
+                "copyright notice to ship with the binary. No wimlib (LGPL) code is used."
+            ),
+        },
     ]
 
     for entry in entries:
@@ -159,7 +175,10 @@ def collect_bundled_notices(workspace: Path, license_dir: Path, notice_path: Pat
             if source.is_file():
                 copied = copy_file(source, destination_root / source.name)
                 copied_files.append(display_path(copied, notice_path))
-                break
+                # A dual-licensed input ships both texts; a single-license input
+                # lists fallback paths, so stop at the first one that exists.
+                if not entry.get("all_files"):
+                    break
         bundled.append({**entry, "license_files": copied_files})
 
     return bundled
@@ -317,6 +336,8 @@ def render_notices(
             "- Cargo metadata command: `cargo metadata --format-version 1 --locked`",
             "- Bundled license inputs:",
             "  `crates/zmanager-unrar/vendor/unrar/license.txt`",
+            "  `crates/zmanager-wim/vendor/LICENSE-MIT`,",
+            "  `crates/zmanager-wim/vendor/LICENSE-APACHE`",
             "",
         ]
     )

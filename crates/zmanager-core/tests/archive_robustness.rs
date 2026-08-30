@@ -72,6 +72,18 @@ fn truncated_container_matrix_fails_integrity_and_extraction_closed() {
         CorruptCase { name: "truncated.cdi", expected_format: ArchiveFormatKind::Cdi, bytes: b"CDI\0" },
         CorruptCase { name: "truncated.ccd", expected_format: ArchiveFormatKind::Ccd, bytes: b"[CloneCD]\r\n" },
         CorruptCase { name: "truncated.cue", expected_format: ArchiveFormatKind::Cue, bytes: b"FILE \"missing.bin\" BINARY\r\n" },
+        CorruptCase { name: "truncated.vhdx", expected_format: ArchiveFormatKind::Vhdx, bytes: b"vhdxfile" },
+        CorruptCase { name: "truncated.qcow2", expected_format: ArchiveFormatKind::Qcow2, bytes: &[0x51, 0x46, 0x49, 0xfb] },
+        CorruptCase { name: "truncated.qcow", expected_format: ArchiveFormatKind::Qcow2, bytes: &[0x51, 0x46, 0x49, 0xfb] },
+        CorruptCase { name: "truncated.e01", expected_format: ArchiveFormatKind::Ewf, bytes: b"EVF\x09\x0d\x0a\xff\x00" },
+        CorruptCase { name: "truncated.ex01", expected_format: ArchiveFormatKind::Ewf, bytes: b"EVF2\x0d\x0a\x81\x00" },
+        CorruptCase { name: "truncated.ad1", expected_format: ArchiveFormatKind::Ad1, bytes: b"ADSEGMENTEDFILE\0" },
+        CorruptCase { name: "truncated.dar", expected_format: ArchiveFormatKind::Dar, bytes: b"DAR\0" },
+        CorruptCase { name: "truncated.aff4", expected_format: ArchiveFormatKind::Aff4, bytes: b"PK\x03\x04" },
+        CorruptCase { name: "truncated.raw", expected_format: ArchiveFormatKind::RawDisk, bytes: b"raw sector dump" },
+        CorruptCase { name: "truncated.dd", expected_format: ArchiveFormatKind::RawDisk, bytes: b"raw sector dump" },
+        CorruptCase { name: "truncated.dsk", expected_format: ArchiveFormatKind::RawDisk, bytes: b"raw sector dump" },
+        CorruptCase { name: "truncated.img", expected_format: ArchiveFormatKind::RawDisk, bytes: b"raw sector dump" },
     ];
     let temp = TestDir::new("truncated-container-matrix");
     let mut failures = Vec::new();

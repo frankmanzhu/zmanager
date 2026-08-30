@@ -2757,6 +2757,62 @@ static CUE_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     supports_encryption: false,
 };
 
+static VHDX_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::VHDX,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static QCOW2_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::QCOW2,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static EWF_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::EWF,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static AD1_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_logical_container_lister",
+    format: FormatId::AD1,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static DAR_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_logical_container_lister",
+    format: FormatId::DAR,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static AFF4_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_logical_container_lister",
+    format: FormatId::AFF4,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
+static RAW_DISK_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
+    name: "native_virtual_disk_lister",
+    format: FormatId::RAW_DISK,
+    operations: &[ArchiveOperation::List, ArchiveOperation::Extract, ArchiveOperation::Test, ArchiveOperation::CopyToWriter],
+    required_source_access: SourceAccess::Seekable,
+    supports_encryption: false,
+};
+
 static SQUASHFS_DESCRIPTOR: AdapterDescriptor = AdapterDescriptor {
     name: "native_squashfs_adapter",
     format: FormatId::SQUASHFS,
@@ -2995,9 +3051,18 @@ pub struct VirtualDiskListAdapter {
 }
 
 impl VirtualDiskListAdapter {
-    /// Creates a virtual disk or optical filesystem adapter for VHD, VMDK, UDF, ISO, VDI, NRG, MDF, CDI, ISZ, CCD, or CUE.
-    #[must_use]
-    pub(crate) fn new(format: FormatId) -> Option<Self> {
+    /// Every format this adapter serves, and how the backend must mount it:
+    /// `Some(false)` for a disk or optical image, `Some(true)` for a logical
+    /// container (AD1/DAR/AFF4 -- an arbitrary-path file tree with no sector
+    /// stream), `None` for a format this adapter does not own.
+    ///
+    /// `new`, `extract`, `test`, and `copy_to_writer` all route through this one
+    /// list, so a newly supported format is added in exactly one place. The
+    /// per-format `virtual_disk_backend::extract_*` / `test_*` entry points are
+    /// public API for FFI and desktop callers, but they all delegate to the same
+    /// two inner routines, so enumerating them here would only be a way to get
+    /// the routing out of sync with the constructor.
+    fn mounts_as_logical_container(format: FormatId) -> Option<bool> {
         match format {
             FormatId::VHD
             | FormatId::VMDK
@@ -3009,9 +3074,26 @@ impl VirtualDiskListAdapter {
             | FormatId::CDI
             | FormatId::ISZ
             | FormatId::CCD
-            | FormatId::CUE => Some(Self { format }),
+            | FormatId::CUE
+            | FormatId::VHDX
+            | FormatId::QCOW2
+            | FormatId::EWF
+            | FormatId::RAW_DISK => Some(false),
+            FormatId::AD1 | FormatId::DAR | FormatId::AFF4 => Some(true),
             _ => None,
         }
+    }
+
+    /// Resolves the mount class, or reports the format as unsupported.
+    fn mount_class(&self, operation: &str) -> Result<bool, ArchiveError> {
+        Self::mounts_as_logical_container(self.format)
+            .ok_or_else(|| ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk {operation} format '{}'", self.format)))
+    }
+
+    /// Creates a virtual disk, optical, or logical container adapter.
+    #[must_use]
+    pub(crate) fn new(format: FormatId) -> Option<Self> {
+        Self::mounts_as_logical_container(format).map(|_| Self { format })
     }
 }
 
@@ -3029,72 +3111,51 @@ impl NativeReadAdapter for VirtualDiskListAdapter {
             FormatId::ISZ => &ISZ_DESCRIPTOR,
             FormatId::CCD => &CCD_DESCRIPTOR,
             FormatId::CUE => &CUE_DESCRIPTOR,
+            FormatId::VHDX => &VHDX_DESCRIPTOR,
+            FormatId::QCOW2 => &QCOW2_DESCRIPTOR,
+            FormatId::EWF => &EWF_DESCRIPTOR,
+            FormatId::AD1 => &AD1_DESCRIPTOR,
+            FormatId::DAR => &DAR_DESCRIPTOR,
+            FormatId::AFF4 => &AFF4_DESCRIPTOR,
+            FormatId::RAW_DISK => &RAW_DISK_DESCRIPTOR,
             _ => unreachable!("VirtualDiskListAdapter only accepts virtual disk and optical formats"),
         }
     }
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
-        let raw_entries = match self.format {
-            FormatId::VHD => virtual_disk_backend::list_vhd(primary_path),
-            FormatId::VMDK => virtual_disk_backend::list_vmdk(primary_path),
-            FormatId::UDF => virtual_disk_backend::list_udf(primary_path),
-            FormatId::ISO => virtual_disk_backend::list_iso(primary_path),
-            FormatId::VDI => virtual_disk_backend::list_vdi(primary_path),
-            FormatId::NRG => virtual_disk_backend::list_nrg(primary_path),
-            FormatId::MDF => virtual_disk_backend::list_mdf(primary_path),
-            FormatId::CDI => virtual_disk_backend::list_cdi(primary_path),
-            FormatId::ISZ => virtual_disk_backend::list_isz(primary_path),
-            FormatId::CCD => virtual_disk_backend::list_ccd(primary_path),
-            FormatId::CUE => virtual_disk_backend::list_cue(primary_path),
-            _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
-        }
-        .map_err(|error| virtual_disk_error(primary_path, &error))?;
-
+        let allow_logical = self.mount_class("format")?;
+        let raw_entries = virtual_disk_backend::list_container_inner(primary_path, allow_logical).map_err(|error| virtual_disk_error(primary_path, &error))?;
         Ok(ArchiveListing { entries: map_virtual_disk_entries(raw_entries) })
     }
 
     fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
-        let report = if let Some(resolver) = options.overwrite_resolver.as_deref_mut() {
-            match self.format {
-                FormatId::VHD => virtual_disk_backend::extract_vhd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::VMDK => virtual_disk_backend::extract_vmdk_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::UDF => virtual_disk_backend::extract_udf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::ISO => virtual_disk_backend::extract_iso_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::VDI => virtual_disk_backend::extract_vdi_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::NRG => virtual_disk_backend::extract_nrg_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::MDF => virtual_disk_backend::extract_mdf_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::CDI => virtual_disk_backend::extract_cdi_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::ISZ => virtual_disk_backend::extract_isz_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::CCD => virtual_disk_backend::extract_ccd_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                FormatId::CUE => virtual_disk_backend::extract_cue_with_overwrite_resolver(path, &options.destination, options.policy.clone(), resolver),
-                _ => return Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk format '{}'", self.format))),
-            }
-        } else {
-            virtual_disk_backend::extract_virtual_disk(path, &options.destination, options.policy.clone())
-        }
+        let allow_logical = self.mount_class("format")?;
+        let report = virtual_disk_backend::extract_container_inner(
+            path,
+            &options.destination,
+            options.policy.clone(),
+            None,
+            options.overwrite_resolver.as_deref_mut(),
+            allow_logical,
+        )
         .map_err(|error| virtual_disk_error(path, &error))?;
         Ok(crate::engine::adapters::extract_report(report.written_entries, report.skipped_entries, report.written_bytes, report.warnings))
     }
 
     fn test(&self, archive: &NativeReadContext, options: &TestOptions) -> Result<TestReport, ArchiveError> {
         let path = archive.primary_path();
-        match self.format {
-            FormatId::ISO | FormatId::NRG | FormatId::MDF | FormatId::CDI | FormatId::ISZ | FormatId::CCD | FormatId::CUE => {
-                virtual_disk_backend::test_optical(path, options).map_err(|error| virtual_disk_error(path, &error))
-            }
-            FormatId::VDI | FormatId::VHD | FormatId::VMDK | FormatId::UDF => {
-                virtual_disk_backend::test_virtual_disk(path, options).map_err(|error| virtual_disk_error(path, &error))
-            }
-            _ => Err(ArchiveError::usable(ErrorKind::UnsupportedOperation, format!("Unsupported virtual disk test format '{}'", self.format))),
-        }
+        let allow_logical = self.mount_class("test")?;
+        virtual_disk_backend::test_container_payloads(path, options, allow_logical).map_err(|error| virtual_disk_error(path, &error))
     }
 
     fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let written_bytes = virtual_disk_backend::copy_virtual_disk_by_path_occurrence(path, &selector.path, selector.occurrence, writer)
+        let allow_logical = self.mount_class("copy")?;
+        let label = if allow_logical { "logical container" } else { "virtual disk" };
+        let written_bytes = virtual_disk_backend::copy_container_by_path_occurrence(path, &selector.path, selector.occurrence, writer, allow_logical, label)
             .map_err(|error| virtual_disk_error(path, &error))?;
         Ok(CopyReport { written_bytes })
     }
@@ -3140,13 +3201,70 @@ fn virtual_disk_error(path: &std::path::Path, error: &virtual_disk_backend::Virt
 #[cfg(test)]
 mod tests {
     use super::NativeEntrySelector;
+    use super::NativeReadAdapter as _;
     use super::NativeReadContext;
+    use super::VirtualDiskListAdapter;
     use crate::archive_browser::BrowserEntryKind;
     use crate::engine::format::FormatId;
     use crate::engine::source::ArchiveSource;
     use crate::engine::types::{ArchiveListing, DetectedArchive, EngineEntry, EntryId, OpenOptions};
     use crate::test_support::TestDir;
     use std::io::Read as _;
+
+    /// `descriptor` still routes per format through a `match` that ends in
+    /// `unreachable!`, so a format accepted by `VirtualDiskListAdapter::new`
+    /// but missing a descriptor arm would panic in production rather than fail
+    /// to compile. Walk the accepted set so the gap is a test failure instead.
+    #[test]
+    fn every_accepted_virtual_disk_format_has_a_consistent_descriptor() {
+        let accepted = [
+            FormatId::VHD,
+            FormatId::VMDK,
+            FormatId::UDF,
+            FormatId::ISO,
+            FormatId::VDI,
+            FormatId::NRG,
+            FormatId::MDF,
+            FormatId::CDI,
+            FormatId::ISZ,
+            FormatId::CCD,
+            FormatId::CUE,
+            FormatId::VHDX,
+            FormatId::QCOW2,
+            FormatId::EWF,
+            FormatId::AD1,
+            FormatId::DAR,
+            FormatId::AFF4,
+            FormatId::RAW_DISK,
+        ];
+
+        for format in accepted {
+            let adapter = VirtualDiskListAdapter::new(format).unwrap_or_else(|| panic!("{format} must be accepted"));
+            let descriptor = adapter.descriptor();
+            assert_eq!(descriptor.format, format, "descriptor for {format} names a different format");
+            for operation in
+                [super::ArchiveOperation::List, super::ArchiveOperation::Extract, super::ArchiveOperation::Test, super::ArchiveOperation::CopyToWriter]
+            {
+                assert!(descriptor.operations.contains(&operation), "{format} descriptor is missing {operation:?}");
+            }
+            // Every accepted format must classify; `mount_class` is what `list`,
+            // `extract`, `test`, and `copy_to_writer` all route through.
+            assert!(VirtualDiskListAdapter::mounts_as_logical_container(format).is_some(), "{format} has no mount class");
+        }
+
+        // The logical containers are the only ones mounted permissively.
+        for format in [FormatId::AD1, FormatId::DAR, FormatId::AFF4] {
+            assert_eq!(VirtualDiskListAdapter::mounts_as_logical_container(format), Some(true), "{format}");
+        }
+        for format in [FormatId::VHD, FormatId::ISO, FormatId::VHDX, FormatId::QCOW2, FormatId::EWF, FormatId::RAW_DISK] {
+            assert_eq!(VirtualDiskListAdapter::mounts_as_logical_container(format), Some(false), "{format}");
+        }
+
+        // A format this adapter does not own is rejected, not silently accepted.
+        for format in [FormatId::ZIP, FormatId::TAR, FormatId::SQUASHFS, FormatId::WIM] {
+            assert!(VirtualDiskListAdapter::new(format).is_none(), "{format} must not be accepted");
+        }
+    }
 
     #[test]
     fn native_session_context_owns_source_cursor_factory() {

@@ -7,7 +7,7 @@ use super::{Bitstream, DecodeFailed, DecoderState, Tree};
 // } else {
 //     (position_slot - 2) / 2
 // }
-const FOOTER_BITS: [u8; 289] = [
+const FOOTER_BITS: [u8; 290] = [
     0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17,
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
@@ -15,7 +15,7 @@ const FOOTER_BITS: [u8; 289] = [
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-    17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
+    17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
 ];
 
 // if position_slot == 0 {
@@ -280,6 +280,62 @@ impl Block {
                 r.copy_from_slice(new_r);
                 Ok(Decoded::Read(self.remaining as usize))
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BASE_POSITION, FOOTER_BITS};
+    use crate::lzx::WindowSize;
+
+    /// Every window size the decoder accepts must be addressable in both slot
+    /// tables. `decode_element` indexes them with `(main_element - 256) >> 3`,
+    /// whose maximum is `position_slots() - 1`, so a table shorter than the
+    /// largest window's slot count panics on a crafted stream.
+    #[test]
+    fn slot_tables_cover_every_window_size() {
+        let sizes = [
+            WindowSize::KB32,
+            WindowSize::KB64,
+            WindowSize::KB128,
+            WindowSize::KB256,
+            WindowSize::KB512,
+            WindowSize::MB1,
+            WindowSize::MB2,
+            WindowSize::MB4,
+            WindowSize::MB8,
+            WindowSize::MB16,
+            WindowSize::MB32,
+        ];
+        let widest = sizes.iter().map(|size| size.position_slots()).max().unwrap();
+        assert_eq!(widest, 290, "largest window slot count changed; the tables must follow");
+        for size in sizes {
+            let highest_slot = size.position_slots() - 1;
+            assert!(highest_slot < FOOTER_BITS.len(), "FOOTER_BITS is short for {size:?}: needs index {highest_slot}");
+            assert!(highest_slot < BASE_POSITION.len(), "BASE_POSITION is short for {size:?}: needs index {highest_slot}");
+        }
+    }
+
+    /// The tables are transcribed constants; re-derive them from the formulas
+    /// the comments above each one document, so a transcription slip is caught.
+    #[test]
+    fn slot_tables_match_their_documented_formulas() {
+        for (slot, bits) in FOOTER_BITS.iter().enumerate() {
+            let expected = if slot < 4 {
+                0
+            } else if slot >= 36 {
+                17
+            } else {
+                u8::try_from((slot - 2) / 2).unwrap()
+            };
+            assert_eq!(*bits, expected, "FOOTER_BITS[{slot}]");
+        }
+
+        assert_eq!(BASE_POSITION[0], 0);
+        for slot in 1..BASE_POSITION.len() {
+            let expected = BASE_POSITION[slot - 1] + (1_u32 << FOOTER_BITS[slot - 1]);
+            assert_eq!(BASE_POSITION[slot], expected, "BASE_POSITION[{slot}]");
         }
     }
 }

@@ -175,6 +175,13 @@ impl ArchivePlugin for DefaultArchivePlugin {
             FormatId::ISZ,
             FormatId::CCD,
             FormatId::CUE,
+            FormatId::VHDX,
+            FormatId::QCOW2,
+            FormatId::EWF,
+            FormatId::AD1,
+            FormatId::DAR,
+            FormatId::AFF4,
+            FormatId::RAW_DISK,
         ] {
             let adapter = adapters::native::VirtualDiskListAdapter::new(format)
                 .ok_or_else(|| ArchiveError::usable(ErrorKind::InvalidFormat, format!("unsupported virtual disk adapter format '{format}'")))?;

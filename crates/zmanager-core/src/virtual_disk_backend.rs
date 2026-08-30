@@ -154,11 +154,16 @@ fn is_ntfs_metadata_path(path: &str) -> bool {
     path.split('/').next().is_some_and(|root| NTFS_METADATA_NAMES.contains(&root))
 }
 
-/// Logical-container kinds the VFS resolver can produce (zip/7z/tar/dar/aff4/ad1).
-/// A file that resolves to one of these is an
-/// archive tree, not a disk image.
+/// Plain archive kinds the VFS resolver can produce as fallbacks (zip/7z/tar).
+/// A file that resolves to one of these is a loose archive fallback, not a dedicated
+/// container or disk image.
+fn is_plain_archive_fallback_kind(kind: FsKind) -> bool {
+    matches!(kind.as_str(), "zip" | "7z" | "tar")
+}
+
+/// Logical-container kinds the VFS resolver can produce (dar/aff4/ad1).
 fn is_logical_container_kind(kind: FsKind) -> bool {
-    matches!(kind.as_str(), "zip" | "7z" | "tar" | "dar" | "aff4" | "ad1")
+    matches!(kind.as_str(), "dar" | "aff4" | "ad1")
 }
 
 /// `VDI_IMAGE_SIGNATURE` from `VirtualBox`'s `VDICore.h`, read as a little-endian
@@ -743,10 +748,16 @@ fn open_optical_source(archive_path: &Path) -> Result<std::sync::Arc<dyn forensi
     Ok(std::sync::Arc::new(OpticalTrackSource { reader: std::sync::Mutex::new(reader), sector_mode, total_logical_bytes }))
 }
 
-/// Opens `archive_path` through the engine and guards against non-disk inputs.
-/// Returns the mounted read-only filesystem and its locator.
+/// Opens `archive_path` through the engine and returns the mounted read-only
+/// filesystem and its locator.
+///
+/// `allow_logical` selects which resolutions count as success. With it clear the
+/// input must be a disk or optical image, so a logical container (AD1/DAR/AFF4)
+/// is rejected; with it set the logical containers are accepted too. A plain
+/// archive tree (zip/7z/tar) is rejected either way — that is the resolver's
+/// loose-archive fallback, not a container this backend owns.
 #[allow(clippy::cast_possible_truncation)]
-fn mount_disk(archive_path: &Path) -> Result<(forensic_vfs::DynFs, forensic_vfs::Locator), VirtualDiskBackendError> {
+fn mount_entry(archive_path: &Path, allow_logical: bool) -> Result<(forensic_vfs::DynFs, forensic_vfs::Locator), VirtualDiskBackendError> {
     if is_vdi_image(archive_path) {
         let mut file = std::fs::File::open(archive_path).map_err(|e| VirtualDiskBackendError::Io { path: archive_path.to_path_buf(), source: e })?;
         let mut header_buf = vec![0_u8; VDI_HEADER_BYTES];
@@ -798,7 +809,15 @@ fn mount_disk(archive_path: &Path) -> Result<(forensic_vfs::DynFs, forensic_vfs:
         return Err(VirtualDiskBackendError::NotDiskImage(format!("{}: resolved to an archive wrapper, not a disk image", archive_path.display())));
     }
 
-    if is_logical_container_kind(fs.kind()) {
+    if is_plain_archive_fallback_kind(fs.kind()) {
+        return Err(VirtualDiskBackendError::NotDiskImage(format!(
+            "{}: resolved to a {} tree, not a disk image or container",
+            archive_path.display(),
+            fs.kind().as_str()
+        )));
+    }
+
+    if !allow_logical && is_logical_container_kind(fs.kind()) {
         return Err(VirtualDiskBackendError::NotDiskImage(format!("{}: resolved to a {} tree, not a disk image", archive_path.display(), fs.kind().as_str())));
     }
 
@@ -836,7 +855,20 @@ fn collect_entries_with_path_map(
 
     let mut entries = Vec::with_capacity(walked.len());
     for entry in walked {
-        let walked_path = entry.path.iter().map(|component| String::from_utf8_lossy(component).into_owned()).collect::<Vec<_>>().join("/");
+        // Built into one exactly-sized String rather than
+        // `map(into_owned).collect::<Vec<_>>().join("/")`, which allocates a
+        // String per component plus a Vec to hold them and then throws both
+        // away. `from_utf8_lossy` borrows for valid UTF-8, so the component
+        // bytes are copied once, straight into the destination. The separator
+        // is keyed on the index, not on the accumulator being non-empty, so an
+        // empty leading component still yields `/b` rather than `b`.
+        let mut walked_path = String::with_capacity(entry.path.iter().map(|component| component.len() + 1).sum());
+        for (index, component) in entry.path.iter().enumerate() {
+            if index > 0 {
+                walked_path.push('/');
+            }
+            walked_path.push_str(&String::from_utf8_lossy(component));
+        }
         let path = match (path_map, entry.id) {
             (Some(map), forensic_vfs::FileId::IsoExtent { block }) => map.get(&block).cloned().unwrap_or(walked_path),
             _ => walked_path,
@@ -950,22 +982,57 @@ pub fn list_iso(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEnt
     list_virtual_disk_inner(archive_path)
 }
 
+/// Lists the entries of a `.vhdx` virtual disk without extracting them.
+pub fn list_vhdx(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_virtual_disk_inner(archive_path)
+}
+
+/// Lists the entries of a `.qcow2` virtual disk without extracting them.
+pub fn list_qcow2(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_virtual_disk_inner(archive_path)
+}
+
+/// Lists the entries of an Expert Witness (`.e01`/`.ex01`) image without extracting them.
+pub fn list_ewf(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_virtual_disk_inner(archive_path)
+}
+
+/// Lists the entries of an `AccessData` AD1 (`.ad1`) logical image without extracting them.
+pub fn list_ad1(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_logical_container_inner(archive_path)
+}
+
+/// Lists the entries of a DAR (`.dar`) archive without extracting them.
+pub fn list_dar(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_logical_container_inner(archive_path)
+}
+
+/// Lists the entries of an AFF4 (`.aff4`) container without extracting them.
+pub fn list_aff4(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_logical_container_inner(archive_path)
+}
+
+/// Lists the entries of a raw sector disk dump (`.raw`/`.dd`/`.dsk`/`.img`) without extracting them.
+pub fn list_raw_disk(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_virtual_disk_inner(archive_path)
+}
+
 /// Verifies selected ISO 9660 file payloads through the forensic VFS reader.
 pub fn test_iso(archive_path: impl AsRef<Path>, options: &TestOptions) -> Result<TestReport, VirtualDiskBackendError> {
-    test_virtual_disk_payloads(archive_path, options)
+    test_container_payloads(archive_path, options, false)
 }
 
 /// Verifies selected VDI file payloads through the forensic VFS reader.
 pub fn test_vdi(archive_path: impl AsRef<Path>, options: &TestOptions) -> Result<TestReport, VirtualDiskBackendError> {
-    test_virtual_disk_payloads(archive_path, options)
+    test_container_payloads(archive_path, options, false)
 }
 
 /// Verifies selected optical image payloads through the forensic VFS reader.
 pub fn test_optical(archive_path: impl AsRef<Path>, options: &TestOptions) -> Result<TestReport, VirtualDiskBackendError> {
-    test_virtual_disk_payloads(archive_path, options)
+    test_container_payloads(archive_path, options, false)
 }
 
-/// Verifies selected virtual-disk payloads (VHD, VMDK, UDF, VDI) through the
+/// Verifies selected virtual-disk payloads (VHD, VMDK, UDF, VDI, VHDX, QCOW2, EWF, `RawDisk`) through the
 /// forensic VFS reader.
 ///
 /// # Errors
@@ -973,12 +1040,22 @@ pub fn test_optical(archive_path: impl AsRef<Path>, options: &TestOptions) -> Re
 /// Propagates mount failures and reports any file whose decoded length
 /// disagrees with the filesystem's declared size.
 pub fn test_virtual_disk(archive_path: impl AsRef<Path>, options: &TestOptions) -> Result<TestReport, VirtualDiskBackendError> {
-    test_virtual_disk_payloads(archive_path, options)
+    test_container_payloads(archive_path, options, false)
 }
 
-fn test_virtual_disk_payloads(archive_path: impl AsRef<Path>, options: &TestOptions) -> Result<TestReport, VirtualDiskBackendError> {
+/// Verifies selected logical container payloads (AD1, DAR, AFF4) through the
+/// forensic VFS reader.
+pub fn test_logical_container(archive_path: impl AsRef<Path>, options: &TestOptions) -> Result<TestReport, VirtualDiskBackendError> {
+    test_container_payloads(archive_path, options, true)
+}
+
+pub(crate) fn test_container_payloads(
+    archive_path: impl AsRef<Path>,
+    options: &TestOptions,
+    allow_logical: bool,
+) -> Result<TestReport, VirtualDiskBackendError> {
     let archive_path = archive_path.as_ref();
-    let (fs, _) = mount_disk(archive_path)?;
+    let (fs, _) = mount_entry(archive_path, allow_logical)?;
     let path_map = path_map_for_filesystem(&fs, archive_path);
     let mut no_warning = None;
     let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
@@ -1010,14 +1087,68 @@ fn test_virtual_disk_payloads(archive_path: impl AsRef<Path>, options: &TestOpti
 
 /// Copies one retained ISO 9660 regular file to a caller-owned writer.
 pub fn copy_iso(archive_path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Write) -> Result<u64, VirtualDiskBackendError> {
+    copy_container(archive_path, entry_index, writer, false, "ISO")
+}
+
+/// Copies the regular file at `entry_index` out of a mounted container.
+/// `label` names the container in the two selector errors so each public entry
+/// point keeps its own wording; `allow_logical` picks the disk or logical mount.
+fn copy_container(
+    archive_path: impl AsRef<Path>,
+    entry_index: usize,
+    writer: &mut dyn io::Write,
+    allow_logical: bool,
+    label: &str,
+) -> Result<u64, VirtualDiskBackendError> {
     let archive_path = archive_path.as_ref();
-    let (fs, _) = mount_disk(archive_path)?;
+    let (fs, _) = mount_entry(archive_path, allow_logical)?;
     let path_map = path_map_for_filesystem(&fs, archive_path);
     let mut no_warning = None;
     let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
-    let (entry, file_id) = entries.get(entry_index).ok_or_else(|| VirtualDiskBackendError::Vfs("retained ISO entry ID is not present".to_owned()))?;
+    let (entry, file_id) = entries.get(entry_index).ok_or_else(|| VirtualDiskBackendError::Vfs(format!("retained {label} entry ID is not present")))?;
     if !matches!(entry.kind, ExtractionEntryKind::File) {
-        return Err(VirtualDiskBackendError::Vfs("retained ISO entry is not a regular file".to_owned()));
+        return Err(VirtualDiskBackendError::Vfs(format!("retained {label} entry is not a regular file")));
+    }
+    stream_file(&fs, *file_id, &entry.archive_path, writer)
+}
+
+/// Resolves `selected_path` + `selected_occurrence` to an entry and copies it.
+/// The occurrence counter advances only on entries whose path matches, so it
+/// selects the Nth duplicate of that exact path rather than the Nth entry
+/// overall.
+///
+/// The container is mounted and walked once. Resolving the selector through
+/// `list_*` and then calling `copy_container` would mount and walk it a second
+/// time, which for a compressed container (EWF, qcow2, VHDX) costs more than
+/// reading the file itself.
+pub(crate) fn copy_container_by_path_occurrence(
+    archive_path: &Path,
+    selected_path: &str,
+    selected_occurrence: usize,
+    writer: &mut dyn io::Write,
+    allow_logical: bool,
+    label: &str,
+) -> Result<u64, VirtualDiskBackendError> {
+    let (fs, _) = mount_entry(archive_path, allow_logical)?;
+    let path_map = path_map_for_filesystem(&fs, archive_path);
+    let mut no_warning = None;
+    let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
+
+    let mut occurrence = 0_usize;
+    let selected = entries.iter().find(|(entry, _)| {
+        if entry.archive_path != selected_path {
+            return false;
+        }
+        let matches = occurrence == selected_occurrence;
+        occurrence = occurrence.saturating_add(1);
+        matches
+    });
+    let (entry, file_id) = selected.ok_or_else(|| VirtualDiskBackendError::Io {
+        path: archive_path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::NotFound, format!("retained {label} entry is not present")),
+    })?;
+    if !matches!(entry.kind, ExtractionEntryKind::File) {
+        return Err(VirtualDiskBackendError::Vfs(format!("retained {label} entry is not a regular file")));
     }
     stream_file(&fs, *file_id, &entry.archive_path, writer)
 }
@@ -1029,25 +1160,7 @@ pub fn copy_iso_by_path_occurrence(
     selected_occurrence: usize,
     writer: &mut dyn io::Write,
 ) -> Result<u64, VirtualDiskBackendError> {
-    let archive_path = archive_path.as_ref();
-    let mut occurrence = 0_usize;
-    let entry_index = list_iso(archive_path)?
-        .into_iter()
-        .enumerate()
-        .find_map(|entry| {
-            let (entry_index, entry) = entry;
-            if entry.path != selected_path {
-                return None;
-            }
-            let matches = occurrence == selected_occurrence;
-            occurrence = occurrence.saturating_add(1);
-            matches.then_some(entry_index)
-        })
-        .ok_or_else(|| VirtualDiskBackendError::Io {
-            path: archive_path.to_path_buf(),
-            source: io::Error::new(io::ErrorKind::NotFound, "retained ISO entry is not present"),
-        })?;
-    copy_iso(archive_path, entry_index, writer)
+    copy_container_by_path_occurrence(archive_path.as_ref(), selected_path, selected_occurrence, writer, false, "ISO")
 }
 
 /// Copies one retained VDI file by path and duplicate occurrence.
@@ -1069,29 +1182,27 @@ pub fn copy_virtual_disk_by_path_occurrence(
     selected_occurrence: usize,
     writer: &mut dyn io::Write,
 ) -> Result<u64, VirtualDiskBackendError> {
-    let archive_path = archive_path.as_ref();
-    let mut occurrence = 0_usize;
-    let entry_index = list_virtual_disk_inner(archive_path)?
-        .into_iter()
-        .enumerate()
-        .find_map(|(entry_index, entry)| {
-            if entry.path != selected_path {
-                return None;
-            }
-            let matches = occurrence == selected_occurrence;
-            occurrence = occurrence.saturating_add(1);
-            matches.then_some(entry_index)
-        })
-        .ok_or_else(|| VirtualDiskBackendError::Io {
-            path: archive_path.to_path_buf(),
-            source: io::Error::new(io::ErrorKind::NotFound, "retained virtual disk entry is not present"),
-        })?;
-    copy_iso(archive_path, entry_index, writer)
+    copy_container_by_path_occurrence(archive_path.as_ref(), selected_path, selected_occurrence, writer, false, "virtual disk")
 }
 
-fn list_virtual_disk_inner(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+/// Copies a retained logical container file by its stable path/occurrence selector.
+pub fn copy_logical_container_by_path_occurrence(
+    archive_path: impl AsRef<Path>,
+    selected_path: &str,
+    selected_occurrence: usize,
+    writer: &mut dyn io::Write,
+) -> Result<u64, VirtualDiskBackendError> {
+    copy_container_by_path_occurrence(archive_path.as_ref(), selected_path, selected_occurrence, writer, true, "logical container")
+}
+
+/// Copies a retained logical container regular file at `entry_index` into `writer`.
+pub fn copy_logical_container(archive_path: impl AsRef<Path>, entry_index: usize, writer: &mut dyn io::Write) -> Result<u64, VirtualDiskBackendError> {
+    copy_container(archive_path, entry_index, writer, true, "logical container")
+}
+
+pub(crate) fn list_container_inner(archive_path: impl AsRef<Path>, allow_logical: bool) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
     let archive_path = archive_path.as_ref();
-    let (fs, _) = mount_disk(archive_path)?;
+    let (fs, _) = mount_entry(archive_path, allow_logical)?;
     let path_map = path_map_for_filesystem(&fs, archive_path);
     let mut no_warning = None;
     let entries = collect_entries_with_path_map(&fs, &mut no_warning, path_map.as_ref())?;
@@ -1114,6 +1225,14 @@ fn list_virtual_disk_inner(archive_path: impl AsRef<Path>) -> Result<Vec<Virtual
             }
         })
         .collect())
+}
+
+fn list_virtual_disk_inner(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_container_inner(archive_path, false)
+}
+
+fn list_logical_container_inner(archive_path: impl AsRef<Path>) -> Result<Vec<VirtualDiskListEntry>, VirtualDiskBackendError> {
+    list_container_inner(archive_path, true)
 }
 
 /// Extracts a `.vhd` archive into `destination`.
@@ -1226,6 +1345,76 @@ pub fn extract_iso_with_overwrite_resolver(
     extract_virtual_disk_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
 }
 
+/// Extracts a `.vhdx` virtual disk into `destination`.
+pub fn extract_vhdx_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_virtual_disk_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts a `.qcow2` virtual disk into `destination`.
+pub fn extract_qcow2_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_virtual_disk_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts an Expert Witness (`.e01`/`.ex01`) image into `destination`.
+pub fn extract_ewf_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_virtual_disk_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts an `AccessData` AD1 (`.ad1`) logical image into `destination`.
+pub fn extract_ad1_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_logical_container_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts a DAR (`.dar`) archive into `destination`.
+pub fn extract_dar_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_logical_container_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts an AFF4 (`.aff4`) container into `destination`.
+pub fn extract_aff4_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_logical_container_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
+/// Extracts a raw sector disk dump (`.raw`/`.dd`/`.dsk`/`.img`) into `destination`.
+pub fn extract_raw_disk_with_overwrite_resolver(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    overwrite_resolver: &mut dyn OverwriteResolver,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_virtual_disk_inner(archive_path, destination, policy, None, Some(overwrite_resolver))
+}
+
 /// Extracts a virtual disk without job progress callbacks.
 pub fn extract_virtual_disk(
     archive_path: impl AsRef<Path>,
@@ -1233,6 +1422,15 @@ pub fn extract_virtual_disk(
     policy: ExtractionPolicy,
 ) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
     extract_virtual_disk_inner(archive_path, destination, policy, None, None)
+}
+
+/// Extracts a logical container without job progress callbacks.
+pub fn extract_logical_container(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_logical_container_inner(archive_path, destination, policy, None, None)
 }
 
 /// Streaming writer that checks cancellation and reports bytes through the
@@ -1264,15 +1462,36 @@ fn extract_virtual_disk_inner(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,
     policy: ExtractionPolicy,
+    context: Option<&mut JobContext<'_>>,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_container_inner(archive_path, destination, policy, context, overwrite_resolver, false)
+}
+
+fn extract_logical_container_inner(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
+    context: Option<&mut JobContext<'_>>,
+    overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
+    extract_container_inner(archive_path, destination, policy, context, overwrite_resolver, true)
+}
+
+pub(crate) fn extract_container_inner(
+    archive_path: impl AsRef<Path>,
+    destination: impl AsRef<Path>,
+    policy: ExtractionPolicy,
     mut context: Option<&mut JobContext<'_>>,
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
+    allow_logical: bool,
 ) -> Result<VirtualDiskExtractReport, VirtualDiskBackendError> {
     let archive_path = archive_path.as_ref();
     let destination = destination.as_ref();
     let destination_root =
         crate::safety::prepare_destination_root(destination).map_err(|source| VirtualDiskBackendError::Io { path: destination.to_path_buf(), source })?;
 
-    let (fs, _) = mount_disk(archive_path)?;
+    let (fs, _) = mount_entry(archive_path, allow_logical)?;
 
     let mut warnings = Vec::new();
     let path_map = path_map_for_filesystem(&fs, archive_path);
@@ -1408,8 +1627,8 @@ mod tests {
         copy_vdi_by_path_occurrence, extract_ccd_with_overwrite_resolver, extract_cue_with_overwrite_resolver, extract_isz_with_overwrite_resolver,
         extract_mdf_with_overwrite_resolver, extract_nrg_with_overwrite_resolver, extract_udf_with_overwrite_resolver, extract_vdi_with_overwrite_resolver,
         extract_vhd_with_overwrite_resolver, extract_vmdk_with_overwrite_resolver, is_isz_image, is_logical_container_kind, is_ntfs_metadata_path,
-        is_optical_image, is_reserved_volume_entry, is_vdi_image, list_ccd, list_cue, list_isz, list_mdf, list_nrg, list_udf, list_vdi, list_vhd, list_vmdk,
-        open_optical_source, resolve_mdf_descriptor, test_optical, test_virtual_disk,
+        is_optical_image, is_plain_archive_fallback_kind, is_reserved_volume_entry, is_vdi_image, list_ccd, list_cue, list_isz, list_mdf, list_nrg, list_udf,
+        list_vdi, list_vhd, list_vmdk, open_optical_source, resolve_mdf_descriptor, test_optical, test_virtual_disk,
     };
     use crate::safety::{ExtractionPolicy, OverwriteConflict, OverwriteDecision, OverwritePolicy, OverwriteResolver};
     use crate::test_support::TestDir;
@@ -1603,18 +1822,21 @@ mod tests {
         assert!(!is_ntfs_metadata_path("$Recycle.Bin"));
         assert!(!is_ntfs_metadata_path("payload/README.txt"));
         for (name, expected) in [
-            ("zip", true),
-            ("7z", true),
-            ("tar", true),
             ("dar", true),
             ("aff4", true),
             ("ad1", true),
+            ("zip", false),
+            ("7z", false),
+            ("tar", false),
             ("ntfs", false),
             ("fat", false),
             ("udf", false),
             ("ext", false),
         ] {
-            assert_eq!(is_logical_container_kind(forensic_vfs::FsKind::from_name(name)), expected, "{name}");
+            assert_eq!(is_logical_container_kind(forensic_vfs::FsKind::from_name(name)), expected, "is_logical_container_kind({name})");
+        }
+        for (name, expected) in [("zip", true), ("7z", true), ("tar", true), ("dar", false), ("aff4", false), ("ad1", false), ("ntfs", false), ("fat", false)] {
+            assert_eq!(is_plain_archive_fallback_kind(forensic_vfs::FsKind::from_name(name)), expected, "is_plain_archive_fallback_kind({name})");
         }
     }
 

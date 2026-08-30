@@ -83,6 +83,18 @@ fn classify_archive_path_supports_launch_extensions() {
         ("archive.vhd", ArchiveFormat::Vhd),
         ("archive.vmdk", ArchiveFormat::Vmdk),
         ("archive.udf", ArchiveFormat::Udf),
+        ("archive.vhdx", ArchiveFormat::Vhdx),
+        ("archive.qcow2", ArchiveFormat::Qcow2),
+        ("archive.e01", ArchiveFormat::Ewf),
+        ("archive.ad1", ArchiveFormat::Ad1),
+        ("archive.dar", ArchiveFormat::Dar),
+        ("archive.aff4", ArchiveFormat::Aff4),
+        ("archive.raw", ArchiveFormat::RawDisk),
+        ("archive.dd", ArchiveFormat::RawDisk),
+        ("archive.dsk", ArchiveFormat::RawDisk),
+        ("archive.img", ArchiveFormat::RawDisk),
+        ("archive.ex01", ArchiveFormat::Ewf),
+        ("archive.qcow", ArchiveFormat::Qcow2),
         ("archive.gz", ArchiveFormat::Gzip),
         ("archive.bz2", ArchiveFormat::Bzip2),
         ("archive.xz", ArchiveFormat::Xz),
@@ -128,6 +140,18 @@ fn every_registered_core_format_has_a_dedicated_mobile_classification() {
         ("vhd", ArchiveFormat::Vhd),
         ("vmdk", ArchiveFormat::Vmdk),
         ("udf", ArchiveFormat::Udf),
+        ("vhdx", ArchiveFormat::Vhdx),
+        ("qcow2", ArchiveFormat::Qcow2),
+        ("e01", ArchiveFormat::Ewf),
+        ("ad1", ArchiveFormat::Ad1),
+        ("dar", ArchiveFormat::Dar),
+        ("aff4", ArchiveFormat::Aff4),
+        ("raw", ArchiveFormat::RawDisk),
+        ("dd", ArchiveFormat::RawDisk),
+        ("dsk", ArchiveFormat::RawDisk),
+        ("img", ArchiveFormat::RawDisk),
+        ("ex01", ArchiveFormat::Ewf),
+        ("qcow", ArchiveFormat::Qcow2),
     ];
 
     for (extension, expected) in cases {
@@ -717,11 +741,19 @@ mod disk_and_filesystem_formats {
 
     #[test]
     fn generic_and_unimplemented_extensions_stay_unclaimed() {
-        // `.img` is a generic raw-image extension, and `.esd` images are LZMS
-        // solid WIMs this build cannot decode; neither is advertised.
+        // `.img` is a generic raw-image extension: SD-card, floppy and disk
+        // dumps all use it, which is exactly `RawDisk` -- never CloneCD, whose
+        // sets are entered through the `.ccd` control file.
         for name in ["raspios.img", "sdcard.img"] {
             let (format, _) = classify_archive_path(Path::new(name));
-            assert_eq!(format, ArchiveFormat::Other, "{name} must not be claimed as CloneCD");
+            assert_eq!(format, ArchiveFormat::RawDisk, "{name} must classify as a raw disk dump");
+        }
+
+        // `.esd` images are LZMS solid WIMs this build cannot decode, and the
+        // logical/SMART EWF variants have no reader, so none are advertised.
+        for name in ["install.esd", "evidence.s01", "evidence.l01", "evidence.lx01"] {
+            let (format, _) = classify_archive_path(Path::new(name));
+            assert_eq!(format, ArchiveFormat::Other, "{name} must not be claimed");
         }
     }
 }
