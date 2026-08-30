@@ -634,7 +634,9 @@ fn write_manifest_to_zip<W: Write + Seek>(
             }
             ManifestFileType::Symlink => {
                 if let Some(target) = entry.symlink_target.as_ref() {
-                    writer.add_symlink_from_path(&entry.archive_path, target, zip_options(entry, options).compression_level(None))?;
+                    let target_str = target.to_str().ok_or_else(|| ZipBackendError::InvalidSymlinkTarget { archive_path: entry.archive_path.clone() })?;
+                    let target_normalized = if target_str.contains('\\') { target_str.replace('\\', "/") } else { target_str.to_owned() };
+                    writer.add_symlink(&entry.archive_path, target_normalized, zip_options(entry, options))?;
                     report.written_entries += 1;
                 } else {
                     let warning = format!("skipped symlink {}: missing target", entry.archive_path);
@@ -1071,8 +1073,49 @@ mod tests {
 
         let report = create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
 
+        let listing = list_zip(&archive).unwrap();
         assert_eq!(report.warnings.len(), 0);
-        assert!(list_zip(&archive).unwrap().entries.iter().any(|entry| entry.name == "project/link.txt" && entry.kind == ZipEntryKind::Symlink));
+        assert!(listing.entries.iter().any(|entry| entry.name == "project/link.txt" && entry.kind == ZipEntryKind::Symlink));
+
+        let extract_report = extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+        assert_eq!(extract_report.written_entries, 3);
+        let extracted_link = temp.path("out/project/link.txt");
+        assert_eq!(fs::read_link(&extracted_link).unwrap(), Path::new("target.txt"));
+        assert_eq!(fs::read_to_string(&extracted_link).unwrap(), "target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_relative_symlink_targets_with_parent_traversal() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TestDir::new("preserves_relative_symlink_targets");
+        temp.write_file("project/README.txt", b"readme content");
+        temp.write_file("project/root_target.txt", b"root target content");
+        temp.create_dir("project/nested");
+        temp.create_dir("project/deep/nested");
+
+        symlink("../README.txt", temp.path("project/nested/readme-link.txt")).unwrap();
+        symlink("../../root_target.txt", temp.path("project/deep/nested/deep-link.txt")).unwrap();
+        let archive = temp.path("archive.zip");
+
+        let report = create_zip_fixture(temp.path("project"), &archive, &ZipCreateOptions::default()).unwrap();
+        assert_eq!(report.warnings.len(), 0);
+
+        let listing = list_zip(&archive).unwrap();
+        assert!(listing.entries.iter().any(|entry| entry.name == "project/nested/readme-link.txt" && entry.kind == ZipEntryKind::Symlink));
+        assert!(listing.entries.iter().any(|entry| entry.name == "project/deep/nested/deep-link.txt" && entry.kind == ZipEntryKind::Symlink));
+
+        let extract_report = extract_zip_fixture(&archive, temp.path("out"), ExtractionPolicy::default()).unwrap();
+        assert_eq!(extract_report.written_entries, 8);
+
+        let extracted_readme_link = temp.path("out/project/nested/readme-link.txt");
+        assert_eq!(fs::read_link(&extracted_readme_link).unwrap(), Path::new("../README.txt"));
+        assert_eq!(fs::read_to_string(&extracted_readme_link).unwrap(), "readme content");
+
+        let extracted_deep_link = temp.path("out/project/deep/nested/deep-link.txt");
+        assert_eq!(fs::read_link(&extracted_deep_link).unwrap(), Path::new("../../root_target.txt"));
+        assert_eq!(fs::read_to_string(&extracted_deep_link).unwrap(), "root target content");
     }
 
     #[test]
