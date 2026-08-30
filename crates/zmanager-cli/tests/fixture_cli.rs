@@ -280,6 +280,7 @@ const FULL_PAYLOAD_TREE_FIXTURES: &[(&str, &str)] = &[
     ("basic.tar.zst", "symlink"),
     ("basic.cpio", "symlink"),
     ("basic.pkg", "symlink"),
+    ("basic.xar", "symlink"),
 ];
 
 #[test]
@@ -297,12 +298,6 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
     // Every deviation here is documented in `fixtures/archives/README.md`;
     // these stay subset assertions because the deviations are format-inherent.
     let cases: &[(&str, &[(&str, &str)])] = &[
-        // XAR stores the Unicode member under a base64-encoded name, so the
-        // Unicode entry is asserted separately rather than through the shared tree.
-        (
-            "basic.xar",
-            &[("payload", "directory"), ("payload/nested", "directory"), ("payload/README.txt", "file"), ("payload/nested/readme-link.txt", "symlink")],
-        ),
         // ISO 9660/Joliet upcases names and is generated without the symlink.
         ("basic.iso", &[("NESTED", "directory"), ("README.TXT", "file"), ("NESTED/FILE.TXT", "file")]),
         // Package containers expose their members, not the payload tree.

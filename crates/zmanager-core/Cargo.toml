@@ -53,10 +53,13 @@ memchr = "2.7"
 zmanager-unrar = { workspace = true }
 
 zstd = { version = "0.13.3", features = ["zstdmt"] }
-# Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4)
-# and XAR symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/5), combined
-# on the `zmanager-integration` branch since zmanager needs both before either merges.
-# Switch back to `dpp = "0.4.2"` once upstream releases both fixes.
+# Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4),
+# XAR symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/5), and XAR
+# <name enctype="base64"> decoding (non-ASCII filenames; not yet filed upstream — pushed to
+# frankmanzhu/dpp on branch `xar-name-base64-enctype` instead, to avoid piling a third PR onto
+# Dil4rd/dpp while PR #5 is still unreviewed), combined on the `zmanager-integration` branch
+# since zmanager needs all three before they merge. Switch back to `dpp = "0.4.2"` once upstream
+# releases all three fixes.
 dpp = { git = "https://github.com/frankmanzhu/dpp", branch = "zmanager-integration" }
 delharc = { version = "0.8.0", default-features = false, features = ["std", "lh1", "lz", "lhx"] }
 # Forensic disk-image stack: VHD/VMDK containers, MBR/GPT volume systems, and
