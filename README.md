@@ -172,7 +172,7 @@ Passwords are not accepted as command arguments. Use the prompt or
 | Raw compressed files | `.zst`, `.gz`, `.bz2`, `.xz`, `.lzma`, `.lz`, `.br`, `.lz4`, `.lzo`, `.Z`, `.uu`, `.b64` |
 | Packages and containers | `.deb`, `.rpm`, `.a`, `.ar`, `.lib`, `.cpio`, `.cpio.gz`, `.cpio.bz2`, `.cpio.xz`, `.cpio.lzma`, `.cpio.zst`, `.cpgz`, `.spk`, `.iso`, `.xar`, `.cab`, `.msi`, `.pkg`, `.lha`, `.lzh`, `.warc`, `.mtree` |
 | Disk images | `.dmg` (Apple Disk Image), `.vhd` (Virtual PC/Hyper-V), `.vmdk` (VMware), `.vdi` (Oracle VirtualBox), `.udf` (optical) — extraction resolves MBR/GPT partitions and the inner filesystem (NTFS, FAT/exFAT, ext4, UDF) |
-| Optical sector dumps | `.iso`, `.nrg` (Nero), `.mds`/`.mdf` (Alcohol 120%), `.cdi` (DiscJuggler), `.isz` (UltraISO Compressed ISO), `.ccd` (CloneCD), `.cue` (CUE/BIN) — raw 2352/2448 and Mode 2 sectors are mapped to logical 2048-byte sectors |
+| Optical sector dumps | `.iso`, `.udf`, `.nrg` (Nero), `.mds`/`.mdf` (Alcohol 120%), `.cdi` (DiscJuggler), `.isz` (UltraISO Compressed ISO), `.ccd` with its `.img` companion (CloneCD), `.cue` with its `.bin` companion (CUE/BIN) — raw 2352/2448 and Mode 2 sectors are mapped to logical 2048-byte sectors |
 | Linux filesystem images | `.squashfs`, `.sqfs`, and `.appimage` (type 2) — gzip, XZ, LZO, LZ4, and zstd blocks; Unix modes and mtimes are restored |
 | Windows imaging | `.wim` and `.swm` split sets — stored, XPRESS-Huffman, and WIM-LZX resources: every image in a multi-image WIM, sibling-part resolution, and reparse-point symlinks. LZMS/`.esd` resources are recognized and rejected with the reason and a `wimlib-imagex export` conversion command |
 | Apple Archive | `.aar`, `.aea` encrypted Apple Archives (macOS/iOS) |
