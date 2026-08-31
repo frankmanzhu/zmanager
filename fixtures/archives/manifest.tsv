@@ -78,17 +78,17 @@ basic.txt.b64	RAW	true		aa38a5dc83d2e476311df34b150994f00ac100cd3d9d725aceed22fa
 basic.tar.uu	TAR.UU	true		d56ff83c06d220b524d0ba7dd075418a82bad34bae861b291ca38518b7175216	Tar fixture encoded with uuencode
 basic.tar.b64	TAR.B64	true		85489ac272a0c93c20b798dc37933988c5e01b5adaba68d3e9cb4fe7725f09cc	Tar fixture encoded with base64
 basic.vdi	VDI	true		af2ee2abd194534b9fcf691a6a77585ae476d56db15523d344ba269ef4518757	Oracle VirtualBox disk image fixture: superfloppy FAT32, qemu-img -O vdi (mtools populates)
-basic.squashfs	SQUASHFS	true		f5245648cec4233661af5c6ce89a796d1b8c193c8562cf8b5aef460cbe8bcea6	SquashFS fixture (xz) authored by mksquashfs
-basic.sqfs	SQUASHFS	true		f5245648cec4233661af5c6ce89a796d1b8c193c8562cf8b5aef460cbe8bcea6	SquashFS fixture under the .sqfs extension
-basic-xz.squashfs	SQUASHFS	true		f5245648cec4233661af5c6ce89a796d1b8c193c8562cf8b5aef460cbe8bcea6	SquashFS fixture compressed with xz, the dominant distribution choice
-basic-gzip.squashfs	SQUASHFS	true		d0fcf79f397c6cdafdaca8254cefebb657574dd17edd23f2ecbaa4aa4473ec71	SquashFS fixture compressed with gzip
-basic-zstd.squashfs	SQUASHFS	true		6b26654d8b79e656a17fbb3473838f008313fae45c149737161c029f872021a5	SquashFS fixture compressed with zstd
-basic.AppImage	APPIMAGE	true		4160b26c2237717dad8f37b6e57bd7b0ad1412677264a13f7df287e050682a4b	Type-2 AppImage: ELF runtime with the SquashFS appended after the section-header table
+basic.squashfs	SQUASHFS	true		e94cce616b6efa3548fe8cb24b9b9a910905e5feb922739912764eeb0505f256	SquashFS fixture (xz) authored by mksquashfs
+basic.sqfs	SQUASHFS	true		e94cce616b6efa3548fe8cb24b9b9a910905e5feb922739912764eeb0505f256	SquashFS fixture under the .sqfs extension
+basic-xz.squashfs	SQUASHFS	true		e94cce616b6efa3548fe8cb24b9b9a910905e5feb922739912764eeb0505f256	SquashFS fixture compressed with xz, the dominant distribution choice
+basic-gzip.squashfs	SQUASHFS	true		27108dfc2d1d45016c53d91651080b0d834313e6653a73b99188abfd4c5b7de6	SquashFS fixture compressed with gzip
+basic-zstd.squashfs	SQUASHFS	true		bbcce311f7db05516c06a0078463c05dc1804dba7ccb1ba34bfd8bfa24d8ed02	SquashFS fixture compressed with zstd
+basic.AppImage	APPIMAGE	true		1b72856a4803a7e9bb92992517b30df47b40c46d71f9c25a2b5bf3549183e731	Type-2 AppImage: ELF runtime with the SquashFS appended after the section-header table
 basic.wim	WIM	true		3450921a6de58adf5c86f6bdd8d3418291650ea65f08ef788985dfc9906f3264	Uncompressed WIM authored by wimlib-imagex; decoded end to end
 basic-none.wim	WIM	true		3450921a6de58adf5c86f6bdd8d3418291650ea65f08ef788985dfc9906f3264	Uncompressed WIM authored by wimlib-imagex
 basic-LZX.wim	WIM	true		21a14648a7a0d53119d4c2d885ed35a6266062897678d0b1c75685cb2209b335	WIM-LZX image authored by wimlib-imagex
 basic-XPRESS.wim	WIM	true		4150cac4ba6c213a107b977bec60ca2675e7f6623a4f04583aefc2ab64eb176f	XPRESS-Huffman WIM image authored by wimlib-imagex
-multi-image.wim	WIM	true		b202a09a308698cef410dc6ba66336a1bca50689c270e33e18b42d6f090a6502	Two-image WIM: every image is exposed under its own imageN/ prefix
+multi-image.wim	WIM	true		6d21d369364f8de709d64a8450608656c50e7b7729d3679b109506af59f6448f	Two-image WIM: every image is exposed under its own imageN/ prefix
 split.swm	WIM	true		1d1ce37cc3cc8bbc1a0f4d45fad9ea8510c97b941f6133dd14fd56d5da7ba53d	Split WIM set (with split2.swm) authored by wimlib-imagex split
 basic.raw	RAWDISK	true		09644808acef641a9ccabb06b435b4b5a43388ab1f959ff58727f550e85788bb	Raw sector dump of basic.vdi's FAT32 volume (qemu-img convert)
 basic.dd	RAWDISK	true		09644808acef641a9ccabb06b435b4b5a43388ab1f959ff58727f550e85788bb	basic.raw under the .dd extension
@@ -100,7 +100,7 @@ basic.qcow	QCOW2	true		8cfff4a514b902eeb1f0d5760d97b53f11ee86a214109bf5728b4a036
 basic.e01	EWF	true		729d2f0f7edca2cba743523c850884ab966696fe766de590432c8a3f774faaaa	EWF v1 (EnCase 5/6) acquisition of basic.raw; scripts/make_ewf_fixtures.py
 basic.ex01	EWF	true		1b0cfa8d1c5c4e62aeaa2105c001324807ed3b3a7ff5f1b7ce60c79115b1fd8e	EWF v2 (EnCase 7 Ex01) acquisition of basic.raw; scripts/make_ewf_fixtures.py
 basic.aff4	AFF4	true		049ae58cc5540bf378c43074caf18168374bf3421a49586e8baff69cd2c07ad1	Physical AFF4 (aff4:ImageStream) over basic.raw; scripts/make_aff4_fixture.py
-basic-logical.aff4	AFF4	true		6d71147fb82a3033ab29aef8e26133aa5042ec283a5201718a63e88b92c7d569	Logical AFF4 (aff4:FileImage) captured file tree; aff4-core testutil
-basic.ad1	AD1	true		a6a957bc2c14a3967ab16a9794c9b43771b9847c28477d61cef2de44eba1f53c	FTK Imager AD1 logical image of the payload/ tree; ad1-core testfix
+basic-logical.aff4	AFF4	true		373aa9c81c3f9527cb9f0c0a27864a379a19757571d3ccdc89abd9937da98af6	Logical AFF4 (aff4:FileImage) captured file tree; aff4-core testutil
+basic.ad1	AD1	true		8fbedcfecc9e275883e73e2af900252496f910cd2bee5436f6785972c4f941e4	FTK Imager AD1 logical image of the payload/ tree; ad1-core testfix
 basic.dar	DAR	true		60139b22c9024f553a6ff6a589cc618d2993e8d67bfa9c07231dfe073b5ed463	Single-slice DAR archive minted with the dar CLI 2.8.5 (hello.txt, sub_note.txt, sub/deep.txt)
 lzx-longmatch.wim	WIM	true		297d9cd792b63db49852568ff2edcb732e026da78857ec7a93a35d84f409ff35	WIM-LZX long-match stress corpus: max-length runs, a repeated 64 KiB block, and repeated prose

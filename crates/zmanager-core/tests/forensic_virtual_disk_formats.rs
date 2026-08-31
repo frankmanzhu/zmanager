@@ -11,7 +11,7 @@
 mod common;
 
 use common::TestDir;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use zmanager_core::archive_browser::BrowserEntryKind;
@@ -69,6 +69,29 @@ fn tree_of(root: &Path) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+/// Every directory (including empty ones) below `root`, relative to `root`.
+/// `tree_of` above only collects regular files, so a backend that silently
+/// drops an empty directory during extraction passes `tree_of` unnoticed;
+/// this is the check that catches it.
+fn dirs_of(root: &Path) -> BTreeSet<String> {
+    fn walk(dir: &Path, prefix: &str, out: &mut BTreeSet<String>) {
+        for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display())) {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let key = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+            if entry.file_type().unwrap().is_dir() {
+                out.insert(key.clone());
+                walk(&entry.path(), &key, out);
+            }
+        }
+    }
+    let mut out = BTreeSet::new();
+    if root.is_dir() {
+        walk(root, "", &mut out);
+    }
+    out
+}
+
 /// Asserts every file under `destination` really lives inside it once symlinks
 /// and `..` are resolved. A sanitized name may still *contain* `..` as literal
 /// characters (`../escape.txt` becomes `.._escape.txt`), which is safe; what
@@ -119,6 +142,9 @@ fn assert_disk_image_lifecycle(fixture_name: &str, expected_kind: ArchiveFormatK
     let extract_report = handle.extract(&mut options).unwrap_or_else(|e| panic!("extract {fixture_name}: {e}"));
     assert_eq!(usize::try_from(extract_report.written_entries).unwrap(), CANONICAL_PAYLOAD.len(), "{fixture_name}");
     assert_eq!(tree_of(&out), expected_payload(), "{fixture_name} extracted a different tree");
+    // `tree_of` only sees files: the empty directory is checked separately so
+    // a backend that silently drops it does not pass unnoticed.
+    assert!(dirs_of(&out).contains("payload/nested/empty-dir"), "{fixture_name} dropped the empty directory");
 
     // copy_entry must agree byte-for-byte with what extraction wrote.
     for (expected_path, expected_bytes) in CANONICAL_PAYLOAD {
@@ -128,6 +154,29 @@ fn assert_disk_image_lifecycle(fixture_name: &str, expected_kind: ArchiveFormatK
         assert_eq!(copied, *expected_bytes, "{fixture_name}: {expected_path}");
         assert_eq!(copy_report.written_bytes, expected_bytes.len() as u64, "{fixture_name}: {expected_path}");
     }
+
+    // Extract one: selecting a single file must write only that file, not
+    // the whole tree -- distinct from `copy_entry` above, which reads bytes
+    // without ever writing a destination directory.
+    let one_temp = TestDir::new(&format!("forensic-{expected_format}-one"));
+    let out_one = one_temp.path("out");
+    let one_policy = ExtractionPolicy { include_patterns: vec!["payload/README.txt".to_owned()], ..ExtractionPolicy::default() };
+    let mut one_options = ExtractOptions { destination: out_one.clone(), policy: one_policy, ..Default::default() };
+    handle.extract(&mut one_options).unwrap_or_else(|e| panic!("single-file extract {fixture_name}: {e}"));
+    assert_eq!(std::fs::read(out_one.join("payload/README.txt")).unwrap(), b"ZManager fixture payload\n", "{fixture_name}");
+    assert!(!out_one.join("payload/nested").exists(), "{fixture_name} single-file selection pulled entries outside it");
+
+    // Selecting a subfolder must pull every entry beneath it and nothing
+    // outside it -- the "extract subfolder" leg of the validation matrix,
+    // which plain full/single-entry extraction above does not cover.
+    let sub_temp = TestDir::new(&format!("forensic-{expected_format}-subfolder"));
+    let sub_out = sub_temp.path("out");
+    let sub_policy = ExtractionPolicy { include_patterns: vec!["payload/nested".to_owned()], ..ExtractionPolicy::default() };
+    let mut sub_options = ExtractOptions { destination: sub_out.clone(), policy: sub_policy, ..Default::default() };
+    handle.extract(&mut sub_options).unwrap_or_else(|e| panic!("subfolder extract {fixture_name}: {e}"));
+    assert_eq!(std::fs::read(sub_out.join("payload/nested/file.txt")).unwrap(), b"nested fixture file\n", "{fixture_name}");
+    assert!(dirs_of(&sub_out).contains("payload/nested/empty-dir"), "{fixture_name} subfolder extraction dropped the empty directory");
+    assert!(!sub_out.join("payload/README.txt").exists(), "{fixture_name} subfolder extraction pulled entries outside the subfolder");
 }
 
 #[test]
@@ -184,6 +233,11 @@ fn engine_ad1_lifecycle_lists_tests_extracts_and_copies() {
             .unwrap_or_else(|| panic!("{expected_path} missing: {:?}", listing.entries.iter().map(|e| &e.path).collect::<Vec<_>>()));
         assert_eq!(entry.size, Some(expected_bytes.len() as u64), "{expected_path}");
     }
+    // AD1 has no symlink concept (see `ad1-core`'s `vfs.rs` doc comment), so
+    // the empty directory is the one structural, non-file element it carries;
+    // assert it is actually surfaced in the listing, not just tolerated.
+    let empty_dir = listing.entries.iter().find(|entry| entry.path == "payload/nested/empty-dir").expect("payload/nested/empty-dir missing from AD1 listing");
+    assert_eq!(empty_dir.kind, BrowserEntryKind::Directory);
 
     let report = handle.test(&TestOptions::default()).expect("test ad1");
     assert!(report.tested_entries > 0);
@@ -193,6 +247,7 @@ fn engine_ad1_lifecycle_lists_tests_extracts_and_copies() {
     let mut options = ExtractOptions { destination: out.clone(), ..Default::default() };
     handle.extract(&mut options).expect("extract ad1");
     assert_eq!(tree_of(&out), expected_payload());
+    assert!(dirs_of(&out).contains("payload/nested/empty-dir"), "AD1 extraction dropped the empty directory");
 
     for (expected_path, expected_bytes) in CANONICAL_PAYLOAD {
         let entry = listing.entries.iter().find(|entry| entry.path == *expected_path).unwrap();
@@ -200,6 +255,24 @@ fn engine_ad1_lifecycle_lists_tests_extracts_and_copies() {
         handle.copy_entry(entry.id, &mut copied).expect("copy ad1 entry");
         assert_eq!(copied, *expected_bytes, "{expected_path}");
     }
+
+    // Extract one: selecting a single file must write only that file.
+    let out_one = temp.path("out-one");
+    let one_policy = ExtractionPolicy { include_patterns: vec!["payload/README.txt".to_owned()], ..ExtractionPolicy::default() };
+    let mut one_options = ExtractOptions { destination: out_one.clone(), policy: one_policy, ..Default::default() };
+    handle.extract(&mut one_options).expect("single-file extract ad1");
+    assert_eq!(std::fs::read(out_one.join("payload/README.txt")).unwrap(), b"ZManager fixture payload\n");
+    assert!(!out_one.join("payload/nested").exists());
+
+    // Extract subfolder: selecting `payload/nested` must pull the file and
+    // the empty directory beneath it, and nothing outside it.
+    let sub_out = temp.path("out-subdir");
+    let sub_policy = ExtractionPolicy { include_patterns: vec!["payload/nested".to_owned()], ..ExtractionPolicy::default() };
+    let mut sub_options = ExtractOptions { destination: sub_out.clone(), policy: sub_policy, ..Default::default() };
+    handle.extract(&mut sub_options).expect("subfolder extract ad1");
+    assert_eq!(std::fs::read(sub_out.join("payload/nested/file.txt")).unwrap(), b"nested fixture file\n");
+    assert!(dirs_of(&sub_out).contains("payload/nested/empty-dir"));
+    assert!(!sub_out.join("payload/README.txt").exists());
 
     // Direct backend entry points, not just the engine adapter.
     assert!(!list_ad1(&path).expect("list_ad1").is_empty());
@@ -237,6 +310,22 @@ fn engine_dar_lifecycle_lists_tests_extracts_and_copies() {
     assert_eq!(copied, b"hello from dar\n");
     assert_eq!(copy_report.written_bytes, copied.len() as u64);
 
+    // Extract one: selecting a single file must write only that file.
+    let out_one = temp.path("out-one");
+    let one_policy = ExtractionPolicy { include_patterns: vec!["hello.txt".to_owned()], ..ExtractionPolicy::default() };
+    let mut one_options = ExtractOptions { destination: out_one.clone(), policy: one_policy, ..Default::default() };
+    handle.extract(&mut one_options).expect("single-file extract dar");
+    assert_eq!(std::fs::read(out_one.join("hello.txt")).unwrap(), b"hello from dar\n");
+    assert!(!out_one.join("sub").exists(), "single-file selection pulled the sub/ subtree too");
+
+    // Extract subfolder: selecting `sub` must pull deep.txt and nothing else.
+    let out_sub = temp.path("out-sub");
+    let sub_policy = ExtractionPolicy { include_patterns: vec!["sub".to_owned()], ..ExtractionPolicy::default() };
+    let mut sub_options = ExtractOptions { destination: out_sub.clone(), policy: sub_policy, ..Default::default() };
+    handle.extract(&mut sub_options).expect("subfolder extract dar");
+    assert_eq!(std::fs::read(out_sub.join("sub/deep.txt")).unwrap(), b"deep\n");
+    assert!(!out_sub.join("hello.txt").exists());
+
     assert!(!list_dar(&path).expect("list_dar").is_empty());
     let direct = temp.path("direct");
     let mut resolver = AlwaysReplace;
@@ -253,8 +342,22 @@ fn engine_logical_aff4_lifecycle_lists_tests_extracts_and_copies() {
     let mut handle = engine.open(ArchiveSource::from_path_autodetect(&path), OpenOptions::default()).expect("open logical aff4");
     assert_eq!(handle.detected().format, FormatId::AFF4);
 
+    // AFF4-L (`aff4:FileImage`) carries the whole canonical payload tree, not
+    // just README.txt: multi-file, nested, spaces-in-name, and Unicode all
+    // exercise the same flat-file-list-to-tree derivation `open_aff4_logical`
+    // does (it has no directory nodes -- see its doc comment -- so unlike
+    // AD1/the disk images, there is no empty directory to assert here: AFF4-L
+    // has nothing to carry it in).
     let listing = handle.list().expect("list logical aff4");
-    let readme = listing.entries.iter().find(|entry| entry.path.ends_with("README.txt")).expect("README.txt in logical aff4");
+    for (expected_path, expected_bytes) in CANONICAL_PAYLOAD {
+        let entry = listing
+            .entries
+            .iter()
+            .find(|entry| entry.path == *expected_path)
+            .unwrap_or_else(|| panic!("{expected_path} missing: {:?}", listing.entries.iter().map(|e| &e.path).collect::<Vec<_>>()));
+        assert_eq!(entry.size, Some(expected_bytes.len() as u64), "{expected_path}");
+    }
+    let readme = listing.entries.iter().find(|entry| entry.path == "payload/README.txt").unwrap();
 
     let report = handle.test(&TestOptions::default()).expect("test logical aff4");
     assert!(report.tested_entries > 0);
@@ -263,11 +366,36 @@ fn engine_logical_aff4_lifecycle_lists_tests_extracts_and_copies() {
     let out = temp.path("out");
     let mut options = ExtractOptions { destination: out.clone(), ..Default::default() };
     handle.extract(&mut options).expect("extract logical aff4");
-    assert_eq!(tree_of(&out).get("payload/README.txt").map(Vec::as_slice), Some(&b"ZManager fixture payload\n"[..]));
+    assert_eq!(tree_of(&out), expected_payload(), "logical aff4 extracted a different tree");
 
+    for (expected_path, expected_bytes) in CANONICAL_PAYLOAD {
+        let entry = listing.entries.iter().find(|entry| entry.path == *expected_path).unwrap();
+        let mut copied = Vec::new();
+        handle.copy_entry(entry.id, &mut copied).unwrap_or_else(|e| panic!("copy logical aff4 {expected_path}: {e}"));
+        assert_eq!(copied, *expected_bytes, "{expected_path}");
+    }
+    // The original single-file assertion, kept as a direct sanity check on
+    // the specific entry every earlier version of this test exercised.
     let mut copied = Vec::new();
     handle.copy_entry(readme.id, &mut copied).expect("copy logical aff4 entry");
     assert_eq!(copied, b"ZManager fixture payload\n");
+
+    // Extract one: selecting a single file must write only that file.
+    let out_one = temp.path("out-one");
+    let one_policy = ExtractionPolicy { include_patterns: vec!["payload/README.txt".to_owned()], ..ExtractionPolicy::default() };
+    let mut one_options = ExtractOptions { destination: out_one.clone(), policy: one_policy, ..Default::default() };
+    handle.extract(&mut one_options).expect("single-file extract logical aff4");
+    assert_eq!(std::fs::read(out_one.join("payload/README.txt")).unwrap(), b"ZManager fixture payload\n");
+    assert!(!out_one.join("payload/nested").exists());
+
+    // Extract subfolder: selecting `payload/nested` must pull only the file
+    // beneath it (AFF4-L's flat file list has no empty-dir to assert here).
+    let sub_out = temp.path("out-subdir");
+    let sub_policy = ExtractionPolicy { include_patterns: vec!["payload/nested".to_owned()], ..ExtractionPolicy::default() };
+    let mut sub_options = ExtractOptions { destination: sub_out.clone(), policy: sub_policy, ..Default::default() };
+    handle.extract(&mut sub_options).expect("subfolder extract logical aff4");
+    assert_eq!(std::fs::read(sub_out.join("payload/nested/file.txt")).unwrap(), b"nested fixture file\n");
+    assert!(!sub_out.join("payload/README.txt").exists());
 
     assert!(!list_aff4(&path).expect("list_aff4").is_empty());
     let direct = temp.path("direct");

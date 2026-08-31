@@ -54,6 +54,7 @@ rm -f "$ARCHIVES"/basic.zip \
   "$ARCHIVES"/basic.udf \
   "$ARCHIVES"/basic.mtree \
   "$ARCHIVES"/basic.tzap \
+  "$ARCHIVES"/basic.sqfs \
   "$ARCHIVES"/basic.tzst "$ARCHIVES"/basic.tgz "$ARCHIVES"/basic.aea \
   "$ARCHIVES"/basic.aar \
   "$ARCHIVES"/basic.txt.gz \
@@ -99,13 +100,26 @@ aa archive -d "$WORK" -o "$ARCHIVES/basic.aar" -a lz4 >/dev/null
 # rather than against an image this repository's own encoder produced.
 # `-noappend` keeps reruns idempotent; `-all-root` keeps ownership stable
 # across machines.
+#
+# SquashFS and AppImage get their own copy of the payload tree with an added
+# executable `run.sh`, so the reader's mode bits are checked against a real
+# executable member rather than only the payload's plain files. This is kept
+# out of $SRC (and therefore out of zip/tar/7z/WIM) so it stays scoped to the
+# two formats it is documented for in fixtures/archives/README.md.
 if command -v mksquashfs >/dev/null 2>&1; then
+  SQSRC="$WORK/squashfs-src"
+  rm -rf "$SQSRC"; mkdir -p "$SQSRC"
+  cp -R "$SRC/." "$SQSRC/"
+  printf '#!/bin/sh\necho "ZManager fixture payload"\n' > "$SQSRC/run.sh"
+  chmod 755 "$SQSRC/run.sh"
+
   for comp in xz gzip zstd; do
     rm -f "$ARCHIVES/basic-$comp.squashfs"
-    mksquashfs "$SRC" "$ARCHIVES/basic-$comp.squashfs" \
+    mksquashfs "$SQSRC" "$ARCHIVES/basic-$comp.squashfs" \
       -comp "$comp" -noappend -all-root -no-xattrs -no-progress -quiet >/dev/null
   done
   cp "$ARCHIVES/basic-xz.squashfs" "$ARCHIVES/basic.squashfs"
+  cp "$ARCHIVES/basic.squashfs" "$ARCHIVES/basic.sqfs"
 
   # A type-2 AppImage is an ELF runtime with the SquashFS appended directly
   # after its section-header table. Synthesize the smallest ELF with that
@@ -130,9 +144,18 @@ if command -v wimlib-imagex >/dev/null 2>&1; then
   done
   cp "$ARCHIVES/basic-none.wim" "$ARCHIVES/basic.wim"
 
+  # The two images must carry different content: identical trees would let a
+  # backend silently emit image 1 twice under both imageN/ prefixes and still
+  # pass a same-content comparison. image2 gets an extra marker file (and
+  # drops one of image1's) so a per-image assertion can tell them apart.
   rm -f "$ARCHIVES/multi-image.wim"
   wimlib-imagex capture "$WIMSRC" "$ARCHIVES/multi-image.wim" "First" --compress=none --norpfix >/dev/null 2>&1
-  wimlib-imagex append  "$WIMSRC" "$ARCHIVES/multi-image.wim" "Second" --norpfix >/dev/null 2>&1
+  WIMSRC2="$WORK/wim-src-2"
+  rm -rf "$WIMSRC2"; mkdir -p "$WIMSRC2"
+  cp -R "$SRC/." "$WIMSRC2/"
+  rm -rf "$WIMSRC2/unicode"
+  printf 'second image marker\n' > "$WIMSRC2/second-image-only.txt"
+  wimlib-imagex append  "$WIMSRC2" "$ARCHIVES/multi-image.wim" "Second" --norpfix >/dev/null 2>&1
 
   rm -f "$ARCHIVES"/split*.swm
   wimlib-imagex split "$ARCHIVES/basic-none.wim" "$ARCHIVES/split.swm" 0.001 >/dev/null 2>&1
@@ -581,6 +604,7 @@ append_manifest "basic.txt.b64" "RAW" "true" "" "Raw base64 stream fixture"
 append_manifest "basic.tar.uu" "TAR.UU" "true" "" "Tar fixture encoded with uuencode"
 append_manifest "basic.tar.b64" "TAR.B64" "true" "" "Tar fixture encoded with base64"
 append_manifest "basic.squashfs" "SQUASHFS" "true" "" "SquashFS fixture (xz) authored by mksquashfs"
+append_manifest "basic.sqfs" "SQUASHFS" "true" "" "SquashFS fixture under the .sqfs extension"
 append_manifest "basic-xz.squashfs" "SQUASHFS" "true" "" "SquashFS fixture compressed with xz, the dominant distribution choice"
 append_manifest "basic-gzip.squashfs" "SQUASHFS" "true" "" "SquashFS fixture compressed with gzip"
 append_manifest "basic-zstd.squashfs" "SQUASHFS" "true" "" "SquashFS fixture compressed with zstd"

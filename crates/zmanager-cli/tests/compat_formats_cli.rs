@@ -960,10 +960,9 @@ fn competitor_squashfs_format_extract_with_zm() {
     if let Some(mksquashfs) = find_on_path("mksquashfs") {
         let archive = temp.path("payload.squashfs");
         let create = Command::new(mksquashfs).arg(temp.path("project")).arg(&archive).arg("-noappend").output().unwrap();
-        if create.status.success() {
-            assert_zm_tests_archive("mksquashfs creates squashfs", &archive);
-            assert_zm_extracts_payload("mksquashfs creates squashfs", &archive, PAYLOAD);
-        }
+        assert_success("mksquashfs creates squashfs", &create);
+        assert_zm_tests_archive("mksquashfs creates squashfs", &archive);
+        assert_zm_extracts_payload("mksquashfs creates squashfs", &archive, PAYLOAD);
     }
 }
 
@@ -975,10 +974,9 @@ fn competitor_wim_formats_extract_with_zm() {
     if let Some(wimlib) = find_on_path("wimlib-imagex") {
         let archive = temp.path("payload.wim");
         let create = Command::new(wimlib).arg("capture").arg(temp.path("project")).arg(&archive).output().unwrap();
-        if create.status.success() {
-            assert_zm_tests_archive("wimlib creates wim", &archive);
-            assert_zm_extracts_payload("wimlib creates wim", &archive, PAYLOAD);
-        }
+        assert_success("wimlib-imagex creates wim", &create);
+        assert_zm_tests_archive("wimlib creates wim", &archive);
+        assert_zm_extracts_payload("wimlib creates wim", &archive, PAYLOAD);
     }
 }
 

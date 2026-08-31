@@ -303,6 +303,54 @@ fn cli_fixture_listings_carry_the_whole_payload_tree() {
     }
 }
 
+/// The shared payload tree for formats whose writer roots the tree directly
+/// at the archive root, rather than nesting it under `payload/`: SquashFS,
+/// AppImage, and WIM.
+const ROOT_PAYLOAD_TREE_WITHOUT_SYMLINK: &[(&str, &str)] = &[
+    ("README.txt", "file"),
+    ("nested", "directory"),
+    ("nested/file.txt", "file"),
+    ("nested/empty-dir", "directory"),
+    ("dir with spaces", "directory"),
+    ("dir with spaces/file with spaces.txt", "file"),
+    ("unicode", "directory"),
+    ("unicode/こんにちは.txt", "file"),
+];
+
+/// [`ROOT_PAYLOAD_TREE_WITHOUT_SYMLINK`] plus the symlink entry and any
+/// format-specific extras (SquashFS/AppImage additionally carry an executable
+/// `run.sh`, added by `scripts/generate_fixtures.sh` specifically for these
+/// two formats to check that the mode bit round-trips).
+fn root_payload_tree(symlink_kind: &'static str, extra: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
+    let mut tree = ROOT_PAYLOAD_TREE_WITHOUT_SYMLINK.to_vec();
+    tree.push(("nested/readme-link.txt", symlink_kind));
+    tree.extend_from_slice(extra);
+    tree
+}
+
+#[test]
+fn cli_fixture_listings_carry_the_whole_payload_tree_root_rooted() {
+    // SquashFS (every compression variant and extension alias), AppImage, and
+    // every WIM variant (including the split set) carry the complete shared
+    // tree with no `payload/` prefix. Held to the same exact-match discipline
+    // as `cli_fixture_listings_carry_the_whole_payload_tree` above, so a
+    // regression that drops the empty directory, the symlink, or silently
+    // stops carrying `run.sh` fails here instead of surviving a subset check.
+    let run_sh = &[("run.sh", "file")][..];
+
+    for filename in ["basic.squashfs", "basic-xz.squashfs", "basic-gzip.squashfs", "basic-zstd.squashfs", "basic.sqfs", "basic.AppImage"] {
+        let archive = archives_dir().join(filename);
+        assert!(archive.is_file(), "committed fixture is missing: {}", archive.display());
+        assert_listing_is_exactly(&archive, &root_payload_tree("symlink", run_sh));
+    }
+
+    for filename in ["basic.wim", "basic-none.wim", "basic-LZX.wim", "basic-XPRESS.wim", "split.swm"] {
+        let archive = archives_dir().join(filename);
+        assert!(archive.is_file(), "committed fixture is missing: {}", archive.display());
+        assert_listing_is_exactly(&archive, &root_payload_tree("symlink", &[]));
+    }
+}
+
 #[test]
 fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
     // Formats whose listing legitimately deviates from the shared payload tree.
@@ -339,41 +387,6 @@ fn cli_fixture_listings_preserve_entry_kinds_across_formats() {
                 ("payload/nested/file.txt", "file"),
                 ("payload/dir with spaces/file with spaces.txt", "file"),
                 ("payload/unicode/こんにちは.txt", "file"),
-            ],
-        ),
-        (
-            "basic.squashfs",
-            &[
-                ("README.txt", "file"),
-                ("run.sh", "file"),
-                ("nested", "directory"),
-                ("nested/file.txt", "file"),
-                ("nested/empty-dir", "directory"),
-                ("dir with spaces/file with spaces.txt", "file"),
-                ("unicode/こんにちは.txt", "file"),
-            ],
-        ),
-        (
-            "basic.AppImage",
-            &[
-                ("README.txt", "file"),
-                ("run.sh", "file"),
-                ("nested", "directory"),
-                ("nested/file.txt", "file"),
-                ("nested/empty-dir", "directory"),
-                ("dir with spaces/file with spaces.txt", "file"),
-                ("unicode/こんにちは.txt", "file"),
-            ],
-        ),
-        (
-            "basic.wim",
-            &[
-                ("README.txt", "file"),
-                ("nested", "directory"),
-                ("nested/file.txt", "file"),
-                ("nested/empty-dir", "directory"),
-                ("dir with spaces/file with spaces.txt", "file"),
-                ("unicode/こんにちは.txt", "file"),
             ],
         ),
     ];
@@ -531,6 +544,17 @@ fn cli_lists_tests_and_extracts_virtual_disk_fixtures() {
         assert!(out_sel.join("payload/nested/file.txt").is_file());
         assert!(!out_sel.join("payload/README.txt").exists());
 
+        // Selecting a whole subfolder must pull every entry beneath it
+        // (including the empty directory) and nothing outside it.
+        let out_subdir = temp.path("out-subdir");
+        let subdir_extract =
+            Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_subdir).arg("--include").arg("payload/nested").output().unwrap();
+        assert_success(&format!("zm extract {filename} --include payload/nested"), &subdir_extract);
+        assert!(out_subdir.join("payload/nested/file.txt").is_file(), "{filename}");
+        assert!(out_subdir.join("payload/nested/empty-dir").is_dir(), "{filename}");
+        assert!(!out_subdir.join("payload/README.txt").exists(), "{filename}");
+        assert!(!out_subdir.join("payload/unicode").exists(), "{filename}");
+
         // The disk formats copy a single entry through the shared
         // path/occurrence selector, so --to-stdout works for them.
         let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("payload/README.txt").arg("--to-stdout").output().unwrap();
@@ -604,6 +628,29 @@ fn cli_lists_tests_and_extracts_squashfs_fixtures() {
         assert_eq!(fs::read_to_string(out.join("dir with spaces/file with spaces.txt")).unwrap(), "spaces in path\n");
         assert_eq!(fs::read_to_string(out.join("unicode/こんにちは.txt")).unwrap(), "unicode path fixture\n");
         assert!(out.join("nested/empty-dir").is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = fs::metadata(out.join("run.sh")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "{filename}: run.sh must extract as executable, got mode {mode:o}");
+        }
+
+        // Selecting one file must write only that file to the destination.
+        let out_one = temp.path("out-one");
+        let one_extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_one).arg("--include").arg("nested/file.txt").output().unwrap();
+        assert_success(&format!("zm extract {filename} --include nested/file.txt"), &one_extract);
+        assert_eq!(fs::read_to_string(out_one.join("nested/file.txt")).unwrap(), "nested fixture file\n", "{filename}");
+        assert!(!out_one.join("README.txt").exists(), "{filename}");
+
+        // Selecting a subfolder must pull every entry beneath it (including
+        // the empty directory) and nothing outside it.
+        let out_subdir = temp.path("out-subdir");
+        let subdir_extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_subdir).arg("--include").arg("nested").output().unwrap();
+        assert_success(&format!("zm extract {filename} --include nested"), &subdir_extract);
+        assert!(out_subdir.join("nested/file.txt").is_file(), "{filename}");
+        assert!(out_subdir.join("nested/empty-dir").is_dir(), "{filename}");
+        assert!(!out_subdir.join("README.txt").exists(), "{filename}");
+        assert!(!out_subdir.join("unicode").exists(), "{filename}");
 
         let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("README.txt").arg("--to-stdout").output().unwrap();
         assert_success(&format!("zm extract {filename} --to-stdout"), &stdout);
@@ -635,6 +682,20 @@ fn cli_lists_tests_and_extracts_appimage_fixture() {
     assert_success("zm extract basic.AppImage", &extract);
     assert_eq!(fs::read_to_string(out.join("README.txt")).unwrap(), "ZManager fixture payload\n");
     assert_eq!(fs::read_to_string(out.join("nested/file.txt")).unwrap(), "nested fixture file\n");
+    assert!(out.join("nested/empty-dir").is_dir());
+
+    let out_one = temp.path("out-one");
+    let one_extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_one).arg("--include").arg("nested/file.txt").output().unwrap();
+    assert_success("zm extract basic.AppImage --include nested/file.txt", &one_extract);
+    assert_eq!(fs::read_to_string(out_one.join("nested/file.txt")).unwrap(), "nested fixture file\n");
+    assert!(!out_one.join("README.txt").exists());
+
+    let out_subdir = temp.path("out-subdir");
+    let subdir_extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_subdir).arg("--include").arg("nested").output().unwrap();
+    assert_success("zm extract basic.AppImage --include nested", &subdir_extract);
+    assert!(out_subdir.join("nested/file.txt").is_file());
+    assert!(out_subdir.join("nested/empty-dir").is_dir());
+    assert!(!out_subdir.join("README.txt").exists());
 
     let stdout = Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("README.txt").arg("--to-stdout").output().unwrap();
     assert_success("zm extract basic.AppImage --to-stdout", &stdout);
@@ -662,11 +723,55 @@ fn cli_lists_tests_and_extracts_wim_fixtures() {
         let extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out).arg("--overwrite").arg("always").output().unwrap();
         assert_success(&format!("zm extract {filename}"), &extract);
         if filename == "multi-image.wim" {
+            // The two images carry genuinely different content (see
+            // scripts/generate_fixtures.sh): image1 has `unicode/` and no
+            // marker file, image2 has the marker and no `unicode/`. Asserting
+            // both directions catches a backend that emits one image twice
+            // under both `imageN/` prefixes, which a same-content fixture
+            // could not.
             assert!(out.join("image1/README.txt").is_file());
+            assert!(out.join("image1/unicode/こんにちは.txt").is_file());
+            assert!(!out.join("image1/second-image-only.txt").exists());
             assert!(out.join("image2/README.txt").is_file());
+            assert!(out.join("image2/second-image-only.txt").is_file());
+            assert_eq!(fs::read_to_string(out.join("image2/second-image-only.txt")).unwrap(), "second image marker\n");
+            assert!(!out.join("image2/unicode").exists());
+
+            // Selecting one image's subfolder must not pull the other image's
+            // entries.
+            let out_image2 = temp.path("out-image2");
+            let image2_extract =
+                Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_image2).arg("--include").arg("image2").output().unwrap();
+            assert_success("zm extract multi-image.wim --include image2", &image2_extract);
+            assert!(out_image2.join("image2/second-image-only.txt").is_file());
+            assert!(!out_image2.join("image1").exists());
         } else {
             assert_eq!(fs::read_to_string(out.join("README.txt")).unwrap(), "ZManager fixture payload\n");
             assert_eq!(fs::read_to_string(out.join("nested/file.txt")).unwrap(), "nested fixture file\n");
+            assert!(out.join("nested/empty-dir").is_dir(), "{filename}");
+            #[cfg(unix)]
+            {
+                assert_eq!(fs::read_link(out.join("nested/readme-link.txt")).unwrap(), PathBuf::from("../README.txt"), "{filename}");
+            }
+
+            // Selecting one file must write only that file to the destination.
+            let out_one = temp.path("out-one");
+            let one_extract =
+                Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_one).arg("--include").arg("nested/file.txt").output().unwrap();
+            assert_success(&format!("zm extract {filename} --include nested/file.txt"), &one_extract);
+            assert_eq!(fs::read_to_string(out_one.join("nested/file.txt")).unwrap(), "nested fixture file\n", "{filename}");
+            assert!(!out_one.join("README.txt").exists(), "{filename}");
+
+            // Selecting a subfolder must pull every entry beneath it
+            // (including the empty directory and the symlink) and nothing
+            // outside it.
+            let out_subdir = temp.path("out-subdir");
+            let subdir_extract =
+                Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_subdir).arg("--include").arg("nested").output().unwrap();
+            assert_success(&format!("zm extract {filename} --include nested"), &subdir_extract);
+            assert!(out_subdir.join("nested/file.txt").is_file(), "{filename}");
+            assert!(out_subdir.join("nested/empty-dir").is_dir(), "{filename}");
+            assert!(!out_subdir.join("README.txt").exists(), "{filename}");
         }
 
         if filename != "multi-image.wim" {
@@ -675,6 +780,27 @@ fn cli_lists_tests_and_extracts_wim_fixtures() {
             assert_eq!(stdout.stdout, b"ZManager fixture payload\n", "{filename}");
         }
     }
+}
+
+/// `split.swm` alone (without its sibling `split2.swm`) must fail rather than
+/// silently list/extract a truncated tree: this is the only thing that proves
+/// the second part is actually consumed rather than merely present on disk
+/// beside the first.
+#[test]
+fn cli_rejects_a_split_wim_missing_its_second_part() {
+    let split = archives_dir().join("split.swm");
+    let split2 = archives_dir().join("split2.swm");
+    if !split.exists() || !split2.exists() {
+        return;
+    }
+    let temp = TestDir::new("fixture-cli-wim-split-incomplete");
+    // Copy only the first part into an isolated directory so wimlib's sibling
+    // resolution (which scans the part's own directory) cannot find part 2.
+    fs::write(temp.path("split.swm"), fs::read(&split).unwrap()).unwrap();
+
+    let list = Command::new(cli_path()).arg("list").arg(temp.path("split.swm")).output().unwrap();
+    assert!(!list.status.success(), "listing split.swm without split2.swm must fail:\n{}", String::from_utf8_lossy(&list.stdout));
+    assert!(!String::from_utf8_lossy(&list.stderr).trim().is_empty(), "failed without a diagnostic");
 }
 
 #[test]
@@ -753,6 +879,46 @@ fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
     let extract_mdf = Command::new(cli_path()).arg("extract").arg(&mdf_path).arg("-C").arg(&out_mdf).output().unwrap();
     assert_success("zm extract disc.mdf", &extract_mdf);
     assert!(out_mdf.join("README.TXT").is_file());
+
+    // 5. CDI. Like MDF, `.cdi` is routed through the generic ISO 9660 sector
+    // reader by extension alone -- there is no DiscJuggler-specific header
+    // this backend parses -- so the same raw-bytes-under-the-extension trick
+    // exercises the real code path (confirmed against the CDI reader before
+    // writing this: `list_virtual_disk_inner` behind both `list_cdi` and
+    // `list_mdf` is the same function).
+    let cdi_path = temp.path("disc.cdi");
+    fs::write(&cdi_path, &iso_bytes).unwrap();
+
+    let list_cdi = Command::new(cli_path()).arg("list").arg(&cdi_path).output().unwrap();
+    assert_success("zm list disc.cdi", &list_cdi);
+    let test_cdi = Command::new(cli_path()).arg("test").arg(&cdi_path).output().unwrap();
+    assert_success("zm test disc.cdi", &test_cdi);
+    let out_cdi = temp.path("out_cdi");
+    let extract_cdi = Command::new(cli_path()).arg("extract").arg(&cdi_path).arg("-C").arg(&out_cdi).output().unwrap();
+    assert_success("zm extract disc.cdi", &extract_cdi);
+    assert!(out_cdi.join("README.TXT").is_file());
+    assert_eq!(fs::read(out_cdi.join("NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
+
+    // Open one (preview without writing to disk), extract-one, and
+    // extract-subfolder -- exercised once on the CDI leg since every optical
+    // format here shares the one ISO 9660 reader underneath.
+    let stdout_cdi = Command::new(cli_path()).arg("extract").arg(&cdi_path).arg("--include").arg("README.TXT").arg("--to-stdout").output().unwrap();
+    assert_success("zm extract disc.cdi --to-stdout", &stdout_cdi);
+    assert_eq!(stdout_cdi.stdout, b"ZManager fixture payload\n");
+
+    let out_cdi_one = temp.path("out_cdi_one");
+    let extract_one =
+        Command::new(cli_path()).arg("extract").arg(&cdi_path).arg("-C").arg(&out_cdi_one).arg("--include").arg("README.TXT").output().unwrap();
+    assert_success("zm extract disc.cdi --include README.TXT", &extract_one);
+    assert!(out_cdi_one.join("README.TXT").is_file());
+    assert!(!out_cdi_one.join("NESTED").exists());
+
+    let out_cdi_sub = temp.path("out_cdi_sub");
+    let extract_sub = Command::new(cli_path()).arg("extract").arg(&cdi_path).arg("-C").arg(&out_cdi_sub).arg("--include").arg("NESTED").output().unwrap();
+    assert_success("zm extract disc.cdi --include NESTED", &extract_sub);
+    assert!(out_cdi_sub.join("NESTED/FILE.TXT").is_file());
+    assert!(out_cdi_sub.join("NESTED/EMPTY-DIR").is_dir());
+    assert!(!out_cdi_sub.join("README.TXT").exists());
 }
 
 /// Extracts the VHD and VMDK fixtures with 7-Zip (which reads VPC and VMDK

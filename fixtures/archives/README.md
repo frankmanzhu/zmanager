@@ -84,11 +84,51 @@ installed on a developer machine.
 | `basic.tar.uu`, `basic.tar.b64` | TAR.UU/TAR.B64 | `uuencode`/`base64` plus `bsdtar` | Encoded TAR fixtures for both supported TAR stream wrappers. |
 | `rar5-multipart.part1.rar`–`part4.rar` | RAR5 multipart | RAR | Checked-in multi-volume fixture with a 192 KiB spanning file; core, FFI, and CLI tests verify every extracted byte. |
 | `rar5-passworded-multipart.part1.rar`–`part4.rar` | Passworded RAR5 multipart | RAR | Same corpus with encrypted headers and data; tests require the exact password and ensure it never appears in diagnostics. |
+| `basic.squashfs`, `basic.sqfs`, `basic-xz.squashfs`, `basic-gzip.squashfs`, `basic-zstd.squashfs` | SquashFS | `mksquashfs` | `basic.squashfs`/`basic.sqfs` are copies of the xz variant. Rooted at the archive root (no `payload/` prefix). This is the one format whose payload tree is *not* the plain `$SRC` copy: `scripts/generate_fixtures.sh` adds an executable `run.sh` to a private copy before calling `mksquashfs`, so extraction is checked against a real executable member, not just plain files. |
+| `basic.AppImage` | Type-2 AppImage | `scripts/make_appimage_fixture.py` over `basic-gzip.squashfs` | ELF runtime with the SquashFS image appended after the section-header table; carries `run.sh` for the same reason as the SquashFS family above. |
+| `basic.wim`, `basic-none.wim`, `basic-LZX.wim`, `basic-XPRESS.wim` | WIM | `wimlib-imagex capture --compress=none/LZX/XPRESS` | `basic.wim` is a copy of `basic-none.wim`. Rooted at the archive root like SquashFS; carries the symlink but not `run.sh`. |
+| `multi-image.wim` | WIM, two images | `wimlib-imagex capture` + `append` | The two images carry **different** content by design: image 1 has `unicode/こんにちは.txt` and no marker file; image 2 has `second-image-only.txt` and no `unicode/`. This is deliberate — identical images would let a decoder silently emit image 1 twice under both `image1/`/`image2/` prefixes and still pass a same-content check. Exposed under `imageN/` path prefixes. |
+| `split.swm` (+ `split2.swm`) | Split WIM set | `wimlib-imagex split basic-none.wim … 0.001` | A copy of `basic-none.wim`'s content split across two `.swm` parts. `split2.swm` must be present alongside `split.swm` for either part to open — `cli_rejects_a_split_wim_missing_its_second_part` in `fixture_cli.rs` asserts that opening part 1 alone fails, so a future change that silently makes the reader tolerate a missing part is caught. |
+| `lzx-longmatch.wim` | WIM (LZX stress corpus) | `wimlib-imagex capture --compress=LZX` over a generated corpus | Deliberately repetitive data (3000-byte runs, a repeated 64 KiB block, repeated prose) to drive long LZX matches the small `basic-LZX.wim` never reaches. See `crates/zmanager-wim/tests/reference_wim.rs`. |
+| `basic.vdi` | VirtualBox disk image (superfloppy FAT32) | `qemu-img -O vdi`; populated with `mtools` | Source image the rest of the forensic/virtual-disk family (`basic.raw`/`.dd`/`.dsk`/`.img`, `.vhdx`, `.qcow2`/`.qcow`, `.e01`/`.ex01`, `.aff4`) is derived from — see `scripts/generate-forensic-fixtures.sh`'s derivation chain comment. FAT32 has no symlinks. |
+| `basic.raw`, `basic.dd`, `basic.dsk`, `basic.img` | Raw sector dump | truncated `qemu-img convert -O raw` of `basic.vdi` | Same bytes under four extensions. |
+| `basic.vhdx` | Hyper-V VHDX | `qemu-img convert -O vhdx` over `basic.raw` | |
+| `basic.qcow2`, `basic.qcow` | QEMU qcow2 | `qemu-img convert -O qcow2 -c` over `basic.raw` | `.qcow` is a copy under the legacy extension. |
+| `basic.e01`, `basic.ex01` | EWF (EnCase v1/v2) | `scripts/make_ewf_fixtures.py` over `basic.raw` | Two different on-disk segment-file layouts behind one `FormatId`. |
+| `basic.aff4` | Physical AFF4 (`aff4:ImageStream`) | `scripts/make_aff4_fixture.py` over `basic.raw` | Sector-stream leg of the AFF4 reader — distinct code path from the logical container below. |
+| `basic-logical.aff4` | Logical AFF4 (`aff4:FileImage`) | `crates/zmanager-core/examples/make_forensic_fixtures.rs` (hand-built turtle + ZIP, following `aff4-core`'s own single-entry `testutil::test_aff4_logical` template) | Carries the whole canonical payload tree (4 files) as a flat AFF4-L file list. AFF4-L has no directory nodes (the tree is derived from `/`-separated names), so there is no empty directory to carry. |
+| `basic.ad1` | FTK Imager AD1 | `crates/zmanager-core/examples/make_forensic_fixtures.rs` (`ad1-core`'s `testfix` builder) | Carries the whole canonical payload tree including the empty directory. **No symlink**: AD1's `Node` builder has no symlink variant (`ad1-core`'s `vfs.rs` doc comment: AD1 does not surface symlink targets), so this is a format limitation, not a fixture gap. |
+| `basic.dar` | DAR (single slice) | checked in; minted with the `dar` CLI 2.8.5, no writer in this toolchain | Carries `hello.txt`, `sub_note.txt`, `sub/deep.txt` — **not** the shared payload tree (no Unicode name, no spaces-in-name, no empty dir, no symlink). Regenerating a richer DAR fixture needs a machine with the `dar` CLI installed; nothing in this repo can mint one. |
 
-## Not Included By Default
+## Optical disc formats built at test time, not committed
 
-- WIM: requires `wimlib-imagex` or equivalent and is not a supported ZManager
-  format yet.
+NRG, CUE/BIN, CCD/IMG, and MDF are exercised by
+`cli_lists_tests_and_extracts_optical_disc_fixtures` in
+`crates/zmanager-cli/tests/fixture_cli.rs`, which builds each container's small
+format-specific header/sidecar around `basic.iso`'s bytes at test time rather
+than shipping it as a binary fixture — there is no macOS-available writer for
+Nero/CloneCD/Alcohol images. **CDI is the same trick** (confirmed against the
+reader: `list_cdi`/`list_mdf` are both `list_virtual_disk_inner` — CDI has no
+DiscJuggler-specific header this backend parses, so raw ISO bytes under the
+`.cdi` extension exercise the real code path exactly like MDF does), and is
+covered the same way in that test.
+
+Because none of these five live in `fixtures/archives`, they are **not**
+covered by `fixture_manifest_covers_every_supported_extension`'s sweep over
+`manifest.tsv` — that check only validates the committed binary corpus. This is
+an intentional scope boundary, not an oversight: the sweep exists to catch a
+committed fixture going stale, which does not apply to a container built fresh
+in the test body every run.
+
+**ISZ** is not exercised through `fixtures/archives` or the CLI tests at all,
+but it is not uncovered: `crates/zmanager-core/src/virtual_disk_backend.rs`
+carries its own internal `#[cfg(test)] build_isz` encoder and a dedicated test
+suite (`isz_roundtrip_list_test_and_extract`,
+`isz_decodes_byte_identically_to_the_source_image`, malformed-header rejection)
+that builds real ISZ byte streams — both supported chunk-pointer widths, all
+four documented chunk types — against `basic.iso`'s payload and drives list,
+test, and extract through the real parser. If you are looking for ISZ
+coverage, look there, not in this directory.
 
 The external-fixture test skips unavailable tools for local runs; Unix CI checks
 the required commands first, so the committed-fixture validation is mandatory
