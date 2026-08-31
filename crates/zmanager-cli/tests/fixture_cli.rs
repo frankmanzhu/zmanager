@@ -642,7 +642,8 @@ fn cli_lists_tests_and_extracts_squashfs_fixtures() {
 
         // Selecting one file must write only that file to the destination.
         let out_one = temp.path("out-one");
-        let one_extract = Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_one).arg("--include").arg("nested/file.txt").output().unwrap();
+        let one_extract =
+            Command::new(cli_path()).arg("extract").arg(&fixture).arg("-C").arg(&out_one).arg("--include").arg("nested/file.txt").output().unwrap();
         assert_success(&format!("zm extract {filename} --include nested/file.txt"), &one_extract);
         assert_eq!(fs::read_to_string(out_one.join("nested/file.txt")).unwrap(), "nested fixture file\n", "{filename}");
         assert!(!out_one.join("README.txt").exists(), "{filename}");
