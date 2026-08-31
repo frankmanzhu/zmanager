@@ -304,8 +304,8 @@ fn cli_fixture_listings_carry_the_whole_payload_tree() {
 }
 
 /// The shared payload tree for formats whose writer roots the tree directly
-/// at the archive root, rather than nesting it under `payload/`: SquashFS,
-/// AppImage, and WIM.
+/// at the archive root, rather than nesting it under `payload/`: `SquashFS`,
+/// `AppImage`, and WIM.
 const ROOT_PAYLOAD_TREE_WITHOUT_SYMLINK: &[(&str, &str)] = &[
     ("README.txt", "file"),
     ("nested", "directory"),
@@ -597,6 +597,11 @@ fn cli_lists_tests_and_extracts_hybrid_iso_fixture() {
     assert_success("zm extract basic.iso --include", &selected);
     assert_eq!(fs::read(selected_out.join("NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
     assert!(!selected_out.join("README.TXT").exists());
+
+    // Open one and extract subfolder: basic.iso carries the same upcased
+    // README.TXT / NESTED/FILE.TXT shape every synthesized optical fixture
+    // wraps it in, so the shared matrix helper applies directly.
+    assert_optical_open_extract_matrix("basic.iso", &fixture, &temp);
 }
 
 #[test]
@@ -745,6 +750,30 @@ fn cli_lists_tests_and_extracts_wim_fixtures() {
             assert_success("zm extract multi-image.wim --include image2", &image2_extract);
             assert!(out_image2.join("image2/second-image-only.txt").is_file());
             assert!(!out_image2.join("image1").exists());
+
+            // Selecting one file inside one specific image, by both open
+            // (stdout preview) and extract (directory write), must resolve
+            // against that image and not the other one -- image1 has no
+            // `second-image-only.txt`, so a resolver that ignored the image
+            // prefix would either fail or silently pick the wrong image.
+            let stdout_one_image =
+                Command::new(cli_path()).arg("extract").arg(&fixture).arg("--include").arg("image2/second-image-only.txt").arg("--to-stdout").output().unwrap();
+            assert_success("zm extract multi-image.wim --include image2/second-image-only.txt --to-stdout", &stdout_one_image);
+            assert_eq!(stdout_one_image.stdout, b"second image marker\n");
+
+            let out_one_image = temp.path("out-one-image");
+            let one_image_extract = Command::new(cli_path())
+                .arg("extract")
+                .arg(&fixture)
+                .arg("-C")
+                .arg(&out_one_image)
+                .arg("--include")
+                .arg("image2/second-image-only.txt")
+                .output()
+                .unwrap();
+            assert_success("zm extract multi-image.wim --include image2/second-image-only.txt", &one_image_extract);
+            assert_eq!(fs::read_to_string(out_one_image.join("image2/second-image-only.txt")).unwrap(), "second image marker\n");
+            assert!(!out_one_image.join("image1").exists());
         } else {
             assert_eq!(fs::read_to_string(out.join("README.txt")).unwrap(), "ZManager fixture payload\n");
             assert_eq!(fs::read_to_string(out.join("nested/file.txt")).unwrap(), "nested fixture file\n");
@@ -803,6 +832,95 @@ fn cli_rejects_a_split_wim_missing_its_second_part() {
     assert!(!String::from_utf8_lossy(&list.stderr).trim().is_empty(), "failed without a diagnostic");
 }
 
+/// Builds an `UltraISO` `.isz` image at the documented 48-byte packed header
+/// layout, byte-for-byte the same recipe as `zmanager-core`'s own internal
+/// `build_isz` test encoder (`crates/zmanager-core/src/virtual_disk_backend.rs`,
+/// `sect_size` a `u16` at offset 10, `block_size` a `u32` at offset 29,
+/// `ptr_offs` a `u32` at offset 35, chunk pointers carrying the chunk type in
+/// their top two bits). Kept here rather than imported because the encoder is
+/// `#[cfg(test)]`-private to that crate; this is a second, independent
+/// construction against the same documented wire shape, not a shortcut that
+/// trusts the original encoder's own output.
+fn build_isz(payload: &[u8], sector_size: u16, block_size: u32, ptr_len: u8) -> Vec<u8> {
+    let total_sectors = u32::try_from(payload.len() / usize::from(sector_size)).unwrap();
+
+    let mut chunk_types = Vec::new();
+    let mut chunk_bytes = Vec::new();
+    for block in payload.chunks(block_size as usize) {
+        if block.iter().all(|byte| *byte == 0) {
+            chunk_types.push((0_u8, Vec::new()));
+            continue;
+        }
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(block).unwrap();
+        let compressed = encoder.finish().unwrap();
+        if compressed.len() < block.len() {
+            chunk_types.push((2_u8, compressed));
+        } else {
+            chunk_types.push((1_u8, block.to_vec()));
+        }
+    }
+    for (_, bytes) in &chunk_types {
+        chunk_bytes.extend_from_slice(bytes);
+    }
+
+    let ptr_offset = 48_u32;
+    let data_offset = ptr_offset + u32::try_from(chunk_types.len()).unwrap() * u32::from(ptr_len);
+
+    let mut header = vec![0_u8; 48];
+    header[0..4].copy_from_slice(b"IsZ!");
+    header[4] = 48; // header_size
+    header[5] = 1; // version
+    header[6..10].copy_from_slice(&0x1234_5678_u32.to_le_bytes()); // vol_sn
+    header[10..12].copy_from_slice(&sector_size.to_le_bytes());
+    header[12..16].copy_from_slice(&total_sectors.to_le_bytes());
+    header[16] = 0; // encryption_type: none
+    header[17..25].copy_from_slice(&0_u64.to_le_bytes()); // segment_size: single file
+    let num_blocks = u32::try_from(chunk_types.len()).unwrap();
+    header[25..29].copy_from_slice(&num_blocks.to_le_bytes());
+    header[29..33].copy_from_slice(&block_size.to_le_bytes());
+    header[33] = ptr_len;
+    header[34] = 1; // segment count
+    header[35..39].copy_from_slice(&ptr_offset.to_le_bytes());
+    header[39..43].copy_from_slice(&0_u32.to_le_bytes()); // seg_offs
+    header[43..47].copy_from_slice(&data_offset.to_le_bytes());
+
+    let type_shift = u32::from(ptr_len) * 8 - 2;
+    let mut table = Vec::new();
+    for (kind, bytes) in &chunk_types {
+        let value = (u32::from(*kind) << type_shift) | u32::try_from(bytes.len()).unwrap();
+        table.extend_from_slice(&value.to_le_bytes()[..usize::from(ptr_len)]);
+    }
+
+    let mut out = header;
+    out.extend_from_slice(&table);
+    out.extend_from_slice(&chunk_bytes);
+    out
+}
+
+/// Open one (preview without writing to disk), extract one, and extract
+/// subfolder against an ISO-9660-shaped fixture that carries the canonical
+/// tree upcased: `README.TXT` at the root and `NESTED/FILE.TXT` +
+/// `NESTED/EMPTY-DIR/` beneath a subfolder.
+fn assert_optical_open_extract_matrix(label: &str, path: &Path, temp: &TestDir) {
+    let stdout = Command::new(cli_path()).arg("extract").arg(path).arg("--include").arg("README.TXT").arg("--to-stdout").output().unwrap();
+    assert_success(&format!("zm extract {label} --to-stdout"), &stdout);
+    assert_eq!(stdout.stdout, b"ZManager fixture payload\n", "{label}");
+
+    let out_one = temp.path(format!("{label}-one"));
+    let extract_one = Command::new(cli_path()).arg("extract").arg(path).arg("-C").arg(&out_one).arg("--include").arg("README.TXT").output().unwrap();
+    assert_success(&format!("zm extract {label} --include README.TXT"), &extract_one);
+    assert!(out_one.join("README.TXT").is_file(), "{label}");
+    assert!(!out_one.join("NESTED").exists(), "{label}");
+
+    let out_sub = temp.path(format!("{label}-sub"));
+    let extract_sub = Command::new(cli_path()).arg("extract").arg(path).arg("-C").arg(&out_sub).arg("--include").arg("NESTED").output().unwrap();
+    assert_success(&format!("zm extract {label} --include NESTED"), &extract_sub);
+    assert!(out_sub.join("NESTED/FILE.TXT").is_file(), "{label}");
+    assert!(out_sub.join("NESTED/EMPTY-DIR").is_dir(), "{label}");
+    assert!(!out_sub.join("README.TXT").exists(), "{label}");
+}
+
 #[test]
 fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
     let iso_path = archives_dir().join("basic.iso");
@@ -836,6 +954,7 @@ fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
     let extract_nrg = Command::new(cli_path()).arg("extract").arg(&nrg_path).arg("-C").arg(&out_nrg).output().unwrap();
     assert_success("zm extract disc.nrg", &extract_nrg);
     assert!(out_nrg.join("README.TXT").is_file());
+    assert_optical_open_extract_matrix("disc.nrg", &nrg_path, &temp);
 
     // 2. CUE/BIN
     let bin_path = temp.path("disc.bin");
@@ -851,6 +970,7 @@ fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
     let extract_cue = Command::new(cli_path()).arg("extract").arg(&cue_path).arg("-C").arg(&out_cue).output().unwrap();
     assert_success("zm extract disc.cue", &extract_cue);
     assert!(out_cue.join("README.TXT").is_file());
+    assert_optical_open_extract_matrix("disc.cue", &cue_path, &temp);
 
     // 3. CCD/IMG
     let img_path = temp.path("disc.img");
@@ -866,6 +986,7 @@ fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
     let extract_ccd = Command::new(cli_path()).arg("extract").arg(&ccd_path).arg("-C").arg(&out_ccd).output().unwrap();
     assert_success("zm extract disc.ccd", &extract_ccd);
     assert!(out_ccd.join("README.TXT").is_file());
+    assert_optical_open_extract_matrix("disc.ccd", &ccd_path, &temp);
 
     // 4. MDF
     let mdf_path = temp.path("disc.mdf");
@@ -879,6 +1000,7 @@ fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
     let extract_mdf = Command::new(cli_path()).arg("extract").arg(&mdf_path).arg("-C").arg(&out_mdf).output().unwrap();
     assert_success("zm extract disc.mdf", &extract_mdf);
     assert!(out_mdf.join("README.TXT").is_file());
+    assert_optical_open_extract_matrix("disc.mdf", &mdf_path, &temp);
 
     // 5. CDI. Like MDF, `.cdi` is routed through the generic ISO 9660 sector
     // reader by extension alone -- there is no DiscJuggler-specific header
@@ -898,27 +1020,28 @@ fn cli_lists_tests_and_extracts_optical_disc_fixtures() {
     assert_success("zm extract disc.cdi", &extract_cdi);
     assert!(out_cdi.join("README.TXT").is_file());
     assert_eq!(fs::read(out_cdi.join("NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
+    assert_optical_open_extract_matrix("disc.cdi", &cdi_path, &temp);
 
-    // Open one (preview without writing to disk), extract-one, and
-    // extract-subfolder -- exercised once on the CDI leg since every optical
-    // format here shares the one ISO 9660 reader underneath.
-    let stdout_cdi = Command::new(cli_path()).arg("extract").arg(&cdi_path).arg("--include").arg("README.TXT").arg("--to-stdout").output().unwrap();
-    assert_success("zm extract disc.cdi --to-stdout", &stdout_cdi);
-    assert_eq!(stdout_cdi.stdout, b"ZManager fixture payload\n");
+    // 6. ISZ (UltraISO). Unlike CDI/MDF, ISZ has a real compressed-chunk
+    // container format, so `build_isz` above constructs a genuine ISZ byte
+    // stream (2 pointer widths and all 4 chunk types are exercised by
+    // `zmanager-core`'s own unit tests against this exact recipe) rather than
+    // wrapping the raw ISO bytes under the extension.
+    let isz_path = temp.path("disc.isz");
+    fs::write(&isz_path, build_isz(&iso_bytes, 2048, 65536, 3)).unwrap();
 
-    let out_cdi_one = temp.path("out_cdi_one");
-    let extract_one =
-        Command::new(cli_path()).arg("extract").arg(&cdi_path).arg("-C").arg(&out_cdi_one).arg("--include").arg("README.TXT").output().unwrap();
-    assert_success("zm extract disc.cdi --include README.TXT", &extract_one);
-    assert!(out_cdi_one.join("README.TXT").is_file());
-    assert!(!out_cdi_one.join("NESTED").exists());
-
-    let out_cdi_sub = temp.path("out_cdi_sub");
-    let extract_sub = Command::new(cli_path()).arg("extract").arg(&cdi_path).arg("-C").arg(&out_cdi_sub).arg("--include").arg("NESTED").output().unwrap();
-    assert_success("zm extract disc.cdi --include NESTED", &extract_sub);
-    assert!(out_cdi_sub.join("NESTED/FILE.TXT").is_file());
-    assert!(out_cdi_sub.join("NESTED/EMPTY-DIR").is_dir());
-    assert!(!out_cdi_sub.join("README.TXT").exists());
+    let list_isz = Command::new(cli_path()).arg("list").arg(&isz_path).output().unwrap();
+    assert_success("zm list disc.isz", &list_isz);
+    let list_isz_stdout = String::from_utf8_lossy(&list_isz.stdout);
+    assert!(list_isz_stdout.contains("README.TXT"), "{list_isz_stdout}");
+    let test_isz = Command::new(cli_path()).arg("test").arg(&isz_path).output().unwrap();
+    assert_success("zm test disc.isz", &test_isz);
+    let out_isz = temp.path("out_isz");
+    let extract_isz = Command::new(cli_path()).arg("extract").arg(&isz_path).arg("-C").arg(&out_isz).output().unwrap();
+    assert_success("zm extract disc.isz", &extract_isz);
+    assert!(out_isz.join("README.TXT").is_file());
+    assert_eq!(fs::read(out_isz.join("NESTED/FILE.TXT")).unwrap(), b"nested fixture file\n");
+    assert_optical_open_extract_matrix("disc.isz", &isz_path, &temp);
 }
 
 /// Extracts the VHD and VMDK fixtures with 7-Zip (which reads VPC and VMDK

@@ -87,7 +87,7 @@ installed on a developer machine.
 | `basic.squashfs`, `basic.sqfs`, `basic-xz.squashfs`, `basic-gzip.squashfs`, `basic-zstd.squashfs` | SquashFS | `mksquashfs` | `basic.squashfs`/`basic.sqfs` are copies of the xz variant. Rooted at the archive root (no `payload/` prefix). This is the one format whose payload tree is *not* the plain `$SRC` copy: `scripts/generate_fixtures.sh` adds an executable `run.sh` to a private copy before calling `mksquashfs`, so extraction is checked against a real executable member, not just plain files. |
 | `basic.AppImage` | Type-2 AppImage | `scripts/make_appimage_fixture.py` over `basic-gzip.squashfs` | ELF runtime with the SquashFS image appended after the section-header table; carries `run.sh` for the same reason as the SquashFS family above. |
 | `basic.wim`, `basic-none.wim`, `basic-LZX.wim`, `basic-XPRESS.wim` | WIM | `wimlib-imagex capture --compress=none/LZX/XPRESS` | `basic.wim` is a copy of `basic-none.wim`. Rooted at the archive root like SquashFS; carries the symlink but not `run.sh`. |
-| `multi-image.wim` | WIM, two images | `wimlib-imagex capture` + `append` | The two images carry **different** content by design: image 1 has `unicode/こんにちは.txt` and no marker file; image 2 has `second-image-only.txt` and no `unicode/`. This is deliberate — identical images would let a decoder silently emit image 1 twice under both `image1/`/`image2/` prefixes and still pass a same-content check. Exposed under `imageN/` path prefixes. |
+| `multi-image.wim` | WIM, two images | `wimlib-imagex capture` + `append` | The two images carry **different** content by design: image 1 has `unicode/こんにちは.txt` and no marker file; image 2 has `second-image-only.txt` and no `unicode/`. This is deliberate — identical images would let a decoder silently emit image 1 twice under both `image1/`/`image2/` prefixes and still pass a same-content check. Exposed under `imageN/` path prefixes; `cli_lists_tests_and_extracts_wim_fixtures` selects a single file inside one specific image (`image2/second-image-only.txt`) by both preview and directory write, proving selection resolves against the right image rather than falling through to the other one. |
 | `split.swm` (+ `split2.swm`) | Split WIM set | `wimlib-imagex split basic-none.wim … 0.001` | A copy of `basic-none.wim`'s content split across two `.swm` parts. `split2.swm` must be present alongside `split.swm` for either part to open — `cli_rejects_a_split_wim_missing_its_second_part` in `fixture_cli.rs` asserts that opening part 1 alone fails, so a future change that silently makes the reader tolerate a missing part is caught. |
 | `lzx-longmatch.wim` | WIM (LZX stress corpus) | `wimlib-imagex capture --compress=LZX` over a generated corpus | Deliberately repetitive data (3000-byte runs, a repeated 64 KiB block, repeated prose) to drive long LZX matches the small `basic-LZX.wim` never reaches. See `crates/zmanager-wim/tests/reference_wim.rs`. |
 | `basic.vdi` | VirtualBox disk image (superfloppy FAT32) | `qemu-img -O vdi`; populated with `mtools` | Source image the rest of the forensic/virtual-disk family (`basic.raw`/`.dd`/`.dsk`/`.img`, `.vhdx`, `.qcow2`/`.qcow`, `.e01`/`.ex01`, `.aff4`) is derived from — see `scripts/generate-forensic-fixtures.sh`'s derivation chain comment. FAT32 has no symlinks. |
@@ -102,33 +102,89 @@ installed on a developer machine.
 
 ## Optical disc formats built at test time, not committed
 
-NRG, CUE/BIN, CCD/IMG, and MDF are exercised by
+NRG, CUE/BIN, CCD/IMG, MDF, and ISZ are exercised by
 `cli_lists_tests_and_extracts_optical_disc_fixtures` in
 `crates/zmanager-cli/tests/fixture_cli.rs`, which builds each container's small
 format-specific header/sidecar around `basic.iso`'s bytes at test time rather
 than shipping it as a binary fixture — there is no macOS-available writer for
-Nero/CloneCD/Alcohol images. **CDI is the same trick** (confirmed against the
-reader: `list_cdi`/`list_mdf` are both `list_virtual_disk_inner` — CDI has no
-DiscJuggler-specific header this backend parses, so raw ISO bytes under the
-`.cdi` extension exercise the real code path exactly like MDF does), and is
-covered the same way in that test.
+Nero/CloneCD/Alcohol/UltraISO images. **CDI is the same trick** (confirmed
+against the reader: `list_cdi`/`list_mdf` are both `list_virtual_disk_inner` —
+CDI has no DiscJuggler-specific header this backend parses, so raw ISO bytes
+under the `.cdi` extension exercise the real code path exactly like MDF does),
+and is covered the same way in that test. **ISZ is the one exception with a
+real container format**: `build_isz` in that same test file constructs a
+genuine compressed-chunk ISZ byte stream (48-byte packed header, a chunk
+pointer table, zlib-compressed blocks) — a second, independent encoder against
+the documented wire shape, not a shortcut through the reference decoder.
 
-Because none of these five live in `fixtures/archives`, they are **not**
+Every one of these six formats — plus the pre-existing `basic.iso` baseline —
+is held to the complete six-operation matrix: list, view/test, open one
+(`--to-stdout`, a preview that writes nothing to disk), extract one (a single
+named file written to a directory), extract a subfolder, and extract all. The
+shared `assert_optical_open_extract_matrix` helper drives the last three
+uniformly, since every one of these readers ends up at the same ISO 9660
+volume underneath. The only genuinely open gap left in this family is fixture
+*authenticity*: these seven are all synthesized against this codebase's own
+understanding of each header, not authored by the real Nero/CloneCD/Alcohol/
+UltraISO tools. Upgrading them to real tool output is a fidelity improvement a
+human needs to do — Windows/Parallels + ImgBurn (free) or the UltraISO/Alcohol
+120%/Nero trials, minted once and committed like the UDF/NTFS fixtures below —
+not a coverage gap this test suite can close on its own.
+
+Because none of these seven live in `fixtures/archives`, they are **not**
 covered by `fixture_manifest_covers_every_supported_extension`'s sweep over
 `manifest.tsv` — that check only validates the committed binary corpus. This is
 an intentional scope boundary, not an oversight: the sweep exists to catch a
 committed fixture going stale, which does not apply to a container built fresh
 in the test body every run.
 
-**ISZ** is not exercised through `fixtures/archives` or the CLI tests at all,
-but it is not uncovered: `crates/zmanager-core/src/virtual_disk_backend.rs`
-carries its own internal `#[cfg(test)] build_isz` encoder and a dedicated test
-suite (`isz_roundtrip_list_test_and_extract`,
+ISZ also carries its own independent, lower-level coverage:
+`crates/zmanager-core/src/virtual_disk_backend.rs` has an internal
+`#[cfg(test)] build_isz` encoder and a dedicated test suite
+(`isz_roundtrip_list_test_and_extract`,
 `isz_decodes_byte_identically_to_the_source_image`, malformed-header rejection)
-that builds real ISZ byte streams — both supported chunk-pointer widths, all
-four documented chunk types — against `basic.iso`'s payload and drives list,
-test, and extract through the real parser. If you are looking for ISZ
-coverage, look there, not in this directory.
+that exercises both supported chunk-pointer widths and all four documented
+chunk types directly against the reader, byte-for-byte against the source ISO.
+
+### Upgrading NRG/CCD/MDF/ISZ to real tool output (manual, one-time)
+
+No macOS tool authors these formats, and none of the original vendors ship a
+Linux build either, so this is a Windows job. Every fixture in this corpus
+that needed Windows-only or Docker-only tooling was minted the same way —
+once, by hand, then committed — see `basic.vhd`/`basic.udf` above for the
+precedent. This isn't scripted because it goes through GUI installers; do it
+once in the Windows 11 Parallels VM already set up for this repo:
+
+1. **Boot the VM**: `prlctl start "Windows 11"` (or resume it from Parallels
+   Desktop). Copy `fixtures/archives/basic.iso` into it — it's 900 KB, so any
+   transfer method (shared folder, drag-and-drop) works.
+2. **Install ImgBurn** (free, no trial limits — get it from imgburn.com, the
+   official site). Open `basic.iso` in it, switch to "Write image file to
+   image file" mode, and save it out as:
+   - **CCD**: destination format CloneCD → produces `disc.ccd` + `disc.img`
+     (and possibly a `.sub` subchannel file the reader doesn't currently need)
+   - **NRG**: destination format Nero → produces `disc.nrg`
+   - **MDS/MDF**: if ImgBurn's format list includes it, produces `disc.mds` +
+     `disc.mdf`
+3. **Install UltraISO** (trial from ultraiso.com; the trial's 300 MB cap is
+   irrelevant at this file size). Open `basic.iso`, then File → Save As →
+   `.isz`, any compression level → produces `disc.isz`. If ImgBurn didn't
+   cover NRG or MDS/MDF, UltraISO's Save As also targets both.
+4. **If MDF/MDS still isn't covered**, install Alcohol 120% (official site,
+   alcohol-soft.com) specifically for it: Image Making Wizard → source
+   `basic.iso` → output `.mds`/`.mdf`.
+5. **Rename and hand back**: rename the outputs to match this corpus's
+   `basic.*` convention (`basic.ccd` + `basic.img`, `basic.nrg`,
+   `basic.mdf` + `basic.mds`, `basic.isz`) and drop them into
+   `fixtures/archives/`. From there, wiring them in is a normal PR: add
+   `manifest.tsv` rows (sha256 of the real bytes), swap
+   `cli_lists_tests_and_extracts_optical_disc_fixtures` from building the
+   synthetic version to reading the committed one, and note the authoring
+   tool + version in the table above, matching how every other externally-
+   authored fixture here is documented.
+The CLI-level `build_isz` above is a separate, from-scratch construction
+mirroring that same recipe — not a copy of it — so the two are independent
+evidence the format is understood correctly.
 
 The external-fixture test skips unavailable tools for local runs; Unix CI checks
 the required commands first, so the committed-fixture validation is mandatory
