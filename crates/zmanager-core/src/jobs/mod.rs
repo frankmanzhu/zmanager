@@ -19,7 +19,6 @@ pub(crate) use progress::PROGRESS_ENTRY_STEP;
 pub use progress::{JobEventSink, JobProgressState, PROGRESS_PATH_DISPLAY_BYTES_LIMIT, PROGRESS_RECENT_PATH_BYTES_LIMIT, PROGRESS_RECENT_PATH_LIMIT};
 pub use progress::{ProgressBatch, ProgressCoalescer};
 
-use self::progress::path_identity;
 use std::collections::BTreeMap;
 
 /// Bounded identity of an exact producer path whose display copy may be truncated.
@@ -270,20 +269,6 @@ impl<'a> JobContext<'a> {
         self.flush_progress();
         self.phase_bytes_processed.insert(phase, 0);
         self.emit(JobEvent::PhaseStarted { phase, total_bytes });
-    }
-
-    /// Emits phase-scoped byte progress with a capped recent-path activity list.
-    pub fn phase_bytes_processed_with_recent_paths(
-        &mut self,
-        phase: JobPhase,
-        path: Option<&str>,
-        recent_paths: Vec<String>,
-        bytes: u64,
-        total_bytes: Option<u64>,
-        recent_paths_truncated: bool,
-    ) {
-        let recent_path_identities = recent_paths.iter().map(|path| path_identity(path)).collect();
-        self.phase_bytes_processed_with_path_identities(phase, path, recent_paths, recent_path_identities, bytes, total_bytes, recent_paths_truncated);
     }
 
     #[allow(clippy::too_many_arguments)]

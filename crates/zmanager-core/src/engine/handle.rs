@@ -6,7 +6,7 @@ use crate::engine::registry::{AdapterRegistry, ReadAdapterSession};
 use crate::engine::source::{ArchiveSource, SourceFingerprint};
 use crate::engine::types::{
     ArchiveError, ArchiveListing, ArchiveOperation, CopyReport, CreateReport, CreateRequest, DetectedArchive, EntryId, ErrorKind, ExtractOptions,
-    ExtractReport, HandleCapabilities, OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport, normalize_engine_path,
+    ExtractReport, OpenOptions, SelectedExtractOptions, SessionDisposition, TestOptions, TestReport, normalize_engine_path,
 };
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -199,12 +199,6 @@ impl ArchiveHandle {
     #[must_use]
     pub const fn disposition(&self) -> SessionDisposition {
         self.disposition
-    }
-
-    /// Returns handle capabilities derived from registered adapter descriptors.
-    #[must_use]
-    pub fn capabilities(&self) -> Option<HandleCapabilities> {
-        self.engine_registry.capabilities_for_format(self.detected.format)
     }
 
     fn validate_source(&mut self) -> Result<(), ArchiveError> {

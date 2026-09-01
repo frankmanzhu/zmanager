@@ -16,12 +16,6 @@ use std::time::SystemTime;
 /// Result alias for `AppleArchive` wrapper operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Returns whether this target can use the native `AppleArchive` library.
-#[must_use]
-pub const fn is_supported() -> bool {
-    true
-}
-
 /// Error returned by the `AppleArchive` wrapper.
 #[derive(Debug)]
 pub enum Error {

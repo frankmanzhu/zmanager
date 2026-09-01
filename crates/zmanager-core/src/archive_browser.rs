@@ -268,7 +268,7 @@ pub fn list_directory_with_options(path: impl AsRef<Path>, dir_path: &str, optio
 }
 
 /// Lists immediate children from a retained engine handle.
-pub fn list_directory_from_engine_handle(handle: &mut crate::engine::ArchiveHandle, dir_path: &str) -> Result<BrowserListing, ArchiveBrowserError> {
+fn list_directory_from_engine_handle(handle: &mut crate::engine::ArchiveHandle, dir_path: &str) -> Result<BrowserListing, ArchiveBrowserError> {
     let listing = list_entries_from_engine_handle(handle)?;
     let parent = dir_path.replace('\\', "/").trim_matches('/').to_owned();
     let prefix = if parent.is_empty() { String::new() } else { format!("{parent}/") };
@@ -356,25 +356,6 @@ pub fn extract_entry_with_options(
             allow_absolute_symlinks: options.tzap_allow_absolute_symlinks,
         },
     )
-}
-
-/// Extracts a batch of selected paths through one retained engine handle when
-/// the format has a retained selected-extraction binding. The returned
-/// reports preserve listing order and physical duplicate entries.
-pub fn extract_selected_entries_with_options(
-    archive_path: impl AsRef<Path>,
-    entry_paths: &[String],
-    destination: impl AsRef<Path>,
-    options: BrowserExtractOptions<'_>,
-) -> Result<Vec<(String, EntryExtractReport)>, ArchiveBrowserError> {
-    let archive_path = archive_path.as_ref();
-    let destination = destination.as_ref();
-    let engine = crate::engine::create_default_engine().map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
-    let source = crate::engine::ArchiveSource::from_path_autodetect(archive_path);
-    let mut handle = engine
-        .open(source, crate::engine::OpenOptions { password: options.password.map(ToOwned::to_owned), recipient_key: None, ..Default::default() })
-        .map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
-    extract_selected_entries_from_engine_handle(&mut handle, entry_paths, destination, options)
 }
 
 /// Extracts selected paths through a caller-owned retained engine handle.
@@ -971,8 +952,10 @@ mod tests {
         let archive = temp.path("archive.zip");
         write_zip(&archive, &[("duplicate/./file.txt", b"first".as_slice()), ("duplicate/file.txt", b"second".as_slice())]);
 
-        let reports = super::extract_selected_entries_with_options(
-            &archive,
+        let engine = crate::engine::create_default_engine().unwrap();
+        let mut handle = engine.open(crate::engine::ArchiveSource::from_path_autodetect(&archive), crate::engine::OpenOptions::default()).unwrap();
+        let reports = super::extract_selected_entries_from_engine_handle(
+            &mut handle,
             &["duplicate/file.txt".to_owned(), "duplicate/file.txt".to_owned()],
             temp.path("out"),
             super::BrowserExtractOptions { overwrite: OverwritePolicy::Replace, ..Default::default() },

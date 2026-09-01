@@ -73,6 +73,7 @@ unsafe extern "C" {
 
     fn zmu_unrar_extract(archive: *const c_char, password: *const c_char, user: *mut c_void, callback: ExtractCallback) -> c_int;
 
+    #[cfg(test)]
     fn zmu_unrar_large_dictionary_allowed(dict_size_kb: u64) -> c_int;
 }
 
@@ -158,7 +159,8 @@ impl std::error::Error for UnrarError {}
 
 /// Returns whether a large RAR dictionary request is within `ZManager`'s limit.
 #[must_use]
-pub fn large_dictionary_allowed_bytes(bytes: u64) -> bool {
+#[cfg(test)]
+fn large_dictionary_allowed_bytes(bytes: u64) -> bool {
     let kilobytes = bytes.div_ceil(KIBIBYTE_BYTES);
     unsafe { zmu_unrar_large_dictionary_allowed(kilobytes) == 1 }
 }

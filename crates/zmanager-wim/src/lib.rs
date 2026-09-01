@@ -298,15 +298,9 @@ pub struct WimArchive {
 }
 
 impl WimArchive {
-    /// Header of the first part of the set.
-    #[must_use]
-    pub fn header(&self) -> &WimHeader {
-        &self.parts[0].header
-    }
-
     /// Path of the first part of the set.
     #[must_use]
-    pub fn path(&self) -> &Path {
+    fn path(&self) -> &Path {
         &self.parts[0].path
     }
 
@@ -924,16 +918,6 @@ impl WimArchive {
         }
         Ok(verified)
     }
-}
-
-/// Opens a WIM and returns all entries across all images.
-///
-/// # Errors
-///
-/// Returns [`WimError`] when the WIM cannot be opened, parsed, or decoded.
-pub fn list(path: impl AsRef<Path>) -> Result<Vec<WimEntry>, WimError> {
-    let mut archive = WimArchive::open(path.as_ref())?;
-    archive.entries()
 }
 
 fn hex_sha1(value: [u8; 20]) -> String {

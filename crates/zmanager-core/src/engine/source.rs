@@ -140,7 +140,7 @@ impl ArchiveSource {
 
     /// Returns the source access capability.
     #[must_use]
-    pub fn access_capability(&self) -> SourceAccess {
+    pub(crate) fn access_capability(&self) -> SourceAccess {
         match self {
             Self::Path(_) => SourceAccess::Seekable,
             Self::VolumeSet(_) => SourceAccess::MultiVolumeSet,

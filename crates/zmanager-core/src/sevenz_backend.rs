@@ -602,7 +602,8 @@ pub fn extract_7z_with_overwrite_resolver(
 ///
 /// Returns [`SevenZError`] when the archive cannot be read, an entry is unsafe,
 /// password validation fails, or filesystem writes fail.
-pub fn extract_7z_with_context(
+#[cfg(test)]
+fn extract_7z_with_context(
     archive_path: impl AsRef<Path>,
     destination: impl AsRef<Path>,
     password: Option<&str>,
