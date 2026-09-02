@@ -173,6 +173,31 @@ fn write_xar(temp: &TestDir, name: &str, toc_xml: &[u8], heap: &[u8]) -> std::pa
 }
 
 #[test]
+fn pr5_xar_base64_name_decodes_through_zmanager() {
+    // Standard base64 encoding of the macOS XAR filename "こんにちは.txt".
+    let xml = br#"<xar><toc><file id="1">
+  <type>file</type><name enctype="base64">44GT44KT44Gr44Gh44GvLnR4dA==</name>
+  <data><offset>0</offset><length>7</length><size>7</size><encoding style="application/octet-stream"/></data>
+</file></toc></xar>"#;
+    let temp = TestDir::new("dpp-pr5-xar-base64-name");
+    let archive = write_xar(&temp, "base64-name.xar", xml, b"payload");
+
+    let entries = xar_backend::list(&archive).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "こんにちは.txt");
+    assert_eq!(entries[0].kind, BrowserEntryKind::File);
+
+    let mut copied = Vec::new();
+    assert_eq!(xar_backend::copy(&archive, 0, &mut copied).unwrap(), 7);
+    assert_eq!(copied, b"payload");
+
+    let destination = temp.path("out");
+    let report = xar_backend::extract(&archive, &destination, ExtractionPolicy::default(), None, None).unwrap();
+    assert_eq!(report.entries, 1);
+    assert_eq!(std::fs::read(destination.join("こんにちは.txt")).unwrap(), b"payload");
+}
+
+#[test]
 fn pr5_xar_nested_metadata_cannot_clobber_path_or_payload() {
     let xml = br#"<xar><toc><file id="1">
   <type>file</type><name>real-name.txt</name>
