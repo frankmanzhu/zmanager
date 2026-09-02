@@ -12,6 +12,7 @@
 //! every other disk-image fixture (including an empty directory), so a single
 //! expected listing covers the whole forensic family.
 
+use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -79,15 +80,16 @@ fn build_aff4_logical(entries: &[(&str, &[u8])]) -> Vec<u8> {
          @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n",
     );
     for (segment, content) in entries {
-        turtle.push_str(&format!(
+        let _ = writeln!(
+            turtle,
             "<{vol}/{segment}> rdf:type aff4:FileImage , aff4:Image , aff4:zip_segment ; \
              aff4:originalFileName \"./{segment}\"^^xsd:string ; \
              aff4:size {} ; \
              aff4:lastWritten \"2018-09-17T13:42:20+10:00\"^^xsd:datetime ; \
              aff4:hash \"00000000000000000000000000000000\"^^aff4:MD5 ; \
-             aff4:stored <{vol}> .\n",
+             aff4:stored <{vol}> .",
             content.len()
-        ));
+        );
     }
 
     let cursor = std::io::Cursor::new(Vec::<u8>::new());

@@ -81,6 +81,36 @@ fn engine_create_job_emits_lifecycle_events() {
 }
 
 #[test]
+fn engine_tzap_create_accepts_unicode_entry_names() {
+    let temp = TestDir::new("engine_tzap_create_unicode_entry");
+    temp.write_file("金庸-神雕侠侣txt精校版.txt", b"unicode filename");
+    let mut events = Vec::new();
+
+    let report = super::adapters::run_engine_create_job_from_sources(
+        &[temp.path("金庸-神雕侠侣txt精校版.txt")],
+        temp.path("unicode.tzap"),
+        &CreateOptions::Tzap(crate::engine::TzapCreateOptions {
+            key_source: crate::engine::TzapKeySource::NoPassword,
+            level: 1,
+            preserve_metadata: true,
+            replace_existing: false,
+            volume_size: None,
+            recovery_percentage: 0,
+            volume_loss_tolerance: 0,
+            x509_signing: None,
+            emit_bootstrap_sidecar: false,
+        }),
+        &PlanOptions::default(),
+        &CancellationToken::new(),
+        &mut |event| events.push(event),
+    )
+    .unwrap();
+
+    assert_eq!(report.written_entries, 1);
+    assert!(events.iter().any(|event| matches!(event, JobEvent::Completed { .. })));
+}
+
+#[test]
 fn progress_coalescer_flushes_entry_and_time_thresholds_without_sleeping() {
     let start = Instant::now();
     let mut entries = ProgressCoalescer::new_at(None, start);

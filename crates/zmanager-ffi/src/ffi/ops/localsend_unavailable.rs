@@ -17,6 +17,11 @@ fn unavailable(operation: &str) -> ZmanagerGuiError {
 }
 
 #[allow(non_snake_case)]
+pub fn localsendSetIdentityDir(_directory: String) -> Result<(), ZmanagerGuiError> {
+    Err(unavailable("localsendSetIdentityDir"))
+}
+
+#[allow(non_snake_case)]
 pub fn localsendDiscover(_request: DiscoverRequest) -> Result<Vec<DeviceInfoDto>, ZmanagerGuiError> {
     Err(unavailable("localsendDiscover"))
 }

@@ -58,6 +58,14 @@ namespace zmanager {
     // native shells consume UniFFI-generated request/response types instead
     // of hand-mirrored JSON DTOs; the underlying protocol is unmodified
     // upstream `localsend-rs` — push-only, same as official LocalSend apps.
+    // Where this device's LocalSend identity is persisted. Call once at
+    // startup, before any other localsend* call: a LocalSend device IS its
+    // certificate fingerprint, so an identity that does not outlive the
+    // process makes ZManager a new device to every peer on every launch.
+    // The directory is the shell's own application-data directory, the one
+    // thing that cannot be decided in shared Rust.
+    [Throws=ZmanagerGuiError]
+    void localsendSetIdentityDir(string directory);
     [Throws=ZmanagerGuiError]
     sequence<DeviceInfoDto> localsendDiscover(DiscoverRequest request);
     [Throws=ZmanagerGuiError]

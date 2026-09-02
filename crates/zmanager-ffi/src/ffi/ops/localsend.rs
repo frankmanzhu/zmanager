@@ -72,6 +72,18 @@ impl From<TransferDecisionKind> for zmanager_localsend::TransferDecisionKind {
     }
 }
 
+/// Points the shared registry at the shell's application-data directory so
+/// this device keeps one LocalSend identity across launches.
+///
+/// Desktop calls [`zmanager_localsend::LocalSendRegistry::set_identity_dir`]
+/// directly; this is that same method, reachable from Swift and Kotlin. Only
+/// the directory differs per platform — the persistence itself is one
+/// implementation in `localsend-rs`.
+#[allow(non_snake_case)]
+pub fn localsendSetIdentityDir(directory: String) -> Result<(), ZmanagerGuiError> {
+    zmanager_localsend::registry().set_identity_dir(PathBuf::from(directory)).map_err(map_localsend_error)
+}
+
 #[allow(non_snake_case)]
 pub fn localsendDiscover(request: DiscoverRequest) -> Result<Vec<DeviceInfoDto>, ZmanagerGuiError> {
     let native = zmanager_localsend::DiscoverRequest { alias: request.alias, port: request.port, https: request.https, timeout_ms: request.timeout_ms };

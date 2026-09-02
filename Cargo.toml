@@ -41,6 +41,14 @@ zmanager-ffi = { path = "crates/zmanager-ffi", version = "2.1.2" }
 zmanager-wim = { path = "crates/zmanager-wim", version = "2.1.2" }
 zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.1.2" }
 
+# Keep the TZAP volume-name parser in lockstep with the engine checkout. The
+# parser must treat non-ASCII sibling filenames as opaque UTF-8 when checking
+# for the `.tzap` suffix; the published 0.2.3 crate slices that suffix at a
+# byte offset and can panic while creating an archive in a directory that
+# contains an unrelated Unicode filename.
+[patch.crates-io]
+tzap-core = { path = "../tzap/crates/tzap-core" }
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

@@ -28,6 +28,15 @@ static REGISTRY: OnceLock<Arc<LocalSendRegistry>> = OnceLock::new();
 pub struct LocalSendRegistry {
     runtime: tokio::runtime::Runtime,
     state: Mutex<RegistryState>,
+    /// The process-wide `LocalSend` TLS identity. It must be shared by the
+    /// receiver, discovery clients, and send clients so peers see one stable
+    /// certificate instead of a new client identity per operation.
+    tls_certificate: Mutex<Option<localsend_rs::TlsCertificate>>,
+    /// Where that identity is persisted, once a shell has told us where its
+    /// application data lives. Set it with
+    /// [`LocalSendRegistry::set_identity_dir`]; until then the identity lives
+    /// only as long as this process.
+    identity_dir: Mutex<Option<PathBuf>>,
 }
 
 #[derive(Default)]
@@ -61,6 +70,8 @@ pub fn registry() -> Arc<LocalSendRegistry> {
                     .build()
                     .expect("zmanager-localsend runtime failed to start"),
                 state: Mutex::new(RegistryState::default()),
+                tls_certificate: Mutex::new(None),
+                identity_dir: Mutex::new(None),
             })
         })
         .clone()
@@ -111,6 +122,67 @@ fn default_port() -> u16 {
 }
 
 impl LocalSendRegistry {
+    /// Tells the registry where to persist this device's `LocalSend` identity.
+    ///
+    /// In `LocalSend` a device *is* its certificate fingerprint: peers store it,
+    /// de-duplicate their device lists on it, and pin it for later
+    /// connections. An identity that is regenerated per launch therefore makes
+    /// `ZManager` a brand-new device on every start — a fresh row in every
+    /// peer's list, and a pin that can never match — so the shells hand us a
+    /// directory that outlives the process. `directory` is created if needed;
+    /// the private key inside it is written owner-only.
+    ///
+    /// Call this once during startup, before any discover/receive/send. The
+    /// certificate is materialised here so a bad path fails at configuration
+    /// time rather than midway through a transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the identity cannot be read or written, or if an
+    /// identity has already been materialised for this process — one process
+    /// announcing two fingerprints is exactly the split this method exists to
+    /// prevent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the TLS certificate mutex is poisoned.
+    pub fn set_identity_dir(&self, directory: impl Into<PathBuf>) -> BridgeResult<()> {
+        let directory = directory.into();
+        let mut certificate = self.tls_certificate.lock().expect("TLS certificate lock poisoned");
+        if certificate.is_some() {
+            return Err(LocalSendBridgeError::InvalidRequest(
+                "the LocalSend identity is already in use; set the identity directory before discovering, receiving or sending".to_owned(),
+            ));
+        }
+
+        let loaded = localsend_rs::load_or_generate_tls_certificate(directory.join("certificate.pem"), directory.join("private-key.pem"))?;
+        *self.identity_dir.lock().expect("identity directory lock poisoned") = Some(directory);
+        *certificate = Some(loaded);
+        Ok(())
+    }
+
+    /// This process's `LocalSend` identity, loaded from the configured directory
+    /// on first use.
+    ///
+    /// Without [`Self::set_identity_dir`] the identity is generated in memory
+    /// and lasts only for this process. That still works, but every restart
+    /// looks like a new device to peers, so shells are expected to configure a
+    /// directory at startup.
+    fn client_certificate(&self) -> BridgeResult<localsend_rs::TlsCertificate> {
+        let mut certificate = self.tls_certificate.lock().expect("TLS certificate lock poisoned");
+        if let Some(certificate) = certificate.as_ref() {
+            return Ok(certificate.clone());
+        }
+
+        let directory = self.identity_dir.lock().expect("identity directory lock poisoned").clone();
+        let loaded = match directory {
+            Some(directory) => localsend_rs::load_or_generate_tls_certificate(directory.join("certificate.pem"), directory.join("private-key.pem"))?,
+            None => localsend_rs::generate_tls_certificate()?,
+        };
+        *certificate = Some(loaded.clone());
+        Ok(loaded)
+    }
+
     /// Starts a `LocalSend` receiver with the requested configuration.
     ///
     /// # Errors
@@ -136,7 +208,7 @@ impl LocalSendRegistry {
             builder = builder.pin(pin.clone());
         }
         if request.https {
-            let cert = localsend_rs::generate_tls_certificate()?;
+            let cert = self.client_certificate()?;
             builder = builder.tls_certificate(cert);
         }
 
@@ -326,27 +398,79 @@ impl LocalSendRegistry {
     /// Panics if the discovery result mutex is poisoned or the Tokio runtime
     /// cannot synchronously drive the discovery task.
     pub fn discover(&self, request: DiscoverRequest) -> BridgeResult<Vec<DiscoveredDevice>> {
+        let own_fingerprint = self.state.lock().expect("registry lock poisoned").server.as_ref().map(|server| server.device().fingerprint.clone());
+        let client_certificate = request.https.then(|| self.client_certificate()).transpose()?;
+
         self.runtime.block_on(async move {
-            use localsend_rs::{Discovery, MulticastDiscovery};
+            use localsend_rs::{Discovery, HttpDiscovery, MulticastDiscovery};
 
             let found: Arc<Mutex<Vec<DeviceInfo>>> = Arc::new(Mutex::new(Vec::new()));
             let sink = found.clone();
 
             let protocol = if request.https { Protocol::Https } else { Protocol::Http };
-            let device = DeviceInfoBuilder::new(request.alias, request.port).protocol(protocol).build();
+            let device = DeviceInfoBuilder::new(request.alias.clone(), request.port).protocol(protocol).build();
             let mut discovery = MulticastDiscovery::new_with_device(device);
+            if let Some(certificate) = client_certificate.clone() {
+                discovery.set_client_certificate(certificate);
+            }
             discovery.on_discovered(move |found_device| {
                 let mut guard = sink.lock().expect("discovery result lock poisoned");
                 if !guard.iter().any(|existing| existing.fingerprint == found_device.fingerprint) {
                     guard.push(found_device);
                 }
             });
-            discovery.start().await?;
-            discovery.announce_presence().await?;
-            tokio::time::sleep(std::time::Duration::from_millis(request.timeout_ms)).await;
-            discovery.stop();
 
-            let devices = found.lock().expect("discovery result lock poisoned").clone();
+            // LocalSend's multicast announcement is the fast path, but it is
+            // routinely unavailable across VM/NAT boundaries and on networks
+            // that suppress multicast. The protocol also defines the HTTP
+            // `/info` subnet scan for exactly that case. Run both paths in the
+            // same bounded discovery request so the UI does not depend on a
+            // particular network transport.
+            let multicast = async {
+                discovery.start().await?;
+                discovery.announce_presence().await?;
+                tokio::time::sleep(std::time::Duration::from_millis(request.timeout_ms)).await;
+                discovery.stop();
+                Ok::<(), localsend_rs::error::LocalSendError>(())
+            };
+
+            let http = async {
+                let local_ips = localsend_rs::local_ipv4_addresses()?;
+                let mut scans = Vec::with_capacity(local_ips.len());
+                for local_ip in local_ips {
+                    let scanner = match client_certificate.as_ref() {
+                        Some(certificate) => HttpDiscovery::new_with_client_certificate(request.alias.clone(), request.port, protocol, certificate)?,
+                        None => HttpDiscovery::new(request.alias.clone(), request.port, protocol)?,
+                    };
+                    let base_ip = local_ip.to_string();
+                    let timeout = std::time::Duration::from_millis(request.timeout_ms);
+                    scans.push(tokio::spawn(async move { scanner.scan_subnet_within(&base_ip, timeout).await }));
+                }
+
+                let mut devices = Vec::new();
+                for scan in scans {
+                    if let Ok(Ok(outcome)) = scan.await {
+                        for device in outcome.devices {
+                            if !devices.iter().any(|existing: &DeviceInfo| existing.fingerprint == device.fingerprint) {
+                                devices.push(device);
+                            }
+                        }
+                    }
+                }
+                Ok::<Vec<DeviceInfo>, localsend_rs::error::LocalSendError>(devices)
+            };
+
+            let (multicast_result, http_result) = tokio::join!(multicast, http);
+            multicast_result?;
+
+            let mut guard = found.lock().expect("discovery result lock poisoned");
+            for device in http_result? {
+                if !guard.iter().any(|existing| existing.fingerprint == device.fingerprint) {
+                    guard.push(device);
+                }
+            }
+
+            let devices = exclude_self_devices(guard.clone(), own_fingerprint.as_deref());
             Ok(devices.into_iter().map(DiscoveredDevice::from).collect())
         })
     }
@@ -376,6 +500,7 @@ impl LocalSendRegistry {
         let self_port = request.self_port;
         let https = request.https;
         let target: DeviceInfo = request.target.into();
+        let client_certificate = (https || target.protocol == Protocol::Https).then(|| self.client_certificate()).transpose()?;
         let file_path = request.file_path;
         let pin = request.pin;
 
@@ -395,7 +520,14 @@ impl LocalSendRegistry {
             // trust is established by the fingerprint shown to the user at
             // send time, not by a CA chain).
             let client = if matches!(target.protocol, Protocol::Https) {
-                LocalSendClient::with_trust_policy(self_device, TlsTrustPolicy::PinnedFingerprint(target.fingerprint.clone()))?
+                match client_certificate.as_ref() {
+                    Some(certificate) => LocalSendClient::with_trust_policy_and_client_certificate(
+                        self_device,
+                        TlsTrustPolicy::PinnedFingerprint(target.fingerprint.clone()),
+                        certificate,
+                    )?,
+                    None => LocalSendClient::with_trust_policy(self_device, TlsTrustPolicy::PinnedFingerprint(target.fingerprint.clone()))?,
+                }
             } else {
                 LocalSendClient::new(self_device)
             };
@@ -534,6 +666,10 @@ fn default_discover_timeout_ms() -> u64 {
     3_000
 }
 
+fn exclude_self_devices(devices: Vec<DeviceInfo>, own_fingerprint: Option<&str>) -> Vec<DeviceInfo> {
+    devices.into_iter().filter(|device| own_fingerprint != Some(device.fingerprint.as_str())).collect()
+}
+
 #[derive(Debug, Serialize)]
 pub struct TransferFile {
     pub id: String,
@@ -638,4 +774,43 @@ pub struct SendFileResult {
 #[derive(Debug, Deserialize)]
 pub struct CancelSendRequest {
     pub send_id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_results_exclude_the_running_receiver_identity() {
+        let own_fingerprint = "own-fingerprint".to_owned();
+        let devices = vec![
+            DeviceInfo {
+                alias: "ZManager Desktop".to_owned(),
+                version: "2.1".to_owned(),
+                device_model: Some("macos".to_owned()),
+                device_type: None,
+                fingerprint: own_fingerprint.clone(),
+                port: default_port(),
+                protocol: Protocol::Http,
+                download: false,
+                ip: Some("10.211.55.2".to_owned()),
+            },
+            DeviceInfo {
+                alias: "Lovely Melon".to_owned(),
+                version: "2.1".to_owned(),
+                device_model: Some("Windows".to_owned()),
+                device_type: None,
+                fingerprint: "remote-fingerprint".to_owned(),
+                port: default_port(),
+                protocol: Protocol::Https,
+                download: false,
+                ip: Some("10.211.55.8".to_owned()),
+            },
+        ];
+
+        let filtered = exclude_self_devices(devices, Some(own_fingerprint.as_str()));
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].alias, "Lovely Melon");
+    }
 }

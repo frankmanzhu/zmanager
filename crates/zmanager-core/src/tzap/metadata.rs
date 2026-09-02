@@ -29,7 +29,30 @@ pub(crate) struct CapturedPortableFileMetadata {
     pub(crate) macos_identity: Option<tzap_core::macos_metadata::MacosMetadataIdentity>,
 }
 
+const METADATA_CAPTURE_ATTEMPTS: usize = 3;
+
+fn with_metadata_capture_retry<T>(mut capture: impl FnMut() -> Result<T, TzapError>) -> Result<T, TzapError> {
+    for attempt in 0..METADATA_CAPTURE_ATTEMPTS {
+        match capture() {
+            Ok(value) => return Ok(value),
+            Err(error)
+                if matches!(&error, TzapError::Io { source, .. } if source.to_string() == "input changed during metadata capture")
+                    && attempt + 1 < METADATA_CAPTURE_ATTEMPTS =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    unreachable!("metadata capture retry loop must return from every attempt")
+}
+
 pub(crate) fn portable_file_metadata(path: &Path) -> Result<CapturedPortableFileMetadata, TzapError> {
+    with_metadata_capture_retry(|| portable_file_metadata_once(path))
+}
+
+fn portable_file_metadata_once(path: &Path) -> Result<CapturedPortableFileMetadata, TzapError> {
     let metadata = fs::symlink_metadata(path).map_err(|source| TzapError::Io { path: path.to_path_buf(), source })?;
     let source_os = source_os_label().to_owned();
     let created = metadata.created().ok().and_then(system_time_to_archive_timestamp).or({
@@ -236,4 +259,37 @@ pub(crate) fn write_symlink(_target: &Path, destination_path: &Path) -> Result<(
 
 pub(crate) fn write_hardlink(source_path: &Path, destination_path: &Path) -> Result<(), TzapError> {
     fs::hard_link(source_path, destination_path).map_err(|source| TzapError::Io { path: destination_path.to_path_buf(), source })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn transient_metadata_capture_error() -> TzapError {
+        TzapError::Io { path: Path::new("input.txt").to_path_buf(), source: std::io::Error::other("input changed during metadata capture") }
+    }
+
+    #[test]
+    fn transient_metadata_capture_race_is_retried() {
+        let mut attempts = 0;
+        let result = with_metadata_capture_retry(|| {
+            attempts += 1;
+            if attempts == 1 { Err(transient_metadata_capture_error()) } else { Ok("captured") }
+        });
+
+        assert_eq!(result.unwrap(), "captured");
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn persistent_metadata_capture_race_still_fails_after_retry_budget() {
+        let mut attempts = 0;
+        let result = with_metadata_capture_retry(|| {
+            attempts += 1;
+            Err::<(), _>(transient_metadata_capture_error())
+        });
+
+        assert!(result.is_err());
+        assert_eq!(attempts, 3);
+    }
 }

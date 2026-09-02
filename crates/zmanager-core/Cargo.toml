@@ -61,13 +61,9 @@ zstd = { version = "0.13.3", features = ["zstdmt"] }
 # `rust-lzo` (GPL-2.0). XZ, LZMA, and LZO are instead supplied under Apache-2.0 / MIT
 # by `squashfs_backend::XzCapableCompressor`, backed by `lzma-rust2` and `lzo`.
 backhand = { version = "0.25", default-features = false, features = ["gzip", "zstd", "lz4", "parallel"] }
-# Patched fork: APFS symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/4),
-# XAR symlink target support (upstream PR https://github.com/Dil4rd/dpp/pull/5), and XAR
-# <name enctype="base64"> decoding (non-ASCII filenames; not yet filed upstream — pushed to
-# frankmanzhu/dpp on branch `xar-name-base64-enctype` instead, to avoid piling a third PR onto
-# Dil4rd/dpp while PR #5 is still unreviewed), combined on the `zmanager-integration` branch
-# since zmanager needs all three before they merge. Switch back to `dpp = "0.4.2"` once upstream
-# releases all three fixes.
+# Upstream `dev` now contains the APFS symlink fix and XAR PR #5. The fork's
+# `zmanager-integration` branch adds the focused XAR <name enctype="base64">
+# filename fix from `xar-name-base64-enctype` until that change is upstreamed.
 dpp = { git = "https://github.com/frankmanzhu/dpp", branch = "zmanager-integration" }
 delharc = { version = "0.8.0", default-features = false, features = ["std", "lh1", "lz", "lhx"] }
 # Forensic disk-image stack: VHD/VMDK containers, MBR/GPT volume systems, and

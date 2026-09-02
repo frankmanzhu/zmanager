@@ -15,7 +15,8 @@ mod tests;
 
 pub use ops::archive::{detectArchive, healthcheck, listArchive, listFormats, materializePreview, testArchive};
 pub use ops::localsend::{
-    localsendCancelSend, localsendDiscover, localsendPollEvents, localsendRespondToTransfer, localsendSendFile, localsendStartReceiver, localsendStopReceiver,
+    localsendCancelSend, localsendDiscover, localsendPollEvents, localsendRespondToTransfer, localsendSendFile, localsendSetIdentityDir,
+    localsendStartReceiver, localsendStopReceiver,
 };
 pub use ops::tzap::{
     createTzapSelfSignedIdentity, inspectTzapX509PublicNoKeySigner, inspectTzapX509Signer, tzap_auth_account_url_json, tzap_auth_forget_json,
