@@ -2630,6 +2630,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 [[package]]
 name = "localsend-rs"
 version = "0.1.2"
+source = "git+https://github.com/frankmanzhu/localsend-rs.git?rev=08e337e#08e337e2921f5fcc639cb49cee359c7ba9bdc0e4"
 dependencies = [
  "anyhow",
  "async-stream",

@@ -11,11 +11,10 @@ repository.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-# Vendored fork of CrossCopy/localsend-rs (MIT) — see NOTICE / THIRD_PARTY_NOTICES.md.
-# `path` dependency during active co-development; switch to a pinned git tag
-# once the fork stabilizes, matching the pinned-checkout pattern zmanager-mobile
-# already uses for its own sibling `zmanager` dependency.
-localsend-rs = { path = "../../../localsend-rs", default-features = false, features = [
+# Fork of CrossCopy/localsend-rs (MIT) — see NOTICE / THIRD_PARTY_NOTICES.md.
+# Pin the exact fork revision so desktop and CI consume the same reviewed
+# implementation instead of whichever sibling checkout happens to be present.
+localsend-rs = { git = "https://github.com/frankmanzhu/localsend-rs.git", rev = "08e337e", default-features = false, features = [
     "https",
 ] }
 serde = { version = "1", features = ["derive"] }
