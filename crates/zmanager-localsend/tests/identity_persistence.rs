@@ -18,7 +18,7 @@ fn identity_on_disk(directory: &Path) -> localsend_rs::TlsCertificate {
 }
 
 #[test]
-fn the_identity_is_persisted_and_reused_across_restarts() {
+fn identity_persists_and_reconfiguration_is_refused() {
     let directory = tempfile::tempdir().expect("temporary application-data directory");
 
     zmanager_localsend::registry().set_identity_dir(directory.path()).expect("configure the identity directory");
@@ -31,18 +31,8 @@ fn the_identity_is_persisted_and_reused_across_restarts() {
 
     assert!(directory.path().join("certificate.pem").exists());
     assert!(directory.path().join("private-key.pem").exists());
-}
-
-#[test]
-fn configuring_the_directory_twice_is_refused_rather_than_splitting_the_identity() {
-    let directory = tempfile::tempdir().expect("temporary application-data directory");
     let other = tempfile::tempdir().expect("a second directory");
 
-    // Whichever of the two tests in this binary ran first already configured
-    // the singleton, so the first call here may legitimately fail; what must
-    // never happen is a second directory silently taking effect and leaving
-    // this process announcing two different fingerprints.
-    let _ = zmanager_localsend::registry().set_identity_dir(directory.path());
     let second = zmanager_localsend::registry().set_identity_dir(other.path());
 
     assert!(second.is_err(), "reconfiguring an in-use identity must be refused");
