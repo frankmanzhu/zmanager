@@ -789,6 +789,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -827,6 +829,8 @@ fun uniffi_zmanager_ffi_checksum_func_localsendpollevents(
 fun uniffi_zmanager_ffi_checksum_func_localsendrespondtotransfer(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_localsendsendfile(
+): Short
+fun uniffi_zmanager_ffi_checksum_func_localsendsetidentitydir(
 ): Short
 fun uniffi_zmanager_ffi_checksum_func_localsendstartreceiver(
 ): Short
@@ -951,6 +955,8 @@ fun uniffi_zmanager_ffi_fn_func_localsendrespondtotransfer(`request`: RustBuffer
 ): Unit
 fun uniffi_zmanager_ffi_fn_func_localsendsendfile(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_zmanager_ffi_fn_func_localsendsetidentitydir(`directory`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 fun uniffi_zmanager_ffi_fn_func_localsendstartreceiver(`request`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 fun uniffi_zmanager_ffi_fn_func_localsendstopreceiver(uniffi_out_err: UniffiRustCallStatus, 
@@ -1165,6 +1171,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_localsendsendfile() != 46136.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_zmanager_ffi_checksum_func_localsendsetidentitydir() != 34955.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_zmanager_ffi_checksum_func_localsendstartreceiver() != 29828.toShort()) {
@@ -3787,6 +3796,15 @@ public object FfiConverterSequenceTypeQueuedEvent: FfiConverterRustBuffer<List<Q
 }
     )
     }
+    
+
+    @Throws(ZmanagerGuiException::class) fun `localsendSetIdentityDir`(`directory`: kotlin.String)
+        = 
+    uniffiRustCallWithError(ZmanagerGuiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_zmanager_ffi_fn_func_localsendsetidentitydir(
+        FfiConverterString.lower(`directory`),_status)
+}
+    
     
 
     @Throws(ZmanagerGuiException::class) fun `localsendStartReceiver`(`request`: StartReceiverRequest)

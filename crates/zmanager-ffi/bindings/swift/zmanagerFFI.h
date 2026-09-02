@@ -314,6 +314,11 @@ void uniffi_zmanager_ffi_fn_func_localsendrespondtotransfer(RustBuffer request, 
 RustBuffer uniffi_zmanager_ffi_fn_func_localsendsendfile(RustBuffer request, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LOCALSENDSETIDENTITYDIR
+#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LOCALSENDSETIDENTITYDIR
+void uniffi_zmanager_ffi_fn_func_localsendsetidentitydir(RustBuffer directory, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LOCALSENDSTARTRECEIVER
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_FN_FUNC_LOCALSENDSTARTRECEIVER
 void uniffi_zmanager_ffi_fn_func_localsendstartreceiver(RustBuffer request, RustCallStatus *_Nonnull out_status
@@ -799,6 +804,12 @@ uint16_t uniffi_zmanager_ffi_checksum_func_localsendrespondtotransfer(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LOCALSENDSENDFILE
 #define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LOCALSENDSENDFILE
 uint16_t uniffi_zmanager_ffi_checksum_func_localsendsendfile(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LOCALSENDSETIDENTITYDIR
+#define UNIFFI_FFIDEF_UNIFFI_ZMANAGER_FFI_CHECKSUM_FUNC_LOCALSENDSETIDENTITYDIR
+uint16_t uniffi_zmanager_ffi_checksum_func_localsendsetidentitydir(void
     
 );
 #endif

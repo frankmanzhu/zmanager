@@ -4808,6 +4808,12 @@ public func localsendSendFile(request: SendFileRequest)throws  -> SendFileResult
     )
 })
 }
+public func localsendSetIdentityDir(directory: String)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
+    uniffi_zmanager_ffi_fn_func_localsendsetidentitydir(
+        FfiConverterString.lower(directory),$0
+    )
+}
+}
 public func localsendStartReceiver(request: StartReceiverRequest)throws   {try rustCallWithError(FfiConverterTypeZmanagerGuiError_lift) {
     uniffi_zmanager_ffi_fn_func_localsendstartreceiver(
         FfiConverterTypeStartReceiverRequest_lower(request),$0
@@ -5047,6 +5053,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_localsendsendfile() != 46136) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_zmanager_ffi_checksum_func_localsendsetidentitydir() != 34955) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_zmanager_ffi_checksum_func_localsendstartreceiver() != 29828) {

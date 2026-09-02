@@ -30,6 +30,11 @@ allow = [
     "MIT-0",
     # Unicode License v3 (ICU4X family: icu_*, zerovec, yoke, ...).
     "Unicode-3.0",
+    # CDLA-Permissive-2.0 is used by webpki-root-certs, pulled by the
+    # pinned LocalSend dependency through reqwest/rustls. It is a permissive
+    # certificate-data license and is reviewed as part of LocalSend's TLS
+    # dependency chain.
+    "CDLA-Permissive-2.0",
     # bzip2's classic BSD-style license (libbz2-rs-sys).
     "bzip2-1.0.6",
     # MPL-2.0 is the one weak copyleft in the tree: the uniffi binding
