@@ -89,8 +89,8 @@ fn cert_enroll_uses_local_service_and_updates_inventory() {
     let state_dir = temp.path("state");
     sign_in_with_fake_relay(&temp, &state_dir);
 
-    let list = zm().args(["auth", "cert", "list", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
-    assert_success("cert list", &list);
+    let list = zm().args(["tzap", "certs", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
+    assert_success("tzap certs", &list);
     assert_eq!(String::from_utf8_lossy(&list.stdout).trim(), "{\"certificates\":[]}");
 
     let enroll = zm().args(["auth", "cert", "enroll", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
@@ -99,8 +99,8 @@ fn cert_enroll_uses_local_service_and_updates_inventory() {
     assert!(stdout.contains("\"operation\":\"cert_enroll\""));
     assert!(stdout.contains("\"certificate_id\""));
 
-    let list = zm().args(["auth", "cert", "list", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
-    assert_success("cert list after enroll", &list);
+    let list = zm().args(["tzap", "certs", "--state-dir", state_dir.to_str().unwrap(), "--json"]).output().unwrap();
+    assert_success("tzap certs after enroll", &list);
     let stdout = String::from_utf8_lossy(&list.stdout);
     assert!(stdout.contains("\"certificates\":[{"));
     assert!(stdout.contains("\"state\":\"active\""));
@@ -177,7 +177,7 @@ fn verify_accepts_custom_trust_root_certificate_file() {
     fs::write(&payload, br#"{"tzap_payload_version":1,"title":"Root cert verification"}"#).unwrap();
     let sign = zm()
         .args([
-            "auth",
+            "tzap",
             "sign",
             payload.to_str().unwrap(),
             "--state-dir",
@@ -209,7 +209,7 @@ fn verify_accepts_custom_trust_root_certificate_file() {
     let root_path = temp.path("root.der");
     fs::write(&root_path, root_der).unwrap();
 
-    let verify = zm().args(["auth", "verify", envelope.to_str().unwrap(), "--custom-trust-root-cert", root_path.to_str().unwrap(), "--json"]).output().unwrap();
+    let verify = zm().args(["tzap", "verify", envelope.to_str().unwrap(), "--custom-trust-root-cert", root_path.to_str().unwrap(), "--json"]).output().unwrap();
     assert_success("verify with root cert", &verify);
     let stdout = String::from_utf8_lossy(&verify.stdout);
     assert!(stdout.contains("\"state\":\"cryptographically_intact_offline\""));
@@ -222,7 +222,7 @@ fn verify_json_reports_invalid_without_claiming_official_validity() {
     let envelope = temp.path("bad-envelope.json");
     fs::write(&envelope, br#"{"not":"a tzap envelope"}"#).unwrap();
 
-    let output = zm().args(["auth", "verify", envelope.to_str().unwrap(), "--json"]).output().unwrap();
+    let output = zm().args(["tzap", "verify", envelope.to_str().unwrap(), "--json"]).output().unwrap();
     assert_failure("verify", &output);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"state\":\"invalid\""));

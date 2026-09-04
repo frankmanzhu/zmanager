@@ -889,7 +889,8 @@ fn hosted_tzap_cert_enroll_json(request_json: &str) -> String {
         let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
         let transport = crate::reqwest_transport::ReqwestTransport;
         let enrollment_client = crate::enrollment_client::TzapEnrollmentClient::local_staging_server(&service_base_url, &transport);
-        let lifecycle_client = crate::certificate_lifecycle::TzapCertificateLifecycleClient::local_staging_server(&service_base_url, &service_base_url, &transport);
+        let lifecycle_client =
+            crate::certificate_lifecycle::TzapCertificateLifecycleClient::local_staging_server(&service_base_url, &service_base_url, &transport);
         let validator =
             FfiTrustedEnrollmentCertificateValidator { trusted_root_sha256, trusted_root_der, options: crate::trust::TzapCertificateProfileOptions::default() };
         // Reuses the device's existing signing key and renews when it

@@ -1,10 +1,11 @@
 # fish completion for zm
 
-set -l zm_commands create extract list test plan formats auth me cert device sign verify contact share doctor completions help
-set -l zm_help_topics create extract list test plan formats auth me cert device sign verify contact share doctor completions
-set -l zm_auth_commands login callback status forget account
-set -l zm_cert_commands list enroll renew revoke
-set -l zm_device_commands retire
+set -l zm_commands create extract list test plan formats tzap auth doctor completions help
+set -l zm_help_topics create extract list test plan formats tzap sign verify contact share certs auth me cert device doctor completions
+set -l zm_tzap_commands sign verify contact share certs
+set -l zm_auth_commands login callback status forget account me cert device
+set -l zm_cert_commands enroll renew revoke
+set -l zm_device_commands retire revoke
 set -l zm_contact_commands keygen export import list remove
 set -l zm_completion_shells bash zsh fish powershell
 
@@ -32,14 +33,8 @@ complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a list -d "Lis
 complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a test -d "Test archive readability"
 complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a plan -d "Show planned archive entries"
 complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a formats -d "Show supported formats"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a auth -d "Hosted TZAP auth handoff helpers"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a me -d "Show the local TZAP session summary"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a cert -d "Manage local TZAP certificate inventory"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a device -d "Retire local TZAP device material"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a sign -d "Sign a TZAP document JSON payload"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a verify -d "Verify a TZAP document envelope"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a contact -d "Manage TZAP contact cards"
-complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a share -d "Create a TZAP archive for contacts"
+complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a tzap -d "Sign, verify, and share TZAP documents"
+complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a auth -d "Online identity and certificate enrollment"
 complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a doctor -d "Verify the archive engine"
 complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a completions -d "Print shell completion scripts"
 complete -c zm -n "not __fish_seen_subcommand_from $zm_commands" -a help -d "Show help for a command"
@@ -78,6 +73,7 @@ complete -c zm -n "__fish_seen_subcommand_from create" -l recipient-cert -r -d "
 complete -c zm -n "__fish_seen_subcommand_from create" -l signing-cert -r -d "Sign TZAP RootAuth with an X.509 cert or PEM bundle"
 complete -c zm -n "__fish_seen_subcommand_from create" -l signing-private-key -r -d "Private key for --signing-cert"
 complete -c zm -n "__fish_seen_subcommand_from create" -l signing-chain -r -d "Extra intermediate certificate chain for --signing-cert"
+complete -c zm -n "__fish_seen_subcommand_from create" -l signing-identity -d "Sign TZAP RootAuth with a local enrolled certificate"
 complete -c zm -n "__fish_seen_subcommand_from create" -s j -l junk-paths -d "Store basenames only"
 complete -c zm -n "__fish_seen_subcommand_from create" -s y -l preserve-symlinks -d "Store symlink entries where supported"
 complete -c zm -n "__fish_seen_subcommand_from create" -l follow-symlinks -d "Archive symlink target contents"
@@ -139,6 +135,7 @@ complete -c zm -n "__fish_seen_subcommand_from plan" -l exclude -r -d "Exclude a
 complete -c zm -n "__fish_seen_subcommand_from plan" -l exclude-from -r -d "Read exclude globs from file"
 complete -c zm -n "__fish_seen_subcommand_from plan" -l json -d "Emit machine-readable JSON"
 
+complete -c zm -n "__fish_seen_subcommand_from tzap; and not __fish_seen_subcommand_from $zm_tzap_commands" -a "$zm_tzap_commands" -d "TZAP command"
 complete -c zm -n "__fish_seen_subcommand_from auth; and not __fish_seen_subcommand_from $zm_auth_commands" -a "$zm_auth_commands" -d "Auth command"
 complete -c zm -n "__fish_seen_subcommand_from cert; and not __fish_seen_subcommand_from $zm_cert_commands" -a "$zm_cert_commands" -d "Certificate command"
 complete -c zm -n "__fish_seen_subcommand_from device; and not __fish_seen_subcommand_from $zm_device_commands" -a "$zm_device_commands" -d "Device command"
@@ -156,19 +153,22 @@ complete -c zm -n "__fish_seen_subcommand_from auth" -l callback-url -r -d "Full
 complete -c zm -n "__fish_seen_subcommand_from auth" -l handoff-code -r -d "One-time handoff code"
 complete -c zm -n "__fish_seen_subcommand_from auth" -l relay-body -r -d "Relay JSON file"
 
-complete -c zm -n "__fish_seen_subcommand_from auth me cert device sign contact share" -l state-dir -r -d "Store local state in directory"
-complete -c zm -n "__fish_seen_subcommand_from auth me cert device sign contact share" -l account-key -r -d "Local account inventory key"
-complete -c zm -n "__fish_seen_subcommand_from auth me cert device sign verify contact share" -l json -d "Emit machine-readable JSON"
-complete -c zm -n "__fish_seen_subcommand_from cert sign contact" -l certificate-id -r -d "Certificate id"
+complete -c zm -n "__fish_seen_subcommand_from auth me cert device sign contact share certs" -l state-dir -r -d "Store local state in directory"
+complete -c zm -n "__fish_seen_subcommand_from auth me cert device sign contact share certs" -l account-key -r -d "Local account inventory key"
+complete -c zm -n "__fish_seen_subcommand_from auth me cert device sign verify contact share certs" -l json -d "Emit machine-readable JSON"
+complete -c zm -n "__fish_seen_subcommand_from cert sign contact share" -l certificate-id -r -d "Certificate id"
 complete -c zm -n "__fish_seen_subcommand_from contact" -l label -r -d "Local recipient key label"
 complete -c zm -n "__fish_seen_subcommand_from cert" -l service-base-url -r -d "Hosted TZAP sign API URL"
 complete -c zm -n "__fish_seen_subcommand_from cert" -l trusted-root-cert -r -d "Trusted staging root certificate"
 complete -c zm -n "__fish_seen_subcommand_from cert" -l requested-validity-seconds -r -d "Requested certificate lifetime"
+complete -c zm -n "__fish_seen_subcommand_from device" -l device-id -r -d "Sign device id for revoke"
+complete -c zm -n "__fish_seen_subcommand_from device" -l service-base-url -r -d "Hosted TZAP sign API URL"
 complete -c zm -n "__fish_seen_subcommand_from sign contact" -l output -r -d "Destination JSON file"
 complete -c zm -n "__fish_seen_subcommand_from verify contact" -l custom-trust-root -r -d "Custom root fingerprint"
 complete -c zm -n "__fish_seen_subcommand_from verify contact" -l custom-trust-root-cert -r -d "Custom root certificate"
+complete -c zm -n "__fish_seen_subcommand_from verify" -l status-response -r -d "Apply a status JSON response"
+complete -c zm -n "__fish_seen_subcommand_from verify" -l time -r -d "Verification time"
 complete -c zm -n "__fish_seen_subcommand_from share" -l contact -r -d "Accepted contact id"
-complete -c zm -n "__fish_seen_subcommand_from share" -l certificate-id -r -d "Active local certificate used for RootAuth signing"
 complete -c zm -n "__fish_seen_subcommand_from share" -l force -d "Replace existing output archive"
 
 complete -c zm -n "__fish_seen_subcommand_from formats doctor" -s h -l help -d "Show help"

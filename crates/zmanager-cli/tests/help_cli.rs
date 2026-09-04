@@ -98,6 +98,7 @@ const CREATE_FLAGS: &[&str] = &[
     "--signing-cert <file>",
     "--signing-private-key <file>",
     "--signing-chain <file>",
+    "--signing-identity [id]",
 ];
 
 const EXTRACT_FLAGS: &[&str] = &[
@@ -407,6 +408,7 @@ fn completion_files_cover_public_commands_and_hide_legacy_commands() {
         "public-no-key",
         "volume-size",
         "signing-cert",
+        "signing-identity",
         "trusted-ca-cert",
     ] {
         assert_contains(COMPLETION_BASH, &format!("--{required_flag}"));
@@ -443,16 +445,16 @@ fn static_completion_files_capture_navigation_contract() {
 
     assert_contains(
         COMPLETION_BASH,
-        "local help_topics=\"create extract list test plan formats auth me cert device sign verify contact share doctor completions\"",
+        "local help_topics=\"create extract list test plan formats tzap sign verify contact share certs auth me cert device doctor completions\"",
     );
     assert_contains(
         COMPLETION_FISH,
-        "set -l zm_help_topics create extract list test plan formats auth me cert device sign verify contact share doctor completions",
+        "set -l zm_help_topics create extract list test plan formats tzap sign verify contact share certs auth me cert device doctor completions",
     );
     assert_contains(COMPLETION_ZSH, "help_topics=(");
     assert_contains(
         COMPLETION_POWERSHELL,
-        "$helpTopics = @(\"create\", \"extract\", \"list\", \"test\", \"plan\", \"formats\", \"auth\", \"me\", \"cert\", \"device\", \"sign\", \"verify\", \"contact\", \"share\", \"doctor\", \"completions\")",
+        "$helpTopics = @(\"create\", \"extract\", \"list\", \"test\", \"plan\", \"formats\", \"tzap\", \"sign\", \"verify\", \"contact\", \"share\", \"certs\", \"auth\", \"me\", \"cert\", \"device\", \"doctor\", \"completions\")",
     );
 }
 
@@ -492,9 +494,11 @@ run_case top zm h
 run_case help_topics zm help ""
 run_case list_options zm list --
 run_case create_options zm create --
+run_case tzap_commands zm tzap ""
 run_case auth_commands zm auth ""
-run_case cert_commands zm cert ""
-run_case contact_commands zm contact ""
+run_case cert_commands zm auth cert ""
+run_case device_commands zm auth device ""
+run_case contact_commands zm tzap contact ""
 run_case auth_options zm auth status --
 run_case completion_shells zm completions ""
 run_case list_files zm list ""
@@ -510,18 +514,26 @@ run_case list_files zm list ""
     assert_success("bash completion contract", &output);
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert_contains(&stdout, "top: help\n");
-    assert_contains(&stdout, "help_topics: create extract list test plan formats auth me cert device sign verify contact share doctor completions\n");
+    assert_contains(
+        &stdout,
+        "help_topics: create extract list test plan formats tzap sign verify contact share certs auth me cert device doctor completions\n",
+    );
     assert_contains(&stdout, "list_options: --help");
     assert_contains(&stdout, "--tree");
     assert_contains(&stdout, "create_options: --help");
     assert_contains(&stdout, "--exclude-from");
-    assert_contains(&stdout, "auth_commands: login callback status forget account\n");
-    assert_contains(&stdout, "cert_commands: list enroll renew revoke\n");
+    assert_contains(&stdout, "tzap_commands: sign verify contact share certs\n");
+    assert_contains(&stdout, "auth_commands: login callback status forget account me cert device\n");
+    assert_contains(&stdout, "cert_commands: enroll renew revoke\n");
+    assert_contains(&stdout, "device_commands: retire revoke\n");
     assert_contains(&stdout, "contact_commands: keygen export import list remove\n");
     assert_contains(&stdout, "auth_options: --help");
     assert_contains(&stdout, "completion_shells: bash zsh fish powershell\n");
     assert_contains(&stdout, "list_files: archive.zip\n");
-    assert_not_contains(&stdout, "help_topics: create extract list test plan formats auth me cert device sign verify contact share doctor completions help");
+    assert_not_contains(
+        &stdout,
+        "help_topics: create extract list test plan formats tzap sign verify contact share certs auth me cert device doctor completions help",
+    );
 }
 
 #[test]

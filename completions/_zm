@@ -1,7 +1,8 @@
 #compdef zm
 
 local -a commands help_topics global_options create_options extract_options list_options test_options plan_options
-local -a auth_options identity_options cert_options sign_options verify_options contact_options share_options
+local -a tzap_commands auth_commands cert_commands device_commands contact_commands
+local -a auth_options identity_options cert_options device_options sign_options verify_options contact_options share_options certs_options
 
 commands=(
   'create:Create an archive'
@@ -10,14 +11,8 @@ commands=(
   'test:Test archive readability'
   'plan:Show planned archive entries'
   'formats:Show supported formats'
-  'auth:Hosted TZAP auth handoff helpers'
-  'me:Show the local TZAP session summary'
-  'cert:Manage local TZAP certificate inventory'
-  'device:Retire local TZAP device material'
-  'sign:Sign a TZAP document JSON payload'
-  'verify:Verify a TZAP document envelope'
-  'contact:Manage TZAP contact cards'
-  'share:Create a TZAP archive for contacts'
+  'tzap:Sign, verify, and share TZAP documents'
+  'auth:Online identity and certificate enrollment'
   'doctor:Verify the archive engine'
   'completions:Print shell completion scripts'
   'help:Show help for a command'
@@ -30,17 +25,42 @@ help_topics=(
   'test:Test archive readability'
   'plan:Show planned archive entries'
   'formats:Show supported formats'
-  'auth:Hosted TZAP auth handoff helpers'
-  'me:Show the local TZAP session summary'
-  'cert:Manage local TZAP certificate inventory'
-  'device:Retire local TZAP device material'
+  'tzap:Sign, verify, and share TZAP documents'
   'sign:Sign a TZAP document JSON payload'
   'verify:Verify a TZAP document envelope'
   'contact:Manage TZAP contact cards'
   'share:Create a TZAP archive for contacts'
+  'certs:List the local TZAP certificate catalogue'
+  'auth:Online identity and certificate enrollment'
+  'me:Show the local TZAP session summary'
+  'cert:Enroll, renew, and revoke TZAP certificates'
+  'device:Manage local TZAP device material'
   'doctor:Verify the archive engine'
   'completions:Print shell completion scripts'
 )
+
+tzap_commands=(
+  'sign:Sign a TZAP document JSON payload'
+  'verify:Verify a TZAP document envelope'
+  'contact:Manage TZAP contact cards'
+  'share:Create a TZAP archive for contacts'
+  'certs:List the local TZAP certificate catalogue'
+)
+
+auth_commands=(
+  'login:Hosted TZAP auth login'
+  'callback:Process auth callback'
+  'status:Show auth status'
+  'forget:Forget local auth material'
+  'account:Show account URL'
+  'me:Show the local TZAP session summary'
+  'cert:Enroll, renew, and revoke TZAP certificates'
+  'device:Manage local TZAP device material'
+)
+
+cert_commands=(enroll renew revoke)
+device_commands=(retire revoke)
+contact_commands=(keygen export import list remove)
 
 global_options=(
   '(-h --help)'{-h,--help}'[Show help]'
@@ -95,6 +115,7 @@ create_options=(
   '--signing-cert[Sign TZAP RootAuth with an X.509 certificate]:certificate:_files'
   '--signing-private-key[Private key for --signing-cert]:key:_files'
   '--signing-chain[Intermediate certificate chain for --signing-cert]:certificate:_files'
+  '--signing-identity[Sign TZAP RootAuth with a local enrolled certificate]::certificate id:'
   '(-j --junk-paths)'{-j,--junk-paths}'[Store basenames only]'
   '(-y --preserve-symlinks)'{-y,--preserve-symlinks}'[Store symlink entries where supported]'
   '--follow-symlinks[Archive symlink target contents]'
@@ -196,6 +217,12 @@ cert_options=(
   '--requested-validity-seconds[Requested certificate lifetime]:seconds'
 )
 
+device_options=(
+  $identity_options
+  '--device-id[Sign device id for revoke]:id'
+  '--service-base-url[Hosted TZAP sign API URL]:url'
+)
+
 sign_options=(
   $identity_options
   '--certificate-id[Local enrolled certificate id]:id'
@@ -232,6 +259,10 @@ share_options=(
   '--force[Replace an existing output archive]'
 )
 
+certs_options=(
+  $identity_options
+)
+
 _zm_command() {
   local context state line
   _arguments -C $global_options '1:command:->command' '*::argument:->argument'
@@ -247,14 +278,25 @@ _zm_command() {
         list) _arguments $list_options '*:archive:_files' ;;
         test) _arguments $test_options '*:archive:_files' ;;
         plan) _arguments $plan_options '*:path:_files' ;;
-        auth) _arguments $auth_options '1:auth command:(login callback status forget account)' '*:argument:_files' ;;
-        me) _arguments $identity_options ;;
-        cert) _arguments $cert_options '1:certificate command:(list enroll renew revoke)' ;;
-        device) _arguments $identity_options '1:device command:(retire)' ;;
-        sign) _arguments $sign_options '1:input JSON:_files' ;;
-        verify) _arguments $verify_options '1:envelope JSON:_files' ;;
-        contact) _arguments $contact_options '1:contact command:(keygen export import list remove)' '*:argument:_files' ;;
-        share) _arguments $share_options '1:archive:_files' '*:path:_files' ;;
+        tzap)
+          case $words[2] in
+            sign) _arguments $sign_options '1:input JSON:_files' ;;
+            verify) _arguments $verify_options '1:envelope JSON:_files' ;;
+            contact) _arguments $contact_options '1:contact command:(keygen export import list remove)' '*:argument:_files' ;;
+            share) _arguments $share_options '1:archive:_files' '*:path:_files' ;;
+            certs) _arguments $certs_options ;;
+            *) _describe -t commands 'zm tzap command' tzap_commands ;;
+          esac
+          ;;
+        auth)
+          case $words[2] in
+            login|callback|status|forget|account) _arguments $auth_options '*:argument:_files' ;;
+            me) _arguments $identity_options ;;
+            cert) _arguments $cert_options '1:certificate command:(enroll renew revoke)' ;;
+            device) _arguments $device_options '1:device command:(retire revoke)' ;;
+            *) _describe -t commands 'zm auth command' auth_commands ;;
+          esac
+          ;;
         formats|doctor) _arguments '(-h --help)'{-h,--help}'[Show help]' '--json[Emit JSON]' ;;
         completions) _arguments '(-h --help)'{-h,--help}'[Show help]' '1:shell:(bash zsh fish powershell)' ;;
         help) _describe -t commands 'zm command' help_topics ;;

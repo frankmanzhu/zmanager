@@ -503,9 +503,8 @@ pub fn enroll_or_renew_device_certificate<T: TzapAuthHttpTransport>(
             };
             lifecycle_client.renew_certificate(validator, store, session, &renewal_request, &signing_key, &signing_key, &csr_der)
         }
-        None => {
-            enroll_device_certificate(enrollment_client, validator, store, session, request, &signing_key, &csr_der).map_err(TzapCertificateLifecycleError::Enrollment)
-        }
+        None => enroll_device_certificate(enrollment_client, validator, store, session, request, &signing_key, &csr_der)
+            .map_err(TzapCertificateLifecycleError::Enrollment),
     }
 }
 
@@ -941,10 +940,7 @@ mod tests {
         // and AcceptingLifecycleValidator accepts any chain, so only the
         // challenge response's own self-consistency (payload echo) matters.
         let transport = FakeLifecycleTransport::new(vec![
-            TzapAuthHttpResponse {
-                status_code: 200,
-                body: json!({"challenge_id": "challenge_1", "challenge_payload": Value::Null}).to_string().into_bytes(),
-            },
+            TzapAuthHttpResponse { status_code: 200, body: json!({"challenge_id": "challenge_1", "challenge_payload": Value::Null}).to_string().into_bytes() },
             TzapAuthHttpResponse { status_code: 200, body: json!({"certificate": enrollment_certificate_json()}).to_string().into_bytes() },
         ]);
         let enrollment_client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);

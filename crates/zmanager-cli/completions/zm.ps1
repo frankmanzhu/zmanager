@@ -11,8 +11,8 @@ Register-ArgumentCompleter -Native -CommandName zm -ScriptBlock {
         $wordToComplete = ""
     }
 
-    $commands = @("create", "extract", "list", "test", "plan", "formats", "auth", "me", "cert", "device", "sign", "verify", "contact", "share", "doctor", "completions", "help")
-    $helpTopics = @("create", "extract", "list", "test", "plan", "formats", "auth", "me", "cert", "device", "sign", "verify", "contact", "share", "doctor", "completions")
+    $commands = @("create", "extract", "list", "test", "plan", "formats", "tzap", "auth", "doctor", "completions", "help")
+    $helpTopics = @("create", "extract", "list", "test", "plan", "formats", "tzap", "sign", "verify", "contact", "share", "certs", "auth", "me", "cert", "device", "doctor", "completions")
     $shellValues = @("bash", "zsh", "fish", "powershell")
     $formatValues = @("zip", "tar.zst", "tzap", "aar", "7z", "tgz")
     $colorValues = @("auto", "always", "never")
@@ -20,9 +20,10 @@ Register-ArgumentCompleter -Native -CommandName zm -ScriptBlock {
     $overwriteValues = @("never", "always", "ask", "rename")
     $restoreValues = @("content", "portable", "same-os", "system")
     $volumeSizeValues = @("64k", "100m", "500m", "1g", "2g", "4g")
-    $authCommands = @("login", "callback", "status", "forget", "account")
-    $certCommands = @("list", "enroll", "renew", "revoke")
-    $deviceCommands = @("retire")
+    $tzapCommands = @("sign", "verify", "contact", "share", "certs")
+    $authCommands = @("login", "callback", "status", "forget", "account", "me", "cert", "device")
+    $certCommands = @("enroll", "renew", "revoke")
+    $deviceCommands = @("retire", "revoke")
     $contactCommands = @("keygen", "export", "import", "list", "remove")
 
     $globalOptions = @(
@@ -37,7 +38,7 @@ Register-ArgumentCompleter -Native -CommandName zm -ScriptBlock {
         "--no-hidden", "-i", "--include", "--exclude", "--exclude-from",
         "--format", "--method", "--level", "-0", "-1", "-2", "-3", "-4",
         "-5", "-6", "-7", "-8", "-9", "--store", "--solid", "--no-solid",
-        "--volume-size", "--recipient-cert", "--signing-cert", "--signing-private-key", "--signing-chain",
+        "--volume-size", "--recipient-cert", "--signing-cert", "--signing-private-key", "--signing-chain", "--signing-identity",
         "-j", "--junk-paths", "-y", "--preserve-symlinks",
         "--follow-symlinks", "--preserve-metadata", "-X", "--no-metadata",
         "-f", "--file", "--force", "--dry-run", "-T", "--test-after", "--encrypt",
@@ -63,20 +64,26 @@ Register-ArgumentCompleter -Native -CommandName zm -ScriptBlock {
         "--files-from", "--null", "--clean", "--no-ignore", "-i", "--include",
         "--exclude", "--exclude-from", "--json"
     )
+    $authVerbOptions = @("-h", "--help", "--print-url", "--state-dir", "--account-key", "--auth-base-url", "--account-base-url", "--client-id", "--redirect-uri", "--provider", "--org-id", "--state", "--callback-url", "--handoff-code", "--relay-body", "--json")
     $commandOptions = @{
         create = $createOptions
         extract = $extractOptions
         list = $listOptions
         test = $testOptions
         plan = $planOptions
-        auth = @("-h", "--help", "--print-url", "--state-dir", "--account-key", "--auth-base-url", "--account-base-url", "--client-id", "--redirect-uri", "--provider", "--org-id", "--state", "--callback-url", "--handoff-code", "--relay-body", "--json")
+        login = $authVerbOptions
+        callback = $authVerbOptions
+        status = $authVerbOptions
+        forget = $authVerbOptions
+        account = $authVerbOptions
         me = @("-h", "--help", "--state-dir", "--account-key", "--json")
         cert = @("-h", "--help", "--state-dir", "--account-key", "--certificate-id", "--service-base-url", "--trusted-root-cert", "--org-id", "--requested-validity-seconds", "--json")
-        device = @("-h", "--help", "--state-dir", "--account-key", "--json")
+        device = @("-h", "--help", "--state-dir", "--account-key", "--device-id", "--service-base-url", "--json")
         sign = @("-h", "--help", "--state-dir", "--account-key", "--certificate-id", "--output", "--claimed-signing-time", "--json")
         verify = @("-h", "--help", "--custom-trust-root", "--custom-trust-root-cert", "--status-response", "--time", "--json")
         contact = @("-h", "--help", "--state-dir", "--account-key", "--label", "--recipient-key-id", "--certificate-id", "--display-name", "--device-label", "--output", "--accept", "--custom-trust-root", "--custom-trust-root-cert", "--json")
         share = @("-h", "--help", "--state-dir", "--account-key", "--contact", "--certificate-id", "--force", "--json")
+        certs = @("-h", "--help", "--state-dir", "--account-key", "--json")
         formats = @("-h", "--help", "--json")
         doctor = @("-h", "--help", "--json")
         completions = @("-h", "--help")
@@ -169,12 +176,39 @@ Register-ArgumentCompleter -Native -CommandName zm -ScriptBlock {
 
     $previousWord = if ($completedWords.Count -gt 0) { $completedWords[-1] } else { "" }
     $command = ""
+    $subcommand = ""
+    $subsubcommand = ""
+    $seenCommand = $false
     foreach ($word in $completedWords) {
-        if ($commands -contains $word) {
-            $command = $word
-            break
+        if (-not $seenCommand) {
+            if ($commands -contains $word) {
+                $command = $word
+                $seenCommand = $true
+            }
+            continue
+        }
+        if ($subcommand -eq "" -and $command -eq "tzap" -and $tzapCommands -contains $word) {
+            $subcommand = $word
+            continue
+        }
+        if ($subcommand -eq "" -and $command -eq "auth" -and $authCommands -contains $word) {
+            $subcommand = $word
+            continue
+        }
+        if ($subsubcommand -eq "" -and $subcommand -eq "cert" -and $certCommands -contains $word) {
+            $subsubcommand = $word
+            continue
+        }
+        if ($subsubcommand -eq "" -and $subcommand -eq "device" -and $deviceCommands -contains $word) {
+            $subsubcommand = $word
+            continue
+        }
+        if ($subsubcommand -eq "" -and $subcommand -eq "contact" -and $contactCommands -contains $word) {
+            $subsubcommand = $word
+            continue
         }
     }
+    $effectiveCommand = if ($subcommand -ne "") { $subcommand } else { $command }
 
     switch ($previousWord) {
         "--color" {
@@ -256,9 +290,9 @@ Register-ArgumentCompleter -Native -CommandName zm -ScriptBlock {
     }
 
     if ($wordToComplete.StartsWith("-", [System.StringComparison]::Ordinal)) {
-        if ($commandOptions.ContainsKey($command)) {
+        if ($commandOptions.ContainsKey($effectiveCommand)) {
             Complete-ZmValues `
-                -Values $commandOptions[$command] `
+                -Values $commandOptions[$effectiveCommand] `
                 -Prefix $wordToComplete `
                 -ResultType ([System.Management.Automation.CompletionResultType]::ParameterName)
         } else {
@@ -280,17 +314,25 @@ Register-ArgumentCompleter -Native -CommandName zm -ScriptBlock {
         "completions" {
             Complete-ZmValues -Values $shellValues -Prefix $wordToComplete
         }
+        "tzap" {
+            if ($subcommand -eq "") {
+                Complete-ZmValues -Values $tzapCommands -Prefix $wordToComplete
+            } elseif ($subcommand -eq "contact" -and $subsubcommand -eq "") {
+                Complete-ZmValues -Values $contactCommands -Prefix $wordToComplete
+            } else {
+                Complete-ZmFiles -Prefix $wordToComplete
+            }
+        }
         "auth" {
-            Complete-ZmValues -Values $authCommands -Prefix $wordToComplete
-        }
-        "cert" {
-            Complete-ZmValues -Values $certCommands -Prefix $wordToComplete
-        }
-        "device" {
-            Complete-ZmValues -Values $deviceCommands -Prefix $wordToComplete
-        }
-        "contact" {
-            Complete-ZmValues -Values $contactCommands -Prefix $wordToComplete
+            if ($subcommand -eq "") {
+                Complete-ZmValues -Values $authCommands -Prefix $wordToComplete
+            } elseif ($subcommand -eq "cert" -and $subsubcommand -eq "") {
+                Complete-ZmValues -Values $certCommands -Prefix $wordToComplete
+            } elseif ($subcommand -eq "device" -and $subsubcommand -eq "") {
+                Complete-ZmValues -Values $deviceCommands -Prefix $wordToComplete
+            } else {
+                Complete-ZmFiles -Prefix $wordToComplete
+            }
         }
         "formats" {}
         "doctor" {}

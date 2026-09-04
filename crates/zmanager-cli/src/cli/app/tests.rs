@@ -1,16 +1,14 @@
 use super::{ArchiveFormat, CreateRequest, ExtractRequest, InteractiveOverwriteResolver, ListRequest, TestRequest, publish_archive};
-#[cfg(feature = "tzap-online")]
-use crate::cli::auth::*;
 use crate::cli::create::*;
 use crate::cli::extract::*;
 use crate::cli::open::*;
 use crate::cli::options::*;
+use crate::cli::tzap::*;
 use crate::cli::usage::*;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(feature = "tzap-online")]
 use zmanager_core::local_identity_store::TzapLocalIdentityStore as _;
 use zmanager_core::safety::{OverwriteConflict, OverwriteDecision, OverwriteResolver};
 
@@ -31,7 +29,6 @@ fn hosted_http_transport_accepts_https_urls() {
     assert_eq!(request.url().path(), "/v1/me");
 }
 
-#[cfg(feature = "tzap-online")]
 #[test]
 fn contact_keygen_persists_a_distinct_recipient_key() {
     let temp = TestDir::new("contact-keygen");
@@ -147,6 +144,71 @@ fn create_validation_restricts_x509_signing_to_tzap() {
     let error = validate_create_options(ArchiveFormat::Zip, &request).unwrap_err();
 
     assert!(error.contains("only for TZAP"));
+}
+
+#[test]
+fn create_parser_accepts_signing_identity_with_no_certificate_id() {
+    let mut request = CreateRequest::default();
+    let mut global = GlobalOptions::default();
+    let args = strings(["signed.tzap", "src", "--format", "tzap", "--signing-identity", "--password-stdin"]);
+
+    parse_create_request(&args, &mut global, &mut request).unwrap();
+
+    assert_eq!(request.tzap_signing_identity, Some(None));
+    assert!(validate_create_options(ArchiveFormat::Tzap, &request).is_ok());
+}
+
+#[test]
+fn create_parser_accepts_signing_identity_with_explicit_certificate_id() {
+    let mut request = CreateRequest::default();
+    let mut global = GlobalOptions::default();
+    let args = strings(["signed.tzap", "src", "--format", "tzap", "--signing-identity", "cert-abc123"]);
+
+    parse_create_request(&args, &mut global, &mut request).unwrap();
+
+    assert_eq!(request.tzap_signing_identity, Some(Some("cert-abc123".to_owned())));
+    assert!(validate_create_options(ArchiveFormat::Tzap, &request).is_ok());
+}
+
+#[test]
+fn create_validation_rejects_signing_identity_combined_with_signing_cert() {
+    let request = CreateRequest {
+        archive: "signed.tzap".to_owned(),
+        sources: vec![PathBuf::from("src")],
+        tzap_signing_cert: Some(PathBuf::from("signer.pem")),
+        tzap_signing_private_key: Some(PathBuf::from("signer.key")),
+        tzap_signing_identity: Some(None),
+        ..CreateRequest::default()
+    };
+
+    let error = validate_create_options(ArchiveFormat::Tzap, &request).unwrap_err();
+
+    assert!(error.contains("--signing-identity cannot be combined"));
+}
+
+#[test]
+fn create_validation_restricts_signing_identity_to_tzap() {
+    let request =
+        CreateRequest { archive: "signed.zip".to_owned(), sources: vec![PathBuf::from("src")], tzap_signing_identity: Some(None), ..CreateRequest::default() };
+
+    let error = validate_create_options(ArchiveFormat::Zip, &request).unwrap_err();
+
+    assert!(error.contains("only for TZAP"));
+}
+
+#[test]
+fn create_validation_rejects_signing_identity_combined_with_recipient_cert() {
+    let request = CreateRequest {
+        archive: "sealed.tzap".to_owned(),
+        sources: vec![PathBuf::from("src")],
+        tzap_recipient_cert: Some(PathBuf::from("recipient.pem")),
+        tzap_signing_identity: Some(None),
+        ..CreateRequest::default()
+    };
+
+    let error = validate_create_options(ArchiveFormat::Tzap, &request).unwrap_err();
+
+    assert!(error.contains("--recipient-cert cannot be combined with X.509 signing options"));
 }
 
 #[test]

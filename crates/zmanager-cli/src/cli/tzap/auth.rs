@@ -30,10 +30,6 @@ pub(crate) fn auth_command(args: &[String], global: GlobalOptions) -> ExitCode {
         "me" => super::me_command(&args[1..], global),
         "cert" => super::cert_command(&args[1..], global),
         "device" => super::device_command(&args[1..], global),
-        "sign" => super::sign_command(&args[1..], global),
-        "verify" => super::verify_command(&args[1..], global),
-        "contact" => super::contact_command(&args[1..], global),
-        "share" => super::share_command(&args[1..], global),
         command => command_usage_error("auth", &format!("unknown auth command: {command}"), &global),
     }
 }

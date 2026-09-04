@@ -181,6 +181,17 @@ pub(crate) fn parse_create_request(args: &[String], global: &mut GlobalOptions, 
             "--signing-chain" => {
                 request.tzap_signing_chain.push(PathBuf::from(take_value(args, &mut index, arg)?));
             }
+            "--signing-identity" => {
+                let certificate_id = match args.get(index + 1) {
+                    Some(next) if !next.starts_with('-') => {
+                        index += 1;
+                        Some(args[index].clone())
+                    }
+                    _ => None,
+                };
+                request.tzap_signing_identity = Some(certificate_id);
+                index += 1;
+            }
             "--sidecar" => {
                 request.tzap_sidecar = true;
                 index += 1;
@@ -221,6 +232,33 @@ pub(crate) fn parse_create_request(args: &[String], global: &mut GlobalOptions, 
 
     Ok(())
 }
+/// Resolves `--signing-identity [certificate-id]` against the local TZAP
+/// identity catalogue. With no id, the single active local certificate is
+/// used; with more than one, the caller must disambiguate explicitly.
+fn resolve_tzap_signing_identity(certificate_id: Option<&str>) -> Result<zmanager_core::engine::TzapX509SigningOptions, String> {
+    use zmanager_core::local_identity_store::{TzapLocalCertificateState, TzapLocalIdentityStore as _};
+
+    let state_dir = crate::cli::tzap::default_offline_tzap_state_dir();
+    let account_key = zmanager_core::local_identity_store::DEFAULT_IDENTITY_INVENTORY_ACCOUNT;
+    let store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&state_dir);
+    let now_unix_seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |duration| duration.as_secs());
+
+    let certificate_id = if let Some(certificate_id) = certificate_id {
+        certificate_id.to_owned()
+    } else {
+        let inventory = store.load_inventory(account_key).map_err(|error| error.to_string())?;
+        let mut active = inventory.enrolled_certificates.iter().filter(|certificate| certificate.state == TzapLocalCertificateState::Active);
+        let Some(certificate) = active.next() else {
+            return Err("no active local certificate found for --signing-identity; enroll one with `zm auth cert enroll` or the desktop/mobile app".to_owned());
+        };
+        if active.next().is_some() {
+            return Err("more than one active local certificate; disambiguate with --signing-identity <certificate-id> (see `zm tzap certs`)".to_owned());
+        }
+        certificate.certificate_id.clone()
+    };
+    zmanager_core::engine::tzap::tzap_x509_signing_options_from_inventory(&store, account_key, &certificate_id, now_unix_seconds).map(Into::into)
+}
+
 fn push_create_positional(request: &mut CreateRequest, value: &str, current_dir: Option<&Path>) {
     if request.archive.is_empty() {
         value.clone_into(&mut request.archive);
@@ -382,8 +420,8 @@ fn build_engine_create_options(
             } else {
                 password.map_or(zmanager_core::engine::TzapKeySource::NoPassword, zmanager_core::engine::TzapKeySource::Passphrase)
             };
-            let x509_signing = match &request.tzap_signing_cert {
-                Some(certificate) => {
+            let x509_signing = match (&request.tzap_signing_cert, &request.tzap_signing_identity) {
+                (Some(certificate), _) => {
                     let Some(private_key) = &request.tzap_signing_private_key else {
                         print_error_line(global, format_args!("create failed: --signing-cert and --signing-private-key must be used together"));
                         return Err(ExitCode::from(2));
@@ -394,7 +432,14 @@ fn build_engine_create_options(
                         signing_chain: request.tzap_signing_chain.clone(),
                     })
                 }
-                None => None,
+                (None, Some(certificate_id)) => match resolve_tzap_signing_identity(certificate_id.as_deref()) {
+                    Ok(options) => Some(options),
+                    Err(error) => {
+                        print_error_line(global, format_args!("create failed: {error}"));
+                        return Err(ExitCode::FAILURE);
+                    }
+                },
+                (None, None) => None,
             };
             zmanager_core::engine::CreateOptions::Tzap(zmanager_core::engine::TzapCreateOptions {
                 key_source,
@@ -553,7 +598,11 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
         if request.encrypt || request.password_stdin {
             return Err("--recipient-cert cannot be combined with --encrypt or --password-stdin".to_owned());
         }
-        if request.tzap_signing_cert.is_some() || request.tzap_signing_private_key.is_some() || !request.tzap_signing_chain.is_empty() {
+        if request.tzap_signing_cert.is_some()
+            || request.tzap_signing_private_key.is_some()
+            || !request.tzap_signing_chain.is_empty()
+            || request.tzap_signing_identity.is_some()
+        {
             return Err("--recipient-cert cannot be combined with X.509 signing options".to_owned());
         }
         if request.volume_size.is_some() {
@@ -565,6 +614,9 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
         if format != ArchiveFormat::Tzap {
             return Err("certificate signing is supported only for TZAP archives".to_owned());
         }
+        if request.tzap_signing_identity.is_some() {
+            return Err("--signing-identity cannot be combined with --signing-cert, --signing-private-key, or --signing-chain".to_owned());
+        }
         match (request.tzap_signing_cert.as_ref(), request.tzap_signing_private_key.as_ref()) {
             (Some(_), Some(_)) => {}
             (None, None) if !request.tzap_signing_chain.is_empty() => {
@@ -574,6 +626,10 @@ pub(crate) fn validate_create_options(format: ArchiveFormat, request: &CreateReq
                 return Err("--signing-cert and --signing-private-key must be used together".to_owned());
             }
         }
+    }
+
+    if request.tzap_signing_identity.is_some() && format != ArchiveFormat::Tzap {
+        return Err("certificate signing is supported only for TZAP archives".to_owned());
     }
 
     if request.tzap_sidecar {

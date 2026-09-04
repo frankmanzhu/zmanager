@@ -30,9 +30,12 @@ curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
   | sudo env ZMANAGER_VERSION=v2.1.2 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
 ```
 
-The default installs the **full** build (with online identity features such as
-`zm auth`). To install the **offline** build — the same archive commands with no
-network features — pass `--offline`:
+The default installs the **full** build, which adds online identity and
+certificate enrollment (`zm auth login`, `cert enroll`, `device revoke`, and
+so on) on top of everything in the offline build. To install the **offline**
+build — every archive command plus `zm tzap sign`, `verify`, `contact`,
+`share`, and `certs` (which work entirely against the local identity
+catalogue, no network required) but no `zm auth` — pass `--offline`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \

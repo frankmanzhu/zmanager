@@ -13,7 +13,7 @@ use zmanager_core::secrets::SecretString;
 #[cfg(feature = "tzap-online")]
 macro_rules! auth_command_usage_line {
     () => {
-        "  auth <command>                 Online identity, signing, and sharing\n"
+        "  auth <command>                 Online identity and certificate enrollment\n"
     };
 }
 #[cfg(not(feature = "tzap-online"))]
@@ -42,6 +42,7 @@ Commands:
   test <archive>                 Test archive readability
   plan <paths...>                Show planned archive entries
   formats                        Show supported formats
+  tzap <command>                 Sign, verify, and share TZAP documents
 ",
     auth_command_usage_line!(),
     "  doctor                         Verify the archive engine
@@ -152,6 +153,9 @@ Output and safety:
       --signing-private-key <file>
                                   Private key for --signing-cert
       --signing-chain <file>     Extra intermediate certificate chain for --signing-cert
+      --signing-identity [id]    Sign TZAP RootAuth with a local enrolled certificate;
+                                  uses the single active one when id is omitted
+                                  (mutually exclusive with --signing-cert)
       --sidecar                  Emit TZAP bootstrap recovery sidecar (.sidecar) file
       --no-sidecar               Disable TZAP bootstrap recovery sidecar (default)
   TZAP without a password uses tzap's unencrypted mode.
@@ -345,9 +349,30 @@ Examples:
 Use --json in scripts and bug reports.
 ";
 
+pub(crate) const TZAP_MENU_HELP: &str = "\
+Sign, verify, and share TZAP documents
+
+Usage:
+  zm tzap <command> [options]
+
+Commands:
+  sign <input>                   Sign a TZAP document JSON payload
+  verify <input>                 Verify a TZAP document envelope
+  contact <command>              Manage TZAP contact cards
+  share <archive> <paths...>     Create a TZAP archive for contacts
+  certs                          List the local TZAP certificate catalogue
+
+Options:
+      --json                     Emit machine-readable JSON where supported
+
+`zm tzap` works entirely offline, against certificates and signing keys
+already in the local identity catalogue. Use `zm auth cert enroll` (full
+build only) or the desktop/mobile app to obtain one.
+";
+
 #[cfg(feature = "tzap-online")]
 pub(crate) const AUTH_MENU_HELP: &str = "\
-Online identity and sharing operations
+Online identity and certificate enrollment
 
 Usage:
   zm auth <command> [options]
@@ -359,12 +384,9 @@ Commands:
   forget                         Forget local auth material
   account                        Show account URL
   me                             Show the local TZAP session summary
-  cert <command>                 Manage local TZAP certificate inventory
+  cert <command>                 Enroll, renew, and revoke TZAP certificates
   device retire                  Retire local TZAP device material
-  sign <input>                   Sign a TZAP document JSON payload
-  verify <input>                 Verify a TZAP document envelope
-  contact <command>              Manage TZAP contact cards
-  share <archive> <paths...>     Create a TZAP archive for contacts
+  device revoke                  Revoke a TZAP device remotely
 
 Options:
       --environment <name>       Select a hosted service environment (local|staging|prod)
@@ -378,7 +400,9 @@ Options:
       --account-key <key>        Local account inventory key; default is default
       --json                     Emit machine-readable JSON (status, account, and sign in/out)
 
-`zm auth` commands manage your identity, sign documents, and share archives securely.
+`zm auth` commands manage your identity and certificate enrollment. Once
+enrolled, sign documents and share archives with `zm tzap` — it works in
+every build, including the offline one.
 ";
 
 #[cfg(feature = "tzap-online")]
@@ -396,10 +420,9 @@ Options:
 
 #[cfg(feature = "tzap-online")]
 pub(crate) const CERT_HELP: &str = "\
-Manage local TZAP certificate inventory
+Enroll, renew, and revoke TZAP certificates
 
 Usage:
-  zm auth cert list [options]
   zm auth cert enroll [options]
   zm auth cert renew [options]
   zm auth cert revoke [options]
@@ -415,8 +438,9 @@ Options:
                                   Requested hosted enrollment/renewal certificate lifetime
       --json                     Emit machine-readable JSON
 
-`cert list` reads local inventory. Enroll, renew, and revoke use the local fake
-TZAP service profile by default for deterministic harness runs.
+Enroll, renew, and revoke use the local fake TZAP service profile by default
+for deterministic harness runs. `zm tzap certs` reads the resulting local
+inventory read-only, in every build.
 ";
 
 #[cfg(feature = "tzap-online")]
@@ -435,12 +459,11 @@ Options:
       --json                     Emit machine-readable JSON
 ";
 
-#[cfg(feature = "tzap-online")]
 pub(crate) const SIGN_HELP: &str = "\
 Sign a TZAP document JSON payload
 
 Usage:
-  zm auth sign <input.json> --certificate-id <id> --output <envelope.json> [options]
+  zm tzap sign <input.json> --certificate-id <id> --output <envelope.json> [options]
 
 Options:
       --state-dir <dir>          Store local identity state in dir
@@ -452,12 +475,11 @@ Options:
       --json                     Emit machine-readable JSON
 ";
 
-#[cfg(feature = "tzap-online")]
 pub(crate) const VERIFY_HELP: &str = "\
 Verify a TZAP document envelope
 
 Usage:
-  zm auth verify <envelope.json> [options]
+  zm tzap verify <envelope.json> [options]
 
 Options:
       --custom-trust-root <sha256:id>
@@ -471,19 +493,20 @@ Options:
 
 Offline verification reports `cryptographically_intact_offline`, not fully
 valid-now status. `--status-response` enables explicit online-status
-verification. Custom trust is reported as custom trust, never official TZAP.
+verification — fetching the status needs the network, using it does not, so
+this works in the offline build too. Custom trust is reported as custom
+trust, never official TZAP.
 ";
 
-#[cfg(feature = "tzap-online")]
 pub(crate) const CONTACT_HELP: &str = "\
 Manage TZAP contact cards
 
 Usage:
-  zm auth contact keygen [--label <name>] [options]
-  zm auth contact export --recipient-key-id <id> --certificate-id <id> --display-name <name> --output <file>
-  zm auth contact import <card.json> --accept [options]
-  zm auth contact list [options]
-  zm auth contact remove <contact-id> [options]
+  zm tzap contact keygen [--label <name>] [options]
+  zm tzap contact export --recipient-key-id <id> --certificate-id <id> --display-name <name> --output <file>
+  zm tzap contact import <card.json> --accept [options]
+  zm tzap contact list [options]
+  zm tzap contact remove <contact-id> [options]
 
 Options:
       --state-dir <dir>          Store local identity state in dir
@@ -502,12 +525,11 @@ Options:
       --json                     Emit machine-readable JSON
 ";
 
-#[cfg(feature = "tzap-online")]
 pub(crate) const SHARE_HELP: &str = "\
 Create a TZAP archive for accepted contacts
 
 Usage:
-  zm auth share <archive.tzap> <paths...> --contact <id> --certificate-id <id> [options]
+  zm tzap share <archive.tzap> <paths...> --contact <id> --certificate-id <id> [options]
 
 Options:
       --state-dir <dir>          Store local identity state in dir
@@ -516,6 +538,21 @@ Options:
       --certificate-id <id>      Active local certificate used for RootAuth signing
       --force                    Replace an existing output archive
       --json                     Emit machine-readable JSON
+";
+
+pub(crate) const CERTS_HELP: &str = "\
+List the local TZAP certificate catalogue
+
+Usage:
+  zm tzap certs [options]
+
+Options:
+      --state-dir <dir>          Read local identity state from dir
+      --account-key <key>        Local account inventory key; default is default
+      --json                     Emit machine-readable JSON
+
+Reads the local identity catalogue only — no network access. Use this to find
+a --certificate-id for `zm tzap sign` or `zm tzap share`.
 ";
 
 pub(crate) const COMPLETIONS_HELP: &str = "\
@@ -574,6 +611,12 @@ fn command_help(command: &str) -> Option<&'static str> {
         "test" => Some(TEST_HELP),
         "plan" => Some(PLAN_HELP),
         "formats" => Some(FORMATS_HELP),
+        "tzap" => Some(TZAP_MENU_HELP),
+        "sign" => Some(SIGN_HELP),
+        "verify" => Some(VERIFY_HELP),
+        "contact" => Some(CONTACT_HELP),
+        "share" => Some(SHARE_HELP),
+        "certs" => Some(CERTS_HELP),
         #[cfg(feature = "tzap-online")]
         "auth" => Some(AUTH_MENU_HELP),
         #[cfg(feature = "tzap-online")]
@@ -582,14 +625,6 @@ fn command_help(command: &str) -> Option<&'static str> {
         "cert" => Some(CERT_HELP),
         #[cfg(feature = "tzap-online")]
         "device" => Some(DEVICE_HELP),
-        #[cfg(feature = "tzap-online")]
-        "sign" => Some(SIGN_HELP),
-        #[cfg(feature = "tzap-online")]
-        "verify" => Some(VERIFY_HELP),
-        #[cfg(feature = "tzap-online")]
-        "contact" => Some(CONTACT_HELP),
-        #[cfg(feature = "tzap-online")]
-        "share" => Some(SHARE_HELP),
         "doctor" | "healthcheck" => Some(DOCTOR_HELP),
         "completions" | "completion" => Some(COMPLETIONS_HELP),
         _ => None,
@@ -1002,6 +1037,7 @@ const CREATE_OPTIONS: &[&str] = &[
     "--signing-cert",
     "--signing-private-key",
     "--signing-chain",
+    "--signing-identity",
     "--dry-run",
     "-T",
     "--test-after",

@@ -192,7 +192,7 @@ session_token() {
 
 enroll_personal() {
 	local state_dir="$1" output="$2"
-	"$ZM" cert enroll --state-dir "$state_dir" --service-base-url "$BASE_URL" \
+	"$ZM" auth cert enroll --state-dir "$state_dir" --service-base-url "$BASE_URL" \
 		--trusted-root-cert "$ROOT_CERT" --requested-validity-seconds 7776000 --json > "$output"
 	jq -er '.certificate.certificate_id' "$output"
 }
@@ -238,17 +238,17 @@ CERT_1="$(enroll_personal "$STATE_1" "$WORK_DIR/enroll-1.json")"
 CERT_2="$(enroll_personal "$STATE_2" "$WORK_DIR/enroll-2.json")"
 CERT_1_SHA="$(jq -er '.certificate.certificate_sha256' "$WORK_DIR/enroll-1.json")"
 CERT_2_SHA="$(jq -er '.certificate.certificate_sha256' "$WORK_DIR/enroll-2.json")"
-"$ZM" cert list --state-dir "$STATE_1" --json | jq -e --arg id "$CERT_1" 'any(.certificates[]; .certificate_id == $id)' >/dev/null
-"$ZM" cert list --state-dir "$STATE_2" --json | jq -e --arg id "$CERT_2" 'any(.certificates[]; .certificate_id == $id)' >/dev/null
+"$ZM" tzap certs --state-dir "$STATE_1" --json | jq -e --arg id "$CERT_1" 'any(.certificates[]; .certificate_id == $id)' >/dev/null
+"$ZM" tzap certs --state-dir "$STATE_2" --json | jq -e --arg id "$CERT_2" 'any(.certificates[]; .certificate_id == $id)' >/dev/null
 
 log "Signing a document and validating it offline and with live status"
 printf '%s\n' '{"tzap_payload_version":1,"title":"Staging integration document","amount":42}' > "$WORK_DIR/document.json"
-"$ZM" sign "$WORK_DIR/document.json" --state-dir "$STATE_1" --certificate-id "$CERT_1" \
+"$ZM" tzap sign "$WORK_DIR/document.json" --state-dir "$STATE_1" --certificate-id "$CERT_1" \
 	--output "$WORK_DIR/document-envelope.json" --json >/dev/null
-"$ZM" verify "$WORK_DIR/document-envelope.json" --custom-trust-root-cert "$ROOT_CERT" --json |
+"$ZM" tzap verify "$WORK_DIR/document-envelope.json" --custom-trust-root-cert "$ROOT_CERT" --json |
 	jq -e '.state == "cryptographically_intact_offline"' >/dev/null
 curl --fail --silent --show-error "$BASE_URL/v1/status/certificates/by-fingerprint/$CERT_1_SHA" > "$WORK_DIR/status-1.json"
-"$ZM" verify "$WORK_DIR/document-envelope.json" --custom-trust-root-cert "$ROOT_CERT" \
+"$ZM" tzap verify "$WORK_DIR/document-envelope.json" --custom-trust-root-cert "$ROOT_CERT" \
 	--status-response "$WORK_DIR/status-1.json" --json | jq -e '.state == "valid_now"' >/dev/null
 
 if [[ "$RUN_ORGANIZATION" == true ]]; then
@@ -257,7 +257,7 @@ if [[ "$RUN_ORGANIZATION" == true ]]; then
 	ORG="$(post_json /v1/orgs "$(jq -nc --arg name "ZManager staging $(date -u '+%Y%m%dT%H%M%SZ')" '{name:$name}')" "$TOKEN_1")"
 	ORG_ID="$(jq -er '.org_id' <<<"$ORG")"
 	set +e
-	"$ZM" cert enroll --state-dir "$STATE_1" --service-base-url "$BASE_URL" \
+	"$ZM" auth cert enroll --state-dir "$STATE_1" --service-base-url "$BASE_URL" \
 		--trusted-root-cert "$ROOT_CERT" --org-id "$ORG_ID" --requested-validity-seconds 7776000 \
 		--json > "$WORK_DIR/org-pending.out" 2> "$WORK_DIR/org-pending.err"
 	pending_exit=$?
@@ -271,7 +271,7 @@ if [[ "$RUN_ORGANIZATION" == true ]]; then
 	DEVICES="$(curl --fail --silent --show-error -H "Authorization: Bearer $TOKEN_1" "$BASE_URL/v1/orgs/$ORG_ID/devices")"
 	ORG_DEVICE_ID="$(jq -er --arg key "$ORG_KEY_ID" '.[] | select(.device_public_key_fingerprint == $key) | .organization_device_id' <<<"$DEVICES")"
 	post_json "/v1/orgs/$ORG_ID/devices/$ORG_DEVICE_ID/approve" '{}' "$TOKEN_1" >/dev/null
-	"$ZM" cert enroll --state-dir "$STATE_1" --service-base-url "$BASE_URL" \
+	"$ZM" auth cert enroll --state-dir "$STATE_1" --service-base-url "$BASE_URL" \
 		--trusted-root-cert "$ROOT_CERT" --org-id "$ORG_ID" --requested-validity-seconds 7776000 \
 		--json > "$WORK_DIR/org-enroll.json"
 	ORG_CERT="$(jq -er '.certificate.certificate_id' "$WORK_DIR/org-enroll.json")"
@@ -279,29 +279,29 @@ if [[ "$RUN_ORGANIZATION" == true ]]; then
 	jq -e --arg key "$ORG_KEY_ID" \
 		'([.device_signing_keys[] | select(.key_id == $key)] | length) == 1 and any(.enrolled_certificates[]; .signing_key_id == $key)' \
 		"$STATE_1/default.identity.json" >/dev/null
-	"$ZM" sign "$WORK_DIR/document.json" --state-dir "$STATE_1" --certificate-id "$ORG_CERT" \
+	"$ZM" tzap sign "$WORK_DIR/document.json" --state-dir "$STATE_1" --certificate-id "$ORG_CERT" \
 		--output "$WORK_DIR/org-document-envelope.json" --json >/dev/null
-	"$ZM" verify "$WORK_DIR/org-document-envelope.json" --custom-trust-root-cert "$ROOT_CERT" --json |
+	"$ZM" tzap verify "$WORK_DIR/org-document-envelope.json" --custom-trust-root-cert "$ROOT_CERT" --json |
 		jq -e '.state == "cryptographically_intact_offline"' >/dev/null
-	"$ZM" cert list --state-dir "$STATE_1" --json |
+	"$ZM" tzap certs --state-dir "$STATE_1" --json |
 		jq -e --arg id "$ORG_CERT" --arg org "$ORG_ID" \
 		'any(.certificates[]; .certificate_id == $id and .public_org_id == $org)' >/dev/null
 fi
 
 log "Creating contact cards and a signed two-recipient TZAP"
-KEY_1="$("$ZM" contact keygen --state-dir "$STATE_1" --label 'Staging recipient one' --json | jq -er '.recipient_key_id')"
-KEY_2="$("$ZM" contact keygen --state-dir "$STATE_2" --label 'Staging recipient two' --json | jq -er '.recipient_key_id')"
-"$ZM" contact export --state-dir "$STATE_1" --recipient-key-id "$KEY_1" --certificate-id "$CERT_1" \
+KEY_1="$("$ZM" tzap contact keygen --state-dir "$STATE_1" --label 'Staging recipient one' --json | jq -er '.recipient_key_id')"
+KEY_2="$("$ZM" tzap contact keygen --state-dir "$STATE_2" --label 'Staging recipient two' --json | jq -er '.recipient_key_id')"
+"$ZM" tzap contact export --state-dir "$STATE_1" --recipient-key-id "$KEY_1" --certificate-id "$CERT_1" \
 	--display-name 'Staging Recipient One' --output "$WORK_DIR/contact-1.json" --json >/dev/null
-"$ZM" contact export --state-dir "$STATE_2" --recipient-key-id "$KEY_2" --certificate-id "$CERT_2" \
+"$ZM" tzap contact export --state-dir "$STATE_2" --recipient-key-id "$KEY_2" --certificate-id "$CERT_2" \
 	--display-name 'Staging Recipient Two' --output "$WORK_DIR/contact-2.json" --json >/dev/null
-CONTACT_1="$("$ZM" contact import "$WORK_DIR/contact-1.json" --state-dir "$STATE_1" --accept \
+CONTACT_1="$("$ZM" tzap contact import "$WORK_DIR/contact-1.json" --state-dir "$STATE_1" --accept \
 	--custom-trust-root-cert "$ROOT_CERT" --json | jq -er '.contact.contact_id')"
-CONTACT_2="$("$ZM" contact import "$WORK_DIR/contact-2.json" --state-dir "$STATE_1" --accept \
+CONTACT_2="$("$ZM" tzap contact import "$WORK_DIR/contact-2.json" --state-dir "$STATE_1" --accept \
 	--custom-trust-root-cert "$ROOT_CERT" --json | jq -er '.contact.contact_id')"
 mkdir -p "$WORK_DIR/payload"
 printf 'signed multi-recipient staging payload\n' > "$WORK_DIR/payload/message.txt"
-"$ZM" share "$WORK_DIR/multi-recipient.tzap" "$WORK_DIR/payload" --state-dir "$STATE_1" \
+"$ZM" tzap share "$WORK_DIR/multi-recipient.tzap" "$WORK_DIR/payload" --state-dir "$STATE_1" \
 	--contact "$CONTACT_1" --contact "$CONTACT_2" --certificate-id "$CERT_1" --json |
 	jq -e '.recipients == 2 and .signed == true' >/dev/null
 

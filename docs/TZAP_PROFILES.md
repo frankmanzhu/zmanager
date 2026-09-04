@@ -47,3 +47,23 @@ its account UI uses hosted authentication.
 Adding a hosted operation requires an explicit `tzap-online` product-boundary
 decision. It must not be added to archive-engine selection or to the stable
 FFI type contract.
+
+## `zmanager-cli` command split
+
+The CLI dependency profile mirrors the same boundary, at the command level
+rather than the module level:
+
+| Build | `zmanager-tzap-hosted` | reqwest | Commands |
+|---|---|---|---|
+| default | present, without `reqwest-transport` | absent | `zm tzap …` |
+| `tzap-online` | present, with `reqwest-transport` | present | `zm tzap …` + `zm auth …` |
+
+`zmanager-tzap-hosted` is always a CLI dependency — it separates its own HTTP
+transport behind `reqwest-transport` — so the default build keeps `zm tzap
+sign`, `verify`, `contact`, `share`, and `certs` (which reads the local
+identity catalogue) working entirely offline, while dropping reqwest and the
+hosted commands under `zm auth` (`login`, `callback`, `status`, `forget`,
+`account`, `me`, `cert enroll|renew|revoke`, `device retire|revoke`)
+entirely. See
+[`cli-command-structure-and-profiles-plan.md`](../implementation-docs/cli-command-structure-and-profiles-plan.md)
+for the full command tree and rationale.

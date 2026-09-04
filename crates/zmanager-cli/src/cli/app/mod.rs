@@ -1,5 +1,3 @@
-#[cfg(feature = "tzap-online")]
-use crate::cli::auth::auth_command;
 use crate::cli::create::{create_command, create_command_from_expanded};
 use crate::cli::extract::{extract_command, extract_command_from_expanded};
 use crate::cli::format::{
@@ -8,6 +6,9 @@ use crate::cli::format::{
 };
 use crate::cli::open::{list_command, list_command_from_expanded, plan_command, test_command, test_command_from_expanded};
 use crate::cli::options::{GlobalOptions, parse_global_option, parse_output_mode};
+#[cfg(feature = "tzap-online")]
+use crate::cli::tzap::auth_command;
+use crate::cli::tzap::tzap_command;
 use crate::cli::usage::{
     COMPLETION_BASH_SCRIPT, COMPLETION_FISH_SCRIPT, COMPLETION_POWERSHELL_SCRIPT, COMPLETION_ZSH_SCRIPT, COMPLETIONS_HELP, DOCTOR_HELP, FORMATS_HELP, USAGE,
     command_usage_error, help_command, json_escape, print_help_stderr, print_help_stdout, usage_error, wants_help,
@@ -61,6 +62,7 @@ pub fn run_from_env() -> ExitCode {
         "doctor" | "healthcheck" => doctor_command(&raw_args[1..], global),
         "completions" | "completion" => completions_command(&raw_args[1..], global),
         "formats" => formats_command(&raw_args[1..], global),
+        "tzap" => tzap_command(&raw_args[1..], global),
         #[cfg(feature = "tzap-online")]
         "auth" => auth_command(&raw_args[1..], global),
         "create" | "c" => create_command(&raw_args[1..], global),
@@ -349,6 +351,12 @@ pub(crate) struct CreateRequest {
     pub(crate) tzap_signing_cert: Option<PathBuf>,
     pub(crate) tzap_signing_private_key: Option<PathBuf>,
     pub(crate) tzap_signing_chain: Vec<PathBuf>,
+    /// `--signing-identity [certificate-id]`: `Some(None)` selects the single
+    /// active local certificate; `Some(Some(id))` disambiguates when more
+    /// than one is active. Mutually exclusive with the file-based signing
+    /// flags above.
+    #[allow(clippy::option_option)]
+    pub(crate) tzap_signing_identity: Option<Option<String>>,
     pub(crate) tzap_sidecar: bool,
 }
 
@@ -385,6 +393,7 @@ impl Default for CreateRequest {
             tzap_signing_cert: None,
             tzap_signing_private_key: None,
             tzap_signing_chain: Vec::new(),
+            tzap_signing_identity: None,
             tzap_sidecar: false,
         }
     }
