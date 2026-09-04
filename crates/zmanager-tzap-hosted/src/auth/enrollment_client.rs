@@ -357,7 +357,7 @@ impl TzapEnrollmentCertificatePayload {
         Ok(())
     }
 
-    pub(crate) fn into_store_record(
+    pub fn into_store_record(
         self,
         request: &TzapEnrollmentRequest,
         signing_key_id: &str,

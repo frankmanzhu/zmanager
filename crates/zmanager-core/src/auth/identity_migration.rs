@@ -383,14 +383,18 @@ fn verify_private_matches_fingerprint(private_key: &SecretBytes, expected_finger
 
 /// File-backed secret store used by the legacy facade: one 0o600 file per
 /// secret under `{root}/secrets/{account_key}/{purpose}/{reference}`.
-pub(crate) struct FileTzapSecretMaterialStore {
+///
+/// `pub` (not `pub(crate)`) so `zmanager-mobile-core` can compose it inside
+/// `PlatformWrappedTzapSecretStore` rather than re-deriving this file layout
+/// and atomic-write behavior — see the mobile TZAP secret-store cutover plan.
+pub struct FileTzapSecretMaterialStore {
     root: PathBuf,
     account_key: String,
 }
 
 impl FileTzapSecretMaterialStore {
     #[must_use]
-    pub(crate) fn new(root: impl Into<PathBuf>, account_key: &str) -> Self {
+    pub fn new(root: impl Into<PathBuf>, account_key: &str) -> Self {
         Self { root: root.into(), account_key: account_key.to_owned() }
     }
 
@@ -442,7 +446,7 @@ impl TzapSecretMaterialStore for FileTzapSecretMaterialStore {
 /// Persists a legacy inventory through the catalog, reusing existing secret
 /// references for keys that persist so refs stay stable across saves and no
 /// secrets are orphaned.
-pub(crate) fn store_inventory_as_catalog(
+pub fn store_inventory_as_catalog(
     catalog_store: &mut impl TzapIdentityCatalogStore,
     secret_store: &mut impl TzapSecretMaterialStore,
     account_key: &str,
@@ -509,7 +513,7 @@ pub(crate) fn store_inventory_as_catalog(
 /// Loads a legacy-shaped inventory from the catalog, hydrating private key
 /// material from the secret store.
 #[allow(clippy::too_many_lines)]
-pub(crate) fn load_inventory_from_catalog(
+pub fn load_inventory_from_catalog(
     catalog_store: &impl TzapIdentityCatalogStore,
     secret_store: &impl TzapSecretMaterialStore,
     account_key: &str,

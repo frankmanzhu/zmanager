@@ -73,7 +73,7 @@ pub mod document_verification;
 #[path = "auth/identity_catalog.rs"]
 pub mod identity_catalog;
 #[path = "auth/identity_migration.rs"]
-pub(crate) mod identity_migration;
+pub mod identity_migration;
 #[path = "auth/jcs.rs"]
 pub mod jcs;
 #[path = "auth/json_util.rs"]
