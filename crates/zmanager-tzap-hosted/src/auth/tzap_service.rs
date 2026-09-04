@@ -882,41 +882,30 @@ fn hosted_tzap_cert_enroll_json(request_json: &str) -> String {
             requested_validity_seconds: request_u64(&request, "requested_validity_seconds")?.unwrap_or(90 * 24 * 60 * 60),
             now_unix_seconds,
         };
-        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
-        let mut inventory = store.load_inventory(&context.account_key).map_err(|error| error.to_string())?;
         let label = match enrollment_request.org_id.as_deref() {
             Some(org_id) => format!("ZManager Mobile Enrollment (org:{org_id})"),
             None => "ZManager Mobile Enrollment (personal)".to_owned(),
         };
-        let (signing_key, csr_der) = if let Some(record) = inventory.device_signing_keys.iter().find(|record| {
-            record.label.as_deref() == Some(label.as_str())
-                && !inventory.enrolled_certificates.iter().any(|certificate| certificate.signing_key_id == record.key_id)
-        }) {
-            let csr_der =
-                crate::device_identity::generate_device_csr_from_private_key(&record.private_key_der, &crate::device_identity::TzapDeviceCsrOptions::default())
-                    .map_err(|error| error.to_string())?;
-            (record.clone(), csr_der)
-        } else {
-            let material = crate::device_identity::generate_device_signing_key_and_csr(&crate::device_identity::TzapDeviceCsrOptions::default())
-                .map_err(|error| error.to_string())?;
-            let record = crate::local_identity_store::TzapDeviceSigningKeyRecord {
-                key_id: material.public_key_fingerprint.clone(),
-                public_key_fingerprint: material.public_key_fingerprint,
-                private_key_der: material.private_key_der,
-                created_at_unix_seconds: now_unix_seconds,
-                label: Some(label),
-            };
-            inventory.device_signing_keys.push(record.clone());
-            store.save_inventory(&context.account_key, inventory).map_err(|error| error.to_string())?;
-            (record, material.csr_der)
-        };
+        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
         let transport = crate::reqwest_transport::ReqwestTransport;
-        let client = crate::enrollment_client::TzapEnrollmentClient::local_staging_server(&service_base_url, &transport);
+        let enrollment_client = crate::enrollment_client::TzapEnrollmentClient::local_staging_server(&service_base_url, &transport);
+        let lifecycle_client = crate::certificate_lifecycle::TzapCertificateLifecycleClient::local_staging_server(&service_base_url, &service_base_url, &transport);
         let validator =
             FfiTrustedEnrollmentCertificateValidator { trusted_root_sha256, trusted_root_der, options: crate::trust::TzapCertificateProfileOptions::default() };
-        let certificate =
-            crate::enrollment_client::enroll_device_certificate(&client, &validator, &mut store, &session, &enrollment_request, &signing_key, &csr_der)
-                .map_err(|error| error.to_string())?;
+        // Reuses the device's existing signing key and renews when it
+        // already holds an active certificate, rather than minting a new
+        // key on every call — see `enroll_or_renew_device_certificate`'s
+        // doc comment for the *Identity proliferation* defect this fixes.
+        let certificate = crate::certificate_lifecycle::enroll_or_renew_device_certificate(
+            &enrollment_client,
+            &lifecycle_client,
+            &validator,
+            &mut store,
+            &session,
+            &enrollment_request,
+            &label,
+        )
+        .map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "operation": OP_CERT_ENROLL,

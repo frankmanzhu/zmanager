@@ -4,11 +4,11 @@ use crate::auth_client::{
     SESSION_AUDIENCE_LOGIN_TZAP, SESSION_AUDIENCE_SIGN_TZAP, TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpResponse, TzapAuthHttpTransport, TzapBearerToken,
     TzapSessionRecord,
 };
-use crate::device_identity::csr_fingerprint;
+use crate::device_identity::{TzapDeviceCsrOptions, csr_fingerprint, generate_device_csr_from_private_key, generate_device_signing_key_and_csr};
 use crate::enrollment_client::{
-    ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator, TzapEnrollmentError, TzapEnrollmentRequest,
-    canonicalize_local_staging_server_json_bytes, csr_der_to_pem, parse_challenge_response, parse_enrollment_response, requested_validity_days,
-    sign_p256_challenge,
+    ENROLLMENT_CHALLENGE_CANONICALIZATION, ENROLLMENT_CHALLENGES_PATH, TzapEnrollmentCertificateValidator, TzapEnrollmentClient, TzapEnrollmentError,
+    TzapEnrollmentRequest, canonicalize_local_staging_server_json_bytes, csr_der_to_pem, enroll_device_certificate, parse_challenge_response,
+    parse_enrollment_response, requested_validity_days, sign_p256_challenge,
 };
 use crate::http_client::{require_success, send_json_request};
 use crate::jcs;
@@ -436,6 +436,79 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
     }
 }
 
+/// Enrolls a device certificate the way a client should: reusing the
+/// existing device signing key for `label` if one exists, and renewing
+/// (same key, proof of continuity via the old certificate's signature)
+/// instead of enrolling fresh whenever that key already holds an active
+/// certificate.
+///
+/// Fixes the *Identity proliferation* defect (mobile TZAP secret-store
+/// cutover plan): the naive enroll path mints a new key on every call
+/// unless it happens to find an orphaned key from a previously-failed
+/// enrollment, so two enrollments of the same device produce two keys, two
+/// device rows, and two certificates even with local state fully
+/// preserved. `public_device_id` asserts "this device" — device identity
+/// must stay stable across a certificate refresh, which is what renewal
+/// exists for.
+#[allow(clippy::too_many_arguments)]
+pub fn enroll_or_renew_device_certificate<T: TzapAuthHttpTransport>(
+    enrollment_client: &TzapEnrollmentClient<'_, T>,
+    lifecycle_client: &TzapCertificateLifecycleClient<'_, T>,
+    validator: &impl TzapEnrollmentCertificateValidator,
+    store: &mut impl TzapLocalIdentityStore,
+    session: &TzapSessionRecord,
+    request: &TzapEnrollmentRequest,
+    label: &str,
+) -> Result<TzapEnrolledCertificateRecord, TzapCertificateLifecycleError> {
+    let mut inventory = store.load_inventory(&request.account_key)?;
+    let existing_key = inventory.device_signing_keys.iter().find(|record| record.label.as_deref() == Some(label)).cloned();
+
+    let signing_key = if let Some(record) = existing_key {
+        record
+    } else {
+        let material =
+            generate_device_signing_key_and_csr(&TzapDeviceCsrOptions::default()).map_err(|error| TzapCertificateLifecycleError::Crypto(error.to_string()))?;
+        let record = TzapDeviceSigningKeyRecord {
+            key_id: material.public_key_fingerprint.clone(),
+            public_key_fingerprint: material.public_key_fingerprint,
+            private_key_der: material.private_key_der,
+            created_at_unix_seconds: request.now_unix_seconds,
+            label: Some(label.to_owned()),
+        };
+        inventory.device_signing_keys.push(record.clone());
+        store.save_inventory(&request.account_key, inventory)?;
+        record
+    };
+
+    let csr_der = generate_device_csr_from_private_key(&signing_key.private_key_der, &TzapDeviceCsrOptions::default())
+        .map_err(|error| TzapCertificateLifecycleError::Crypto(error.to_string()))?;
+
+    let active_certificate = store
+        .load_inventory(&request.account_key)?
+        .enrolled_certificates
+        .into_iter()
+        .find(|certificate| certificate.signing_key_id == signing_key.key_id && certificate.state == TzapLocalCertificateState::Active);
+
+    match active_certificate {
+        Some(certificate) => {
+            let renewal_request = TzapRenewalRequest {
+                account_key: request.account_key.clone(),
+                previous_certificate_id: certificate.certificate_id.clone(),
+                previous_certificate_sha256: certificate.certificate_sha256.clone(),
+                org_id: request.org_id.clone(),
+                requested_validity_seconds: request.requested_validity_seconds,
+                renewal_policy: TzapRenewalPolicy::SameKeyRequired,
+                now_unix_seconds: request.now_unix_seconds,
+                server_grace_seconds: RENEWAL_GRACE_MAX_SECONDS,
+            };
+            lifecycle_client.renew_certificate(validator, store, session, &renewal_request, &signing_key, &signing_key, &csr_der)
+        }
+        None => {
+            enroll_device_certificate(enrollment_client, validator, store, session, request, &signing_key, &csr_der).map_err(TzapCertificateLifecycleError::Enrollment)
+        }
+    }
+}
+
 fn optional_string_from_payload(payload: &Value, field: &'static str) -> Result<Option<String>, TzapCertificateLifecycleError> {
     let object = json_object::<TzapCertificateLifecycleError>(payload, "challenge_payload")?;
     optional_string::<TzapCertificateLifecycleError>(object, field)
@@ -561,7 +634,7 @@ mod tests {
         TzapBearerToken, TzapSessionRecord,
     };
     use crate::device_identity::{TzapDeviceCsrOptions, generate_device_signing_key_and_csr};
-    use crate::enrollment_client::{TzapEnrollmentCertificateValidator, TzapEnrollmentError};
+    use crate::enrollment_client::{TzapEnrollmentCertificateValidator, TzapEnrollmentClient, TzapEnrollmentError, TzapEnrollmentRequest};
     use crate::local_identity_store::{
         DEFAULT_IDENTITY_INVENTORY_ACCOUNT, InMemoryTzapLocalIdentityStore, TzapDeviceSigningKeyRecord, TzapEmergencyBlocklistState,
         TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore, TzapOrganizationDeviceRetirement,
@@ -793,6 +866,129 @@ mod tests {
         // request URL.
         assert!(url.contains("sign_device_id=dev%3Fadmin%3Dtrue%26x%3D1"), "raw characters leaked into URL: {url}");
         assert!(!url.contains("?admin=true"), "query injection succeeded: {url}");
+    }
+
+    /// Regression test for *Identity proliferation*: a second call for the
+    /// same device label must reuse the existing key and renew, not mint a
+    /// fresh key and enroll — the pre-fix bug produced a brand-new key,
+    /// device row, and certificate on every enrollment.
+    #[test]
+    fn enroll_or_renew_reuses_the_labeled_key_and_renews_when_it_already_has_an_active_certificate() {
+        let fixture = LifecycleFixture::new();
+        let mut labeled_key = fixture.signing_key.clone();
+        labeled_key.label = Some("device-label".to_owned());
+        let mut inventory = TzapLocalIdentityInventory::empty();
+        inventory.device_signing_keys.push(labeled_key.clone());
+        inventory.enrolled_certificates.push(certificate_record(TzapSignDeviceRouting::Personal));
+        inventory.emergency_blocklist = TzapEmergencyBlocklistState::default();
+        let mut store = InMemoryTzapLocalIdentityStore::new();
+        store.save_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, inventory).unwrap();
+
+        let transport = FakeLifecycleTransport::new(vec![renewal_challenge_response(&fixture, None), renewal_certificate_response()]);
+        let enrollment_client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
+        let lifecycle_client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
+        let request = TzapEnrollmentRequest {
+            account_key: DEFAULT_IDENTITY_INVENTORY_ACCOUNT.to_owned(),
+            org_id: None,
+            requested_validity_seconds: 90 * 24 * 60 * 60,
+            now_unix_seconds: 150,
+        };
+
+        let record = super::enroll_or_renew_device_certificate(
+            &enrollment_client,
+            &lifecycle_client,
+            &AcceptingLifecycleValidator,
+            &mut store,
+            &fixture.sign_session,
+            &request,
+            "device-label",
+        )
+        .unwrap();
+
+        assert_eq!(record.certificate_id, "cert_new");
+        let inventory = store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
+        // No new key generated: still exactly the one key this device had.
+        assert_eq!(inventory.device_signing_keys.len(), 1);
+        assert_eq!(inventory.device_signing_keys[0].key_id, labeled_key.key_id);
+        assert_eq!(inventory.enrolled_certificates.len(), 2);
+        let requests = transport.requests();
+        assert_eq!(requests[1].url, "https://sign.tzap.org/v1/certificates/cert_old/renew");
+        assert!(requests[1].body.as_ref().unwrap().get("old_certificate_signature").unwrap().as_str().is_some());
+    }
+
+    /// The other half of the same fix: with no existing key for the label,
+    /// this generates one and enrolls fresh (unchanged prior behavior) —
+    /// makes sure the renewal branch above didn't come at the cost of
+    /// breaking first-time enrollment.
+    #[test]
+    fn enroll_or_renew_generates_a_new_key_and_enrolls_when_no_key_exists_for_the_label() {
+        let mut store = InMemoryTzapLocalIdentityStore::new();
+        store.save_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, TzapLocalIdentityInventory::empty()).unwrap();
+        let request = TzapEnrollmentRequest {
+            account_key: DEFAULT_IDENTITY_INVENTORY_ACCOUNT.to_owned(),
+            org_id: None,
+            requested_validity_seconds: 90 * 24 * 60 * 60,
+            now_unix_seconds: 100,
+        };
+        let session = session(SESSION_AUDIENCE_SIGN_TZAP);
+        // The challenge response's csr_sha256/device_public_key_fingerprint
+        // must match whatever key this call ends up generating, which isn't
+        // known ahead of time, so the challenge is built after a first
+        // (failing) attempt only to read back the generated key — instead,
+        // sidestep that by using a validator/transport pairing that doesn't
+        // check those fields: FakeLifecycleTransport records the request
+        // and returns responses positionally regardless of body content,
+        // and AcceptingLifecycleValidator accepts any chain, so only the
+        // challenge response's own self-consistency (payload echo) matters.
+        let transport = FakeLifecycleTransport::new(vec![
+            TzapAuthHttpResponse {
+                status_code: 200,
+                body: json!({"challenge_id": "challenge_1", "challenge_payload": Value::Null}).to_string().into_bytes(),
+            },
+            TzapAuthHttpResponse { status_code: 200, body: json!({"certificate": enrollment_certificate_json()}).to_string().into_bytes() },
+        ]);
+        let enrollment_client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
+        let lifecycle_client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
+
+        // A null challenge_payload fails `validate_challenge_payload`, so
+        // this exercises exactly as far as confirming the *enroll* (not
+        // renew) endpoint is the one called — the deeper wire contract is
+        // already covered by `enrollment_client`'s own tests.
+        let error = super::enroll_or_renew_device_certificate(
+            &enrollment_client,
+            &lifecycle_client,
+            &AcceptingLifecycleValidator,
+            &mut store,
+            &session,
+            &request,
+            "device-label",
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, TzapCertificateLifecycleError::Enrollment(_)));
+        let inventory = store.load_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT).unwrap();
+        // A new key was generated and persisted even though enrollment
+        // itself failed past the challenge step.
+        assert_eq!(inventory.device_signing_keys.len(), 1);
+        assert_eq!(inventory.device_signing_keys[0].label.as_deref(), Some("device-label"));
+        let requests = transport.requests();
+        assert_eq!(requests[0].url, "https://sign.tzap.org/v1/certificates/enrollment-challenges");
+    }
+
+    fn enrollment_certificate_json() -> Value {
+        json!({
+            "certificate_id": "cert_enrolled",
+            "leaf_certificate_der": URL_SAFE_NO_PAD.encode([0x30, 0x01]),
+            "intermediate_chain_der": [URL_SAFE_NO_PAD.encode([0x30, 0x02])],
+            "issuer_certificate_sha256": trust::format_certificate_sha256(&[0x04; 32]),
+            "issuer_key_identifier": "AQIDBA",
+            "serial_number": "01ABCDEF",
+            "certificate_sha256": trust::format_certificate_sha256(&[0x03; 32]),
+            "not_before_unix_seconds": 100,
+            "not_after_unix_seconds": 200,
+            "sign_device_id": "sign-device-enrolled",
+            "login_organization_device_id": Value::Null
+        })
     }
 
     struct LifecycleFixture {

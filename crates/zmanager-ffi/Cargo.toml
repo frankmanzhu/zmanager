@@ -23,7 +23,7 @@ zmanager-tzap-hosted = { workspace = true, optional = true }
 zmanager-localsend = { workspace = true, optional = true }
 
 [features]
-default = ["tzap-online", "localsend"]
+default = ["localsend"]
 tzap-online = ["dep:zmanager-tzap-hosted", "zmanager-tzap-hosted/reqwest-transport"]
 localsend = ["dep:zmanager-localsend"]
 
