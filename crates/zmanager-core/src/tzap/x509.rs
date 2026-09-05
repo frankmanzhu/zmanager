@@ -31,8 +31,8 @@ use tzap_plugin_keywrap::{
     dispatch_key_wrap_record, wrap_master_key_for_recipient,
 };
 use tzap_plugin_signing::x509_chain::{
-    X509_AUTHENTICATOR_ID, X509RootAuthReport, X509RootAuthSigner, certificate_der_from_pem_or_der, certificates_der_from_pem_or_der, verify_root_auth_footer,
-    verify_root_auth_signature,
+    X509_AUTHENTICATOR_ID, X509RootAuthReport, X509RootAuthSigner, certificate_der_from_pem_or_der, certificates_der_from_pem_or_der,
+    verify_root_auth_footer_at_time, verify_root_auth_signature,
 };
 
 // The official root literals live in `trust::` (pinned there too), so the
@@ -597,6 +597,16 @@ fn current_unix_seconds_i64() -> Result<i64, TzapError> {
     i64::try_from(seconds).map_err(|_| TzapError::X509RootAuth("current Unix time exceeds i64".to_owned()))
 }
 
+/// Extracts the signer-claimed signing time from a footer's authenticator
+/// envelope, via the trustless "assertion-1" check (no chain or trust
+/// evaluation, so this is cheap and doesn't require a decision about trust
+/// roots yet). Needed before full chain verification can even run at the
+/// right time (Z3): `RootAuthFooterV1` carries no plain `signed_at` field —
+/// it's inside the authenticator value that only signature parsing exposes.
+fn claimed_signing_time(footer: &RootAuthFooterV1, archive_root: &[u8; 32]) -> Result<i64, TzapError> {
+    verify_root_auth_signature(footer, archive_root).map(|report| report.signed_at_unix_seconds).map_err(|error| TzapError::X509RootAuth(error.to_string()))
+}
+
 /// Classifies which trust anchor validated a footer that has already
 /// verified successfully against `trust`'s combined trust store (Z2).
 ///
@@ -609,7 +619,18 @@ fn current_unix_seconds_i64() -> Result<i64, TzapError> {
 /// otherwise neither official root was in play and the answer is always
 /// [`TzapX509TrustAnchor::Untrusted`] by definition of that variant (see its
 /// doc comment on [`TzapX509VerificationReport::trust_anchor`]).
-fn classify_x509_trust_anchor(footer: &RootAuthFooterV1, archive_root: &[u8; 32], trust: &TzapX509TrustOptions) -> TzapX509TrustAnchor {
+///
+/// `chain_validation_time_unix_seconds` must be the same time basis the main
+/// verification used (Z3: the footer's claimed signing time) — reclassifying
+/// at a different time could disagree with a verification that already
+/// succeeded, e.g. misreporting `Untrusted` for a since-expired official
+/// root that was valid, and validated the chain, at signing time.
+fn classify_x509_trust_anchor(
+    footer: &RootAuthFooterV1,
+    archive_root: &[u8; 32],
+    trust: &TzapX509TrustOptions,
+    chain_validation_time_unix_seconds: i64,
+) -> TzapX509TrustAnchor {
     if !trust.include_official_tzap_root {
         return TzapX509TrustAnchor::Untrusted;
     }
@@ -619,7 +640,7 @@ fn classify_x509_trust_anchor(footer: &RootAuthFooterV1, archive_root: &[u8; 32]
     let Ok(staging_root_der) = certificate_der_from_pem_or_der(crate::trust::OFFICIAL_TZAP_STAGING_ROOT_PEM) else {
         return TzapX509TrustAnchor::Untrusted;
     };
-    classify_x509_trust_anchor_against(footer, archive_root, &production_root_der, &staging_root_der)
+    classify_x509_trust_anchor_against(footer, archive_root, &production_root_der, &staging_root_der, chain_validation_time_unix_seconds)
 }
 
 /// The comparison half of [`classify_x509_trust_anchor`], taking the two
@@ -632,11 +653,12 @@ fn classify_x509_trust_anchor_against(
     archive_root: &[u8; 32],
     production_root_der: &[u8],
     staging_root_der: &[u8],
+    chain_validation_time_unix_seconds: i64,
 ) -> TzapX509TrustAnchor {
-    if verify_root_auth_footer(footer, archive_root, &[production_root_der.to_vec()], false, false).is_ok() {
+    if verify_root_auth_footer_at_time(footer, archive_root, &[production_root_der.to_vec()], false, false, Some(chain_validation_time_unix_seconds)).is_ok() {
         return TzapX509TrustAnchor::ProductionRoot;
     }
-    if verify_root_auth_footer(footer, archive_root, &[staging_root_der.to_vec()], false, false).is_ok() {
+    if verify_root_auth_footer_at_time(footer, archive_root, &[staging_root_der.to_vec()], false, false, Some(chain_validation_time_unix_seconds)).is_ok() {
         return TzapX509TrustAnchor::StagingRoot;
     }
     TzapX509TrustAnchor::Untrusted
@@ -649,9 +671,30 @@ fn verify_opened_x509_root_auth(opened: &OpenedArchive, trust: &TzapX509TrustOpt
     let mut x509_error = None;
     let verification = opened
         .verify_root_auth_with(|footer, archive_root| {
-            match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots, trust.include_official_tzap_root) {
+            // Z3: validate the chain at the footer's claimed signing time
+            // rather than verifier-now, so an archive doesn't stop verifying
+            // ~90 days after signing purely because the signing certificate
+            // has since expired. `signed_at_unix_seconds` is signer-claimed
+            // and covered by the signature, so it can't be altered by a
+            // third party, but a dishonest signer could backdate it — this
+            // defends against honest expiry, not a dishonest signer.
+            let signed_at_unix_seconds = match claimed_signing_time(footer, archive_root) {
+                Ok(value) => value,
+                Err(error) => {
+                    x509_error = Some(error.to_string());
+                    return Ok(false);
+                }
+            };
+            match verify_root_auth_footer_at_time(
+                footer,
+                archive_root,
+                &trusted_roots_der,
+                trust.trusted_system_roots,
+                trust.include_official_tzap_root,
+                Some(signed_at_unix_seconds),
+            ) {
                 Ok(value) => {
-                    trust_anchor = classify_x509_trust_anchor(footer, archive_root, trust);
+                    trust_anchor = classify_x509_trust_anchor(footer, archive_root, trust, signed_at_unix_seconds);
                     report = Some(value);
                     Ok(true)
                 }
@@ -829,9 +872,26 @@ pub fn verify_tzap_x509_public_no_key(archive: impl AsRef<Path>, trust: &TzapX50
         if footer.authenticator_id != X509_AUTHENTICATOR_ID {
             return Err(FormatError::ReaderUnsupported("X.509 trust can only verify X.509 RootAuth"));
         }
-        match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots, trust.include_official_tzap_root) {
+        // Z3: same signing-time basis as verify_opened_x509_root_auth — see
+        // its comment for why the footer's own claimed time is used instead
+        // of verifier-now.
+        let signed_at_unix_seconds = match claimed_signing_time(footer, archive_root) {
+            Ok(value) => value,
+            Err(error) => {
+                x509_error = Some(error.to_string());
+                return Ok(false);
+            }
+        };
+        match verify_root_auth_footer_at_time(
+            footer,
+            archive_root,
+            &trusted_roots_der,
+            trust.trusted_system_roots,
+            trust.include_official_tzap_root,
+            Some(signed_at_unix_seconds),
+        ) {
             Ok(value) => {
-                trust_anchor = classify_x509_trust_anchor(footer, archive_root, trust);
+                trust_anchor = classify_x509_trust_anchor(footer, archive_root, trust, signed_at_unix_seconds);
                 report = Some(value);
                 Ok(true)
             }
@@ -960,6 +1020,7 @@ mod tests {
     use openssl::rsa::Rsa;
     use openssl::x509::extension::{BasicConstraints, KeyUsage};
     use openssl::x509::{X509, X509NameBuilder};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tzap_core::format::{FORMAT_VERSION, VOLUME_FORMAT_REV};
     use tzap_core::wire::RootAuthFooterV1;
     use tzap_core::writer::RootAuthSigningRequest;
@@ -989,17 +1050,18 @@ mod tests {
         let (untrusted_root, untrusted_key) = test_ca_cert("Some Other Root");
         let (leaf_cert, leaf_key) = test_leaf_cert("Archive Signer", &production_stand_in, &production_key);
         let (footer, archive_root) = signed_footer(&leaf_cert, &leaf_key, Vec::new());
+        let now = now_unix_seconds();
 
         assert_eq!(
-            classify_x509_trust_anchor_against(&footer, &archive_root, &production_stand_in.to_der().unwrap(), &staging_stand_in.to_der().unwrap()),
+            classify_x509_trust_anchor_against(&footer, &archive_root, &production_stand_in.to_der().unwrap(), &staging_stand_in.to_der().unwrap(), now),
             TzapX509TrustAnchor::ProductionRoot
         );
         assert_eq!(
-            classify_x509_trust_anchor_against(&footer, &archive_root, &staging_stand_in.to_der().unwrap(), &production_stand_in.to_der().unwrap()),
+            classify_x509_trust_anchor_against(&footer, &archive_root, &staging_stand_in.to_der().unwrap(), &production_stand_in.to_der().unwrap(), now),
             TzapX509TrustAnchor::StagingRoot
         );
         assert_eq!(
-            classify_x509_trust_anchor_against(&footer, &archive_root, &untrusted_root.to_der().unwrap(), &staging_stand_in.to_der().unwrap()),
+            classify_x509_trust_anchor_against(&footer, &archive_root, &untrusted_root.to_der().unwrap(), &staging_stand_in.to_der().unwrap(), now),
             TzapX509TrustAnchor::Untrusted
         );
         let _ = untrusted_key;
@@ -1012,10 +1074,42 @@ mod tests {
         let (leaf_cert, leaf_key) = test_leaf_cert("Archive Signer", &root_cert, &root_key);
         let (footer, archive_root) = signed_footer(&leaf_cert, &leaf_key, Vec::new());
 
-        assert_eq!(super::classify_x509_trust_anchor(&footer, &archive_root, &trust), TzapX509TrustAnchor::Untrusted);
+        assert_eq!(super::classify_x509_trust_anchor(&footer, &archive_root, &trust, now_unix_seconds()), TzapX509TrustAnchor::Untrusted);
     }
 
     fn test_ca_cert(cn: &str) -> (X509, PKey<Private>) {
+        test_ca_cert_valid_from(cn, now_unix_seconds())
+    }
+
+    #[test]
+    fn signing_time_validation_extracts_and_uses_the_footers_claimed_time() {
+        // Z3: an archive signed while its certificate was valid must keep
+        // verifying after that certificate has since expired, and the time
+        // used for that check must come from the footer itself, not from
+        // wherever the test happens to run.
+        let signed_at = now_unix_seconds() - 30 * 86_400; // 30 days ago
+        let (root_cert, root_key) = test_ca_cert_valid_from("Stand-in Production Root", signed_at - 86_400);
+        let (leaf_cert, leaf_key) = test_leaf_cert_valid_between("Archive Signer", &root_cert, &root_key, signed_at - 3_600, signed_at + 3_600);
+        let (footer, archive_root) = signed_footer_at(&leaf_cert, &leaf_key, Vec::new(), signed_at);
+
+        assert_eq!(super::claimed_signing_time(&footer, &archive_root).unwrap(), signed_at);
+
+        let other_root_der = test_ca_cert("Stand-in Staging Root").0.to_der().unwrap();
+        let now = now_unix_seconds();
+        // Reclassifying at verifier-now would fail: the leaf's validity
+        // window (signed_at +/- 1h) is long past. At the extracted signing
+        // time, it succeeds.
+        assert_eq!(
+            classify_x509_trust_anchor_against(&footer, &archive_root, &root_cert.to_der().unwrap(), &other_root_der, now),
+            TzapX509TrustAnchor::Untrusted
+        );
+        assert_eq!(
+            classify_x509_trust_anchor_against(&footer, &archive_root, &root_cert.to_der().unwrap(), &other_root_der, signed_at),
+            TzapX509TrustAnchor::ProductionRoot
+        );
+    }
+
+    fn test_ca_cert_valid_from(cn: &str, not_before: i64) -> (X509, PKey<Private>) {
         let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
         let mut name = X509NameBuilder::new().unwrap();
         name.append_entry_by_text("CN", cn).unwrap();
@@ -1026,7 +1120,7 @@ mod tests {
         builder.set_subject_name(&name).unwrap();
         builder.set_issuer_name(&name).unwrap();
         builder.set_pubkey(&key).unwrap();
-        builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        builder.set_not_before(&Asn1Time::from_unix(not_before).unwrap()).unwrap();
         builder.set_not_after(&Asn1Time::days_from_now(365).unwrap()).unwrap();
         builder.append_extension(BasicConstraints::new().critical().ca().build().unwrap()).unwrap();
         builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build().unwrap()).unwrap();
@@ -1035,6 +1129,10 @@ mod tests {
     }
 
     fn test_leaf_cert(cn: &str, ca_cert: &X509, ca_key: &PKey<Private>) -> (X509, PKey<Private>) {
+        test_leaf_cert_valid_between(cn, ca_cert, ca_key, now_unix_seconds(), now_unix_seconds() + 365 * 86_400)
+    }
+
+    fn test_leaf_cert_valid_between(cn: &str, ca_cert: &X509, ca_key: &PKey<Private>, not_before: i64, not_after: i64) -> (X509, PKey<Private>) {
         let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
         let mut name = X509NameBuilder::new().unwrap();
         name.append_entry_by_text("CN", cn).unwrap();
@@ -1045,16 +1143,24 @@ mod tests {
         builder.set_subject_name(&name).unwrap();
         builder.set_issuer_name(ca_cert.subject_name()).unwrap();
         builder.set_pubkey(&key).unwrap();
-        builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
-        builder.set_not_after(&Asn1Time::days_from_now(365).unwrap()).unwrap();
+        builder.set_not_before(&Asn1Time::from_unix(not_before).unwrap()).unwrap();
+        builder.set_not_after(&Asn1Time::from_unix(not_after).unwrap()).unwrap();
         builder.append_extension(BasicConstraints::new().build().unwrap()).unwrap();
         builder.append_extension(KeyUsage::new().critical().digital_signature().build().unwrap()).unwrap();
         builder.sign(ca_key, MessageDigest::sha256()).unwrap();
         (builder.build(), key)
     }
 
+    fn now_unix_seconds() -> i64 {
+        i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()).unwrap()
+    }
+
     fn signed_footer(leaf_cert: &X509, leaf_key: &PKey<Private>, chain_der: Vec<Vec<u8>>) -> (RootAuthFooterV1, [u8; 32]) {
-        let signer = X509RootAuthSigner::new(leaf_cert.to_der().unwrap(), leaf_key.clone(), chain_der, 1).unwrap();
+        signed_footer_at(leaf_cert, leaf_key, chain_der, now_unix_seconds())
+    }
+
+    fn signed_footer_at(leaf_cert: &X509, leaf_key: &PKey<Private>, chain_der: Vec<Vec<u8>>, signed_at_unix_seconds: i64) -> (RootAuthFooterV1, [u8; 32]) {
+        let signer = X509RootAuthSigner::new(leaf_cert.to_der().unwrap(), leaf_key.clone(), chain_der, signed_at_unix_seconds).unwrap();
         let request = RootAuthSigningRequest {
             root_auth_spec_id: tzap_core::format::ROOT_AUTH_SPEC_ID,
             archive_uuid: [1; 16],

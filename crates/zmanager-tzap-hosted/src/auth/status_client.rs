@@ -248,6 +248,52 @@ impl TzapArchiveStatusTarget {
     }
 }
 
+/// The one revocation reason the server itself emits on the renewal path
+/// (`CertificateEnrollmentService.revokePredecessor`). Compared by exact
+/// string equality — see [`classify_archive_revocation`].
+pub const RENEWAL_REVOCATION_REASON: &str = "renewed";
+
+/// Outcome of applying revocation-as-early-expiry (Z3/D12) to an archive
+/// signature claimed at a given time, against a `status: revoked` response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TzapArchiveRevocationOutcome {
+    /// The signature was claimed strictly before `revoked_at_unix_seconds`
+    /// and the reason is the one the server emits for renewal: treated as an
+    /// early expiry dated at the revocation, not a terminal failure.
+    BeforeRevocation,
+    /// Terminal: either the reason is anything other than exactly `"renewed"`
+    /// (including missing, empty, or an unrecognised value), or the claimed
+    /// signing time is at or after `revoked_at_unix_seconds`.
+    Revoked,
+}
+
+/// Classifies a revoked certificate's effect on an archive signature claimed
+/// at `signed_at_unix_seconds` (Z3/D12): the lost-card model — signatures
+/// before the report stand, signatures after do not — but only when the
+/// revocation reason is trustworthy enough to grant that.
+///
+/// This is a one-entry **allowlist**, not a denylist of compromise reasons,
+/// by deliberate design: `revocation_reason` is free-form text supplied by
+/// whoever calls the revoke endpoint (`CertificateManagementService.normalizeReason`
+/// performs no validation), so it cannot be trusted to *widen* validity.
+/// Someone revoking a compromised certificate could pass `"renewed"` to keep
+/// their prior signatures verifying. Only `"renewed"` is emitted by the
+/// server itself, on the renewal path, so only `"renewed"` is allowlisted —
+/// a denylist of known-bad reasons (`"key_compromise"`, etc.) would fail
+/// open on any reason nobody anticipated; this fails closed instead.
+///
+/// Comparison is exact-string and case-sensitive against
+/// [`RENEWAL_REVOCATION_REASON`]; `None`, `Some("")`, and every other value
+/// — including a value that merely contains "renew" — are all terminal.
+#[must_use]
+pub fn classify_archive_revocation(revocation_reason: Option<&str>, revoked_at_unix_seconds: i64, signed_at_unix_seconds: i64) -> TzapArchiveRevocationOutcome {
+    if revocation_reason == Some(RENEWAL_REVOCATION_REASON) && signed_at_unix_seconds < revoked_at_unix_seconds {
+        TzapArchiveRevocationOutcome::BeforeRevocation
+    } else {
+        TzapArchiveRevocationOutcome::Revoked
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct TzapStatusQueryEcho {
     pub certificate_sha256: Option<String>,
@@ -527,8 +573,8 @@ fn is_printable_ascii(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        TzapArchiveStatusTarget, TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, archive_status_matches,
-        online_verification_result_from_status, validate_bulk_lookups,
+        TzapArchiveRevocationOutcome, TzapArchiveStatusTarget, TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse,
+        archive_status_matches, classify_archive_revocation, online_verification_result_from_status, validate_bulk_lookups,
     };
     use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport};
     use crate::document_verification::TzapDocumentVerificationResult;
@@ -693,6 +739,30 @@ mod tests {
         let status = archive_status_response(&expected, Some(trust::format_issuer_sha256(&[0x44; 32])));
 
         assert!(!archive_status_matches(&expected, &status));
+    }
+
+    #[test]
+    fn revocation_by_renewal_is_early_expiry_only_before_the_revocation_time() {
+        // "renewal revokes the predecessor with reason `renewed` and
+        // archives signed before it still verify."
+        assert_eq!(classify_archive_revocation(Some("renewed"), 1_000, 500), TzapArchiveRevocationOutcome::BeforeRevocation);
+        // "a signature claimed at or after revoked_at_unix_seconds is
+        // revoked for every reason including `renewed`."
+        assert_eq!(classify_archive_revocation(Some("renewed"), 1_000, 1_000), TzapArchiveRevocationOutcome::Revoked);
+        assert_eq!(classify_archive_revocation(Some("renewed"), 1_000, 1_500), TzapArchiveRevocationOutcome::Revoked);
+    }
+
+    #[test]
+    fn revocation_for_any_other_reason_is_terminal_at_any_claimed_signing_time() {
+        // "key_compromise invalidates at any claimed signing time."
+        assert_eq!(classify_archive_revocation(Some("key_compromise"), 1_000, 1), TzapArchiveRevocationOutcome::Revoked);
+        assert_eq!(classify_archive_revocation(Some("key_compromise"), 1_000, 999), TzapArchiveRevocationOutcome::Revoked);
+        // "an unrecognised reason is terminal" — including values that look
+        // adjacent to "renewed" but are not an exact match, and the missing
+        // or empty cases the server's own free-text field allows.
+        for reason in [None, Some(""), Some("user_requested"), Some("Renewed"), Some("renewed "), Some(" renewed"), Some("re-renewed")] {
+            assert_eq!(classify_archive_revocation(reason, 1_000, 1), TzapArchiveRevocationOutcome::Revoked, "reason {reason:?} must be terminal");
+        }
     }
 
     fn archive_target_fixture() -> TzapArchiveStatusTarget {
