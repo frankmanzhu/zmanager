@@ -202,7 +202,7 @@ fn source_os_label() -> &'static str {
     } else if cfg!(target_os = "solaris") {
         "solaris"
     } else if cfg!(target_family = "unix") {
-        "unix"
+        "other-unix"
     } else {
         "other"
     }
