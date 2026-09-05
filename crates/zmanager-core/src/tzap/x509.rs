@@ -140,6 +140,64 @@ pub fn tzap_x509_signing_options_from_inventory(
     })
 }
 
+/// Turns a stored default-signing-key preference into a concrete certificate
+/// id (Z8): the newest usable certificate for that signing key — active,
+/// time-valid at `now_unix_seconds`, not locally blocklisted, and free of a
+/// cached non-valid status. This is the only place that resolution rule is
+/// implemented. The durable preference — *which signing key* is the default
+/// — is stored by the caller: mobile keeps only that preference, and the
+/// CLI's `--signing-identity` (with no certificate id given) answers the
+/// same question through this function, so mobile and the CLI always select
+/// the same certificate for the same inventory and clock.
+///
+/// "Newest" is the usable candidate with the latest `not_before_unix_seconds`:
+/// a renewal's certificate always has a later `not_before` than the
+/// predecessor it supersedes, so this is what makes renewal take effect for
+/// new signing without a separate "current certificate" pointer to update.
+///
+/// # Errors
+///
+/// Returns an error message when no enrolled certificate for `signing_key_id`
+/// is currently usable.
+pub fn resolve_default_signing_certificate_id(
+    inventory: &crate::local_identity_store::TzapLocalIdentityInventory,
+    signing_key_id: &str,
+    now_unix_seconds: u64,
+) -> Result<String, String> {
+    inventory
+        .enrolled_certificates
+        .iter()
+        .filter(|certificate| certificate.signing_key_id == signing_key_id)
+        .filter(|certificate| certificate_is_usable_for_signing(certificate, inventory, now_unix_seconds))
+        .max_by_key(|certificate| certificate.not_before_unix_seconds)
+        .map(|certificate| certificate.certificate_id.clone())
+        .ok_or_else(|| format!("no usable certificate found for signing key: {signing_key_id}"))
+}
+
+/// The usability gate [`resolve_default_signing_certificate_id`] applies to
+/// each candidate: the same four checks `tzap_x509_signing_options_from_inventory`
+/// applies to a caller-chosen certificate id, applied here across candidates
+/// for a signing key instead. Kept separate from that function rather than
+/// factored through it, so its existing per-failure error messages (used
+/// when a caller names a specific, unusable certificate) are undisturbed.
+fn certificate_is_usable_for_signing(
+    certificate: &crate::local_identity_store::TzapEnrolledCertificateRecord,
+    inventory: &crate::local_identity_store::TzapLocalIdentityInventory,
+    now_unix_seconds: u64,
+) -> bool {
+    use crate::local_identity_store::TzapLocalCertificateState;
+    use crate::trust::TzapCertificateStatus;
+
+    certificate.state == TzapLocalCertificateState::Active
+        && now_unix_seconds >= certificate.not_before_unix_seconds
+        && now_unix_seconds < certificate.not_after_unix_seconds
+        && !inventory.emergency_blocklist.blocked_issuer_sha256.contains(&certificate.issuer_certificate_sha256)
+        && !inventory
+            .certificate_status_cache
+            .iter()
+            .any(|status| status.certificate_sha256 == certificate.certificate_sha256 && status.status != TzapCertificateStatus::Valid)
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TzapX509VerificationReport {
     /// Verified archive root commitment.
@@ -1023,5 +1081,120 @@ mod tests {
             footer_crc32c: 0,
         };
         (footer, request.archive_root)
+    }
+
+    mod default_signing_certificate_resolution {
+        use super::super::resolve_default_signing_certificate_id;
+        use crate::local_identity_store::{
+            TzapCertificateStatusCacheRecord, TzapEmergencyBlocklistState, TzapEnrolledCertificateRecord, TzapLocalCertificateState,
+            TzapLocalIdentityInventory, TzapSignDeviceRouting,
+        };
+        use crate::trust::{self, TzapCertificatePublicMetadata, TzapCertificateStatus, TzapIdentityAssurance};
+
+        const SIGNING_KEY: &str = "device-key-1";
+        const OTHER_KEY: &str = "device-key-2";
+
+        #[test]
+        fn picks_the_newest_usable_certificate_for_the_signing_key() {
+            let inventory = inventory_with(vec![
+                certificate("cert-old", SIGNING_KEY, TzapLocalCertificateState::Active, 100, 200),
+                certificate("cert-new", SIGNING_KEY, TzapLocalCertificateState::Active, 150, 250),
+            ]);
+
+            assert_eq!(resolve_default_signing_certificate_id(&inventory, SIGNING_KEY, 180).unwrap(), "cert-new");
+        }
+
+        #[test]
+        fn skips_inactive_expired_not_yet_valid_blocklisted_and_status_blocked_candidates() {
+            let mut inventory = inventory_with(vec![
+                certificate("cert-revoked", SIGNING_KEY, TzapLocalCertificateState::Revoked, 100, 900),
+                certificate("cert-expired", SIGNING_KEY, TzapLocalCertificateState::Active, 100, 150),
+                certificate("cert-not-yet-valid", SIGNING_KEY, TzapLocalCertificateState::Active, 500, 900),
+                certificate("cert-blocklisted", SIGNING_KEY, TzapLocalCertificateState::Active, 100, 900),
+                certificate("cert-status-blocked", SIGNING_KEY, TzapLocalCertificateState::Active, 100, 900),
+                certificate("cert-good", SIGNING_KEY, TzapLocalCertificateState::Active, 100, 900),
+            ]);
+            inventory.emergency_blocklist = TzapEmergencyBlocklistState {
+                blocked_root_sha256: Vec::new(),
+                blocked_issuer_sha256: vec![issuer_sha("cert-blocklisted")],
+                updated_at_unix_seconds: None,
+            };
+            inventory.certificate_status_cache.push(TzapCertificateStatusCacheRecord {
+                certificate_sha256: leaf_sha("cert-status-blocked"),
+                status: TzapCertificateStatus::Suspended,
+                this_update_unix_seconds: 100,
+                next_update_unix_seconds: 900,
+            });
+
+            assert_eq!(resolve_default_signing_certificate_id(&inventory, SIGNING_KEY, 200).unwrap(), "cert-good");
+        }
+
+        #[test]
+        fn ignores_candidates_for_a_different_signing_key() {
+            let inventory = inventory_with(vec![
+                certificate("cert-mine", SIGNING_KEY, TzapLocalCertificateState::Active, 100, 900),
+                certificate("cert-newer-but-not-mine", OTHER_KEY, TzapLocalCertificateState::Active, 500, 900),
+            ]);
+
+            assert_eq!(resolve_default_signing_certificate_id(&inventory, SIGNING_KEY, 200).unwrap(), "cert-mine");
+        }
+
+        #[test]
+        fn errors_when_no_certificate_is_usable() {
+            let inventory = inventory_with(Vec::new());
+            assert!(resolve_default_signing_certificate_id(&inventory, SIGNING_KEY, 200).is_err());
+
+            let inventory = inventory_with(vec![certificate("cert-expired", SIGNING_KEY, TzapLocalCertificateState::Active, 100, 150)]);
+            assert!(resolve_default_signing_certificate_id(&inventory, SIGNING_KEY, 200).is_err());
+        }
+
+        fn inventory_with(certificates: Vec<TzapEnrolledCertificateRecord>) -> TzapLocalIdentityInventory {
+            let mut inventory = TzapLocalIdentityInventory::empty();
+            inventory.enrolled_certificates = certificates;
+            inventory
+        }
+
+        fn certificate(
+            id: &str,
+            signing_key_id: &str,
+            state: TzapLocalCertificateState,
+            not_before_unix_seconds: u64,
+            not_after_unix_seconds: u64,
+        ) -> TzapEnrolledCertificateRecord {
+            TzapEnrolledCertificateRecord {
+                certificate_id: id.to_owned(),
+                certificate_sha256: leaf_sha(id),
+                issuer_certificate_sha256: issuer_sha(id),
+                issuer_key_identifier: "AQIDBA".to_owned(),
+                serial_number: "01".to_owned(),
+                leaf_certificate_der: vec![0x30, 0x01],
+                intermediate_chain_der: vec![vec![0x30, 0x02]],
+                not_before_unix_seconds,
+                not_after_unix_seconds,
+                public_metadata: TzapCertificatePublicMetadata {
+                    version: 1,
+                    public_signer_id: "psign_0123456789ABCDEFGH".to_owned(),
+                    public_org_id: None,
+                    public_device_id: "pdev_0123456789ABCDEFGH".to_owned(),
+                    assurance_level: TzapIdentityAssurance::OauthVerifiedEmail,
+                    policy_oid: trust::TZAP_OID_LEAF_POLICY.to_owned(),
+                },
+                sign_device_id: "sign-device-1".to_owned(),
+                sign_device_routing: TzapSignDeviceRouting::Personal,
+                signing_key_id: signing_key_id.to_owned(),
+                state,
+            }
+        }
+
+        // Each certificate gets its own leaf/issuer fingerprint (derived from
+        // its id) so per-certificate blocklist/status-cache fixtures target
+        // exactly one candidate without affecting the others.
+        fn leaf_sha(id: &str) -> String {
+            trust::sha256_identifier(format!("leaf:{id}").as_bytes())
+        }
+
+        fn issuer_sha(id: &str) -> String {
+            trust::sha256_identifier(format!("issuer:{id}").as_bytes())
+        }
     }
 }

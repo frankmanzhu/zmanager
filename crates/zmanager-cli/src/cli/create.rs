@@ -233,28 +233,34 @@ pub(crate) fn parse_create_request(args: &[String], global: &mut GlobalOptions, 
     Ok(())
 }
 /// Resolves `--signing-identity [certificate-id]` against the local TZAP
-/// identity catalogue. With no id, the single active local certificate is
-/// used; with more than one, the caller must disambiguate explicitly.
+/// identity catalogue. With no id, the local signing key's newest usable
+/// certificate is used (Z8: `resolve_default_signing_certificate_id`, the
+/// same resolution rule mobile's default-identity selection uses — active,
+/// time-valid, not locally blocklisted, and free of a cached non-valid
+/// status); with more than one local signing key, the caller must
+/// disambiguate explicitly.
 fn resolve_tzap_signing_identity(certificate_id: Option<&str>) -> Result<zmanager_core::engine::TzapX509SigningOptions, String> {
-    use zmanager_core::local_identity_store::{TzapLocalCertificateState, TzapLocalIdentityStore as _};
+    use zmanager_core::engine::tzap::resolve_default_signing_certificate_id;
+    use zmanager_core::local_identity_store::TzapLocalIdentityStore as _;
 
     let state_dir = crate::cli::tzap::default_offline_tzap_state_dir();
     let account_key = zmanager_core::local_identity_store::DEFAULT_IDENTITY_INVENTORY_ACCOUNT;
-    let store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&state_dir);
+    let store = crate::cli::tzap::NativeTzapLocalIdentityStore::new(&state_dir, account_key).map_err(|error| error.to_string())?;
     let now_unix_seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |duration| duration.as_secs());
 
     let certificate_id = if let Some(certificate_id) = certificate_id {
         certificate_id.to_owned()
     } else {
         let inventory = store.load_inventory(account_key).map_err(|error| error.to_string())?;
-        let mut active = inventory.enrolled_certificates.iter().filter(|certificate| certificate.state == TzapLocalCertificateState::Active);
-        let Some(certificate) = active.next() else {
-            return Err("no active local certificate found for --signing-identity; enroll one with `zm auth cert enroll` or the desktop/mobile app".to_owned());
+        let mut signing_key_ids: Vec<&str> = inventory.enrolled_certificates.iter().map(|certificate| certificate.signing_key_id.as_str()).collect();
+        signing_key_ids.sort_unstable();
+        signing_key_ids.dedup();
+        let signing_key_id = match signing_key_ids.as_slice() {
+            [] => return Err("no local certificate found for --signing-identity; enroll one with `zm auth cert enroll` or the desktop/mobile app".to_owned()),
+            [signing_key_id] => *signing_key_id,
+            _ => return Err("more than one local signing key; disambiguate with --signing-identity <certificate-id> (see `zm tzap certs`)".to_owned()),
         };
-        if active.next().is_some() {
-            return Err("more than one active local certificate; disambiguate with --signing-identity <certificate-id> (see `zm tzap certs`)".to_owned());
-        }
-        certificate.certificate_id.clone()
+        resolve_default_signing_certificate_id(&inventory, signing_key_id, now_unix_seconds)?
     };
     zmanager_core::engine::tzap::tzap_x509_signing_options_from_inventory(&store, account_key, &certificate_id, now_unix_seconds).map(Into::into)
 }
