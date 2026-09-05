@@ -197,6 +197,7 @@ fn personal_happy_path_signs_verifies_imports_contact_and_unwraps_share() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,

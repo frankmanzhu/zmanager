@@ -325,6 +325,7 @@ fn run_engine_test(request: &TestRequest, password: Option<&str>) -> Result<(Str
     let report = handle.test(&zmanager_core::engine::TestOptions {
         selected_paths,
         recipient_key: request.recipient_key.clone(),
+        recipient_key_bytes: None,
         tzap_x509_trust: is_tzap_archive(&request.archive).then(|| test_request_x509_trust(request)),
         cancellation: None,
     })?;
@@ -534,7 +535,7 @@ fn run_plan_request(request: &PlanRequest, global: &GlobalOptions) -> ExitCode {
     }
 }
 fn list_entries_with_password(archive: &str, password: Option<&str>, recipient_key: Option<&Path>) -> Result<Vec<GenericEntry>, String> {
-    let options = zmanager_core::archive_browser::BrowserListOptions { password, recipient_key };
+    let options = zmanager_core::archive_browser::BrowserListOptions { password, recipient_key, recipient_key_bytes: None };
     let listing = zmanager_core::archive_browser::list_entries_with_options(archive, options).map_err(|error| error.to_string())?;
 
     let generic_entries = listing

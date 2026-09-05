@@ -44,8 +44,12 @@ pub struct TzapCreateOptions {
     pub preserve_metadata: bool,
     /// Replace an existing destination archive at commit time.
     pub replace_existing: bool,
-    /// Split output into TZAP volumes of this size when present.
+    /// Split output into TZAP volumes of this size when present. Mutually
+    /// exclusive with `volume_count`.
     pub volume_size: Option<u64>,
+    /// Split output into exactly this many TZAP volumes (striped rather than
+    /// size-targeted) when present. Mutually exclusive with `volume_size`.
+    pub volume_count: Option<u32>,
     /// Percent of archive data reserved for bit-rot recovery structures.
     pub recovery_percentage: u8,
     /// Number of missing output volumes the archive should tolerate.
@@ -101,11 +105,14 @@ pub fn create_tzap_from_manifest_with_context(
     context: &mut JobContext<'_>,
 ) -> Result<TzapCreateReport, TzapError> {
     context.check_cancelled()?;
+    if options.volume_size.is_some() && options.volume_count.is_some_and(|count| count > 1) {
+        return Err(FormatError::WriterUnsupported("volume_size and volume_count are mutually exclusive").into());
+    }
     let (file_sources, mut warnings) = collect_archive_sources(manifest, options, context)?;
     context.check_cancelled()?;
 
     let mut writer_options = WriterOptions {
-        stripe_width: 1,
+        stripe_width: options.volume_count.unwrap_or(1).max(1),
         volume_loss_tolerance: options.volume_loss_tolerance,
         bit_rot_buffer_pct: options.recovery_percentage,
         target_volume_size: options.volume_size,

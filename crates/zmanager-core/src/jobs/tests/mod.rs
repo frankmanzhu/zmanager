@@ -95,6 +95,7 @@ fn engine_tzap_create_accepts_unicode_entry_names() {
             preserve_metadata: true,
             replace_existing: false,
             volume_size: None,
+            volume_count: None,
             recovery_percentage: 0,
             volume_loss_tolerance: 0,
             x509_signing: None,

@@ -1980,9 +1980,10 @@ impl NativeReadAdapter for TzapListAdapter {
 
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
-        let listing = match archive.options().recipient_key_path() {
-            Some(recipient_key) => tzap::list_tzap_index_with_recipient_key(primary_path, recipient_key),
-            None => tzap::list_tzap_index_with_optional_password(primary_path, archive.options().password.as_deref()),
+        let listing = match (archive.options().recipient_key_bytes(), archive.options().recipient_key_path()) {
+            (Some(recipient_key_bytes), _) => tzap::list_tzap_index_with_recipient_key_bytes(primary_path, recipient_key_bytes),
+            (None, Some(recipient_key)) => tzap::list_tzap_index_with_recipient_key(primary_path, recipient_key),
+            (None, None) => tzap::list_tzap_index_with_optional_password(primary_path, archive.options().password.as_deref()),
         }
         .map_err(|error| tzap_error(primary_path, &error))?;
 
@@ -2036,8 +2037,16 @@ impl NativeReadAdapter for TzapListAdapter {
     fn test(&self, archive: &NativeReadContext, test_options: &TestOptions) -> Result<TestReport, ArchiveError> {
         let path = archive.primary_path();
         let trust = test_options.tzap_x509_trust.clone().map(Into::into);
+        let recipient_key_bytes = test_options.recipient_key_bytes.as_deref().or_else(|| archive.options().recipient_key_bytes());
         let recipient_key = test_options.recipient_key.as_deref().or(archive.options().recipient_key_path());
-        let report = if let Some(recipient_key) = recipient_key {
+        let report = if let Some(recipient_key_bytes) = recipient_key_bytes {
+            tzap::test_tzap_with_recipient_key_bytes_filter_and_x509_trust(
+                path,
+                recipient_key_bytes,
+                |entry_path| test_options.selects(entry_path),
+                trust.as_ref(),
+            )
+        } else if let Some(recipient_key) = recipient_key {
             tzap::test_tzap_with_recipient_key_filter_and_x509_trust(path, recipient_key, |entry_path| test_options.selects(entry_path), trust.as_ref())
         } else {
             tzap::test_tzap_with_optional_password_filter_and_x509_trust(
@@ -2111,10 +2120,13 @@ impl NativeReadAdapter for TzapListAdapter {
                 ..ExtractReport::default()
             });
         }
-        let key = archive.options().recipient_key_path().map_or_else(
-            || tzap::TzapExtractKeySource::Password(archive.options().password.as_deref().unwrap_or("")),
-            tzap::TzapExtractKeySource::RecipientKeyPath,
-        );
+        let key = if let Some(recipient_key_bytes) = archive.options().recipient_key_bytes() {
+            tzap::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
+        } else if let Some(recipient_key) = archive.options().recipient_key_path() {
+            tzap::TzapExtractKeySource::RecipientKeyPath(recipient_key)
+        } else {
+            tzap::TzapExtractKeySource::Password(archive.options().password.as_deref().unwrap_or(""))
+        };
         let report = tzap::extract_tzap_file_to_destination(
             path,
             key,
@@ -2133,10 +2145,13 @@ impl NativeReadAdapter for TzapListAdapter {
     fn copy_to_writer(&self, archive: &NativeReadContext, entry_id: EntryId, writer: &mut dyn std::io::Write) -> Result<CopyReport, ArchiveError> {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
-        let key = archive.options().recipient_key_path().map_or_else(
-            || tzap::TzapExtractKeySource::Password(archive.options().password.as_deref().unwrap_or("")),
-            tzap::TzapExtractKeySource::RecipientKeyPath,
-        );
+        let key = if let Some(recipient_key_bytes) = archive.options().recipient_key_bytes() {
+            tzap::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
+        } else if let Some(recipient_key) = archive.options().recipient_key_path() {
+            tzap::TzapExtractKeySource::RecipientKeyPath(recipient_key)
+        } else {
+            tzap::TzapExtractKeySource::Password(archive.options().password.as_deref().unwrap_or(""))
+        };
         let report = tzap::copy_tzap_file_to_writer(path, key, &selector.path, writer).map_err(|error| tzap_error(path, &error))?;
         Ok(CopyReport { written_bytes: report.written_bytes })
     }

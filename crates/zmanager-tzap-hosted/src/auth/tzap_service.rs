@@ -1246,6 +1246,7 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
             preserve_metadata: true,
             replace_existing: request.get("replace_existing").and_then(Value::as_bool).unwrap_or(false),
             volume_size: None,
+            volume_count: None,
             recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
             volume_loss_tolerance: TZAP_SINGLE_VOLUME_LOSS_TOLERANCE,
             x509_signing: x509_signing.map(Into::into),

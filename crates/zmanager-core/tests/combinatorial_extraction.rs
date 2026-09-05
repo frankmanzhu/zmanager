@@ -66,6 +66,7 @@ fn create_tzap_fixture(source: &Path, archive: &Path, recovery_percentage: u8) {
         preserve_metadata: true,
         replace_existing: true,
         volume_size: None,
+        volume_count: None,
         recovery_percentage,
         volume_loss_tolerance: 0,
         x509_signing: None,

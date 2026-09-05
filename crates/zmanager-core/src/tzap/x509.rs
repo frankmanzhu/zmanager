@@ -4,7 +4,7 @@
 
 use super::TzapError;
 use crate::secrets::{SecretBytes, SecretString};
-use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_recipient_key, open_tzap_input_volume_readers};
+use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_recipient_key, open_tzap_input_volume_readers};
 use crate::tzap::write::TzapCreateOptions;
 use crate::x509_format::x509_name_to_string;
 use openssl::asn1::Asn1Time;
@@ -366,7 +366,7 @@ pub(crate) fn load_x509_trusted_roots(trust: &TzapX509TrustOptions) -> Result<Ve
 }
 
 pub(crate) fn validate_recipient_wrap_create_options(options: &TzapCreateOptions) -> Result<(), TzapError> {
-    if options.volume_size.is_some() || options.volume_loss_tolerance != 0 {
+    if options.volume_size.is_some() || options.volume_count.is_some_and(|count| count > 1) || options.volume_loss_tolerance != 0 {
         return Err(TzapError::Format(FormatError::WriterUnsupported(
             "recipient certificate encryption is currently supported only for single-volume TZAP create",
         )));
@@ -814,6 +814,24 @@ pub fn test_tzap_with_recipient_key_filter_and_x509_trust(
     x509_trust: Option<&TzapX509TrustOptions>,
 ) -> Result<TzapTestReport, TzapError> {
     let opened = open_tzap_archive_with_recipient_key(archive, recipient_private_key)?;
+    test_opened_tzap_archive(&opened, selector, x509_trust)
+}
+
+/// Tests recipient-wrapped `.tzap` readability and integrity with an
+/// in-memory private key, for callers that must not write key material to
+/// disk.
+///
+/// # Errors
+///
+/// Returns [`TzapError`] when the archive cannot be opened, verified, or when
+/// requested X.509 `RootAuth` verification fails.
+pub fn test_tzap_with_recipient_key_bytes_filter_and_x509_trust(
+    archive: impl AsRef<Path>,
+    recipient_private_key_bytes: &[u8],
+    selector: impl Fn(&str) -> bool,
+    x509_trust: Option<&TzapX509TrustOptions>,
+) -> Result<TzapTestReport, TzapError> {
+    let opened = open_tzap_archive_with_key_options(archive, None, None, Some(recipient_private_key_bytes))?;
     test_opened_tzap_archive(&opened, selector, x509_trust)
 }
 

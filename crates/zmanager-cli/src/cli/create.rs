@@ -453,6 +453,7 @@ fn build_engine_create_options(
                 preserve_metadata: !request.no_metadata,
                 replace_existing,
                 volume_size: request.volume_size,
+                volume_count: None,
                 recovery_percentage: TZAP_DEFAULT_RECOVERY_PERCENTAGE,
                 volume_loss_tolerance: tzap_default_volume_loss_tolerance(request.volume_size),
                 x509_signing,

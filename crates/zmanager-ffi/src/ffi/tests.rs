@@ -433,6 +433,7 @@ fn tzap_public_metadata_display_summary_reports_unsigned_archive() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,

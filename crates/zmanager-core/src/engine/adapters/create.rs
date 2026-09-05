@@ -204,6 +204,7 @@ impl From<crate::engine::types::TzapCreateOptions> for crate::tzap::TzapCreateOp
             preserve_metadata: value.preserve_metadata,
             replace_existing: value.replace_existing,
             volume_size: value.volume_size,
+            volume_count: value.volume_count,
             recovery_percentage: value.recovery_percentage,
             volume_loss_tolerance: value.volume_loss_tolerance,
             x509_signing: value.x509_signing.map(Into::into),

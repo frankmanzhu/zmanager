@@ -41,12 +41,16 @@ pub struct OpenLimits {
 }
 
 /// Immutable credentials and source options bound to an opened archive handle.
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct OpenOptions {
     /// Optional password for encrypted headers or entries.
     pub password: Option<String>,
     /// Optional private key used to unwrap recipient-encrypted TZAP archives.
     pub recipient_key: Option<PathBuf>,
+    /// Optional in-memory private key used to unwrap recipient-encrypted TZAP
+    /// archives, for callers that hold key material only in memory (for
+    /// example a platform-sealed secret store) and must not write it to disk.
+    pub recipient_key_bytes: Option<Vec<u8>>,
     /// Bounds applied to the owned source before adapter dispatch.
     pub limits: OpenLimits,
 }
@@ -56,6 +60,23 @@ impl OpenOptions {
     #[must_use]
     pub fn recipient_key_path(&self) -> Option<&Path> {
         self.recipient_key.as_deref()
+    }
+
+    /// Returns the optional in-memory recipient key bytes as a borrowed slice.
+    #[must_use]
+    pub fn recipient_key_bytes(&self) -> Option<&[u8]> {
+        self.recipient_key_bytes.as_deref()
+    }
+}
+
+impl fmt::Debug for OpenOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenOptions")
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("recipient_key", &self.recipient_key)
+            .field("recipient_key_bytes", &self.recipient_key_bytes.as_ref().map(Vec::len))
+            .field("limits", &self.limits)
+            .finish()
     }
 }
 
@@ -192,16 +213,30 @@ pub struct ArchiveListing {
 }
 
 /// Options for a normalized archive integrity test.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct TestOptions {
     /// Exact archive paths to verify. An empty list verifies every entry.
     pub selected_paths: Vec<String>,
     /// Optional recipient key used by encrypted TZAP archives.
     pub recipient_key: Option<PathBuf>,
+    /// Optional in-memory recipient key used by encrypted TZAP archives.
+    pub recipient_key_bytes: Option<Vec<u8>>,
     /// Optional X.509 trust policy for TZAP root-auth verification.
     pub tzap_x509_trust: Option<TzapX509TrustOptions>,
     /// Cooperative cancellation flag checked before and during test work.
     pub cancellation: Option<Arc<AtomicBool>>,
+}
+
+impl fmt::Debug for TestOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TestOptions")
+            .field("selected_paths", &self.selected_paths)
+            .field("recipient_key", &self.recipient_key)
+            .field("recipient_key_bytes", &self.recipient_key_bytes.as_ref().map(Vec::len))
+            .field("tzap_x509_trust", &self.tzap_x509_trust)
+            .field("cancellation", &self.cancellation)
+            .finish()
+    }
 }
 
 impl TestOptions {
@@ -646,8 +681,11 @@ pub struct TzapCreateOptions {
     pub preserve_metadata: bool,
     /// Replace an existing destination archive.
     pub replace_existing: bool,
-    /// Optional split volume size.
+    /// Optional split volume size. Mutually exclusive with `volume_count`.
     pub volume_size: Option<u64>,
+    /// Optional exact output volume count (striped rather than size-targeted).
+    /// Mutually exclusive with `volume_size`.
+    pub volume_count: Option<u32>,
     /// Recovery percentage.
     pub recovery_percentage: u8,
     /// Missing-volume tolerance.

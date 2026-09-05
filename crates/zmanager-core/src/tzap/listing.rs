@@ -3,7 +3,7 @@
 
 use super::TzapError;
 use crate::tzap::metadata::metadata_diagnostic_labels;
-use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_recipient_key};
+use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_recipient_key};
 use std::path::Path;
 use tzap_core::format::KdfAlgo;
 use tzap_core::reader::{ArchiveEntry, ArchiveIndexEntry};
@@ -175,6 +175,23 @@ pub fn list_tzap_with_recipient_key(archive: impl AsRef<Path>, recipient_private
 
 pub(crate) fn list_tzap_index_with_recipient_key(archive: impl AsRef<Path>, recipient_private_key: impl AsRef<Path>) -> Result<TzapIndexListing, TzapError> {
     let opened = open_tzap_archive_with_recipient_key(archive, recipient_private_key)?;
+    let indexed = opened.list_index_entries()?;
+    Ok(map_index_entries(indexed, opened.observed_archive_bytes(), true, opened.crypto_header.kdf_algo))
+}
+
+/// Lists recipient-wrapped `.tzap` archive entries with an in-memory private
+/// key, for callers that must not write key material to disk.
+///
+/// # Errors
+///
+/// Returns [`TzapError`] when the archive cannot be opened or listed.
+pub fn list_tzap_with_recipient_key_bytes(archive: impl AsRef<Path>, recipient_private_key_bytes: &[u8]) -> Result<TzapListing, TzapError> {
+    let opened = open_tzap_archive_with_key_options(archive, None, None, Some(recipient_private_key_bytes))?;
+    list_opened_tzap_archive(&opened, true)
+}
+
+pub(crate) fn list_tzap_index_with_recipient_key_bytes(archive: impl AsRef<Path>, recipient_private_key_bytes: &[u8]) -> Result<TzapIndexListing, TzapError> {
+    let opened = open_tzap_archive_with_key_options(archive, None, None, Some(recipient_private_key_bytes))?;
     let indexed = opened.list_index_entries()?;
     Ok(map_index_entries(indexed, opened.observed_archive_bytes(), true, opened.crypto_header.kdf_algo))
 }

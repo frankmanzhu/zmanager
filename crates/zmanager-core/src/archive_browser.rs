@@ -85,6 +85,8 @@ pub struct BrowserListOptions<'a> {
     pub password: Option<&'a str>,
     /// Optional private key for recipient-encrypted TZAP metadata.
     pub recipient_key: Option<&'a Path>,
+    /// Optional in-memory private key for recipient-encrypted TZAP metadata.
+    pub recipient_key_bytes: Option<&'a [u8]>,
 }
 
 /// Report for selected-entry extraction.
@@ -261,6 +263,7 @@ pub fn list_directory_with_options(path: impl AsRef<Path>, dir_path: &str, optio
     let open_options = crate::engine::OpenOptions {
         password: options.password.map(ToOwned::to_owned),
         recipient_key: options.recipient_key.map(Path::to_path_buf),
+        recipient_key_bytes: options.recipient_key_bytes.map(ToOwned::to_owned),
         ..Default::default()
     };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
@@ -519,6 +522,7 @@ fn list_entries_via_engine(path: &Path, options: BrowserListOptions<'_>) -> Resu
     let open_options = crate::engine::OpenOptions {
         password: options.password.map(ToOwned::to_owned),
         recipient_key: options.recipient_key.map(Path::to_path_buf),
+        recipient_key_bytes: options.recipient_key_bytes.map(ToOwned::to_owned),
         ..Default::default()
     };
     let mut handle = engine.open(source, open_options).map_err(|source| ArchiveBrowserError::Engine { format: None, source })?;
@@ -777,6 +781,7 @@ mod tests {
             preserve_metadata: true,
             replace_existing: false,
             volume_size: None,
+            volume_count: None,
             recovery_percentage: 0,
             volume_loss_tolerance: 0,
             x509_signing: None,
@@ -837,7 +842,9 @@ mod tests {
         let error = list_entries(&archive).unwrap_err();
         assert!(error.to_string().contains("password required"));
 
-        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("correct horse"), recipient_key: None }).unwrap();
+        let listing =
+            list_entries_with_options(&archive, BrowserListOptions { password: Some("correct horse"), recipient_key: None, recipient_key_bytes: None })
+                .unwrap();
         assert!(listing.entries.iter().any(|entry| entry.path == "project/a.txt"));
     }
 
@@ -848,7 +855,11 @@ mod tests {
         let missing_password = list_entries(&archive).unwrap_err().to_string();
         assert!(missing_password.contains("password"), "{missing_password}");
 
-        let listing = list_entries_with_options(&archive, BrowserListOptions { password: Some("zmanager-rar-fixture-password"), recipient_key: None }).unwrap();
+        let listing = list_entries_with_options(
+            &archive,
+            BrowserListOptions { password: Some("zmanager-rar-fixture-password"), recipient_key: None, recipient_key_bytes: None },
+        )
+        .unwrap();
         assert_eq!(listing.entries.iter().filter(|entry| entry.path.replace('\\', "/") == "rar-fixture/data/stream.bin").count(), 1);
         assert!(listing.entries.iter().any(|entry| entry.path.replace('\\', "/") == "rar-fixture/docs/readme.txt"));
     }
@@ -1038,6 +1049,7 @@ mod tests {
             preserve_metadata: true,
             replace_existing: false,
             volume_size: None,
+            volume_count: None,
             recovery_percentage: 0,
             volume_loss_tolerance: 0,
             x509_signing: None,

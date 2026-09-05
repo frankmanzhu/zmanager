@@ -523,6 +523,7 @@ fn list_tzap_with_optional_password_includes_precise_portable_metadata() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
@@ -575,6 +576,7 @@ fn fast_extract_restores_portable_mode_and_precise_mtime() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
@@ -791,6 +793,7 @@ fn create_tzap_with_recipient_certificate_opens_with_private_key() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: Some(TzapX509SigningOptions::InMemory {
@@ -881,6 +884,7 @@ fn multi_recipient_public_keys_can_open_same_archive() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
@@ -923,6 +927,7 @@ fn signed_tzap_with_recipient_public_keys_opens_with_the_matching_key() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: Some(TzapX509SigningOptions::InMemory {
@@ -941,6 +946,72 @@ fn signed_tzap_with_recipient_public_keys_opens_with_the_matching_key() {
     let listing = list_tzap_with_recipient_key(&archive, &recipient_key_path).unwrap();
     assert_eq!(listing.entries.len(), 1);
     assert_eq!(listing.entries[0].path, "payload.txt");
+}
+
+/// The engine's `OpenOptions`/`BrowserListOptions`/`ExtractOptions` accept a
+/// recipient private key as either a file path or in-memory bytes, so callers
+/// backed by a platform-sealed secret store never have to write the key to
+/// disk. This proves the bytes path end to end through the public engine
+/// surface: open, list, test, and extract, all with no key file on disk.
+#[test]
+fn recipient_wrapped_tzap_opens_lists_tests_and_extracts_with_in_memory_key_bytes() {
+    use crate::engine::{ArchiveSource, ExtractOptions, OpenOptions, TestOptions};
+    use crate::safety::ExtractionPolicy;
+
+    let temp = TestDir::new("tzap_recipient_key_bytes");
+    let source = temp.path("payload.txt");
+    let archive = temp.path("sealed.tzap");
+    fs::write(&source, b"sealed payload").unwrap();
+
+    let (_recipient_cert, recipient_key) = test_p256_recipient_cert("ZManager Test Recipient");
+    let recipient_key_bytes = recipient_key.private_key_to_pem_pkcs8().unwrap();
+
+    let manifest = single_file_manifest(&temp, source, 14);
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::RecipientPublicKeys(vec![recipient_key.public_key_to_der().unwrap()]),
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: None,
+        volume_count: None,
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: None,
+        emit_bootstrap_sidecar: false,
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+    create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
+
+    let engine = crate::engine::create_default_engine().unwrap();
+
+    // Wrong bytes must not open it.
+    let (_wrong_cert, wrong_key) = test_p256_recipient_cert("ZManager Wrong Recipient");
+    let wrong_bytes = wrong_key.private_key_to_pem_pkcs8().unwrap();
+    let open_err = engine
+        .open(ArchiveSource::from_path_autodetect(&archive), OpenOptions { recipient_key_bytes: Some(wrong_bytes), ..Default::default() })
+        .and_then(|mut handle| handle.list());
+    assert!(open_err.is_err(), "the wrong recipient key must not open a recipient-wrapped archive");
+
+    // The matching key, supplied only as in-memory bytes, opens and lists it.
+    let mut handle = engine
+        .open(ArchiveSource::from_path_autodetect(&archive), OpenOptions { recipient_key_bytes: Some(recipient_key_bytes.clone()), ..Default::default() })
+        .unwrap();
+    let listing = handle.list().unwrap();
+    assert_eq!(listing.entries.len(), 1);
+    assert_eq!(listing.entries[0].path, "payload.txt");
+
+    // Integrity test with only the session-bound bytes (no per-call key).
+    let test_report = handle.test(&TestOptions::default()).unwrap();
+    assert_eq!(test_report.tested_entries, 1);
+
+    // Extraction inherits the session-bound bytes without being told again.
+    let destination = temp.path("extracted");
+    let mut extract_options = ExtractOptions { destination: destination.clone(), policy: ExtractionPolicy::default(), ..ExtractOptions::default() };
+    let report = handle.extract(&mut extract_options).unwrap();
+    assert_eq!(report.written_entries, 1);
+    assert_eq!(fs::read(destination.join("payload.txt")).unwrap(), b"sealed payload");
 }
 
 #[test]
@@ -973,6 +1044,7 @@ fn create_split_tzap_uses_os_friendly_volume_names() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: Some(1024 * 1024),
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 1,
         x509_signing: None,
@@ -993,6 +1065,95 @@ fn create_split_tzap_uses_os_friendly_volume_names() {
     let listing = list_tzap_with_optional_password(&selected_volume, None).unwrap();
     assert_eq!(listing.entries.len(), 1);
     assert_eq!(listing.entries[0].path, "payload.bin");
+}
+
+/// `volume_count` is a second, independent split mode from `volume_size`: it
+/// requests an exact number of output volumes (round-robin striped) rather
+/// than targeting a byte size per volume.
+#[test]
+fn create_tzap_with_volume_count_produces_exactly_that_many_volumes() {
+    let temp = TestDir::new("tzap_volume_count");
+    let source = temp.path("payload.bin");
+    let archive = temp.path("public.tzap");
+    // Incompressible content: `deterministic_bytes`'s short repeating cycle
+    // compresses away to almost nothing under round-robin striping, which
+    // starves the archive-size-scaled extraction cap below the logical size.
+    let payload = pseudo_random_bytes(3 * 1024 * 1024, 0xC0FF_EE13);
+    fs::write(&source, &payload).unwrap();
+
+    let manifest = ArchiveManifest {
+        root: temp.root().to_path_buf(),
+        entries: vec![ManifestEntry {
+            archive_path: "payload.bin".to_owned(),
+            source_path: source,
+            file_type: ManifestFileType::File,
+            size: payload.len() as u64,
+            modified: None,
+            permissions: PermissionSnapshot { readonly: false, unix_mode: Some(0o644) },
+            symlink_target: None,
+        }],
+        total_bytes: payload.len() as u64,
+        excluded_entries: Vec::new(),
+        excluded_bytes: 0,
+        warnings: Vec::new(),
+    };
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::NoPassword,
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: None,
+        volume_count: Some(4),
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: None,
+        emit_bootstrap_sidecar: false,
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+
+    let report = create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
+
+    assert_eq!(report.volume_count, 4);
+    assert!(!archive.exists());
+    for index in 0..4 {
+        assert!(temp.path(format!("public.vol{index:03}.tzap")).exists());
+    }
+
+    let listing = list_tzap_with_optional_password(&archive, None).unwrap();
+    assert_eq!(listing.entries.len(), 1);
+    assert_eq!(listing.entries[0].path, "payload.bin");
+}
+
+/// `volume_size` and `volume_count` are alternate split modes and cannot both
+/// be requested at once.
+#[test]
+fn create_tzap_rejects_both_volume_size_and_volume_count() {
+    let temp = TestDir::new("tzap_volume_count_conflict");
+    let source = temp.path("payload.txt");
+    let archive = temp.path("conflict.tzap");
+    fs::write(&source, b"payload").unwrap();
+
+    let manifest = single_file_manifest(&temp, source, 7);
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::NoPassword,
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: Some(1024),
+        volume_count: Some(2),
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: None,
+        emit_bootstrap_sidecar: false,
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+
+    let error = create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap_err();
+    assert!(matches!(error, super::TzapError::Format(_)));
 }
 
 #[test]
@@ -1031,6 +1192,7 @@ fn create_and_test_tzap_with_x509_root_auth() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: Some(TzapX509SigningOptions::InMemory {
@@ -1103,6 +1265,7 @@ fn public_display_summary_reports_signed_authentic_footer() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: Some(TzapX509SigningOptions::InMemory {
@@ -1452,6 +1615,7 @@ fn create_tzap_embeds_chain_from_signing_certificate_bundle() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: Some(TzapX509SigningOptions::CertificateAndKey {
@@ -1519,6 +1683,7 @@ fn create_tzap_signs_with_pkcs12_identity() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: Some(TzapX509SigningOptions::Pkcs12 { identity: identity_path, password: SecretString::from("identity-password") }),
@@ -1873,6 +2038,7 @@ fn preserves_all_metadata_in_tzap_round_trip() {
     let options = TzapCreateOptions {
         level: 1,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         preserve_metadata: true,
@@ -2246,6 +2412,22 @@ fn deterministic_bytes(len: usize) -> Vec<u8> {
     (0..len).map(|index| u8::try_from((index.wrapping_mul(31).wrapping_add(17)) % 251).expect("deterministic byte is reduced below u8::MAX")).collect()
 }
 
+/// Deterministic but effectively incompressible byte content (xorshift64),
+/// for tests that need the compressed archive size to stay close to the
+/// logical payload size.
+fn pseudo_random_bytes(len: usize, seed: u64) -> Vec<u8> {
+    let mut state = seed | 1;
+    let mut out = Vec::with_capacity(len);
+    while out.len() < len {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        out.extend_from_slice(&state.to_le_bytes());
+    }
+    out.truncate(len);
+    out
+}
+
 fn public_metadata_create_options() -> TzapCreateOptions {
     TzapCreateOptions {
         key_source: TzapKeySource::NoPassword,
@@ -2253,6 +2435,7 @@ fn public_metadata_create_options() -> TzapCreateOptions {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,
@@ -2276,6 +2459,7 @@ fn tzap_create_sidecar_toggle_behavior() {
         preserve_metadata: true,
         replace_existing: false,
         volume_size: None,
+        volume_count: None,
         recovery_percentage: 0,
         volume_loss_tolerance: 0,
         x509_signing: None,

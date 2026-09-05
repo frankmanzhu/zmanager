@@ -358,6 +358,9 @@ impl ArchiveHandle {
         if options.recipient_key.is_none() {
             options.recipient_key.clone_from(&self.options.recipient_key);
         }
+        if options.recipient_key_bytes.is_none() {
+            options.recipient_key_bytes.clone_from(&self.options.recipient_key_bytes);
+        }
         if options.tzap_password.is_none() {
             options.tzap_password.clone_from(&self.options.password);
         }
