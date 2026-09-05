@@ -276,7 +276,13 @@ pub fn discover_split_zip_volumes(path: &Path) -> Option<Vec<PathBuf>> {
     let file_name = path.file_name()?.to_str()?;
     let lower_name = file_name.to_ascii_lowercase();
     let (base, _) = parse_split_zip_part(&lower_name)?;
-    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    // A bare relative file name (`archive.z01`, no directory component) has
+    // `parent() == Some("")`, not `None`; `unwrap_or_else` only substitutes
+    // "." on `None`, so `read_dir` used to receive the empty path and fail,
+    // silently discovering zero sidecar volumes for the most common way to
+    // invoke this against an archive in the current directory (the same bug
+    // class fixed for TZAP volume discovery in `tzap::open`).
+    let directory = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     let entries = std::fs::read_dir(directory).ok()?;
 
     let mut sidecars = std::collections::BTreeMap::new();

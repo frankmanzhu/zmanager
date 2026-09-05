@@ -342,7 +342,7 @@ pub(crate) fn tzap_destination_path_from_volume_path(path: &Path) -> Option<Path
 fn discover_tzap_sibling_volume_paths(path: &Path) -> Option<Vec<PathBuf>> {
     let file_name = path.file_name()?.to_str()?;
     let pattern = parse_volume_file_name(file_name)?;
-    Some(discover_tzap_volume_paths_by_base(path.parent().unwrap_or_else(|| Path::new(".")), &pattern.base))
+    Some(discover_tzap_volume_paths_by_base(archive_directory(path), &pattern.base))
 }
 
 fn discover_tzap_volume_paths_for_destination(destination: &Path) -> Vec<PathBuf> {
@@ -350,7 +350,18 @@ fn discover_tzap_volume_paths_for_destination(destination: &Path) -> Vec<PathBuf
         return Vec::new();
     };
     let base_name = multi_volume_base_name(file_name);
-    discover_tzap_volume_paths_by_base(destination.parent().unwrap_or_else(|| Path::new(".")), &base_name)
+    discover_tzap_volume_paths_by_base(archive_directory(destination), &base_name)
+}
+
+/// The directory to search for sibling volumes of `path`. A bare relative
+/// file name (`archive.vol000.tzap`, no directory component) has
+/// `parent() == Some("")`, not `None`, so `unwrap_or_else` never substitutes
+/// "." for it -- `read_dir("")` then fails with `NotFound`, which callers
+/// here treat as "no siblings found", silently discovering zero volumes for
+/// the single most common way to invoke this against an archive in the
+/// current directory.
+fn archive_directory(path: &Path) -> &Path {
+    path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."))
 }
 
 fn discover_tzap_volume_paths_by_base(parent: &Path, base_name: &str) -> Vec<PathBuf> {
