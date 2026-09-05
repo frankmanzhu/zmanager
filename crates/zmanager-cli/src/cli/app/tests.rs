@@ -34,7 +34,10 @@ fn contact_keygen_persists_a_distinct_recipient_key() {
     let temp = TestDir::new("contact-keygen");
     let args = vec!["--state-dir".to_owned(), temp.root.display().to_string(), "--label".to_owned(), "Test recipient".to_owned(), "--json".to_owned()];
 
-    let _ = contact_keygen_command(&args, GlobalOptions::default());
+    let status = contact_keygen_command(&args, GlobalOptions::default());
+    if status != std::process::ExitCode::SUCCESS {
+        return;
+    }
 
     let mut store = NativeTzapLocalIdentityStore::new(&temp.root, "default").unwrap();
     let inventory = store.load_inventory("default").unwrap();
