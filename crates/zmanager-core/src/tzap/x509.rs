@@ -603,7 +603,7 @@ fn current_unix_seconds_i64() -> Result<i64, TzapError> {
 /// roots yet). Needed before full chain verification can even run at the
 /// right time (Z3): `RootAuthFooterV1` carries no plain `signed_at` field —
 /// it's inside the authenticator value that only signature parsing exposes.
-fn claimed_signing_time(footer: &RootAuthFooterV1, archive_root: &[u8; 32]) -> Result<i64, TzapError> {
+pub(crate) fn claimed_signing_time(footer: &RootAuthFooterV1, archive_root: &[u8; 32]) -> Result<i64, TzapError> {
     verify_root_auth_signature(footer, archive_root).map(|report| report.signed_at_unix_seconds).map_err(|error| TzapError::X509RootAuth(error.to_string()))
 }
 
@@ -625,7 +625,7 @@ fn claimed_signing_time(footer: &RootAuthFooterV1, archive_root: &[u8; 32]) -> R
 /// at a different time could disagree with a verification that already
 /// succeeded, e.g. misreporting `Untrusted` for a since-expired official
 /// root that was valid, and validated the chain, at signing time.
-fn classify_x509_trust_anchor(
+pub(crate) fn classify_x509_trust_anchor(
     footer: &RootAuthFooterV1,
     archive_root: &[u8; 32],
     trust: &TzapX509TrustOptions,

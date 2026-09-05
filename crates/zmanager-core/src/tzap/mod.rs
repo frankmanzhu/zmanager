@@ -9,6 +9,7 @@ mod extract;
 mod listing;
 mod metadata;
 mod open;
+mod verification;
 mod write;
 mod x509;
 
@@ -26,6 +27,10 @@ pub(crate) use listing::{list_tzap_index_with_optional_password, list_tzap_index
 pub(crate) use open::discover_tzap_input_volume_paths;
 pub use open::is_tzap_archive_path;
 pub use open::{TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume, summarize_tzap_public_metadata};
+pub use verification::{
+    TzapArchiveSignatureCheck, TzapArchiveSignerDetails, TzapArchiveStatusCheck, TzapArchiveTimeCheck, TzapArchiveTrustCheck, TzapArchiveVerification,
+    TzapArchiveVerificationOutcome, verify_tzap_archive_public_no_key, verify_tzap_archive_public_no_key_with_signer_predicate,
+};
 pub use write::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context, tzap_bootstrap_sidecar_path};
 pub use x509::{
     TzapTestReport, TzapX509SignerInspection, TzapX509SigningOptions, TzapX509TrustAnchor, TzapX509TrustOptions, TzapX509VerificationReport,

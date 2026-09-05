@@ -1026,6 +1026,24 @@ fn create_and_test_tzap_with_x509_root_auth() {
     let signer_inspection = inspect_tzap_x509_public_no_key_signer(&archive).unwrap();
     assert_eq!(signer_inspection.archive_root, root_auth.archive_root);
     assert_eq!(signer_inspection.subject, "CN=ZManager Test Signer");
+
+    // Z7: unified archive verification model
+    let now = i64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap();
+    let archive_verification = super::verify_tzap_archive_public_no_key(&archive, &trust, now).unwrap();
+    assert_eq!(archive_verification.signature, super::TzapArchiveSignatureCheck::Ok);
+    // Custom test root without official root classifies as Untrusted under Z2 -> Failed
+    assert_eq!(archive_verification.trust, super::TzapArchiveTrustCheck::Untrusted);
+    assert_eq!(archive_verification.certificate_time, super::TzapArchiveTimeCheck::ValidAtSigning);
+    assert_eq!(archive_verification.outcome, super::TzapArchiveVerificationOutcome::Failed);
+    assert_eq!(archive_verification.headline_label(), "Signer Not Trusted");
+    let signer = archive_verification.signer.unwrap();
+    assert_eq!(signer.subject, "CN=ZManager Test Signer");
+    assert_eq!(signer.display_name.as_deref(), Some("ZManager Test Signer"));
+    assert_eq!(signer.certificate_sha256, root_auth.certificate_sha256);
+
+    let own_verification =
+        super::verify_tzap_archive_public_no_key_with_signer_predicate(&archive, &trust, now, |fp| *fp == root_auth.certificate_sha256).unwrap();
+    assert!(own_verification.signer_is_this_device);
 }
 
 #[test]
