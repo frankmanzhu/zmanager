@@ -36,10 +36,11 @@ use tzap_plugin_signing::x509_chain::{
 };
 
 // The official root literals live in `trust::` (pinned there too), so the
-// pin set and the embedded certificates cannot drift.
+// pin set and the embedded certificates cannot drift. `trust::` is also the
+// one place the PEM files are embedded (`include_bytes!`) — this module
+// reuses that embedding rather than keeping its own copy.
 const OFFICIAL_TZAP_ROOT_CERT_SHA256: &str = crate::trust::TZAP_PRODUCTION_ROOT_SHA256;
-const OFFICIAL_TZAP_ROOT_CERT_PEM: &[u8] = include_bytes!("../trust/tzap-production-root-ca-2026.pem");
-const OFFICIAL_TZAP_STAGING_ROOT_PEM: &[u8] = include_bytes!("../trust/tzap-staging-root-ca-2026.pem");
+use crate::trust::{OFFICIAL_TZAP_ROOT_CERT_PEM, OFFICIAL_TZAP_STAGING_ROOT_PEM};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TzapX509SigningOptions {

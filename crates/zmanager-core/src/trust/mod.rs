@@ -283,6 +283,29 @@ pub const TZAP_STAGING_ROOT_SHA256: &str = "sha256:4847bd67cf76f0d399565deac2583
 pub const OFFICIAL_TZAP_ROOT_PINS: TzapRootPinSet =
     TzapRootPinSet { current: &[TZAP_PRODUCTION_ROOT_SHA256, TZAP_STAGING_ROOT_SHA256], planned_successors: &[] };
 
+/// Embedded PEM bytes for the official TZAP roots, matching
+/// [`TZAP_PRODUCTION_ROOT_SHA256`] and [`TZAP_STAGING_ROOT_SHA256`]. This is
+/// the one place these files are embedded in the crate; other code that
+/// needs the certificate bytes themselves (not just the fingerprint) uses
+/// these constants or [`official_tzap_root_certificates_der`] instead of
+/// embedding its own copy, fetching one at runtime, or reading a
+/// caller-supplied path.
+pub const OFFICIAL_TZAP_ROOT_CERT_PEM: &[u8] = include_bytes!("tzap-production-root-ca-2026.pem");
+pub const OFFICIAL_TZAP_STAGING_ROOT_PEM: &[u8] = include_bytes!("tzap-staging-root-ca-2026.pem");
+
+/// DER bytes for both official TZAP roots (production, then staging).
+///
+/// # Panics
+/// Never in practice: the embedded PEMs are checked into this crate and
+/// covered by `official_tzap_root_certificates_der_matches_pinned_fingerprints`.
+#[must_use]
+pub fn official_tzap_root_certificates_der() -> Vec<Vec<u8>> {
+    [OFFICIAL_TZAP_ROOT_CERT_PEM, OFFICIAL_TZAP_STAGING_ROOT_PEM]
+        .into_iter()
+        .map(|pem| certificate_pem_or_der_to_der(pem).expect("embedded TZAP root certificate PEM must parse"))
+        .collect()
+}
+
 pub fn certificate_pem_or_der_to_der(bytes: &[u8]) -> Result<Vec<u8>, String> {
     if let Ok(certificate) = X509::from_pem(bytes) {
         certificate.to_der().map_err(|error| error.to_string())

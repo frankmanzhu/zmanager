@@ -1,10 +1,11 @@
 use super::{
-    OFFICIAL_TZAP_ROOT_PINS, TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TzapCertificateProfileError,
-    TzapCertificateProfileOptions, TzapCertificateStatus, TzapIdentityAssurance, TzapOfficialRootPinKind, TzapRootPinSet, TzapTrustAnchorType,
-    TzapVerificationState, canonical_serial_hex, format_certificate_sha256, format_csr_sha256, format_issuer_sha256, is_valid_base64url_no_padding,
-    is_valid_issuer_key_identifier, is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id, is_valid_serial_hex,
-    is_valid_sha256_identifier, parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256, parse_serial_hex, parse_sha256_identifier,
-    parse_spki_sha256, percent_encode_path_param, status_certificate_by_fingerprint_path, validate_base64url_no_padding,
+    OFFICIAL_TZAP_ROOT_PINS, TZAP_OID_CA_POLICY, TZAP_OID_DOCUMENT_SIGNING_EKU, TZAP_OID_LEAF_POLICY, TZAP_OID_METADATA_EXTENSION, TZAP_PRODUCTION_ROOT_SHA256,
+    TZAP_STAGING_ROOT_SHA256, TzapCertificateProfileError, TzapCertificateProfileOptions, TzapCertificateStatus, TzapIdentityAssurance,
+    TzapOfficialRootPinKind, TzapRootPinSet, TzapTrustAnchorType, TzapVerificationState, canonical_serial_hex, certificate_sha256_identifier_for_der,
+    format_certificate_sha256, format_csr_sha256, format_issuer_sha256, is_valid_base64url_no_padding, is_valid_issuer_key_identifier,
+    is_valid_public_device_id, is_valid_public_org_id, is_valid_public_signer_id, is_valid_serial_hex, is_valid_sha256_identifier,
+    official_tzap_root_certificates_der, parse_certificate_sha256, parse_crl_sha256, parse_csr_sha256, parse_issuer_sha256, parse_serial_hex,
+    parse_sha256_identifier, parse_spki_sha256, percent_encode_path_param, status_certificate_by_fingerprint_path, validate_base64url_no_padding,
     validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
 };
 use openssl::asn1::{Asn1Object, Asn1OctetString, Asn1Time};
@@ -736,4 +737,19 @@ fn planned_successor_pin_set(root_pin: &str) -> TzapRootPinSet {
     let pin: &'static str = Box::leak(root_pin.to_owned().into_boxed_str());
     let planned_successors: &'static [&'static str] = Box::leak(vec![pin].into_boxed_slice());
     TzapRootPinSet { current: &[], planned_successors }
+}
+
+#[test]
+fn official_tzap_root_certificates_der_matches_pinned_fingerprints() {
+    // Z5: consumers that need actual root certificate bytes (chain building
+    // for enrollment/verification) must get the same roots the SHA-256 pins
+    // in `OFFICIAL_TZAP_ROOT_PINS` describe, in production-then-staging
+    // order, so a caller never has to guess which entry is which.
+    let der = official_tzap_root_certificates_der();
+    assert_eq!(der.len(), 2);
+    assert_eq!(certificate_sha256_identifier_for_der(&der[0]), TZAP_PRODUCTION_ROOT_SHA256);
+    assert_eq!(certificate_sha256_identifier_for_der(&der[1]), TZAP_STAGING_ROOT_SHA256);
+    for root_der in &der {
+        assert!(OFFICIAL_TZAP_ROOT_PINS.is_official_root(&certificate_sha256_identifier_for_der(root_der)));
+    }
 }
