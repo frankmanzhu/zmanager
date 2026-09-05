@@ -203,6 +203,15 @@ impl<'a, T: TzapAuthHttpTransport> TzapCertificateLifecycleClient<'a, T> {
         let new_record =
             payload.into_store_record(&enrollment_request, &new_signing_key.key_id, public_metadata).map_err(TzapCertificateLifecycleError::Enrollment)?;
         let mut inventory = store.load_inventory(&request.account_key)?;
+        let predecessor = inventory
+            .enrolled_certificates
+            .iter_mut()
+            .find(|certificate| certificate.certificate_id == request.previous_certificate_id)
+            .ok_or(TzapCertificateLifecycleError::CertificateNotFound)?;
+        // The server revokes the predecessor transactionally with issuance of
+        // the replacement. Keep the local inventory in the same state so a
+        // later automatic renewal cannot select the already-revoked record.
+        predecessor.state = TzapLocalCertificateState::Revoked;
         inventory.enrolled_certificates.push(new_record.clone());
         store.save_inventory(&request.account_key, inventory)?;
         Ok(new_record)
@@ -483,11 +492,15 @@ pub fn enroll_or_renew_device_certificate<T: TzapAuthHttpTransport>(
     let csr_der = generate_device_csr_from_private_key(&signing_key.private_key_der, &TzapDeviceCsrOptions::default())
         .map_err(|error| TzapCertificateLifecycleError::Crypto(error.to_string()))?;
 
-    let active_certificate = store
-        .load_inventory(&request.account_key)?
-        .enrolled_certificates
-        .into_iter()
-        .find(|certificate| certificate.signing_key_id == signing_key.key_id && certificate.state == TzapLocalCertificateState::Active);
+    let active_certificate = store.load_inventory(&request.account_key)?.enrolled_certificates.into_iter().find(|certificate| {
+        certificate.signing_key_id == signing_key.key_id
+            && certificate.state == TzapLocalCertificateState::Active
+            && match (&request.org_id, &certificate.sign_device_routing) {
+                (None, crate::local_identity_store::TzapSignDeviceRouting::Personal) => true,
+                (Some(requested_org_id), crate::local_identity_store::TzapSignDeviceRouting::Organization { org_id, .. }) => requested_org_id == org_id,
+                _ => false,
+            }
+    });
 
     match active_certificate {
         Some(certificate) => {
@@ -910,6 +923,8 @@ mod tests {
         assert_eq!(inventory.device_signing_keys.len(), 1);
         assert_eq!(inventory.device_signing_keys[0].key_id, labeled_key.key_id);
         assert_eq!(inventory.enrolled_certificates.len(), 2);
+        assert_eq!(inventory.enrolled_certificates[0].state, TzapLocalCertificateState::Revoked);
+        assert_eq!(inventory.enrolled_certificates[1].state, TzapLocalCertificateState::Active);
         let requests = transport.requests();
         assert_eq!(requests[1].url, "https://sign.tzap.org/v1/certificates/cert_old/renew");
         assert!(requests[1].body.as_ref().unwrap().get("old_certificate_signature").unwrap().as_str().is_some());
@@ -1058,6 +1073,8 @@ mod tests {
             intermediate_chain_der: vec![vec![0x30, 0x02]],
             not_before_unix_seconds: 100,
             not_after_unix_seconds: 200,
+            renewal_grace_period_days: None,
+            renewal_recommended_within_days: None,
             public_metadata: public_metadata(),
             sign_device_id: "sign-device-old".to_owned(),
             sign_device_routing: routing,

@@ -56,6 +56,11 @@ pub struct TzapEnrollmentCertificatePayload {
     pub certificate_sha256: String,
     pub not_before_unix_seconds: u64,
     pub not_after_unix_seconds: u64,
+    /// S1 (mobile-tzap-archive-signing-tracker.md), sourced from the server's
+    /// `renewal_grace_period_days`/`renewal_recommended_within_days`. `None`
+    /// when the responding server predates S1.
+    pub renewal_grace_period_days: Option<u64>,
+    pub renewal_recommended_within_days: Option<u64>,
     pub sign_device_id: String,
     pub login_organization_device_id: Option<String>,
 }
@@ -382,6 +387,8 @@ impl TzapEnrollmentCertificatePayload {
             intermediate_chain_der: self.intermediate_chain_der,
             not_before_unix_seconds: self.not_before_unix_seconds,
             not_after_unix_seconds: self.not_after_unix_seconds,
+            renewal_grace_period_days: self.renewal_grace_period_days,
+            renewal_recommended_within_days: self.renewal_recommended_within_days,
             public_metadata,
             sign_device_id: self.sign_device_id,
             sign_device_routing,
@@ -536,6 +543,8 @@ fn parse_certificate_payload(value: &Value) -> Result<TzapEnrollmentCertificateP
         certificate_sha256: required_string::<TzapEnrollmentError>(object, "certificate_sha256")?,
         not_before_unix_seconds: required_u64::<TzapEnrollmentError>(object, "not_before_unix_seconds")?,
         not_after_unix_seconds: required_u64::<TzapEnrollmentError>(object, "not_after_unix_seconds")?,
+        renewal_grace_period_days: optional_u64::<TzapEnrollmentError>(object, "renewal_grace_period_days")?,
+        renewal_recommended_within_days: optional_u64::<TzapEnrollmentError>(object, "renewal_recommended_within_days")?,
         sign_device_id: required_string::<TzapEnrollmentError>(object, "sign_device_id")?,
         login_organization_device_id: optional_string::<TzapEnrollmentError>(object, "login_organization_device_id")?,
     })
@@ -563,6 +572,8 @@ fn parse_pem_certificate_payload(object: &Map<String, Value>) -> Result<TzapEnro
         certificate_sha256: required_string::<TzapEnrollmentError>(object, "certificate_sha256")?,
         not_before_unix_seconds,
         not_after_unix_seconds,
+        renewal_grace_period_days: optional_u64::<TzapEnrollmentError>(object, "renewal_grace_period_days")?,
+        renewal_recommended_within_days: optional_u64::<TzapEnrollmentError>(object, "renewal_recommended_within_days")?,
         sign_device_id: required_string::<TzapEnrollmentError>(object, "sign_device_id")?,
         login_organization_device_id: optional_string::<TzapEnrollmentError>(object, "login_organization_device_id")?,
     })

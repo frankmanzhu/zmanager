@@ -1277,6 +1277,8 @@ mod tests {
                 intermediate_chain_der: vec![vec![0x30, 0x02]],
                 not_before_unix_seconds,
                 not_after_unix_seconds,
+                renewal_grace_period_days: None,
+                renewal_recommended_within_days: None,
                 public_metadata: TzapCertificatePublicMetadata {
                     version: 1,
                     public_signer_id: "psign_0123456789ABCDEFGH".to_owned(),

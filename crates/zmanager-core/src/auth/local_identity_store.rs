@@ -183,6 +183,14 @@ pub struct TzapEnrolledCertificateRecord {
     pub intermediate_chain_der: Vec<Vec<u8>>,
     pub not_before_unix_seconds: u64,
     pub not_after_unix_seconds: u64,
+    /// How many days after `not_after_unix_seconds` the server still accepts
+    /// a renewal (S1, mobile-tzap-archive-signing-tracker.md). `None` when the
+    /// enrolling server predates S1 or the record was never told.
+    pub renewal_grace_period_days: Option<u64>,
+    /// How many days before `not_after_unix_seconds` readiness should report
+    /// `RenewalRecommended` instead of `Ready` (S1). `None` means no
+    /// server-sourced threshold is known, so no recommendation is made.
+    pub renewal_recommended_within_days: Option<u64>,
     pub public_metadata: TzapCertificatePublicMetadata,
     pub sign_device_id: String,
     pub sign_device_routing: TzapSignDeviceRouting,
@@ -572,6 +580,11 @@ fn enrolled_certificate_from_json(value: &Value) -> Result<TzapEnrolledCertifica
             .collect::<Result<Vec<_>, _>>()?,
         not_before_unix_seconds: required_u64(object, "not_before_unix_seconds")?,
         not_after_unix_seconds: required_u64(object, "not_after_unix_seconds")?,
+        // Absent on every record written before S1; this legacy raw-file
+        // format is read only for one-time migration, so there is nothing to
+        // backfill it from.
+        renewal_grace_period_days: optional_u64(object, "renewal_grace_period_days")?,
+        renewal_recommended_within_days: optional_u64(object, "renewal_recommended_within_days")?,
         public_metadata: public_metadata_from_json(required_field(object, "public_metadata")?)?,
         sign_device_id: required_string(object, "sign_device_id")?,
         sign_device_routing: routing_from_json(required_field(object, "sign_device_routing")?)?,
@@ -947,6 +960,8 @@ mod tests {
             intermediate_chain_der: vec![vec![0x30, 0x05]],
             not_before_unix_seconds: 100,
             not_after_unix_seconds: 200,
+            renewal_grace_period_days: None,
+            renewal_recommended_within_days: None,
             public_metadata: public_metadata(),
             sign_device_id: "org-sign-device-1".to_owned(),
             sign_device_routing: TzapSignDeviceRouting::Organization {
@@ -966,6 +981,8 @@ mod tests {
             intermediate_chain_der: vec![vec![0x30, 0x05]],
             not_before_unix_seconds: 100,
             not_after_unix_seconds: 200,
+            renewal_grace_period_days: None,
+            renewal_recommended_within_days: None,
             public_metadata: public_metadata(),
             sign_device_id: "revoked-device".to_owned(),
             sign_device_routing: TzapSignDeviceRouting::Personal,
@@ -1014,6 +1031,8 @@ mod tests {
                 intermediate_chain_der: vec![vec![0x30, 0x05]],
                 not_before_unix_seconds: 100,
                 not_after_unix_seconds: 200,
+                renewal_grace_period_days: None,
+                renewal_recommended_within_days: None,
                 public_metadata: public_metadata(),
                 sign_device_id: "sign-device-1".to_owned(),
                 sign_device_routing: TzapSignDeviceRouting::Personal,

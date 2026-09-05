@@ -163,6 +163,12 @@ pub struct TzapStatusResponse {
     pub next_update_unix_seconds: Option<i64>,
     pub revoked_at_unix_seconds: Option<i64>,
     pub revocation_reason: Option<String>,
+    /// Server-derived (S2, mobile-tzap-archive-signing-tracker.md): `Some("supersession")`
+    /// only when the server's own renewal path revoked this certificate,
+    /// `Some("compromise")` for every other revocation path, `None` from a
+    /// server that predates this field or a certificate that was never
+    /// revoked. See [`classify_archive_revocation`] for how it is used.
+    pub revocation_category: Option<String>,
     pub query: TzapStatusQueryEcho,
 }
 
@@ -250,8 +256,17 @@ impl TzapArchiveStatusTarget {
 
 /// The one revocation reason the server itself emits on the renewal path
 /// (`CertificateEnrollmentService.revokePredecessor`). Compared by exact
-/// string equality — see [`classify_archive_revocation`].
+/// string equality — see [`classify_archive_revocation`]. Superseded as the
+/// primary signal by [`RENEWAL_REVOCATION_CATEGORY`] (S2) wherever a status
+/// response carries the structured field; this remains the fallback for a
+/// response or stored record that predates it.
 pub const RENEWAL_REVOCATION_REASON: &str = "renewed";
+
+/// The structured `revocation_category` value (S2) the server emits only on
+/// its own renewal path — never settable through a revoke request body, so
+/// it is trustworthy in a way `revocation_reason` free text is not. See
+/// [`classify_archive_revocation`].
+pub const RENEWAL_REVOCATION_CATEGORY: &str = "supersession";
 
 /// Outcome of applying revocation-as-early-expiry (Z3/D12) to an archive
 /// signature claimed at a given time, against a `status: revoked` response.
@@ -285,9 +300,28 @@ pub enum TzapArchiveRevocationOutcome {
 /// Comparison is exact-string and case-sensitive against
 /// [`RENEWAL_REVOCATION_REASON`]; `None`, `Some("")`, and every other value
 /// — including a value that merely contains "renew" — are all terminal.
+///
+/// When `revocation_category` is present (S2), it is authoritative and
+/// `revocation_reason` is not consulted at all: the category is server-derived
+/// and cannot be set through a revoke request, so it does not carry the
+/// spoofing risk the reason string does. `revocation_category` is `None` for
+/// a status response from a server that predates S2, or a stored record
+/// migrated from before it; only then does this fall back to the
+/// `revocation_reason` allowlist. Either way this stays an allowlist, not a
+/// denylist: an unrecognised category is exactly as terminal as an
+/// unrecognised reason.
 #[must_use]
-pub fn classify_archive_revocation(revocation_reason: Option<&str>, revoked_at_unix_seconds: i64, signed_at_unix_seconds: i64) -> TzapArchiveRevocationOutcome {
-    if revocation_reason == Some(RENEWAL_REVOCATION_REASON) && signed_at_unix_seconds < revoked_at_unix_seconds {
+pub fn classify_archive_revocation(
+    revocation_reason: Option<&str>,
+    revocation_category: Option<&str>,
+    revoked_at_unix_seconds: i64,
+    signed_at_unix_seconds: i64,
+) -> TzapArchiveRevocationOutcome {
+    let is_supersession = match revocation_category {
+        Some(category) => category == RENEWAL_REVOCATION_CATEGORY,
+        None => revocation_reason == Some(RENEWAL_REVOCATION_REASON),
+    };
+    if is_supersession && signed_at_unix_seconds < revoked_at_unix_seconds {
         TzapArchiveRevocationOutcome::BeforeRevocation
     } else {
         TzapArchiveRevocationOutcome::Revoked
@@ -325,6 +359,7 @@ impl TzapStatusResponse {
             next_update_unix_seconds: optional_unix_or_rfc3339(object, "next_update_unix_seconds", "next_update", "next_update_unix_seconds")?,
             revoked_at_unix_seconds: optional_unix_or_rfc3339(object, "revoked_at_unix_seconds", "revoked_at", "revoked_at_unix_seconds")?,
             revocation_reason: optional_string(object, "revocation_reason")?,
+            revocation_category: optional_string(object, "revocation_category")?,
             query,
         };
         response.validate_shape()?;
@@ -539,7 +574,7 @@ pub fn compose_tzap_archive_verification_with_status(
         TzapCertificateStatus::Revoked => {
             let signed_at = offline.signer.as_ref().map_or(0, |s| s.signed_at_unix_seconds);
             let revoked_at = status.revoked_at_unix_seconds.unwrap_or(0);
-            match classify_archive_revocation(status.revocation_reason.as_deref(), revoked_at, signed_at) {
+            match classify_archive_revocation(status.revocation_reason.as_deref(), status.revocation_category.as_deref(), revoked_at, signed_at) {
                 TzapArchiveRevocationOutcome::BeforeRevocation => {
                     offline.status = crate::engine::tzap::TzapArchiveStatusCheck::BeforeRevocation {
                         revoked_at_unix_seconds: revoked_at,
@@ -851,25 +886,59 @@ mod tests {
     #[test]
     fn revocation_by_renewal_is_early_expiry_only_before_the_revocation_time() {
         // "renewal revokes the predecessor with reason `renewed` and
-        // archives signed before it still verify."
-        assert_eq!(classify_archive_revocation(Some("renewed"), 1_000, 500), TzapArchiveRevocationOutcome::BeforeRevocation);
+        // archives signed before it still verify." No revocation_category
+        // present here — a server that predates S2 — so this falls back to
+        // the revocation_reason allowlist.
+        assert_eq!(classify_archive_revocation(Some("renewed"), None, 1_000, 500), TzapArchiveRevocationOutcome::BeforeRevocation);
         // "a signature claimed at or after revoked_at_unix_seconds is
         // revoked for every reason including `renewed`."
-        assert_eq!(classify_archive_revocation(Some("renewed"), 1_000, 1_000), TzapArchiveRevocationOutcome::Revoked);
-        assert_eq!(classify_archive_revocation(Some("renewed"), 1_000, 1_500), TzapArchiveRevocationOutcome::Revoked);
+        assert_eq!(classify_archive_revocation(Some("renewed"), None, 1_000, 1_000), TzapArchiveRevocationOutcome::Revoked);
+        assert_eq!(classify_archive_revocation(Some("renewed"), None, 1_000, 1_500), TzapArchiveRevocationOutcome::Revoked);
     }
 
     #[test]
     fn revocation_for_any_other_reason_is_terminal_at_any_claimed_signing_time() {
         // "key_compromise invalidates at any claimed signing time."
-        assert_eq!(classify_archive_revocation(Some("key_compromise"), 1_000, 1), TzapArchiveRevocationOutcome::Revoked);
-        assert_eq!(classify_archive_revocation(Some("key_compromise"), 1_000, 999), TzapArchiveRevocationOutcome::Revoked);
+        assert_eq!(classify_archive_revocation(Some("key_compromise"), None, 1_000, 1), TzapArchiveRevocationOutcome::Revoked);
+        assert_eq!(classify_archive_revocation(Some("key_compromise"), None, 1_000, 999), TzapArchiveRevocationOutcome::Revoked);
         // "an unrecognised reason is terminal" — including values that look
         // adjacent to "renewed" but are not an exact match, and the missing
         // or empty cases the server's own free-text field allows.
         for reason in [None, Some(""), Some("user_requested"), Some("Renewed"), Some("renewed "), Some(" renewed"), Some("re-renewed")] {
-            assert_eq!(classify_archive_revocation(reason, 1_000, 1), TzapArchiveRevocationOutcome::Revoked, "reason {reason:?} must be terminal");
+            assert_eq!(classify_archive_revocation(reason, None, 1_000, 1), TzapArchiveRevocationOutcome::Revoked, "reason {reason:?} must be terminal");
         }
+    }
+
+    #[test]
+    fn revocation_category_is_authoritative_over_a_mismatched_reason_string() {
+        // S2: the structured category, when present, is trusted on its own —
+        // it cannot be set through a revoke request the way the reason string
+        // can, so a mismatched or absent reason does not override it.
+        assert_eq!(
+            classify_archive_revocation(Some("user_requested"), Some("supersession"), 1_000, 500),
+            TzapArchiveRevocationOutcome::BeforeRevocation
+        );
+        assert_eq!(
+            classify_archive_revocation(None, Some("supersession"), 1_000, 500),
+            TzapArchiveRevocationOutcome::BeforeRevocation
+        );
+        // A present category still respects the revocation-time boundary.
+        assert_eq!(
+            classify_archive_revocation(Some("renewed"), Some("supersession"), 1_000, 1_000),
+            TzapArchiveRevocationOutcome::Revoked
+        );
+        // A present category of "compromise" is terminal even when the reason
+        // string happens to say "renewed" — the category wins, not the text.
+        assert_eq!(
+            classify_archive_revocation(Some("renewed"), Some("compromise"), 1_000, 500),
+            TzapArchiveRevocationOutcome::Revoked
+        );
+        // An unrecognised category is exactly as terminal as an unrecognised
+        // reason — this stays an allowlist, not a denylist.
+        assert_eq!(
+            classify_archive_revocation(Some("renewed"), Some("unexpected_future_value"), 1_000, 500),
+            TzapArchiveRevocationOutcome::Revoked
+        );
     }
 
     fn archive_target_fixture() -> TzapArchiveStatusTarget {

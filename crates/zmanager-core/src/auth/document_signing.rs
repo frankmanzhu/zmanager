@@ -333,6 +333,8 @@ mod tests {
             intermediate_chain_der: vec![vec![0x30, 0x02]],
             not_before_unix_seconds: 100,
             not_after_unix_seconds: 200,
+            renewal_grace_period_days: None,
+            renewal_recommended_within_days: None,
             public_metadata: public_metadata(),
             sign_device_id: "sign-device-1".to_owned(),
             sign_device_routing: TzapSignDeviceRouting::Personal,

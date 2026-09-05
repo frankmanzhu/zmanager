@@ -521,6 +521,8 @@ impl PersonalHarness {
             intermediate_chain_der: vec![self.chain.platform_der.clone(), self.chain.root_der.clone()],
             not_before_unix_seconds: FIXED_NOT_BEFORE.try_into().unwrap(),
             not_after_unix_seconds: FIXED_NOT_AFTER.try_into().unwrap(),
+            renewal_grace_period_days: None,
+            renewal_recommended_within_days: None,
             public_metadata: public_metadata(),
             sign_device_id: "sdev_personal_1".to_owned(),
             sign_device_routing: routing,

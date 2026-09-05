@@ -219,6 +219,8 @@ fn issue_local_certificate(
         intermediate_chain_der: vec![chain.platform_der, chain.root_der],
         not_before_unix_seconds: now_unix_seconds,
         not_after_unix_seconds: now_unix_seconds.saturating_add(LOCAL_VALIDITY_SECONDS),
+        renewal_grace_period_days: None,
+        renewal_recommended_within_days: None,
         public_metadata: public_metadata(),
         sign_device_id: local_sign_device_id(&signing_key.public_key_fingerprint),
         sign_device_routing: TzapSignDeviceRouting::Personal,

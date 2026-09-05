@@ -4,7 +4,7 @@
 //! and compatibility. New readers should use this module so public metadata
 //! never requires hydrating private key bytes.
 
-pub(crate) use crate::identity_migration::{FileTzapSecretMaterialStore, load_inventory_from_catalog, store_inventory_as_catalog};
+pub use crate::identity_migration::{FileTzapSecretMaterialStore, load_inventory_from_catalog, store_inventory_as_catalog};
 pub use crate::identity_migration::{PendingMutation, TzapLegacyMigrationReport, migrate_legacy_inventory};
 use crate::local_identity_store::{TzapLocalIdentityStoreError, TzapSignDeviceRouting};
 use crate::secrets::SecretBytes;
@@ -164,6 +164,13 @@ pub struct TzapPublicSigningIdentityRecord {
     pub certificate_chain_der: Vec<Vec<u8>>,
     pub not_before_unix_seconds: Option<u64>,
     pub not_after_unix_seconds: Option<u64>,
+    /// S1 (mobile-tzap-archive-signing-tracker.md). Absent on catalogs written
+    /// before this field existed.
+    #[serde(default)]
+    pub renewal_grace_period_days: Option<u64>,
+    /// S1. Absent on catalogs written before this field existed.
+    #[serde(default)]
+    pub renewal_recommended_within_days: Option<u64>,
     pub public_signer_id: Option<String>,
     pub public_org_id: Option<String>,
     pub public_device_id: Option<String>,

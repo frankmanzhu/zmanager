@@ -547,6 +547,8 @@ mod tests {
                     intermediate_chain_der: vec![chain.platform_der, chain.root_der.clone()],
                     not_before_unix_seconds: 900,
                     not_after_unix_seconds: 2_000,
+                    renewal_grace_period_days: None,
+                    renewal_recommended_within_days: None,
                     public_metadata: public_metadata(),
                     sign_device_id: "sign-device-1".to_owned(),
                     sign_device_routing: TzapSignDeviceRouting::Personal,
