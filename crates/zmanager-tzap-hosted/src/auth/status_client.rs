@@ -492,6 +492,112 @@ pub fn verify_tzap_document_envelope_valid_now(
     online_verification_result_from_status(offline, &expected, status, offline_options.verifier_time_unix_seconds)
 }
 
+/// Composes an archive's offline verification result with an online status response (Z6).
+///
+/// If the offline signature check was not ok, returns the offline result unchanged.
+/// If the status response does not match the archive status target, sets `status` to
+/// [`crate::engine::tzap::TzapArchiveStatusCheck::Unavailable`].
+/// Otherwise, evaluates the status response (fresh valid, revoked as early expiry,
+/// or suspended) and updates the status axis, re-deriving the outcome.
+///
+/// By virtue of [`crate::engine::tzap::TzapArchiveVerificationOutcome::derive`], a staging-anchored archive
+/// will never reach `Verified` even with a fresh valid status (capping at `VerifiedWithCaveat`).
+#[must_use]
+pub fn compose_tzap_archive_verification_with_status(
+    mut offline: crate::engine::tzap::TzapArchiveVerification,
+    expected: &TzapArchiveStatusTarget,
+    status: &TzapStatusResponse,
+    verifier_time_unix_seconds: i64,
+) -> crate::engine::tzap::TzapArchiveVerification {
+    if offline.signature != crate::engine::tzap::TzapArchiveSignatureCheck::Ok {
+        return offline;
+    }
+
+    if !archive_status_matches(expected, status) {
+        offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Unavailable {
+            reason: Some("online status does not match archive leaf certificate".to_owned()),
+        };
+        offline.outcome = crate::engine::tzap::TzapArchiveVerificationOutcome::derive(
+            offline.signature,
+            offline.trust,
+            offline.certificate_time,
+            &offline.status,
+        );
+        return offline;
+    }
+
+    match status.status {
+        TzapCertificateStatus::Valid => {
+            if status.is_fresh_valid_for_valid_now(verifier_time_unix_seconds) {
+                offline.status = crate::engine::tzap::TzapArchiveStatusCheck::FreshValid;
+            } else {
+                offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Unavailable {
+                    reason: Some(format!("online status is {}", status.status.as_str())),
+                };
+            }
+        }
+        TzapCertificateStatus::Revoked => {
+            let signed_at = offline.signer.as_ref().map_or(0, |s| s.signed_at_unix_seconds);
+            let revoked_at = status.revoked_at_unix_seconds.unwrap_or(0);
+            match classify_archive_revocation(status.revocation_reason.as_deref(), revoked_at, signed_at) {
+                TzapArchiveRevocationOutcome::BeforeRevocation => {
+                    offline.status = crate::engine::tzap::TzapArchiveStatusCheck::BeforeRevocation {
+                        revoked_at_unix_seconds: revoked_at,
+                        reason: status.revocation_reason.clone(),
+                    };
+                }
+                TzapArchiveRevocationOutcome::Revoked => {
+                    offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Revoked {
+                        revoked_at_unix_seconds: revoked_at,
+                        reason: status.revocation_reason.clone(),
+                    };
+                }
+            }
+        }
+        TzapCertificateStatus::Suspended => {
+            offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Suspended;
+        }
+        _ => {
+            offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Unavailable {
+                reason: Some(format!("online status is {}", status.status.as_str())),
+            };
+        }
+    }
+
+    offline.outcome = crate::engine::tzap::TzapArchiveVerificationOutcome::derive(
+        offline.signature,
+        offline.trust,
+        offline.certificate_time,
+        &offline.status,
+    );
+    offline
+}
+
+/// Archive equivalent of [`verify_tzap_document_envelope_valid_now`] (Z6).
+///
+/// Runs offline public-no-key archive verification, extracts the [`TzapArchiveStatusTarget`],
+/// and composes the result with the online status response.
+///
+/// # Errors
+///
+/// Returns [`crate::engine::tzap::TzapError`] if the archive file cannot be opened.
+pub fn verify_tzap_archive_valid_now(
+    archive: impl AsRef<std::path::Path>,
+    trust: &crate::engine::tzap::TzapX509TrustOptions,
+    issuer_certificate_sha256: Option<String>,
+    status: &TzapStatusResponse,
+    verifier_time_unix_seconds: i64,
+) -> Result<crate::engine::tzap::TzapArchiveVerification, crate::engine::tzap::TzapError> {
+    let offline = crate::engine::tzap::verify_tzap_archive_public_no_key(archive, trust, verifier_time_unix_seconds)?;
+    let Some(signer) = &offline.signer else {
+        return Ok(offline);
+    };
+    let Ok(expected) = TzapArchiveStatusTarget::from_leaf_certificate_der(&signer.leaf_certificate_der, issuer_certificate_sha256) else {
+        return Ok(offline);
+    };
+    Ok(compose_tzap_archive_verification_with_status(offline, &expected, status, verifier_time_unix_seconds))
+}
+
 fn validate_bulk_lookups(lookups: &[TzapBulkStatusLookup]) -> Result<(), TzapStatusClientError> {
     if !(MIN_BULK_LOOKUPS..=MAX_BULK_LOOKUPS).contains(&lookups.len()) {
         return Err(TzapStatusClientError::InvalidBulkLookup { reason: "lookup count must be 1-100" });
@@ -574,7 +680,8 @@ fn is_printable_ascii(value: &str) -> bool {
 mod tests {
     use super::{
         TzapArchiveRevocationOutcome, TzapArchiveStatusTarget, TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse,
-        archive_status_matches, classify_archive_revocation, online_verification_result_from_status, validate_bulk_lookups,
+        archive_status_matches, classify_archive_revocation, compose_tzap_archive_verification_with_status, online_verification_result_from_status,
+        validate_bulk_lookups,
     };
     use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport};
     use crate::document_verification::TzapDocumentVerificationResult;
@@ -986,5 +1093,122 @@ mod tests {
             self.requests.borrow_mut().push(request.clone());
             self.responses.borrow_mut().pop().ok_or(TzapAuthError::HttpStatus { status_code: 599 })
         }
+    }
+
+    #[test]
+    fn archive_status_composition_caps_staging_below_verified_and_promotes_production() {
+        use crate::engine::tzap::{
+            TzapArchiveSignatureCheck, TzapArchiveSignerDetails, TzapArchiveStatusCheck, TzapArchiveTimeCheck, TzapArchiveTrustCheck,
+            TzapArchiveVerification, TzapArchiveVerificationOutcome,
+        };
+
+        let target = archive_target_fixture();
+        let status = archive_status_response(&target, None);
+
+        let signer = TzapArchiveSignerDetails {
+            subject: "CN=Test".to_owned(),
+            display_name: Some("Test".to_owned()),
+            organization: None,
+            certificate_sha256: [0x01; 32],
+            certificate_sha256_hex: target.certificate_sha256.clone(),
+            issuer: "CN=Issuer".to_owned(),
+            serial_number_hex: target.serial_number.clone(),
+            signed_at_unix_seconds: 500,
+            leaf_certificate_der: Vec::new(),
+        };
+
+        // Production anchor + valid-at-signing + fresh valid -> Verified
+        let prod_offline = TzapArchiveVerification::new(
+            TzapArchiveSignatureCheck::Ok,
+            TzapArchiveTrustCheck::ProductionRoot,
+            TzapArchiveTimeCheck::ValidAtSigning,
+            TzapArchiveStatusCheck::Unavailable { reason: None },
+            Some(signer.clone()),
+            false,
+        );
+        let prod_verified = compose_tzap_archive_verification_with_status(prod_offline, &target, &status, 1_000);
+        assert_eq!(prod_verified.outcome, TzapArchiveVerificationOutcome::Verified);
+        assert_eq!(prod_verified.status, TzapArchiveStatusCheck::FreshValid);
+        assert_eq!(prod_verified.headline_label(), "Verified Now");
+
+        // Staging anchor + valid-at-signing + fresh valid -> VerifiedWithCaveat (never Verified!)
+        let staging_offline = TzapArchiveVerification::new(
+            TzapArchiveSignatureCheck::Ok,
+            TzapArchiveTrustCheck::StagingRoot,
+            TzapArchiveTimeCheck::ValidAtSigning,
+            TzapArchiveStatusCheck::Unavailable { reason: None },
+            Some(signer.clone()),
+            false,
+        );
+        let staging_verified = compose_tzap_archive_verification_with_status(staging_offline, &target, &status, 1_000);
+        assert_eq!(staging_verified.outcome, TzapArchiveVerificationOutcome::VerifiedWithCaveat);
+        assert_eq!(staging_verified.status, TzapArchiveStatusCheck::FreshValid);
+        assert_eq!(staging_verified.headline_label(), "Verified — Test Certificate");
+
+        // Revocation with 'renewed' and signed before revoked_at -> BeforeRevocation -> VerifiedWithCaveat
+        let mut revoked_status = archive_status_response(&target, None);
+        revoked_status.status = TzapCertificateStatus::Revoked;
+        revoked_status.revocation_reason = Some("renewed".to_owned());
+        revoked_status.revoked_at_unix_seconds = Some(800);
+
+        let prod_offline2 = TzapArchiveVerification::new(
+            TzapArchiveSignatureCheck::Ok,
+            TzapArchiveTrustCheck::ProductionRoot,
+            TzapArchiveTimeCheck::ValidAtSigning,
+            TzapArchiveStatusCheck::Unavailable { reason: None },
+            Some(signer.clone()),
+            false,
+        );
+        let renewed_verified = compose_tzap_archive_verification_with_status(prod_offline2, &target, &revoked_status, 1_000);
+        assert_eq!(renewed_verified.outcome, TzapArchiveVerificationOutcome::VerifiedWithCaveat);
+        assert_eq!(
+            renewed_verified.status,
+            TzapArchiveStatusCheck::BeforeRevocation {
+                revoked_at_unix_seconds: 800,
+                reason: Some("renewed".to_owned())
+            }
+        );
+        assert_eq!(renewed_verified.headline_label(), "Signed Before Revocation");
+
+        // Revocation with 'key_compromise' -> Revoked -> Failed
+        let mut compromise_status = archive_status_response(&target, None);
+        compromise_status.status = TzapCertificateStatus::Revoked;
+        compromise_status.revocation_reason = Some("key_compromise".to_owned());
+        compromise_status.revoked_at_unix_seconds = Some(800);
+
+        let prod_offline3 = TzapArchiveVerification::new(
+            TzapArchiveSignatureCheck::Ok,
+            TzapArchiveTrustCheck::ProductionRoot,
+            TzapArchiveTimeCheck::ValidAtSigning,
+            TzapArchiveStatusCheck::Unavailable { reason: None },
+            Some(signer.clone()),
+            false,
+        );
+        let compromise_verified = compose_tzap_archive_verification_with_status(prod_offline3, &target, &compromise_status, 1_000);
+        assert_eq!(compromise_verified.outcome, TzapArchiveVerificationOutcome::Failed);
+        assert_eq!(
+            compromise_verified.status,
+            TzapArchiveStatusCheck::Revoked {
+                revoked_at_unix_seconds: 800,
+                reason: Some("key_compromise".to_owned())
+            }
+        );
+        assert_eq!(compromise_verified.headline_label(), "Certificate Revoked");
+
+        // Target mismatch leaves status as Unavailable
+        let mut mismatched_target = target.clone();
+        mismatched_target.serial_number = "999".to_owned();
+        let prod_offline4 = TzapArchiveVerification::new(
+            TzapArchiveSignatureCheck::Ok,
+            TzapArchiveTrustCheck::ProductionRoot,
+            TzapArchiveTimeCheck::ValidAtSigning,
+            TzapArchiveStatusCheck::Unavailable { reason: None },
+            Some(signer),
+            false,
+        );
+        let mismatched_verified = compose_tzap_archive_verification_with_status(prod_offline4, &mismatched_target, &status, 1_000);
+        assert_eq!(mismatched_verified.outcome, TzapArchiveVerificationOutcome::VerifiedWithCaveat);
+        assert!(matches!(mismatched_verified.status, TzapArchiveStatusCheck::Unavailable { .. }));
+        assert_eq!(mismatched_verified.headline_label(), "Signature Valid — Status Not Checked");
     }
 }

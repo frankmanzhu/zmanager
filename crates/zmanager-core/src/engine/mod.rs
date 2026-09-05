@@ -30,7 +30,7 @@ pub use types::{
 pub mod tzap {
     pub use crate::tzap::{
         TzapArchiveSignatureCheck, TzapArchiveSignerDetails, TzapArchiveStatusCheck, TzapArchiveTimeCheck, TzapArchiveTrustCheck, TzapArchiveVerification,
-        TzapArchiveVerificationOutcome, TzapPublicDisplaySummary, TzapPublicMetadataSummary, TzapPublicSignatureStatus, TzapPublicVolumeSummary,
+        TzapArchiveVerificationOutcome, TzapError, TzapPublicDisplaySummary, TzapPublicMetadataSummary, TzapPublicSignatureStatus, TzapPublicVolumeSummary,
         TzapTestReport, TzapX509SignerInspection, TzapX509SigningOptions, TzapX509TrustAnchor, TzapX509TrustOptions, TzapX509VerificationReport,
         inspect_tzap_x509_public_no_key_signer, inspect_tzap_x509_signer, resolve_default_signing_certificate_id, summarize_tzap_public_display,
         summarize_tzap_public_metadata, test_tzap_with_optional_password_filter_and_x509_trust, tzap_bootstrap_sidecar_path,
