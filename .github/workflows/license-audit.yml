@@ -45,12 +45,16 @@ jobs:
       # are invisible to it and the path dependencies fail to resolve. Run
       # cargo-deny directly on the runner instead, where the siblings sit at
       # the paths the path deps expect.
-      # The prebuilt release asset is version-prefixed, so resolve the asset
-      # name from the latest release API rather than hardcoding a version.
+      # The prebuilt release asset is downloaded via gh CLI using the GitHub
+      # token to avoid unauthenticated API rate limits on shared runners.
       - name: Install cargo-deny
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ASSET=$(curl -s https://api.github.com/repos/EmbarkStudios/cargo-deny/releases/latest | python3 -c 'import json,sys; print(next(a["name"] for a in json.load(sys.stdin)["assets"] if a["name"].endswith("x86_64-unknown-linux-musl.tar.gz")))')
-          curl -sSfL "https://github.com/EmbarkStudios/cargo-deny/releases/latest/download/$ASSET" | tar -xz -C /tmp --strip-components=1
+          gh release download \
+            --repo EmbarkStudios/cargo-deny \
+            --pattern '*x86_64-unknown-linux-musl.tar.gz' \
+            --output - | tar -xz -C /tmp --strip-components=1
           install -m 0755 /tmp/cargo-deny /usr/local/bin/cargo-deny
 
       - name: Run cargo-deny
