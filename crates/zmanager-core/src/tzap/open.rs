@@ -143,13 +143,13 @@ pub struct TzapPublicFormatSummary {
     pub has_dictionary: bool,
 }
 
-pub(crate) fn read_tzap_input_volume_bytes(archive_path: &Path) -> Result<Vec<Vec<u8>>, TzapError> {
-    let volume_paths = discover_tzap_input_volume_paths(archive_path);
-    let mut volume_bytes = Vec::with_capacity(volume_paths.len());
-    for path in &volume_paths {
-        volume_bytes.push(fs::read(path).map_err(|source| TzapError::Io { path: path.clone(), source })?);
-    }
-    Ok(volume_bytes)
+/// Opens each of an archive's volumes as a `File` (which implements
+/// `ArchiveReadAt`) rather than reading it into memory (T2/Z4): callers pass
+/// these to a reader-based verification entry point, which then reads each
+/// `BlockRecord` with a bounded seek rather than requiring the whole volume
+/// resident at once.
+pub(crate) fn open_tzap_input_volume_readers(archive_path: &Path) -> Result<Vec<File>, TzapError> {
+    discover_tzap_input_volume_paths(archive_path).iter().map(|path| File::open(path).map_err(|source| TzapError::Io { path: path.clone(), source })).collect()
 }
 
 /// Reads public `.tzap` metadata without decrypting archive contents.

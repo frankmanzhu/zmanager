@@ -4,9 +4,9 @@
 use super::{
     TzapCreateOptions, TzapExtractKeySource, TzapExtractRequest, TzapKeySource, TzapPublicSignatureStatus, TzapRestoreOptions, TzapRestorePolicy,
     TzapX509SigningOptions, TzapX509TrustOptions, copy_tzap_file_to_writer, copy_tzap_files_to_writer, create_tzap_from_manifest_with_context, extract_tzap,
-    extract_tzap_file_to_destination, list_tzap_index_with_optional_password, list_tzap_with_optional_password, list_tzap_with_password,
-    list_tzap_with_recipient_key, summarize_tzap_public_display, summarize_tzap_public_metadata, test_tzap_with_password_filter_and_x509_trust,
-    test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
+    extract_tzap_file_to_destination, inspect_tzap_x509_public_no_key_signer, list_tzap_index_with_optional_password, list_tzap_with_optional_password,
+    list_tzap_with_password, list_tzap_with_recipient_key, summarize_tzap_public_display, summarize_tzap_public_metadata,
+    test_tzap_with_password_filter_and_x509_trust, test_tzap_with_recipient_key_filter_and_x509_trust, verify_tzap_x509_public_no_key,
 };
 use crate::jobs::{CancellationToken, JobContext};
 use crate::manifest::{ArchiveManifest, ManifestEntry, ManifestFileType, PermissionSnapshot};
@@ -1019,6 +1019,13 @@ fn create_and_test_tzap_with_x509_root_auth() {
     assert_eq!(public_report.subject, "CN=ZManager Test Signer");
     assert_eq!(public_report.trust_anchor_subject.as_deref(), Some("CN=ZManager Test Root CA"));
     assert_eq!(public_report.diagnostics.first().map(String::as_str), Some("public_data_block_commitment_verified"));
+
+    // Z4: both public no-key paths now verify through File-backed
+    // ArchiveReadAt readers rather than reading every volume into memory
+    // first; this is the same archive exercising the signer-inspection path.
+    let signer_inspection = inspect_tzap_x509_public_no_key_signer(&archive).unwrap();
+    assert_eq!(signer_inspection.archive_root, root_auth.archive_root);
+    assert_eq!(signer_inspection.subject, "CN=ZManager Test Signer");
 }
 
 #[test]

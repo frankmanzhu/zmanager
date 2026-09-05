@@ -4,7 +4,7 @@
 
 use super::TzapError;
 use crate::secrets::{SecretBytes, SecretString};
-use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_recipient_key, read_tzap_input_volume_bytes};
+use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_recipient_key, open_tzap_input_volume_readers};
 use crate::tzap::write::TzapCreateOptions;
 use crate::x509_format::x509_name_to_string;
 use openssl::asn1::Asn1Time;
@@ -25,7 +25,7 @@ use tzap_core::format::{FORMAT_VERSION, FormatError, VOLUME_FORMAT_REV};
 use tzap_core::reader::{PublicNoKeyDiagnostic, RecipientWrapRecordContext, RootAuthDiagnostic};
 use tzap_core::wire::RecipientRecordV1;
 use tzap_core::wire::RootAuthFooterV1;
-use tzap_core::{MasterKey, OpenedArchive, TarEntryKind, public_no_key_verify_volumes_with};
+use tzap_core::{ArchiveReadAt, MasterKey, OpenedArchive, TarEntryKind, public_no_key_verify_readers_with};
 use tzap_plugin_keywrap::{
     ArchiveIdentity as KeyWrapArchiveIdentity, KeyWrapOutcome, KeyWrapSuite, PrivateKeyLookup, RecipientRecordInput, RecipientRecordMetadata,
     dispatch_key_wrap_record, wrap_master_key_for_recipient,
@@ -862,13 +862,13 @@ pub fn verify_tzap_x509_public_no_key(archive: impl AsRef<Path>, trust: &TzapX50
     }
 
     let archive_path = archive.as_ref();
-    let volume_bytes = read_tzap_input_volume_bytes(archive_path)?;
-    let volume_refs = volume_bytes.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let volumes = open_tzap_input_volume_readers(archive_path)?;
+    let volume_refs = volumes.iter().map(|file| file as &dyn ArchiveReadAt).collect::<Vec<_>>();
     let trusted_roots_der = load_x509_trusted_roots(trust)?;
     let mut report = None;
     let mut trust_anchor = TzapX509TrustAnchor::Untrusted;
     let mut x509_error = None;
-    let verification = public_no_key_verify_volumes_with(&volume_refs, |footer, archive_root| {
+    let verification = public_no_key_verify_readers_with(&volume_refs, |footer, archive_root| {
         if footer.authenticator_id != X509_AUTHENTICATOR_ID {
             return Err(FormatError::ReaderUnsupported("X.509 trust can only verify X.509 RootAuth"));
         }
@@ -945,11 +945,11 @@ pub fn inspect_tzap_x509_signer(archive: impl AsRef<Path>, password: Option<&str
 /// archive is not signed with the X.509 `RootAuth` profile.
 pub fn inspect_tzap_x509_public_no_key_signer(archive: impl AsRef<Path>) -> Result<TzapX509SignerInspection, TzapError> {
     let archive_path = archive.as_ref();
-    let volume_bytes = read_tzap_input_volume_bytes(archive_path)?;
-    let volume_refs = volume_bytes.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let volumes = open_tzap_input_volume_readers(archive_path)?;
+    let volume_refs = volumes.iter().map(|file| file as &dyn ArchiveReadAt).collect::<Vec<_>>();
     let mut inspection = None;
     let mut x509_error = None;
-    let verification = public_no_key_verify_volumes_with(&volume_refs, |footer, archive_root| match inspect_x509_root_auth_footer(footer, archive_root) {
+    let verification = public_no_key_verify_readers_with(&volume_refs, |footer, archive_root| match inspect_x509_root_auth_footer(footer, archive_root) {
         Ok(value) => {
             inspection = Some(value);
             Ok(true)
