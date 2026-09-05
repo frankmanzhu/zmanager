@@ -164,8 +164,26 @@ pub struct TzapX509VerificationReport {
     pub verified_chain_subjects: Vec<String>,
     /// Trust anchor subject, when OpenSSL reported one.
     pub trust_anchor_subject: Option<String>,
+    /// Which trust anchor actually validated the chain, derived in Rust from
+    /// the chain itself rather than inferred from `trust_anchor_subject`
+    /// (Z2). Both official TZAP roots remain trusted in every build; this is
+    /// what lets a caller require a production anchor for a "fully verified"
+    /// outcome while a staging-anchored chain still verifies under its own
+    /// label. Any anchor other than the two pinned official roots — a custom
+    /// or system root the caller separately configured — reports
+    /// [`TzapX509TrustAnchor::Untrusted`] here: this classification exists to
+    /// answer "production or staging, or neither", not to relitigate whether
+    /// the underlying chain verification succeeded.
+    pub trust_anchor: TzapX509TrustAnchor,
     /// Root-auth verification diagnostics reported by `tzap`.
     pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TzapX509TrustAnchor {
+    ProductionRoot,
+    StagingRoot,
+    Untrusted,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -521,14 +539,61 @@ fn current_unix_seconds_i64() -> Result<i64, TzapError> {
     i64::try_from(seconds).map_err(|_| TzapError::X509RootAuth("current Unix time exceeds i64".to_owned()))
 }
 
+/// Classifies which trust anchor validated a footer that has already
+/// verified successfully against `trust`'s combined trust store (Z2).
+///
+/// Rather than inferring the answer from `X509RootAuthReport`'s subject
+/// string, this re-runs footer verification against each official root in
+/// isolation and reports whichever one independently succeeds. Both official
+/// roots are small, embedded, and verification is cheap relative to archive
+/// size (it never touches bulk data), so the extra check is not a meaningful
+/// cost. Only meaningful when `trust.include_official_tzap_root` is set;
+/// otherwise neither official root was in play and the answer is always
+/// [`TzapX509TrustAnchor::Untrusted`] by definition of that variant (see its
+/// doc comment on [`TzapX509VerificationReport::trust_anchor`]).
+fn classify_x509_trust_anchor(footer: &RootAuthFooterV1, archive_root: &[u8; 32], trust: &TzapX509TrustOptions) -> TzapX509TrustAnchor {
+    if !trust.include_official_tzap_root {
+        return TzapX509TrustAnchor::Untrusted;
+    }
+    let Ok(production_root_der) = certificate_der_from_pem_or_der(crate::trust::OFFICIAL_TZAP_ROOT_CERT_PEM) else {
+        return TzapX509TrustAnchor::Untrusted;
+    };
+    let Ok(staging_root_der) = certificate_der_from_pem_or_der(crate::trust::OFFICIAL_TZAP_STAGING_ROOT_PEM) else {
+        return TzapX509TrustAnchor::Untrusted;
+    };
+    classify_x509_trust_anchor_against(footer, archive_root, &production_root_der, &staging_root_der)
+}
+
+/// The comparison half of [`classify_x509_trust_anchor`], taking the two
+/// official root DERs as parameters instead of reading the embedded PEM
+/// constants directly. Split out so tests can substitute test roots for the
+/// real (private-key-less, from this crate's perspective) production and
+/// staging roots.
+fn classify_x509_trust_anchor_against(
+    footer: &RootAuthFooterV1,
+    archive_root: &[u8; 32],
+    production_root_der: &[u8],
+    staging_root_der: &[u8],
+) -> TzapX509TrustAnchor {
+    if verify_root_auth_footer(footer, archive_root, &[production_root_der.to_vec()], false, false).is_ok() {
+        return TzapX509TrustAnchor::ProductionRoot;
+    }
+    if verify_root_auth_footer(footer, archive_root, &[staging_root_der.to_vec()], false, false).is_ok() {
+        return TzapX509TrustAnchor::StagingRoot;
+    }
+    TzapX509TrustAnchor::Untrusted
+}
+
 fn verify_opened_x509_root_auth(opened: &OpenedArchive, trust: &TzapX509TrustOptions) -> Result<TzapX509VerificationReport, TzapError> {
     let trusted_roots_der = load_x509_trusted_roots(trust)?;
     let mut report = None;
+    let mut trust_anchor = TzapX509TrustAnchor::Untrusted;
     let mut x509_error = None;
     let verification = opened
         .verify_root_auth_with(|footer, archive_root| {
             match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots, trust.include_official_tzap_root) {
                 Ok(value) => {
+                    trust_anchor = classify_x509_trust_anchor(footer, archive_root, trust);
                     report = Some(value);
                     Ok(true)
                 }
@@ -547,6 +612,7 @@ fn verify_opened_x509_root_auth(opened: &OpenedArchive, trust: &TzapX509TrustOpt
         verification.signer_identity_type,
         verification.total_data_block_count,
         report,
+        trust_anchor,
         &verification.diagnostics,
         root_auth_diagnostic_labels,
     ))
@@ -555,12 +621,14 @@ fn verify_opened_x509_root_auth(opened: &OpenedArchive, trust: &TzapX509TrustOpt
 /// Maps a successful X.509 `RootAuth` verification and its tzap-plugin report
 /// into the public [`TzapX509VerificationReport`], rendering diagnostics with
 /// the verification flavor's label function.
+#[allow(clippy::too_many_arguments)]
 fn x509_report_from_verification<Diagnostics>(
     archive_root: [u8; 32],
     authenticator_id: u16,
     signer_identity_type: u16,
     total_data_block_count: u64,
     report: X509RootAuthReport,
+    trust_anchor: TzapX509TrustAnchor,
     diagnostics: &[Diagnostics],
     diagnostics_labels: fn(&[Diagnostics]) -> Vec<String>,
 ) -> TzapX509VerificationReport {
@@ -576,6 +644,7 @@ fn x509_report_from_verification<Diagnostics>(
         certificate_sha256: report.certificate_sha256,
         verified_chain_subjects: report.verified_chain_subjects,
         trust_anchor_subject: report.trust_anchor_subject,
+        trust_anchor,
         diagnostics: diagnostics_labels(diagnostics),
     }
 }
@@ -696,6 +765,7 @@ pub fn verify_tzap_x509_public_no_key(archive: impl AsRef<Path>, trust: &TzapX50
     let volume_refs = volume_bytes.iter().map(Vec::as_slice).collect::<Vec<_>>();
     let trusted_roots_der = load_x509_trusted_roots(trust)?;
     let mut report = None;
+    let mut trust_anchor = TzapX509TrustAnchor::Untrusted;
     let mut x509_error = None;
     let verification = public_no_key_verify_volumes_with(&volume_refs, |footer, archive_root| {
         if footer.authenticator_id != X509_AUTHENTICATOR_ID {
@@ -703,6 +773,7 @@ pub fn verify_tzap_x509_public_no_key(archive: impl AsRef<Path>, trust: &TzapX50
         }
         match verify_root_auth_footer(footer, archive_root, &trusted_roots_der, trust.trusted_system_roots, trust.include_official_tzap_root) {
             Ok(value) => {
+                trust_anchor = classify_x509_trust_anchor(footer, archive_root, trust);
                 report = Some(value);
                 Ok(true)
             }
@@ -721,6 +792,7 @@ pub fn verify_tzap_x509_public_no_key(archive: impl AsRef<Path>, trust: &TzapX50
         verification.signer_identity_type,
         verification.total_data_block_count,
         report,
+        trust_anchor,
         &verification.diagnostics,
         public_no_key_diagnostic_labels,
     ))
@@ -822,8 +894,18 @@ pub(crate) fn inspect_x509_root_auth_footer(footer: &RootAuthFooterV1, archive_r
 
 #[cfg(test)]
 mod tests {
-    use super::{TzapX509TrustOptions, load_x509_trusted_roots};
-    use openssl::x509::X509;
+    use super::{TzapX509TrustAnchor, TzapX509TrustOptions, classify_x509_trust_anchor_against, load_x509_trusted_roots};
+    use openssl::asn1::Asn1Time;
+    use openssl::bn::BigNum;
+    use openssl::hash::MessageDigest;
+    use openssl::pkey::{PKey, Private};
+    use openssl::rsa::Rsa;
+    use openssl::x509::extension::{BasicConstraints, KeyUsage};
+    use openssl::x509::{X509, X509NameBuilder};
+    use tzap_core::format::{FORMAT_VERSION, VOLUME_FORMAT_REV};
+    use tzap_core::wire::RootAuthFooterV1;
+    use tzap_core::writer::RootAuthSigningRequest;
+    use tzap_plugin_signing::x509_chain::{X509_AUTHENTICATOR_ID, X509_SIGNER_IDENTITY_TYPE_DER_CERT, X509RootAuthSigner};
 
     #[test]
     fn x509_trust_options_can_include_embedded_official_root() {
@@ -838,5 +920,108 @@ mod tests {
         assert_eq!(crate::x509_format::x509_name_to_string(root.subject_name()), "CN=TZAP Production Root CA 2026, O=TZAP, C=AU");
         let staging = X509::from_der(&roots[1]).unwrap();
         assert_eq!(crate::x509_format::x509_name_to_string(staging.subject_name()), "CN=TZAP Staging Root CA 2026, O=TZAP, C=AU");
+    }
+
+    #[test]
+    fn trust_anchor_classification_distinguishes_production_staging_and_untrusted() {
+        // Z2: derived by actually re-verifying against each candidate root in
+        // isolation, never by matching a subject string.
+        let (production_stand_in, production_key) = test_ca_cert("Stand-in Production Root");
+        let (staging_stand_in, _staging_key) = test_ca_cert("Stand-in Staging Root");
+        let (untrusted_root, untrusted_key) = test_ca_cert("Some Other Root");
+        let (leaf_cert, leaf_key) = test_leaf_cert("Archive Signer", &production_stand_in, &production_key);
+        let (footer, archive_root) = signed_footer(&leaf_cert, &leaf_key, Vec::new());
+
+        assert_eq!(
+            classify_x509_trust_anchor_against(&footer, &archive_root, &production_stand_in.to_der().unwrap(), &staging_stand_in.to_der().unwrap()),
+            TzapX509TrustAnchor::ProductionRoot
+        );
+        assert_eq!(
+            classify_x509_trust_anchor_against(&footer, &archive_root, &staging_stand_in.to_der().unwrap(), &production_stand_in.to_der().unwrap()),
+            TzapX509TrustAnchor::StagingRoot
+        );
+        assert_eq!(
+            classify_x509_trust_anchor_against(&footer, &archive_root, &untrusted_root.to_der().unwrap(), &staging_stand_in.to_der().unwrap()),
+            TzapX509TrustAnchor::Untrusted
+        );
+        let _ = untrusted_key;
+    }
+
+    #[test]
+    fn trust_anchor_classification_is_untrusted_when_official_root_is_not_in_play() {
+        let trust = TzapX509TrustOptions { trusted_ca_certificates: Vec::new(), trusted_system_roots: false, include_official_tzap_root: false };
+        let (root_cert, root_key) = test_ca_cert("Custom Root");
+        let (leaf_cert, leaf_key) = test_leaf_cert("Archive Signer", &root_cert, &root_key);
+        let (footer, archive_root) = signed_footer(&leaf_cert, &leaf_key, Vec::new());
+
+        assert_eq!(super::classify_x509_trust_anchor(&footer, &archive_root, &trust), TzapX509TrustAnchor::Untrusted);
+    }
+
+    fn test_ca_cert(cn: &str) -> (X509, PKey<Private>) {
+        let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", cn).unwrap();
+        let name = name.build();
+        let mut builder = X509::builder().unwrap();
+        builder.set_version(2).unwrap();
+        builder.set_serial_number(&BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap()).unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        builder.set_not_after(&Asn1Time::days_from_now(365).unwrap()).unwrap();
+        builder.append_extension(BasicConstraints::new().critical().ca().build().unwrap()).unwrap();
+        builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build().unwrap()).unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+        (builder.build(), key)
+    }
+
+    fn test_leaf_cert(cn: &str, ca_cert: &X509, ca_key: &PKey<Private>) -> (X509, PKey<Private>) {
+        let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", cn).unwrap();
+        let name = name.build();
+        let mut builder = X509::builder().unwrap();
+        builder.set_version(2).unwrap();
+        builder.set_serial_number(&BigNum::from_u32(2).unwrap().to_asn1_integer().unwrap()).unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(ca_cert.subject_name()).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        builder.set_not_after(&Asn1Time::days_from_now(365).unwrap()).unwrap();
+        builder.append_extension(BasicConstraints::new().build().unwrap()).unwrap();
+        builder.append_extension(KeyUsage::new().critical().digital_signature().build().unwrap()).unwrap();
+        builder.sign(ca_key, MessageDigest::sha256()).unwrap();
+        (builder.build(), key)
+    }
+
+    fn signed_footer(leaf_cert: &X509, leaf_key: &PKey<Private>, chain_der: Vec<Vec<u8>>) -> (RootAuthFooterV1, [u8; 32]) {
+        let signer = X509RootAuthSigner::new(leaf_cert.to_der().unwrap(), leaf_key.clone(), chain_der, 1).unwrap();
+        let request = RootAuthSigningRequest {
+            root_auth_spec_id: tzap_core::format::ROOT_AUTH_SPEC_ID,
+            archive_uuid: [1; 16],
+            session_id: [2; 16],
+            archive_root: [3; 32],
+        };
+        let value = signer.authenticator_value_for_request(&request).unwrap();
+        let footer = RootAuthFooterV1 {
+            archive_uuid: request.archive_uuid,
+            session_id: request.session_id,
+            format_version: FORMAT_VERSION,
+            volume_format_rev: VOLUME_FORMAT_REV,
+            authenticator_id: X509_AUTHENTICATOR_ID,
+            signer_identity_type: X509_SIGNER_IDENTITY_TYPE_DER_CERT,
+            signer_identity_bytes: leaf_cert.to_der().unwrap(),
+            authenticator_value: value,
+            total_data_block_count: 0,
+            critical_metadata_digest: [0; 32],
+            index_digest: [0; 32],
+            fec_layout_digest: [0; 32],
+            data_block_merkle_root: [0; 32],
+            signer_identity_digest: [0; 32],
+            archive_root: request.archive_root,
+            footer_crc32c: 0,
+        };
+        (footer, request.archive_root)
     }
 }
