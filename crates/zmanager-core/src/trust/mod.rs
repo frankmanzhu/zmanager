@@ -275,23 +275,24 @@ impl TzapRootPinSet {
 /// SHA-256 identifiers of the TZAP roots trusted by default in chain
 /// verification. Both are official: production serves live traffic and
 /// staging serves the staging environment; chains rooted at either verify.
-/// The PEMs live in `crates/zmanager-core/src/trust/` and are pinned here so
-/// the pin set and the embedded certificates cannot drift.
-pub const TZAP_PRODUCTION_ROOT_SHA256: &str = "sha256:d80d318f6cd6096dc791e314ec6f41434caa47feb75e85ad6f87d5bf72bbd53d";
-pub const TZAP_STAGING_ROOT_SHA256: &str = "sha256:4847bd67cf76f0d399565deac2583d4d4de51d2751b77cd6f7672a508bcc1341";
+/// These re-export `tzap_plugin_signing::trust`, which is the one place in
+/// the `tzap`/`zmanager` workspaces these fingerprints and their matching
+/// PEMs are pinned, so this crate cannot carry its own copy that drifts from
+/// tzap's.
+pub const TZAP_PRODUCTION_ROOT_SHA256: &str = tzap_plugin_signing::trust::OFFICIAL_TZAP_ROOT_CERT_SHA256;
+pub const TZAP_STAGING_ROOT_SHA256: &str = tzap_plugin_signing::trust::OFFICIAL_TZAP_STAGING_ROOT_SHA256;
 
 pub const OFFICIAL_TZAP_ROOT_PINS: TzapRootPinSet =
     TzapRootPinSet { current: &[TZAP_PRODUCTION_ROOT_SHA256, TZAP_STAGING_ROOT_SHA256], planned_successors: &[] };
 
-/// Embedded PEM bytes for the official TZAP roots, matching
-/// [`TZAP_PRODUCTION_ROOT_SHA256`] and [`TZAP_STAGING_ROOT_SHA256`]. This is
-/// the one place these files are embedded in the crate; other code that
-/// needs the certificate bytes themselves (not just the fingerprint) uses
-/// these constants or [`official_tzap_root_certificates_der`] instead of
-/// embedding its own copy, fetching one at runtime, or reading a
-/// caller-supplied path.
-pub const OFFICIAL_TZAP_ROOT_CERT_PEM: &[u8] = include_bytes!("tzap-production-root-ca-2026.pem");
-pub const OFFICIAL_TZAP_STAGING_ROOT_PEM: &[u8] = include_bytes!("tzap-staging-root-ca-2026.pem");
+/// PEM bytes for the official TZAP roots, matching [`TZAP_PRODUCTION_ROOT_SHA256`]
+/// and [`TZAP_STAGING_ROOT_SHA256`]. Sourced from `tzap_plugin_signing::trust`
+/// rather than embedded here; other code that needs the certificate bytes
+/// themselves (not just the fingerprint) uses these constants or
+/// [`official_tzap_root_certificates_der`] instead of embedding its own copy,
+/// fetching one at runtime, or reading a caller-supplied path.
+pub const OFFICIAL_TZAP_ROOT_CERT_PEM: &[u8] = tzap_plugin_signing::trust::OFFICIAL_TZAP_ROOT_CERT_PEM;
+pub const OFFICIAL_TZAP_STAGING_ROOT_PEM: &[u8] = tzap_plugin_signing::trust::OFFICIAL_TZAP_STAGING_ROOT_PEM;
 
 /// DER bytes for both official TZAP roots (production, then staging).
 ///
