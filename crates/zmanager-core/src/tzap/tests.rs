@@ -903,6 +903,47 @@ fn multi_recipient_public_keys_can_open_same_archive() {
 }
 
 #[test]
+fn signed_tzap_with_recipient_public_keys_opens_with_the_matching_key() {
+    let temp = TestDir::new("tzap_signed_recipient_public_key");
+    let source = temp.path("payload.txt");
+    let archive = temp.path("sealed.tzap");
+    let recipient_key_path = temp.path("recipient.key");
+    fs::write(&source, b"sealed payload").unwrap();
+
+    let (_recipient_cert, recipient_key) = test_p256_recipient_cert("ZManager Test Recipient");
+    fs::write(&recipient_key_path, recipient_key.private_key_to_pem_pkcs8().unwrap()).unwrap();
+
+    let (root_cert, root_key) = test_ca_cert("ZManager Test Root CA");
+    let (signer_cert, signer_key) = test_leaf_cert("ZManager Test Signer", root_cert.as_ref(), root_key.as_ref());
+
+    let manifest = single_file_manifest(&temp, source, 14);
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::RecipientPublicKeys(vec![recipient_key.public_key_to_der().unwrap()]),
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: None,
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: Some(TzapX509SigningOptions::InMemory {
+            signing_certificate: signer_cert.to_pem().unwrap(),
+            signing_private_key: SecretBytes::from(signer_key.private_key_to_pem_pkcs8().unwrap()),
+            signing_chain: vec![root_cert.to_der().unwrap()],
+        }),
+        emit_bootstrap_sidecar: false,
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+
+    create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
+
+    let listing = list_tzap_with_recipient_key(&archive, &recipient_key_path).unwrap();
+    assert_eq!(listing.entries.len(), 1);
+    assert_eq!(listing.entries[0].path, "payload.txt");
+}
+
+#[test]
 fn create_split_tzap_uses_os_friendly_volume_names() {
     let temp = TestDir::new("tzap_split_volume_names");
     let source = temp.path("payload.bin");
