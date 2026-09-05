@@ -3,13 +3,18 @@
 use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpResponse, TzapAuthHttpTransport};
 pub use crate::crl::validate_crl_der_against_manifest;
 use crate::crl::{crl_download_to_der, optional_unix_or_rfc3339, parse_crl_manifest};
-use crate::document_verification::{TzapDocumentVerificationResult, TzapOfflineVerificationOptions, verify_tzap_document_envelope_offline};
+use crate::document_verification::{
+    TzapDocumentVerificationResult, TzapOfflineVerificationOptions, authority_key_identifier, verify_tzap_document_envelope_offline,
+};
 use crate::http_client::{require_success, send_json_request};
 use crate::json_util::{json_object, required_string};
 use crate::trust::{self, TzapCertificateStatus, TzapTrustAnchorType, TzapVerificationState};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 use std::fmt;
+use x509_parser::prelude::{FromDer as _, X509Certificate};
 
 pub const STATUS_FRESHNESS_SKEW_SECONDS: i64 = 5 * 60;
 pub const MAX_POSITIVE_STATUS_WINDOW_SECONDS: i64 = 24 * 60 * 60;
@@ -181,6 +186,68 @@ impl TzapDocumentStatusTarget {
     }
 }
 
+#[derive(Debug)]
+pub enum TzapArchiveStatusTargetError {
+    CertificateParse(String),
+    MissingAuthorityKeyIdentifier,
+    InvalidSerial,
+}
+
+impl fmt::Display for TzapArchiveStatusTargetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CertificateParse(detail) => write!(f, "archive status target: certificate parse failed: {detail}"),
+            Self::MissingAuthorityKeyIdentifier => write!(f, "archive status target: leaf certificate has no Authority Key Identifier extension"),
+            Self::InvalidSerial => write!(f, "archive status target: leaf certificate serial number is invalid"),
+        }
+    }
+}
+
+impl std::error::Error for TzapArchiveStatusTargetError {}
+
+/// Status-matching target for a TZAP *archive*'s embedded leaf certificate.
+///
+/// This is the archive equivalent of [`TzapDocumentStatusTarget`], but with
+/// three required fields instead of four (mobile TZAP archive signing plan,
+/// D1/Z1): archives are always queried by leaf fingerprint
+/// (`status_by_fingerprint`), and a SHA-256 of the DER already uniquely
+/// determines the certificate, including its issuer and serial — so
+/// `issuer_certificate_sha256` is compared only when the caller supplies it,
+/// rather than being required the way [`TzapDocumentStatusTarget`] requires
+/// it. That is known for archives this device signed (the local identity
+/// catalog stores it) but not for a received archive, which must still be
+/// verifiable.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TzapArchiveStatusTarget {
+    pub certificate_sha256: String,
+    pub issuer_key_identifier: String,
+    pub serial_number: String,
+    pub issuer_certificate_sha256: Option<String>,
+}
+
+impl TzapArchiveStatusTarget {
+    /// Derives the target from a verified leaf certificate's raw DER — the
+    /// same bytes carried in `RootAuthFooterV1.signer_identity_bytes` once
+    /// the chain has verified. `issuer_certificate_sha256` is `None` unless
+    /// the caller already has it from elsewhere (e.g. the local identity
+    /// catalog, for an archive this device signed).
+    pub fn from_leaf_certificate_der(leaf_certificate_der: &[u8], issuer_certificate_sha256: Option<String>) -> Result<Self, TzapArchiveStatusTargetError> {
+        let (remaining, certificate) =
+            X509Certificate::from_der(leaf_certificate_der).map_err(|error| TzapArchiveStatusTargetError::CertificateParse(error.to_string()))?;
+        if !remaining.is_empty() {
+            return Err(TzapArchiveStatusTargetError::CertificateParse("trailing DER bytes".to_owned()));
+        }
+        let issuer_key_identifier = authority_key_identifier(&certificate).ok_or(TzapArchiveStatusTargetError::MissingAuthorityKeyIdentifier)?;
+        let serial_number = trust::canonical_serial_hex(certificate.raw_serial()).map_err(|_| TzapArchiveStatusTargetError::InvalidSerial)?;
+        Ok(Self {
+            certificate_sha256: trust::sha256_identifier(leaf_certificate_der),
+            issuer_key_identifier: URL_SAFE_NO_PAD.encode(issuer_key_identifier),
+            serial_number,
+            issuer_certificate_sha256,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct TzapStatusQueryEcho {
     pub certificate_sha256: Option<String>,
@@ -330,6 +397,28 @@ pub fn online_verification_result_from_status(
     TzapDocumentVerificationResult { state: TzapVerificationState::ValidNow, reason: None, ..offline }
 }
 
+/// Archive equivalent of `status_matches_document`. See
+/// [`TzapArchiveStatusTarget`] for why this compares three required fields
+/// plus an optional fourth rather than reusing [`TzapDocumentStatusTarget`].
+#[must_use]
+pub fn archive_status_matches(expected: &TzapArchiveStatusTarget, status: &TzapStatusResponse) -> bool {
+    let leaf_fields_match = status.certificate_sha256.as_deref() == Some(expected.certificate_sha256.as_str())
+        && status.issuer_key_identifier.as_deref() == Some(expected.issuer_key_identifier.as_str())
+        && status.serial_number.as_deref() == Some(expected.serial_number.as_str())
+        && match &expected.issuer_certificate_sha256 {
+            Some(expected_issuer) => status.issuer_certificate_sha256.as_deref() == Some(expected_issuer.as_str()),
+            None => true,
+        };
+    // Archives are always queried by leaf fingerprint, so the echo — when
+    // present at all — must agree on that fingerprint; an echo carrying
+    // other fields instead is a mismatch, not something to ignore.
+    let query_matches = match &status.query.certificate_sha256 {
+        Some(echoed) => echoed == &expected.certificate_sha256,
+        None => status.query.issuer_certificate_sha256.is_none() && status.query.serial_number.is_none(),
+    };
+    leaf_fields_match && query_matches
+}
+
 fn status_matches_document(expected: &TzapDocumentStatusTarget, status: &TzapStatusResponse) -> bool {
     let leaf_fields_match = status.certificate_sha256.as_deref() == Some(expected.certificate_sha256.as_str())
         && status.issuer_certificate_sha256.as_deref() == Some(expected.issuer_certificate_sha256.as_str())
@@ -438,11 +527,21 @@ fn is_printable_ascii(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, online_verification_result_from_status, validate_bulk_lookups,
+        TzapArchiveStatusTarget, TzapBulkStatusLookup, TzapDocumentStatusTarget, TzapStatusClient, TzapStatusResponse, archive_status_matches,
+        online_verification_result_from_status, validate_bulk_lookups,
     };
     use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpResponse, TzapAuthHttpTransport};
     use crate::document_verification::TzapDocumentVerificationResult;
     use crate::trust::{self, TzapCertificateStatus, TzapTrustAnchorType, TzapVerificationState};
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use openssl::asn1::{Asn1Integer, Asn1Time};
+    use openssl::bn::BigNum;
+    use openssl::hash::MessageDigest;
+    use openssl::pkey::PKey;
+    use openssl::rsa::Rsa;
+    use openssl::x509::extension::{AuthorityKeyIdentifier, BasicConstraints, SubjectKeyIdentifier};
+    use openssl::x509::{X509, X509NameBuilder};
     use serde_json::json;
     use std::cell::RefCell;
 
@@ -529,6 +628,141 @@ mod tests {
             });
             assert!(!TzapStatusResponse::from_json_value(&value).unwrap().is_fresh_valid_for_valid_now(1_000));
         }
+    }
+
+    #[test]
+    fn archive_status_target_extracts_fingerprint_aki_and_serial_from_leaf_der() {
+        let (_root_der, leaf_der) = test_root_and_leaf_certificate_der();
+
+        let target = TzapArchiveStatusTarget::from_leaf_certificate_der(&leaf_der, None).unwrap();
+
+        assert_eq!(target.certificate_sha256, trust::sha256_identifier(&leaf_der));
+        assert_eq!(target.serial_number, "2A");
+        assert!(!target.issuer_key_identifier.is_empty());
+        assert!(target.issuer_certificate_sha256.is_none());
+
+        let with_issuer = TzapArchiveStatusTarget::from_leaf_certificate_der(&leaf_der, Some("sha256:known-issuer".to_owned())).unwrap();
+        assert_eq!(with_issuer.issuer_certificate_sha256.as_deref(), Some("sha256:known-issuer"));
+    }
+
+    #[test]
+    fn archive_status_matches_requires_fingerprint_aki_and_serial_agreement() {
+        let expected = archive_target_fixture();
+        let status = archive_status_response(&expected, None);
+        assert!(archive_status_matches(&expected, &status));
+
+        let mut wrong_serial = status.clone();
+        wrong_serial.serial_number = Some("FF".to_owned());
+        assert!(!archive_status_matches(&expected, &wrong_serial));
+
+        let mut wrong_aki = status.clone();
+        wrong_aki.issuer_key_identifier = Some(URL_SAFE_NO_PAD.encode([0xFF; 4]));
+        assert!(!archive_status_matches(&expected, &wrong_aki));
+
+        let mut wrong_fingerprint = status;
+        wrong_fingerprint.certificate_sha256 = Some(trust::format_certificate_sha256(&[0xEE; 32]));
+        assert!(!archive_status_matches(&expected, &wrong_fingerprint));
+    }
+
+    #[test]
+    fn archive_status_matches_rejects_disagreeing_query_echo() {
+        let expected = archive_target_fixture();
+        let mut status = archive_status_response(&expected, None);
+        status.query.certificate_sha256 = Some(trust::format_certificate_sha256(&[0xAA; 32]));
+        assert!(!archive_status_matches(&expected, &status));
+    }
+
+    #[test]
+    fn archive_status_matches_ignores_missing_local_issuer_fingerprint_for_a_received_archive() {
+        // D1/Z1: a received archive has no local-catalog issuer_certificate_sha256.
+        // Absence on the *target* must not block matching, even though the
+        // server's response includes one.
+        let mut expected = archive_target_fixture();
+        expected.issuer_certificate_sha256 = None;
+        let status = archive_status_response(&expected, Some(trust::format_issuer_sha256(&[0x33; 32])));
+
+        assert!(archive_status_matches(&expected, &status));
+    }
+
+    #[test]
+    fn archive_status_matches_rejects_disagreeing_local_issuer_fingerprint() {
+        // When the target *does* carry a locally-known issuer fingerprint
+        // (an archive this device signed), it must agree with the server.
+        let mut expected = archive_target_fixture();
+        expected.issuer_certificate_sha256 = Some(trust::format_issuer_sha256(&[0x33; 32]));
+        let status = archive_status_response(&expected, Some(trust::format_issuer_sha256(&[0x44; 32])));
+
+        assert!(!archive_status_matches(&expected, &status));
+    }
+
+    fn archive_target_fixture() -> TzapArchiveStatusTarget {
+        TzapArchiveStatusTarget {
+            certificate_sha256: trust::format_certificate_sha256(&[0x01; 32]),
+            issuer_key_identifier: URL_SAFE_NO_PAD.encode([0x02; 20]),
+            serial_number: "2A".to_owned(),
+            issuer_certificate_sha256: None,
+        }
+    }
+
+    fn archive_status_response(expected: &TzapArchiveStatusTarget, issuer_certificate_sha256: Option<String>) -> TzapStatusResponse {
+        let value = json!({
+            "status": "valid",
+            "certificate_sha256": expected.certificate_sha256,
+            "issuer_certificate_sha256": issuer_certificate_sha256.unwrap_or_else(|| trust::format_issuer_sha256(&[0x02; 32])),
+            "issuer_key_identifier": expected.issuer_key_identifier,
+            "serial_number": expected.serial_number,
+            "not_before_unix_seconds": 100,
+            "not_after_unix_seconds": 2_000,
+            "this_update_unix_seconds": 900,
+            "next_update_unix_seconds": 1_500,
+            "query": {"certificate_sha256": expected.certificate_sha256},
+        });
+        TzapStatusResponse::from_json_value(&value).unwrap()
+    }
+
+    fn test_root_and_leaf_certificate_der() -> (Vec<u8>, Vec<u8>) {
+        let root_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let mut root_name = X509NameBuilder::new().unwrap();
+        root_name.append_entry_by_text("CN", "Archive Status Test Root").unwrap();
+        let root_name = root_name.build();
+        let mut root_builder = X509::builder().unwrap();
+        root_builder.set_version(2).unwrap();
+        root_builder.set_serial_number(&Asn1Integer::from_bn(&BigNum::from_u32(1).unwrap()).unwrap()).unwrap();
+        root_builder.set_subject_name(&root_name).unwrap();
+        root_builder.set_issuer_name(&root_name).unwrap();
+        root_builder.set_pubkey(&root_key).unwrap();
+        root_builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        root_builder.set_not_after(&Asn1Time::days_from_now(365).unwrap()).unwrap();
+        root_builder.append_extension(BasicConstraints::new().critical().ca().build().unwrap()).unwrap();
+        let ski = {
+            let context = root_builder.x509v3_context(None, None);
+            SubjectKeyIdentifier::new().build(&context).unwrap()
+        };
+        root_builder.append_extension(ski).unwrap();
+        root_builder.sign(&root_key, MessageDigest::sha256()).unwrap();
+        let root_cert = root_builder.build();
+
+        let leaf_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let mut leaf_name = X509NameBuilder::new().unwrap();
+        leaf_name.append_entry_by_text("CN", "Archive Status Test Leaf").unwrap();
+        let leaf_name = leaf_name.build();
+        let mut leaf_builder = X509::builder().unwrap();
+        leaf_builder.set_version(2).unwrap();
+        leaf_builder.set_serial_number(&Asn1Integer::from_bn(&BigNum::from_u32(0x2A).unwrap()).unwrap()).unwrap();
+        leaf_builder.set_subject_name(&leaf_name).unwrap();
+        leaf_builder.set_issuer_name(root_cert.subject_name()).unwrap();
+        leaf_builder.set_pubkey(&leaf_key).unwrap();
+        leaf_builder.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        leaf_builder.set_not_after(&Asn1Time::days_from_now(365).unwrap()).unwrap();
+        let aki = {
+            let context = leaf_builder.x509v3_context(Some(root_cert.as_ref()), None);
+            AuthorityKeyIdentifier::new().keyid(true).build(&context).unwrap()
+        };
+        leaf_builder.append_extension(aki).unwrap();
+        leaf_builder.sign(&root_key, MessageDigest::sha256()).unwrap();
+        let leaf_cert = leaf_builder.build();
+
+        (root_cert.to_der().unwrap(), leaf_cert.to_der().unwrap())
     }
 
     #[test]

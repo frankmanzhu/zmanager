@@ -219,8 +219,15 @@ fn verify_chain_trust(
     Err(TzapOfflineVerificationError::Untrusted(reason))
 }
 
-// See `crate::trust::sha256_identifier` (CR-124).
-fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
+/// Reads a certificate's Authority Key Identifier extension, when present.
+///
+/// See `crate::trust::sha256_identifier` (CR-124). `pub` (not `pub(crate)`)
+/// because `zmanager-tzap-hosted`'s archive status target (Z1) needs this to
+/// derive `issuer_key_identifier` from an archive's embedded leaf
+/// certificate the same way document verification does, without
+/// re-implementing extension parsing.
+#[must_use]
+pub fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
     certificate.iter_extensions().find_map(|extension| {
         if let ParsedExtension::AuthorityKeyIdentifier(identifier) = extension.parsed_extension() {
             identifier.key_identifier.as_ref().map(|key_identifier| key_identifier.0.to_vec())
