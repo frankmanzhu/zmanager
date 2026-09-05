@@ -36,11 +36,12 @@ fn contact_keygen_persists_a_distinct_recipient_key() {
 
     let _ = contact_keygen_command(&args, GlobalOptions::default());
 
-    let store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&temp.root);
+    let mut store = NativeTzapLocalIdentityStore::new(&temp.root, "default").unwrap();
     let inventory = store.load_inventory("default").unwrap();
     assert_eq!(inventory.recipient_encryption_keys.len(), 1);
     assert_eq!(inventory.recipient_encryption_keys[0].label.as_deref(), Some("Test recipient"));
     assert!(inventory.device_signing_keys.is_empty());
+    store.clear_inventory("default").unwrap();
 }
 
 #[cfg(feature = "tzap-online")]

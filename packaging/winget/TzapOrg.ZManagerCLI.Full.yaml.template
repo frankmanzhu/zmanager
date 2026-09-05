@@ -1,4 +1,4 @@
-PackageIdentifier: TzapOrg.ZManagerCLI.Offline
+PackageIdentifier: TzapOrg.ZManagerCLI.Full
 PackageVersion: __PACKAGE_VERSION__
 DefaultLocale: en-US
 ManifestType: version

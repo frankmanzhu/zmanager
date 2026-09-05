@@ -48,6 +48,8 @@ zmanager-unrar = { path = "crates/zmanager-unrar", version = "2.1.2" }
 # contains an unrelated Unicode filename.
 [patch.crates-io]
 tzap-core = { path = "../tzap/crates/tzap-core" }
+tzap-plugin-keywrap = { path = "../tzap/crates/tzap-plugin-keywrap" }
+tzap-plugin-signing = { path = "../tzap/crates/tzap-plugin-signing" }
 
 [profile.release]
 lto = "thin"

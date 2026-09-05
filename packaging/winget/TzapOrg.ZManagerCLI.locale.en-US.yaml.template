@@ -7,8 +7,8 @@ PackageName: ZManager CLI
 PackageUrl: https://github.com/tzap-org/zmanager
 License: Apache-2.0
 LicenseUrl: https://github.com/tzap-org/zmanager/blob/__TAG__/LICENSE
-ShortDescription: Universal file archiver for fast compression and safe extraction.
-Description: ZManager CLI is a universal file archiver for high-performance compression, safe extraction, and seamless handling of ZIP, 7z, TAR.ZST, TZAP, RAR, and many other archive formats.
+ShortDescription: Universal file archiver and offline TZAP signer.
+Description: ZManager CLI is the offline ZManager profile for high-performance compression, safe extraction, local identity signing, and seamless handling of ZIP, 7z, TAR.ZST, TZAP, RAR, and many other archive formats. Hosted login and certificate enrollment are available in TzapOrg.ZManagerCLI.Full.
 Tags:
   - archive
   - compression

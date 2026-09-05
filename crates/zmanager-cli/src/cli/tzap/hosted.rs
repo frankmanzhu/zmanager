@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "tzap-online"), allow(dead_code, unused_imports))]
 
+use super::NativeTzapLocalIdentityStore;
 #[cfg(feature = "tzap-online")]
 use super::support::CliHttpJsonTransport;
 use super::support::{certificate_summary_value, current_unix_seconds, parse_tzap_context_option, print_stable_tzap_error};
@@ -114,7 +115,7 @@ where
     F: FnOnce(
         &str,
         &zmanager_tzap_hosted::auth_client::TzapSessionRecord,
-        &mut zmanager_core::local_identity_store::FileTzapLocalIdentityStore,
+        &mut NativeTzapLocalIdentityStore,
         Vec<String>,
         Vec<Vec<u8>>,
     ) -> Result<zmanager_core::local_identity_store::TzapEnrolledCertificateRecord, HostedCertOperationError>,
@@ -136,7 +137,13 @@ where
             return ExitCode::FAILURE;
         }
     };
-    let mut identity_store = zmanager_core::local_identity_store::FileTzapLocalIdentityStore::new(&options.context.state_dir);
+    let mut identity_store = match NativeTzapLocalIdentityStore::new(&options.context.state_dir, &options.context.account_key) {
+        Ok(store) => store,
+        Err(error) => {
+            print_error_line(global, format_args!("{error_prefix}{error}"));
+            return ExitCode::FAILURE;
+        }
+    };
     match run(service_base_url, &session, &mut identity_store, trusted_root_sha256, trusted_root_der) {
         Ok(certificate) => {
             if global.json {
@@ -260,17 +267,17 @@ pub(super) fn run_hosted_cert_renew(options: &HostedCertOptions, global: &Global
     )
 }
 
-pub(crate) fn create_and_store_staging_enrollment_key(
-    store: &mut zmanager_core::local_identity_store::FileTzapLocalIdentityStore,
+pub(crate) fn create_and_store_staging_enrollment_key<S: TzapLocalIdentityStore>(
+    store: &mut S,
     request: &zmanager_tzap_hosted::enrollment_client::TzapEnrollmentRequest,
     now_unix_seconds: u64,
 ) -> Result<(zmanager_core::local_identity_store::TzapDeviceSigningKeyRecord, Vec<u8>), String> {
     let mut inventory = store.load_inventory(&request.account_key).map_err(|error| error.to_string())?;
     let label = staging_enrollment_key_label(request.org_id.as_deref());
-    if let Some(record) = inventory.device_signing_keys.iter().find(|record| {
-        record.label.as_deref() == Some(label.as_str())
-            && !inventory.enrolled_certificates.iter().any(|certificate| certificate.signing_key_id == record.key_id)
-    }) {
+    if let Some(record) = inventory.device_signing_keys.iter().find(|record| record.label.as_deref() == Some(label.as_str())) {
+        if inventory.enrolled_certificates.iter().any(|certificate| certificate.signing_key_id == record.key_id) {
+            return Err(format!("an enrollment key already has a certificate for {}; use `zm auth cert renew --certificate-id <id>`", label));
+        }
         let csr_der = zmanager_core::device_identity::generate_device_csr_from_private_key(
             &record.private_key_der,
             &zmanager_core::device_identity::TzapDeviceCsrOptions::default(),

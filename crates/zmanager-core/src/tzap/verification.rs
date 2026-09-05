@@ -464,6 +464,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn outcome_mapping_matches_plan_table_exactly() {
         // valid_now: verified
         let res = TzapArchiveVerification::new(
@@ -506,10 +507,7 @@ mod tests {
             TzapArchiveSignatureCheck::Ok,
             TzapArchiveTrustCheck::ProductionRoot,
             TzapArchiveTimeCheck::ValidAtSigning,
-            TzapArchiveStatusCheck::BeforeRevocation {
-                revoked_at_unix_seconds: 1000,
-                reason: Some("renewed".to_owned()),
-            },
+            TzapArchiveStatusCheck::BeforeRevocation { revoked_at_unix_seconds: 1000, reason: Some("renewed".to_owned()) },
             None,
             false,
         );
@@ -583,10 +581,7 @@ mod tests {
             TzapArchiveSignatureCheck::Ok,
             TzapArchiveTrustCheck::ProductionRoot,
             TzapArchiveTimeCheck::ValidAtSigning,
-            TzapArchiveStatusCheck::Revoked {
-                revoked_at_unix_seconds: 1000,
-                reason: Some("key_compromise".to_owned()),
-            },
+            TzapArchiveStatusCheck::Revoked { revoked_at_unix_seconds: 1000, reason: Some("key_compromise".to_owned()) },
             None,
             false,
         );
@@ -678,10 +673,7 @@ mod tests {
                 TzapArchiveSignatureCheck::Ok,
                 TzapArchiveTrustCheck::ProductionRoot,
                 TzapArchiveTimeCheck::ValidAtSigning,
-                &TzapArchiveStatusCheck::BeforeRevocation {
-                    revoked_at_unix_seconds: 1000,
-                    reason: Some("renewed".to_owned())
-                },
+                &TzapArchiveStatusCheck::BeforeRevocation { revoked_at_unix_seconds: 1000, reason: Some("renewed".to_owned()) },
             ),
             TzapArchiveVerificationOutcome::VerifiedWithCaveat
         );
@@ -695,10 +687,7 @@ mod tests {
             TzapArchiveSignatureCheck::Ok,
             TzapArchiveTrustCheck::StagingRoot,
             TzapArchiveTimeCheck::ValidAtSigning,
-            TzapArchiveStatusCheck::BeforeRevocation {
-                revoked_at_unix_seconds: 1000,
-                reason: Some("renewed".to_owned()),
-            },
+            TzapArchiveStatusCheck::BeforeRevocation { revoked_at_unix_seconds: 1000, reason: Some("renewed".to_owned()) },
             None,
             false,
         );

@@ -1,0 +1,42 @@
+class ZmanagerFull < Formula
+  desc "Universal file archiver with hosted identity and enrollment support"
+  homepage "https://github.com/tzap-org/zmanager"
+  version "__PACKAGE_VERSION__"
+  license all_of: ["Apache-2.0", :cannot_represent]
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "__RELEASE_BASE_URL__/zm-full-aarch64-apple-darwin.tar.gz"
+      sha256 "__SHA_FULL_AARCH64_APPLE_DARWIN__"
+    else
+      url "__RELEASE_BASE_URL__/zm-full-x86_64-apple-darwin.tar.gz"
+      sha256 "__SHA_FULL_X86_64_APPLE_DARWIN__"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "__RELEASE_BASE_URL__/zm-full-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "__SHA_FULL_AARCH64_UNKNOWN_LINUX_MUSL__"
+    else
+      url "__RELEASE_BASE_URL__/zm-full-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "__SHA_FULL_X86_64_UNKNOWN_LINUX_MUSL__"
+    end
+  end
+
+  def install
+    bin.install "zm-full" => "zm"
+    man1.install "man/man1/zm.1"
+    bash_completion.install "completions/zm.bash" => "zm"
+    zsh_completion.install "completions/_zm" => "_zm"
+    fish_completion.install "completions/zm.fish"
+    doc.install "README.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"
+  end
+
+  test do
+    assert_match "zm #{version}", shell_output("#{bin}/zm --version")
+    (testpath/"payload.txt").write("hello from Homebrew\n")
+    system bin/"zm", "create", "payload.zip", "payload.txt"
+    system bin/"zm", "test", "payload.zip"
+  end
+end

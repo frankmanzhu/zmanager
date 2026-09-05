@@ -142,7 +142,7 @@ else
 fi
 
 configure_static_linux_target
-cargo build --locked --release --target "$TARGET" -p zmanager-cli --bin zm
+cargo build --locked --release --target "$TARGET" -p zmanager-cli --bin zm --no-default-features
 
 cp "target/$TARGET/release/$BINARY" "$STAGE/$BINARY"
 cp README.md LICENSE NOTICE "$STAGE/"
@@ -171,28 +171,26 @@ else
   tar -C "$STAGE" -czf "$OUT_ABS/$ARCHIVE" "$BINARY" README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md third-party-licenses completions man
 fi
 
-# Offline variant: the same build without the `tzap-online` feature — a
-# trimmed binary with no network/identity code (the `zm auth` command is a
-# stub pointing at the full build). Distributed as a separate release
-# artifact; install.sh --offline and the zmanager-offline brew/winget
-# packages install it, while the default installers keep the full build.
-OFFLINE_BINARY="zm-offline"
+# Full variant: the enrollment-capable build is distributed separately from
+# the default offline signer. Keep the binary name distinct inside the
+# archive so users cannot accidentally install the wrong flavor by hand.
+FULL_BINARY="zm-full"
 if [[ "$TARGET" == *windows* ]]; then
-  OFFLINE_BINARY="zm-offline.exe"
+  FULL_BINARY="zm-full.exe"
 fi
-OFFLINE_ARCHIVE="zm-offline-$TARGET.tar.gz"
+FULL_ARCHIVE="zm-full-$TARGET.tar.gz"
 if [[ "$TARGET" == *windows* ]]; then
-  OFFLINE_ARCHIVE="zm-offline-$TARGET.zip"
+  FULL_ARCHIVE="zm-full-$TARGET.zip"
 fi
 
-cargo build --locked --release --target "$TARGET" -p zmanager-cli --bin zm --no-default-features
-cp "target/$TARGET/release/$BINARY" "$STAGE/$OFFLINE_BINARY"
+cargo build --locked --release --target "$TARGET" -p zmanager-cli --bin zm --features tzap-online
+cp "target/$TARGET/release/$BINARY" "$STAGE/$FULL_BINARY"
 cp LICENSE NOTICE "$STAGE/"
 
 if [[ "$TARGET" == *windows* ]]; then
-  (cd "$STAGE" && zip -q -9 -r "$OUT_ABS/$OFFLINE_ARCHIVE" "$OFFLINE_BINARY" LICENSE NOTICE)
+  (cd "$STAGE" && zip -q -9 -r "$OUT_ABS/$FULL_ARCHIVE" "$FULL_BINARY" README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md third-party-licenses completions man)
 else
-  tar -C "$STAGE" -czf "$OUT_ABS/$OFFLINE_ARCHIVE" "$OFFLINE_BINARY" LICENSE NOTICE
+  tar -C "$STAGE" -czf "$OUT_ABS/$FULL_ARCHIVE" "$FULL_BINARY" README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md third-party-licenses completions man
 fi
 
 write_sha256() {
@@ -205,7 +203,7 @@ write_sha256() {
 }
 
 write_sha256 "$ARCHIVE"
-write_sha256 "$OFFLINE_ARCHIVE"
+write_sha256 "$FULL_ARCHIVE"
 
 scripts/inspect-runtime-deps.sh "$TARGET" "$OUT_ABS" >/dev/null
 

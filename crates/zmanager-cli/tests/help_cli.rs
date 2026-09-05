@@ -664,10 +664,10 @@ fn package_preview_uploads_artifacts_without_publishing_release() {
         "scripts/package-release.sh",
         "powershell -ExecutionPolicy Bypass -File scripts/ci-windows.ps1",
         "actions/upload-artifact@v6",
-        "name: zm-preview-${{ matrix.target }}-full",
-        "path: dist/zm-${{ matrix.target }}.*",
         "name: zm-preview-${{ matrix.target }}-offline",
-        "path: dist/zm-offline-${{ matrix.target }}.*",
+        "path: dist/zm-${{ matrix.target }}.*",
+        "name: zm-preview-${{ matrix.target }}-full",
+        "path: dist/zm-full-${{ matrix.target }}.*",
         "Linux tarballs are static single-binary artifacts.",
         "if-no-files-found: error",
         "retention-days: 14",
@@ -684,7 +684,7 @@ fn package_preview_uploads_artifacts_without_publishing_release() {
 
     assert_eq!(PACKAGE_PREVIEW_WORKFLOW.matches("actions/upload-artifact@v6").count(), 2);
 
-    for required in ["--no-default-features", "New-OfflineReleasePackage", "zm-offline-$TargetTriple.zip"] {
+    for required in ["--features", "New-FullReleasePackage", "zm-full-$TargetTriple.zip"] {
         assert_contains(CI_WINDOWS_PS1, required);
     }
 }

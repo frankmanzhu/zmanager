@@ -23,7 +23,7 @@ use crate::trust;
 #[cfg(feature = "reqwest-transport")]
 use crate::tzap_service_auth::load_pending_auth_metadata;
 use crate::tzap_service_auth::{
-    AUTH_PENDING_FILE, TzapFfiSessionStore, current_unix_seconds, default_tzap_state_dir, load_pending_auth, parse_auth_environment, save_pending_auth,
+    TzapFfiSessionStore, clear_pending_auth, current_unix_seconds, default_tzap_state_dir, load_pending_auth, parse_auth_environment, save_pending_auth,
     session_summary_json, session_summary_json_at,
 };
 
@@ -33,9 +33,13 @@ use crate::engine::{TzapCreateOptions, TzapKeySource, TzapX509TrustOptions};
 #[cfg(feature = "reqwest-transport")]
 use crate::enrollment_client::TzapEnrollmentCertificateValidator;
 use crate::jobs::{CancellationToken, JobEvent};
+#[cfg(feature = "keyring")]
+use crate::keyring_store::NativeTzapLocalIdentityStore;
+#[cfg(not(feature = "keyring"))]
+use crate::local_identity_store::FileTzapLocalIdentityStore;
 use crate::local_identity_store::{
-    FileTzapLocalIdentityStore, TzapContactRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory,
-    TzapLocalIdentityStore, TzapRecipientEncryptionKeyRecord,
+    TzapContactRecord, TzapEnrolledCertificateRecord, TzapLocalCertificateState, TzapLocalIdentityInventory, TzapLocalIdentityStore,
+    TzapRecipientEncryptionKeyRecord,
 };
 use crate::manifest::PlanOptions;
 use crate::secrets::SecretString;
@@ -53,6 +57,23 @@ const DEFAULT_TZAP_PROVIDER_ID: &str = "hosted";
 const DEFAULT_TZAP_ACCOUNT_KEY: &str = "default";
 const OP_CERT_ENROLL: &str = "cert_enroll";
 const OP_CERT_RENEW: &str = "cert_renew";
+
+#[cfg(feature = "keyring")]
+type ServiceIdentityStore = NativeTzapLocalIdentityStore;
+#[cfg(not(feature = "keyring"))]
+type ServiceIdentityStore = FileTzapLocalIdentityStore;
+
+fn new_identity_store(state_dir: &Path, account_key: &str) -> Result<ServiceIdentityStore, String> {
+    #[cfg(feature = "keyring")]
+    {
+        NativeTzapLocalIdentityStore::new(state_dir, account_key).map_err(|error| error.to_string())
+    }
+    #[cfg(not(feature = "keyring"))]
+    {
+        let _ = account_key;
+        Ok(FileTzapLocalIdentityStore::new(state_dir))
+    }
+}
 const OP_CERT_REVOKE: &str = "cert_revoke";
 const OP_DEVICE_RETIRE: &str = "device_retire";
 const MISSING_TZAP_SESSION: &str = "no local TZAP session";
@@ -139,7 +160,7 @@ fn required_request_path_array(request: &Value, field: &'static str) -> Result<V
 fn run_local_tzap_service<F>(request_json: &str, action: F) -> String
 where
     F: FnOnce(
-        &mut FileTzapLocalIdentityStore,
+        &mut ServiceIdentityStore,
         &crate::auth_client::TzapSessionRecord,
         &crate::local_tzap_service::TzapLocalServiceOptions,
         &Value,
@@ -151,7 +172,7 @@ where
         let Some(session) = session_store.load_session(&context.account_key) else {
             return Err(MISSING_TZAP_SESSION.to_owned());
         };
-        let mut identity_store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let mut identity_store = new_identity_store(&context.state_dir, &context.account_key)?;
         let options = crate::local_tzap_service::TzapLocalServiceOptions {
             account_key: context.account_key,
             now_unix_seconds: request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds),
@@ -758,7 +779,7 @@ pub fn tzap_auth_callback_json(request_json: &str) -> String {
             request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds),
         )
         .map_err(|error| error.to_string())?;
-        let _ = fs::remove_file(context.state_dir.join(AUTH_PENDING_FILE));
+        clear_pending_auth(&context.state_dir).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "authenticated": true,
@@ -793,7 +814,7 @@ pub fn tzap_auth_forget_json(request_json: &str) -> String {
         let context = TzapFfiContext::from_request(&request)?;
         let mut store = TzapFfiSessionStore::new(&context.state_dir);
         store.clear_session(&context.account_key).map_err(|error| error.to_string())?;
-        let _ = fs::remove_file(context.state_dir.join(AUTH_PENDING_FILE));
+        clear_pending_auth(&context.state_dir).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
             "forgotten": true,
@@ -828,7 +849,7 @@ pub fn tzap_auth_account_url_json(request_json: &str) -> String {
 pub fn tzap_certificate_inventory_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
-        let store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let store = new_identity_store(&context.state_dir, &context.account_key)?;
         let inventory = store.load_inventory(&context.account_key).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
@@ -886,7 +907,7 @@ fn hosted_tzap_cert_enroll_json(request_json: &str) -> String {
             Some(org_id) => format!("ZManager Mobile Enrollment (org:{org_id})"),
             None => "ZManager Mobile Enrollment (personal)".to_owned(),
         };
-        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let mut store = new_identity_store(&context.state_dir, &context.account_key)?;
         let transport = crate::reqwest_transport::ReqwestTransport;
         let enrollment_client = crate::enrollment_client::TzapEnrollmentClient::local_staging_server(&service_base_url, &transport);
         let lifecycle_client =
@@ -1018,7 +1039,7 @@ pub fn tzap_document_sign_json(request_json: &str) -> String {
         let context = TzapFfiContext::from_request(&request)?;
         let certificate_id = required_request_string(&request, "certificate_id")?;
         let payload = request.get("payload").cloned().ok_or_else(|| "missing or invalid field: payload".to_owned())?;
-        let store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let store = new_identity_store(&context.state_dir, &context.account_key)?;
         let mut signing_request = crate::document_signing::TzapDocumentSigningRequest::new(
             context.account_key,
             certificate_id,
@@ -1077,7 +1098,7 @@ pub fn tzap_recipient_key_generate_json(request_json: &str) -> String {
             created_at_unix_seconds: request_u64(&request, "created_at_unix_seconds")?.unwrap_or_else(current_unix_seconds),
             label: request_string(&request, "label")?,
         };
-        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let mut store = new_identity_store(&context.state_dir, &context.account_key)?;
         let mut inventory = store.load_inventory(&context.account_key).map_err(|error| error.to_string())?;
         inventory.recipient_encryption_keys.retain(|existing| existing.key_id != record.key_id);
         inventory.recipient_encryption_keys.push(record.clone());
@@ -1094,7 +1115,7 @@ pub fn tzap_recipient_key_remove_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
         let key_id = required_request_string(&request, "key_id")?;
-        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let mut store = new_identity_store(&context.state_dir, &context.account_key)?;
         let mut inventory = store.load_inventory(&context.account_key).map_err(|error| error.to_string())?;
         let before = inventory.recipient_encryption_keys.len();
         inventory.recipient_encryption_keys.retain(|record| record.key_id != key_id);
@@ -1111,7 +1132,7 @@ pub fn tzap_recipient_key_remove_json(request_json: &str) -> String {
 pub fn tzap_contact_export_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
-        let store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let store = new_identity_store(&context.state_dir, &context.account_key)?;
         let export_request = crate::contact_card::TzapContactCardExportRequest {
             account_key: context.account_key,
             recipient_key_id: required_request_string(&request, "recipient_key_id")?,
@@ -1144,7 +1165,7 @@ pub fn tzap_contact_import_json(request_json: &str) -> String {
             custom_trust_root_certificates_der,
             certificate_profile_options: trust::TzapCertificateProfileOptions::default(),
         };
-        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let mut store = new_identity_store(&context.state_dir, &context.account_key)?;
         let accepted_at = request
             .get("accept")
             .and_then(Value::as_bool)
@@ -1163,7 +1184,7 @@ pub fn tzap_contact_import_json(request_json: &str) -> String {
 pub fn tzap_contact_list_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
-        let store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let store = new_identity_store(&context.state_dir, &context.account_key)?;
         let inventory = store.load_inventory(&context.account_key).map_err(|error| error.to_string())?;
         Ok(json!({
             "ok": true,
@@ -1181,7 +1202,7 @@ pub fn tzap_contact_remove_json(request_json: &str) -> String {
     with_json_request(request_json, |request| {
         let context = TzapFfiContext::from_request(&request)?;
         let contact_id = required_request_string(&request, "contact_id")?;
-        let mut store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let mut store = new_identity_store(&context.state_dir, &context.account_key)?;
         let mut inventory = store.load_inventory(&context.account_key).map_err(|error| error.to_string())?;
         let before = inventory.contacts.len();
         inventory.contacts.retain(|contact| contact.contact_id != contact_id);
@@ -1203,7 +1224,7 @@ pub fn tzap_share_create_json(request_json: &str) -> String {
         let contact_ids = request_string_array(&request, "contact_ids")?;
         let now_unix_seconds = request_u64(&request, "now_unix_seconds")?.unwrap_or_else(current_unix_seconds);
         let certificate_id = request_string(&request, "certificate_id")?;
-        let store = FileTzapLocalIdentityStore::new(&context.state_dir);
+        let store = new_identity_store(&context.state_dir, &context.account_key)?;
         // CR-113: the share endpoint adopts the CLI's engine — resolve the
         // X.509 signing material from the local inventory (when a
         // `certificate_id` is requested) and create through the manifest

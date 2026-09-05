@@ -6,9 +6,9 @@ VERSION="${ZMANAGER_VERSION:-latest}"
 INSTALL_DIR="${ZMANAGER_INSTALL_DIR:-$HOME/.local/bin}"
 TMPDIR="${TMPDIR:-/tmp}"
 
-# Default: the full build (online identity features). --offline installs the
-# offline build (no network features); `zm --version` reports which flavor.
-OFFLINE=0
+# Default: the offline signer. --full installs the enrollment-capable build;
+# `zm --version` reports which flavor.
+FULL=0
 # --preview installs from the latest successful Package Preview CI run
 # instead of a release, for developers testing packages before release.
 PREVIEW=0
@@ -17,24 +17,24 @@ usage() {
   cat <<'EOF'
 zmanager install script
 
-Usage: sh install.sh [--offline] [--preview]
+Usage: sh install.sh [--full] [--preview]
 
 Options:
-  --offline   install the offline build (no online identity features)
+  --full      install the full build (online identity and enrollment features)
   --preview   install from the latest successful Package Preview CI run
               instead of a release (requires the gh CLI; set
               ZMANAGER_RUN_ID to install a specific run)
   --help      show this help
 
 With a piped install, pass the flags after sh -s --:
-  curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --offline
+  curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --full
   curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh | sh -s -- --preview
 EOF
 }
 
 for arg in "$@"; do
   case "$arg" in
-    --offline) OFFLINE=1 ;;
+    --full) FULL=1 ;;
     --preview) PREVIEW=1 ;;
     --help | -h) usage; exit 0 ;;
     *)
@@ -162,9 +162,9 @@ print_success() {
 
 download_release() {
   target="$1"
-  if [ "$OFFLINE" = "1" ]; then
-    asset="zm-offline-$target.tar.gz"
-    binary="zm-offline"
+  if [ "$FULL" = "1" ]; then
+    asset="zm-full-$target.tar.gz"
+    binary="zm-full"
   else
     asset="zm-$target.tar.gz"
     binary="zm"
@@ -199,12 +199,12 @@ download_release() {
 # containing the normal release tarball plus its .sha256 sidecar.
 download_preview() {
   target="$1"
-  if [ "$OFFLINE" = "1" ]; then
-    artifact="zm-preview-$target-offline"
-    archive="zm-offline-$target.tar.gz"
-    binary="zm-offline"
-  else
+  if [ "$FULL" = "1" ]; then
     artifact="zm-preview-$target-full"
+    archive="zm-full-$target.tar.gz"
+    binary="zm-full"
+  else
+    artifact="zm-preview-$target-offline"
     archive="zm-$target.tar.gz"
     binary="zm"
   fi
@@ -250,8 +250,8 @@ build_from_source() {
 
   (
     cd source
-    if [ "$OFFLINE" = "1" ]; then
-      cargo build --locked --release -p zmanager-cli --bin zm --no-default-features
+    if [ "$FULL" = "1" ]; then
+      cargo build --locked --release -p zmanager-cli --bin zm --features tzap-online
     else
       cargo build --locked --release -p zmanager-cli --bin zm
     fi

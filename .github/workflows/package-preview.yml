@@ -152,14 +152,14 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: zm-preview-${{ matrix.target }}-full
+          name: zm-preview-${{ matrix.target }}-offline
           path: dist/zm-${{ matrix.target }}.*
           if-no-files-found: error
           retention-days: 14
 
       - uses: actions/upload-artifact@v6
         with:
-          name: zm-preview-${{ matrix.target }}-offline
-          path: dist/zm-offline-${{ matrix.target }}.*
+          name: zm-preview-${{ matrix.target }}-full
+          path: dist/zm-full-${{ matrix.target }}.*
           if-no-files-found: error
           retention-days: 14

@@ -42,6 +42,47 @@ impl TzapAuthHttpTransport for ReqwestTransport {
     }
 }
 
+/// Fetches the first server-published trust root as PEM. Trust-root discovery
+/// is protocol work, so callers such as mobile use this shared implementation
+/// instead of duplicating the HTTP, JSON, URL, and PEM checks in each shell.
+pub fn fetch_trust_root_pem(service_base_url: &str) -> Result<String, String> {
+    let response =
+        send_json_request(&ReqwestTransport, TzapAuthHttpMethod::Get, service_base_url, "/v1/trust/roots", None, None).map_err(|error| error.to_string())?;
+    let response = require_success(response, |status_code, _| TzapAuthError::HttpStatus { status_code }).map_err(|error| error.to_string())?;
+    let roots: Value = serde_json::from_slice(&response.body).map_err(|error| format!("invalid trust-root response: {error}"))?;
+    let root = roots
+        .get("roots")
+        .and_then(Value::as_array)
+        .and_then(|roots| roots.first())
+        .or_else(|| roots.as_array().and_then(|roots| roots.first()))
+        .ok_or_else(|| "the staging server returned no trust root".to_owned())?;
+    let pem_url = root
+        .get("certificatePemUrl")
+        .or_else(|| root.get("certificate_pem_url"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "the staging server returned no trust-root URL".to_owned())?;
+    let pem_url = if pem_url.starts_with("http://") || pem_url.starts_with("https://") {
+        pem_url.to_owned()
+    } else {
+        format!("{}/{}", service_base_url.trim_end_matches('/'), pem_url.trim_start_matches('/'))
+    };
+    let request = TzapAuthHttpRequest {
+        method: TzapAuthHttpMethod::Get,
+        url: pem_url,
+        bearer_token: None,
+        body: None,
+        options: crate::auth_client::TzapAuthRequestOptions::default(),
+    };
+    let pem_response = ReqwestTransport.send(&request).map_err(|error| error.to_string())?;
+    let pem_response = require_success(pem_response, |status_code, _| TzapAuthError::HttpStatus { status_code }).map_err(|error| error.to_string())?;
+    let pem = String::from_utf8(pem_response.body).map_err(|error| format!("trust root response was not UTF-8: {error}"))?;
+    if !pem.contains("BEGIN CERTIFICATE") {
+        return Err("the staging trust root was invalid".to_owned());
+    }
+    Ok(pem)
+}
+
 /// Exchanges the one-time callback code for the relay body consumed by the
 /// existing Rust session handoff verifier. The code and resulting session
 /// token never leave this function as a loggable return value.

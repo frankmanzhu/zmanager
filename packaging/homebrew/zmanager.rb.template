@@ -1,5 +1,5 @@
 class Zmanager < Formula
-  desc "Universal file archiver for fast compression and safe extraction"
+  desc "Universal file archiver for fast compression and safe extraction (offline signer)"
   homepage "https://github.com/tzap-org/zmanager"
   version "__PACKAGE_VERSION__"
   license all_of: ["Apache-2.0", :cannot_represent]

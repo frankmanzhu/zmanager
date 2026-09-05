@@ -30,16 +30,15 @@ curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
   | sudo env ZMANAGER_VERSION=v2.1.2 ZMANAGER_INSTALL_DIR=/usr/local/bin sh
 ```
 
-The default installs the **full** build, which adds online identity and
-certificate enrollment (`zm auth login`, `cert enroll`, `device revoke`, and
-so on) on top of everything in the offline build. To install the **offline**
-build — every archive command plus `zm tzap sign`, `verify`, `contact`,
-`share`, and `certs` (which work entirely against the local identity
-catalogue, no network required) but no `zm auth` — pass `--offline`:
+The default installs the **offline** signer — every archive command plus
+`zm tzap sign`, `verify`, `contact`, `share`, and `certs` (which work entirely
+against the local identity catalogue, no network required). To install the
+**full** build, which adds online identity and certificate enrollment, pass
+`--full`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
-  | sh -s -- --offline
+  | sh -s -- --full
 ```
 
 `zm --version` reports which flavor is installed: `zm 2.0.1 (full)` or
@@ -189,11 +188,11 @@ curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
   | ZMANAGER_RUN_ID=26042001498 sh -s -- --preview
 ```
 
-Combine with `--offline` to test the offline preview package:
+Combine with `--full` to test the full preview package:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tzap-org/zmanager/main/install.sh \
-  | sh -s -- --preview --offline
+  | sh -s -- --preview --full
 ```
 
 `ZMANAGER_INSTALL_DIR`, `ZMANAGER_REPO_URL`, and the checksum verification
@@ -207,6 +206,8 @@ generated formula is copied to the tap, users install with:
 
 ```sh
 brew install tzap-org/zmanager/zmanager
+# Hosted login and certificate enrollment:
+brew install tzap-org/zmanager/zmanager-full
 ```
 
 The release workflow renders the formula from
@@ -237,6 +238,8 @@ After the manifest is accepted, users install with:
 
 ```powershell
 winget install TzapOrg.ZManagerCLI
+# Hosted login and certificate enrollment:
+winget install TzapOrg.ZManagerCLI.Full
 ```
 
 WinGet metadata is generated from the same `SHA256SUMS` file as the Homebrew

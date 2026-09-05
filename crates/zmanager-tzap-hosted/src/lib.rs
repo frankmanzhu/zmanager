@@ -20,6 +20,7 @@ pub use zmanager_core::{
     manifest, p256_signature, safety, secrets, trust, x509_format,
 };
 
+#[cfg(not(feature = "keyring"))]
 pub(crate) fn write_atomic_secret_file(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     zmanager_core::write_atomic_secret_file(path, bytes)
 }
@@ -34,6 +35,9 @@ pub(crate) mod crl;
 pub mod enrollment_client;
 #[path = "auth/http_client.rs"]
 pub(crate) mod http_client;
+#[cfg(feature = "keyring")]
+#[path = "auth/keyring_store.rs"]
+pub mod keyring_store;
 #[path = "auth/local_tzap_service.rs"]
 pub mod local_tzap_service;
 #[cfg(feature = "reqwest-transport")]

@@ -1,16 +1,19 @@
 //! Hosted-auth session storage and pending-handoff persistence (CR-136,
 //! CR-113).
 //!
-//! Single implementation of the on-disk TZAP auth state: the session file,
-//! the pending-handoff file (including the login metadata the callback
-//! handoff-code exchange needs), and the state-directory default. Both the
-//! JSON service (`tzap_service`) and the CLI (`zmanager-cli`) use these; the
-//! CLI's former `FileTzapSessionStore` and its pending-auth helpers were
-//! merged here so there is one storage path.
+//! Single implementation of TZAP auth state: the OS-keyring-backed session
+//! and pending-handoff records in production keyring builds, the legacy
+//! atomic files in reduced/non-keyring builds, and the shared state-directory
+//! default. Both the JSON service (`tzap_service`) and the CLI use these.
 
 use crate::auth_client::TzapSessionStore;
+#[cfg(feature = "keyring")]
+use crate::identity_catalog::TzapSecretMaterialStore;
+#[cfg(feature = "keyring")]
+use crate::keyring_store::NativeTzapSecretStore;
 use crate::trust;
 use crate::tzap_service::{request_string, request_u64, required_request_string};
+#[cfg(not(feature = "keyring"))]
 use crate::write_atomic_secret_file;
 use serde_json::{Value, json};
 use std::fs;
@@ -21,41 +24,95 @@ pub const AUTH_PENDING_FILE: &str = "auth-pending.json";
 const AUTH_SESSION_FILE: &str = "auth-session.json";
 
 pub struct TzapFfiSessionStore {
+    #[cfg(feature = "keyring")]
+    inner: NativeTzapSecretStore,
+    #[cfg(not(feature = "keyring"))]
     path: PathBuf,
 }
 
 impl TzapFfiSessionStore {
     #[must_use]
     pub fn new(state_dir: &Path) -> Self {
-        Self { path: state_dir.join(AUTH_SESSION_FILE) }
+        #[cfg(feature = "keyring")]
+        {
+            let mut store = Self { inner: NativeTzapSecretStore::default() };
+            store.migrate_legacy_session(state_dir);
+            store
+        }
+        #[cfg(not(feature = "keyring"))]
+        {
+            Self { path: state_dir.join(AUTH_SESSION_FILE) }
+        }
+    }
+
+    #[cfg(feature = "keyring")]
+    fn migrate_legacy_session(&mut self, state_dir: &Path) {
+        let path = state_dir.join(AUTH_SESSION_FILE);
+        let Some(root) = read_json_file(&path) else { return };
+        let Some(sessions) = root.get("sessions").and_then(Value::as_object) else { return };
+        let mut migrated = true;
+        for (account_key, value) in sessions {
+            let Ok(session) = session_from_json(value) else {
+                migrated = false;
+                break;
+            };
+            if self.inner.save_session(account_key, session).is_err() {
+                migrated = false;
+                break;
+            }
+        }
+        if migrated {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
 impl TzapSessionStore for TzapFfiSessionStore {
     fn save_session(&mut self, account_key: &str, session: crate::auth_client::TzapSessionRecord) -> Result<(), crate::auth_client::TzapAuthError> {
-        let mut root = read_json_file(&self.path).unwrap_or_else(|| json!({ "sessions": {} }));
-        if !root.is_object() {
-            root = json!({ "sessions": {} });
+        #[cfg(feature = "keyring")]
+        {
+            self.inner.save_session(account_key, session)
         }
-        root["sessions"][account_key] = session_json(&session, true);
-        write_secret_json_file(&self.path, &root)
-            .map_err(|error| crate::auth_client::TzapAuthError::Storage { message: format!("could not write {}: {error}", self.path.display()) })
+        #[cfg(not(feature = "keyring"))]
+        {
+            let mut root = read_json_file(&self.path).unwrap_or_else(|| json!({ "sessions": {} }));
+            if !root.is_object() {
+                root = json!({ "sessions": {} });
+            }
+            root["sessions"][account_key] = session_json(&session, true);
+            write_secret_json_file(&self.path, &root)
+                .map_err(|error| crate::auth_client::TzapAuthError::Storage { message: format!("could not write {}: {error}", self.path.display()) })
+        }
     }
 
     fn load_session(&self, account_key: &str) -> Option<crate::auth_client::TzapSessionRecord> {
-        let root = read_json_file(&self.path)?;
-        session_from_json(root.get("sessions")?.get(account_key)?).ok()
+        #[cfg(feature = "keyring")]
+        {
+            self.inner.load_session(account_key)
+        }
+        #[cfg(not(feature = "keyring"))]
+        {
+            let root = read_json_file(&self.path)?;
+            session_from_json(root.get("sessions")?.get(account_key)?).ok()
+        }
     }
 
     fn clear_session(&mut self, account_key: &str) -> Result<(), crate::auth_client::TzapAuthError> {
-        let Some(mut root) = read_json_file(&self.path) else {
-            return Ok(());
-        };
-        if let Some(sessions) = root.get_mut("sessions").and_then(Value::as_object_mut) {
-            sessions.remove(account_key);
+        #[cfg(feature = "keyring")]
+        {
+            self.inner.clear_session(account_key)
         }
-        write_secret_json_file(&self.path, &root)
-            .map_err(|error| crate::auth_client::TzapAuthError::Storage { message: format!("could not write {}: {error}", self.path.display()) })
+        #[cfg(not(feature = "keyring"))]
+        {
+            let Some(mut root) = read_json_file(&self.path) else {
+                return Ok(());
+            };
+            if let Some(sessions) = root.get_mut("sessions").and_then(Value::as_object_mut) {
+                sessions.remove(account_key);
+            }
+            write_secret_json_file(&self.path, &root)
+                .map_err(|error| crate::auth_client::TzapAuthError::Storage { message: format!("could not write {}: {error}", self.path.display()) })
+        }
     }
 }
 
@@ -92,6 +149,7 @@ fn read_json_file(path: &Path) -> Option<Value> {
     serde_json::from_slice(&bytes).ok()
 }
 
+#[cfg(not(feature = "keyring"))]
 fn write_secret_json_file(path: &Path, value: &Value) -> std::io::Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -110,9 +168,11 @@ pub fn save_pending_auth(
     pending: &crate::auth_client::TzapPendingAuthState,
     config: &crate::auth_client::TzapHostedAuthLaunchConfig,
 ) -> std::io::Result<()> {
-    write_secret_json_file(
-        &state_dir.join(AUTH_PENDING_FILE),
-        &json!({
+    #[cfg(feature = "keyring")]
+    {
+        let mut store = NativeTzapSecretStore::default();
+        let reference = crate::keyring_store::pending_auth_reference();
+        let value = json!({
             "state": pending.state,
             "provider_id": pending.provider_id,
             "redirect_uri": pending.redirect_uri,
@@ -120,8 +180,29 @@ pub fn save_pending_auth(
             "created_at_unix_seconds": pending.created_at_unix_seconds,
             "client_id": config.client_id,
             "auth_base_url": config.hosted_auth_base_url,
-        }),
-    )
+        });
+        let bytes = serde_json::to_vec(&value).map_err(std::io::Error::other)?;
+        store
+            .put_at(crate::identity_catalog::TzapSecretPurpose::Session, &reference, crate::secrets::SecretBytes::from(bytes))
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let _ = state_dir;
+        Ok(())
+    }
+    #[cfg(not(feature = "keyring"))]
+    {
+        write_secret_json_file(
+            &state_dir.join(AUTH_PENDING_FILE),
+            &json!({
+                "state": pending.state,
+                "provider_id": pending.provider_id,
+                "redirect_uri": pending.redirect_uri,
+                "pkce_verifier": pending.pkce.verifier,
+                "created_at_unix_seconds": pending.created_at_unix_seconds,
+                "client_id": config.client_id,
+                "auth_base_url": config.hosted_auth_base_url,
+            }),
+        )
+    }
 }
 
 #[derive(Debug, Default)]
@@ -132,7 +213,7 @@ pub struct TzapPendingAuthMetadata {
 
 #[must_use]
 pub fn load_pending_auth_metadata(state_dir: &Path) -> TzapPendingAuthMetadata {
-    let Some(value) = read_json_file(&state_dir.join(AUTH_PENDING_FILE)) else {
+    let Some(value) = pending_auth_json(state_dir) else {
         return TzapPendingAuthMetadata::default();
     };
     TzapPendingAuthMetadata {
@@ -142,19 +223,69 @@ pub fn load_pending_auth_metadata(state_dir: &Path) -> TzapPendingAuthMetadata {
 }
 
 pub fn load_pending_auth(state_dir: &Path) -> Result<crate::auth_client::TzapPendingAuthState, String> {
-    let value = read_json_file(&state_dir.join(AUTH_PENDING_FILE)).ok_or_else(|| "no pending hosted-auth handoff".to_owned())?;
-    let verifier = required_request_string(&value, "pkce_verifier")?;
-    let pkce = crate::auth_client::TzapPkcePair::from_verifier(&verifier).map_err(|error| error.to_string())?;
-    Ok(crate::auth_client::TzapPendingAuthState {
-        state: required_request_string(&value, "state")?,
-        provider_id: required_request_string(&value, "provider_id")?,
-        redirect_uri: required_request_string(&value, "redirect_uri")?,
-        pkce,
-        created_at_unix_seconds: request_u64(&value, "created_at_unix_seconds")?
-            .ok_or_else(|| "missing or invalid field: created_at_unix_seconds".to_owned())?,
-    })
+    let value = pending_auth_json(state_dir).ok_or_else(|| "no pending hosted-auth handoff".to_owned())?;
+    let parsed = (|| {
+        let verifier = required_request_string(&value, "pkce_verifier")?;
+        let pkce = crate::auth_client::TzapPkcePair::from_verifier(&verifier).map_err(|error| error.to_string())?;
+        Ok(crate::auth_client::TzapPendingAuthState {
+            state: required_request_string(&value, "state")?,
+            provider_id: required_request_string(&value, "provider_id")?,
+            redirect_uri: required_request_string(&value, "redirect_uri")?,
+            pkce,
+            created_at_unix_seconds: request_u64(&value, "created_at_unix_seconds")?
+                .ok_or_else(|| "missing or invalid field: created_at_unix_seconds".to_owned())?,
+        })
+    })();
+    if parsed.is_err() {
+        // A malformed handoff must not remain replayable or repeatedly break
+        // future callbacks. Preserve no private material in the error path.
+        let _ = clear_pending_auth(state_dir);
+    }
+    parsed
 }
 
+/// Clears the pending handoff from the same backend used by
+/// `save_pending_auth`.
+pub fn clear_pending_auth(state_dir: &Path) -> std::io::Result<()> {
+    #[cfg(feature = "keyring")]
+    {
+        let mut store = NativeTzapSecretStore::default();
+        let reference = crate::keyring_store::pending_auth_reference();
+        store.delete(crate::identity_catalog::TzapSecretPurpose::Session, &reference).map_err(|error| std::io::Error::other(error.to_string()))?;
+        match fs::remove_file(state_dir.join(AUTH_PENDING_FILE)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "keyring"))]
+    {
+        match fs::remove_file(state_dir.join(AUTH_PENDING_FILE)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn pending_auth_json(state_dir: &Path) -> Option<Value> {
+    #[cfg(feature = "keyring")]
+    {
+        let store = NativeTzapSecretStore::new("default").ok()?;
+        let reference = crate::keyring_store::pending_auth_reference();
+        if let Ok(bytes) = store.resolve(crate::identity_catalog::TzapSecretPurpose::Session, &reference) {
+            return serde_json::from_slice(bytes.expose_secret()).ok();
+        }
+        read_json_file(&state_dir.join(AUTH_PENDING_FILE))
+    }
+    #[cfg(not(feature = "keyring"))]
+    {
+        read_json_file(&state_dir.join(AUTH_PENDING_FILE))
+    }
+}
+
+#[cfg(not(feature = "keyring"))]
 fn session_json(session: &crate::auth_client::TzapSessionRecord, include_token: bool) -> Value {
     let mut value = json!({
         "audience": session.audience,

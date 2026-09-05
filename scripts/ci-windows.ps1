@@ -245,16 +245,17 @@ function Invoke-CargoBuildRelease {
         [Parameter(Mandatory = $true)]
         [string]$TargetTriple,
 
-        [switch]$Offline
+        [switch]$Full
     )
 
-    $arguments = @("build", "--locked", "--release", "--target", $TargetTriple, "-p", "zmanager-cli", "--bin", "zm")
-    if ($Offline) {
-        $arguments += "--no-default-features"
+    $arguments = @("build", "--locked", "--release", "--target", $TargetTriple, "-p", "zmanager-cli", "--bin", "zm", "--no-default-features")
+    if ($Full) {
+        $arguments = $arguments[0..($arguments.Count - 2)]
+        $arguments += @("--features", "tzap-online")
     }
 
     Invoke-NativeLogged `
-        -Title ("cargo " + $(if ($Offline) { "offline " } else { "" }) + "release build failed on $TargetTriple") `
+        -Title ("cargo " + $(if ($Full) { "full " } else { "offline " }) + "release build failed on $TargetTriple") `
         -LogName "cargo-build-windows-$TargetTriple.log" `
         -FilePath "cargo" `
         -Arguments $arguments
@@ -448,7 +449,7 @@ function New-ReleasePackage {
     }
 }
 
-function New-OfflineReleasePackage {
+function New-FullReleasePackage {
     param(
         [Parameter(Mandatory = $true)]
         [string]$TargetTriple
@@ -457,14 +458,15 @@ function New-OfflineReleasePackage {
     $outRoot = Join-Path $RepositoryRoot $OutDir
     New-Item -ItemType Directory -Force -Path $outRoot | Out-Null
 
-    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("zmanager-offline-release-" + [System.Guid]::NewGuid())
+    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("zmanager-full-release-" + [System.Guid]::NewGuid())
     New-Item -ItemType Directory -Path $stage | Out-Null
     try {
-        Copy-Item (Join-Path $RepositoryRoot "target\$TargetTriple\release\zm.exe") (Join-Path $stage "zm-offline.exe")
-        Copy-Item (Join-Path $RepositoryRoot "LICENSE") $stage
-        Copy-Item (Join-Path $RepositoryRoot "NOTICE") $stage
+        Copy-ReleaseFiles -TargetTriple $TargetTriple -Stage $stage
+        Rename-Item (Join-Path $stage "zm.exe") "zm-full.exe"
+        Invoke-ThirdPartyNoticeGeneration -Stage $stage
+        Copy-VcpkgRuntimeDlls -Stage $stage
 
-        $archive = Join-Path $outRoot ("zm-offline-$TargetTriple.zip")
+        $archive = Join-Path $outRoot ("zm-full-$TargetTriple.zip")
         if (Test-Path $archive) {
             Remove-Item $archive
         }
@@ -502,8 +504,8 @@ Invoke-NativeLogged `
 if ($Package) {
     Invoke-CargoBuildRelease -TargetTriple $Target
     New-ReleasePackage -TargetTriple $Target
-    Invoke-CargoBuildRelease -TargetTriple $Target -Offline
-    New-OfflineReleasePackage -TargetTriple $Target
+    Invoke-CargoBuildRelease -TargetTriple $Target -Full
+    New-FullReleasePackage -TargetTriple $Target
 } else {
     Invoke-CargoTest -TargetTriple $Target
     Invoke-CargoBuildRelease -TargetTriple $Target

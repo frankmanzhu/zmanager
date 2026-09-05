@@ -549,27 +549,16 @@ pub fn compose_tzap_archive_verification_with_status(
     }
 
     if !archive_status_matches(expected, status) {
-        offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Unavailable {
-            reason: Some("online status does not match archive leaf certificate".to_owned()),
-        };
-        offline.outcome = crate::engine::tzap::TzapArchiveVerificationOutcome::derive(
-            offline.signature,
-            offline.trust,
-            offline.certificate_time,
-            &offline.status,
-        );
+        offline.status =
+            crate::engine::tzap::TzapArchiveStatusCheck::Unavailable { reason: Some("online status does not match archive leaf certificate".to_owned()) };
+        offline.outcome =
+            crate::engine::tzap::TzapArchiveVerificationOutcome::derive(offline.signature, offline.trust, offline.certificate_time, &offline.status);
         return offline;
     }
 
     match status.status {
-        TzapCertificateStatus::Valid => {
-            if status.is_fresh_valid_for_valid_now(verifier_time_unix_seconds) {
-                offline.status = crate::engine::tzap::TzapArchiveStatusCheck::FreshValid;
-            } else {
-                offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Unavailable {
-                    reason: Some(format!("online status is {}", status.status.as_str())),
-                };
-            }
+        TzapCertificateStatus::Valid if status.is_fresh_valid_for_valid_now(verifier_time_unix_seconds) => {
+            offline.status = crate::engine::tzap::TzapArchiveStatusCheck::FreshValid;
         }
         TzapCertificateStatus::Revoked => {
             let signed_at = offline.signer.as_ref().map_or(0, |s| s.signed_at_unix_seconds);
@@ -582,10 +571,8 @@ pub fn compose_tzap_archive_verification_with_status(
                     };
                 }
                 TzapArchiveRevocationOutcome::Revoked => {
-                    offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Revoked {
-                        revoked_at_unix_seconds: revoked_at,
-                        reason: status.revocation_reason.clone(),
-                    };
+                    offline.status =
+                        crate::engine::tzap::TzapArchiveStatusCheck::Revoked { revoked_at_unix_seconds: revoked_at, reason: status.revocation_reason.clone() };
                 }
             }
         }
@@ -593,18 +580,11 @@ pub fn compose_tzap_archive_verification_with_status(
             offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Suspended;
         }
         _ => {
-            offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Unavailable {
-                reason: Some(format!("online status is {}", status.status.as_str())),
-            };
+            offline.status = crate::engine::tzap::TzapArchiveStatusCheck::Unavailable { reason: Some(format!("online status is {}", status.status.as_str())) };
         }
     }
 
-    offline.outcome = crate::engine::tzap::TzapArchiveVerificationOutcome::derive(
-        offline.signature,
-        offline.trust,
-        offline.certificate_time,
-        &offline.status,
-    );
+    offline.outcome = crate::engine::tzap::TzapArchiveVerificationOutcome::derive(offline.signature, offline.trust, offline.certificate_time, &offline.status);
     offline
 }
 
@@ -914,31 +894,16 @@ mod tests {
         // S2: the structured category, when present, is trusted on its own —
         // it cannot be set through a revoke request the way the reason string
         // can, so a mismatched or absent reason does not override it.
-        assert_eq!(
-            classify_archive_revocation(Some("user_requested"), Some("supersession"), 1_000, 500),
-            TzapArchiveRevocationOutcome::BeforeRevocation
-        );
-        assert_eq!(
-            classify_archive_revocation(None, Some("supersession"), 1_000, 500),
-            TzapArchiveRevocationOutcome::BeforeRevocation
-        );
+        assert_eq!(classify_archive_revocation(Some("user_requested"), Some("supersession"), 1_000, 500), TzapArchiveRevocationOutcome::BeforeRevocation);
+        assert_eq!(classify_archive_revocation(None, Some("supersession"), 1_000, 500), TzapArchiveRevocationOutcome::BeforeRevocation);
         // A present category still respects the revocation-time boundary.
-        assert_eq!(
-            classify_archive_revocation(Some("renewed"), Some("supersession"), 1_000, 1_000),
-            TzapArchiveRevocationOutcome::Revoked
-        );
+        assert_eq!(classify_archive_revocation(Some("renewed"), Some("supersession"), 1_000, 1_000), TzapArchiveRevocationOutcome::Revoked);
         // A present category of "compromise" is terminal even when the reason
         // string happens to say "renewed" — the category wins, not the text.
-        assert_eq!(
-            classify_archive_revocation(Some("renewed"), Some("compromise"), 1_000, 500),
-            TzapArchiveRevocationOutcome::Revoked
-        );
+        assert_eq!(classify_archive_revocation(Some("renewed"), Some("compromise"), 1_000, 500), TzapArchiveRevocationOutcome::Revoked);
         // An unrecognised category is exactly as terminal as an unrecognised
         // reason — this stays an allowlist, not a denylist.
-        assert_eq!(
-            classify_archive_revocation(Some("renewed"), Some("unexpected_future_value"), 1_000, 500),
-            TzapArchiveRevocationOutcome::Revoked
-        );
+        assert_eq!(classify_archive_revocation(Some("renewed"), Some("unexpected_future_value"), 1_000, 500), TzapArchiveRevocationOutcome::Revoked);
     }
 
     fn archive_target_fixture() -> TzapArchiveStatusTarget {
@@ -1167,8 +1132,8 @@ mod tests {
     #[test]
     fn archive_status_composition_caps_staging_below_verified_and_promotes_production() {
         use crate::engine::tzap::{
-            TzapArchiveSignatureCheck, TzapArchiveSignerDetails, TzapArchiveStatusCheck, TzapArchiveTimeCheck, TzapArchiveTrustCheck,
-            TzapArchiveVerification, TzapArchiveVerificationOutcome,
+            TzapArchiveSignatureCheck, TzapArchiveSignerDetails, TzapArchiveStatusCheck, TzapArchiveTimeCheck, TzapArchiveTrustCheck, TzapArchiveVerification,
+            TzapArchiveVerificationOutcome,
         };
 
         let target = archive_target_fixture();
@@ -1230,13 +1195,7 @@ mod tests {
         );
         let renewed_verified = compose_tzap_archive_verification_with_status(prod_offline2, &target, &revoked_status, 1_000);
         assert_eq!(renewed_verified.outcome, TzapArchiveVerificationOutcome::VerifiedWithCaveat);
-        assert_eq!(
-            renewed_verified.status,
-            TzapArchiveStatusCheck::BeforeRevocation {
-                revoked_at_unix_seconds: 800,
-                reason: Some("renewed".to_owned())
-            }
-        );
+        assert_eq!(renewed_verified.status, TzapArchiveStatusCheck::BeforeRevocation { revoked_at_unix_seconds: 800, reason: Some("renewed".to_owned()) });
         assert_eq!(renewed_verified.headline_label(), "Signed Before Revocation");
 
         // Revocation with 'key_compromise' -> Revoked -> Failed
@@ -1255,13 +1214,7 @@ mod tests {
         );
         let compromise_verified = compose_tzap_archive_verification_with_status(prod_offline3, &target, &compromise_status, 1_000);
         assert_eq!(compromise_verified.outcome, TzapArchiveVerificationOutcome::Failed);
-        assert_eq!(
-            compromise_verified.status,
-            TzapArchiveStatusCheck::Revoked {
-                revoked_at_unix_seconds: 800,
-                reason: Some("key_compromise".to_owned())
-            }
-        );
+        assert_eq!(compromise_verified.status, TzapArchiveStatusCheck::Revoked { revoked_at_unix_seconds: 800, reason: Some("key_compromise".to_owned()) });
         assert_eq!(compromise_verified.headline_label(), "Certificate Revoked");
 
         // Target mismatch leaves status as Unavailable

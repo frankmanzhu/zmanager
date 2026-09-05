@@ -5,8 +5,8 @@ with positive Cargo features.
 
 | Profile | Archive engine | Offline identity/catalog/sign/verify | Hosted login/enrollment/status | HTTP client |
 |---|---|---|---|---|
-| default | enabled | enabled | enabled | enabled in the CLI |
-| `--no-default-features` | enabled | enabled | unavailable at product boundaries | absent from the CLI graph |
+| default | enabled | enabled | unavailable at product boundaries | absent from the CLI graph |
+| `tzap-online` | enabled | enabled | enabled | enabled |
 
 The feature name is `tzap-online` in `zmanager-cli` and `zmanager-ffi`. Hosted
 transport is supplied by the explicit `zmanager-tzap-hosted` product crate. The
@@ -41,8 +41,13 @@ Native consumer builds select the same profile through `ZMANAGER_TZAP_PROFILE`.
 The root iOS script accepts `full` or `offline` (default `full`); the mobile
 Android and pinned iOS wrappers default to `offline`. The desktop macOS
 inspection-extension build also defaults to `offline`, while the desktop main
-application keeps the explicit `tzap-online` feature as its default because
+application keeps the explicit `tzap-online` feature because
 its account UI uses hosted authentication.
+
+The CLI's default release artifact is the offline profile (`zm-*`). The
+enrollment-capable profile is shipped as a separate `zm-full-*` artifact and
+is installed explicitly with `install.sh --full`, `zmanager-full`, or
+`TzapOrg.ZManagerCLI.Full`.
 
 Adding a hosted operation requires an explicit `tzap-online` product-boundary
 decision. It must not be added to archive-engine selection or to the stable
