@@ -12,7 +12,7 @@ const TZAP_TEMP_EXTRACT_ATTEMPTS: u32 = 100;
 // Batch restore runs single-threaded; the jobs parameter is the plugin's
 // parallelism (minimum 1).
 const EXTRACT_SELECTED_JOBS: usize = 1;
-use crate::tzap::open::open_tzap_archive_with_key_options;
+use crate::tzap::open::open_tzap_archive_with_key_options_multi;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -145,6 +145,10 @@ pub enum TzapExtractKeySource<'a> {
     /// Recipient-wrapped archives, keyed from in-memory private-key bytes
     /// (for example a loaded secret-store value).
     RecipientKeyBytes(&'a [u8]),
+    /// Recipient-wrapped archives, keyed from several in-memory candidate
+    /// private-key blobs (a device's active key plus any retired ones,
+    /// design §9.4). The first candidate whose SPKI matches the record wins.
+    RecipientKeyBytesList(&'a [Vec<u8>]),
 }
 
 /// One `.tzap` extraction request (CR-142).
@@ -182,11 +186,11 @@ pub fn extract_tzap(request: TzapExtractRequest<'_, '_>, archive: impl AsRef<Pat
         debug_assert!(overwrite_resolver.is_none(), "fast extraction does not support an overwrite resolver");
         return extract_tzap_fast_inner(archive, destination, policy, key, restore_options, context);
     }
-    let (password, recipient_private_key, key_bytes) = key_components(key);
+    let (password, recipient_private_key, key_bytes_list) = key_components(key);
     extract_tzap_inner(
         archive,
         destination,
-        ExtractTzapOptions { policy, password, recipient_private_key, recipient_private_key_bytes: key_bytes, restore_options },
+        ExtractTzapOptions { policy, password, recipient_private_key, recipient_private_key_bytes_list: key_bytes_list, restore_options },
         overwrite_resolver,
         context,
     )
@@ -205,8 +209,8 @@ fn extract_tzap_fast_inner(
     context: Option<&mut JobContext<'_>>,
 ) -> Result<TzapExtractReport, TzapError> {
     let destination = destination.as_ref();
-    let (password, recipient_private_key, key_bytes) = key_components(key);
-    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
+    let (password, recipient_private_key, key_bytes_list) = key_components(key);
+    let opened = open_tzap_archive_with_key_options_multi(archive, password, recipient_private_key, key_bytes_list.as_deref())?;
     let entries = opened.list_files()?;
     opened.plan_metadata_restore(restore_options.core_options(false))?;
     if matches!(restore_options.policy, TzapRestorePolicy::SameOs | TzapRestorePolicy::System)
@@ -226,13 +230,16 @@ fn extract_tzap_fast_inner(
     state.finish()
 }
 
-/// Resolves a key source into the archive-opening primitives.
-fn key_components(key: TzapExtractKeySource<'_>) -> (Option<&str>, Option<&Path>, Option<&[u8]>) {
+/// Resolves a key source into the archive-opening primitives. Recipient key
+/// bytes are normalized to a candidate list either way, so every downstream
+/// caller goes through the same multi-key open path (design §9.4).
+fn key_components(key: TzapExtractKeySource<'_>) -> (Option<&str>, Option<&Path>, Option<Vec<Vec<u8>>>) {
     match key {
         TzapExtractKeySource::None => (None, None, None),
         TzapExtractKeySource::Password(password) => (Some(password), None, None),
         TzapExtractKeySource::RecipientKeyPath(path) => (None, Some(path), None),
-        TzapExtractKeySource::RecipientKeyBytes(bytes) => (None, None, Some(bytes)),
+        TzapExtractKeySource::RecipientKeyBytes(bytes) => (None, None, Some(vec![bytes.to_vec()])),
+        TzapExtractKeySource::RecipientKeyBytesList(bytes_list) => (None, None, Some(bytes_list.to_vec())),
     }
 }
 
@@ -248,8 +255,8 @@ pub fn copy_tzap_files_to_writer(
     selector: impl Fn(&str) -> bool,
     writer: &mut dyn io::Write,
 ) -> Result<TzapExtractReport, TzapError> {
-    let (password, recipient_private_key, key_bytes) = key_components(key);
-    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
+    let (password, recipient_private_key, key_bytes_list) = key_components(key);
+    let opened = open_tzap_archive_with_key_options_multi(archive, password, recipient_private_key, key_bytes_list.as_deref())?;
     copy_opened_tzap_files_to_writer(&opened, selector, writer)
 }
 
@@ -266,8 +273,8 @@ pub fn copy_tzap_file_to_writer(
     entry_path: &str,
     writer: &mut dyn io::Write,
 ) -> Result<TzapExtractReport, TzapError> {
-    let (password, recipient_private_key, key_bytes) = key_components(key);
-    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
+    let (password, recipient_private_key, key_bytes_list) = key_components(key);
+    let opened = open_tzap_archive_with_key_options_multi(archive, password, recipient_private_key, key_bytes_list.as_deref())?;
     let Some(entry) = opened.lookup_index_entry(entry_path)? else {
         return Ok(skipped_missing_entry_report(entry_path));
     };
@@ -328,8 +335,8 @@ pub(crate) fn extract_tzap_file_to_destination(
     replace_existing: bool,
     restore_options: TzapRestoreOptions,
 ) -> Result<Option<TzapFileExtractReport>, TzapError> {
-    let (password, recipient_private_key, key_bytes) = key_components(key);
-    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, key_bytes)?;
+    let (password, recipient_private_key, key_bytes_list) = key_components(key);
+    let opened = open_tzap_archive_with_key_options_multi(archive, password, recipient_private_key, key_bytes_list.as_deref())?;
     extract_tzap_file_from_opened_archive(&opened, entry_path, destination_path, replace_existing, restore_options)
 }
 
@@ -356,7 +363,7 @@ struct ExtractTzapOptions<'a> {
     policy: ExtractionPolicy,
     password: Option<&'a str>,
     recipient_private_key: Option<&'a Path>,
-    recipient_private_key_bytes: Option<&'a [u8]>,
+    recipient_private_key_bytes_list: Option<Vec<Vec<u8>>>,
     restore_options: TzapRestoreOptions,
 }
 
@@ -531,10 +538,10 @@ fn extract_tzap_inner(
     overwrite_resolver: Option<&mut dyn OverwriteResolver>,
     context: Option<&mut JobContext<'_>>,
 ) -> Result<TzapExtractReport, TzapError> {
-    let ExtractTzapOptions { policy, password, recipient_private_key, recipient_private_key_bytes, restore_options } = options;
+    let ExtractTzapOptions { policy, password, recipient_private_key, recipient_private_key_bytes_list, restore_options } = options;
     let destination = destination.as_ref();
     let destination_root = crate::safety::prepare_destination_root(destination).map_err(|source| TzapError::Io { path: destination.to_path_buf(), source })?;
-    let opened = open_tzap_archive_with_key_options(archive, password, recipient_private_key, recipient_private_key_bytes)?;
+    let opened = open_tzap_archive_with_key_options_multi(archive, password, recipient_private_key, recipient_private_key_bytes_list.as_deref())?;
     let entries = opened.list_files()?;
     if overwrite_resolver.is_none() && policy.strip_components == 0 && matches!(policy.overwrite, OverwritePolicy::Refuse | OverwritePolicy::Replace) {
         return extract_opened_tzap_with_core_restore(&opened, &destination_root, policy, &entries, restore_options, context);

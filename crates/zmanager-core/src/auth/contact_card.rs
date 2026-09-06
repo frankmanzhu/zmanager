@@ -257,6 +257,9 @@ pub fn import_tzap_contact_card(
         missing_status_caveat: verified.missing_status_caveat,
         contact_card_payload: verified.payload,
         accepted_at_unix_seconds,
+        // Display metadata only, set by the importer afterward -- import
+        // itself never invents or carries one over (design §4).
+        local_alias: None,
     };
     inventory.contacts.retain(|existing| existing.contact_id != contact.contact_id);
     inventory.contacts.push(contact.clone());

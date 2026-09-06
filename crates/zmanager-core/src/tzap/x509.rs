@@ -4,7 +4,10 @@
 
 use super::TzapError;
 use crate::secrets::{SecretBytes, SecretString};
-use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_recipient_key, open_tzap_input_volume_readers};
+use crate::tzap::open::{
+    open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_key_options_multi, open_tzap_archive_with_recipient_key,
+    open_tzap_input_volume_readers,
+};
 use crate::tzap::write::TzapCreateOptions;
 use crate::x509_format::x509_name_to_string;
 use openssl::asn1::Asn1Time;
@@ -482,10 +485,19 @@ fn key_wrap_outcome_error(outcome: &KeyWrapOutcome) -> TzapError {
     }
 }
 
+/// One candidate recipient private key considered when unwrapping a TZAP
+/// keywrap record. A device that has rotated its recipient key holds several
+/// of these at once (its active key plus any retired ones), and the lookup
+/// tries each until one matches the record's certificate.
 #[derive(Debug)]
-pub(crate) struct TzapRecipientPrivateKeyLookup {
+struct RecipientPrivateKeyCandidate {
     private_key_bytes: Vec<u8>,
     private_key_spki_der: Option<Vec<u8>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TzapRecipientPrivateKeyLookup {
+    candidates: Vec<RecipientPrivateKeyCandidate>,
 }
 
 impl PrivateKeyLookup for TzapRecipientPrivateKeyLookup {
@@ -495,14 +507,22 @@ impl PrivateKeyLookup for TzapRecipientPrivateKeyLookup {
         _metadata: &RecipientRecordMetadata,
         recipient_identity_bytes: &[u8],
     ) -> Option<Vec<u8>> {
-        if let Some(private_key_spki_der) = self.private_key_spki_der.as_ref() {
-            let certificate = X509::from_der(recipient_identity_bytes).ok()?;
-            let certificate_spki_der = certificate.public_key().ok()?.public_key_to_der().ok()?;
-            if certificate_spki_der != *private_key_spki_der {
-                return None;
+        let certificate_spki_der =
+            X509::from_der(recipient_identity_bytes).ok().and_then(|certificate| certificate.public_key().ok()?.public_key_to_der().ok());
+        // Prefer an exact SPKI match first, in candidate order, so a device
+        // holding both an active and a retired key always unwraps to the key
+        // the record actually names rather than whichever was listed first.
+        if let Some(certificate_spki_der) = certificate_spki_der.as_ref() {
+            for candidate in &self.candidates {
+                if candidate.private_key_spki_der.as_ref() == Some(certificate_spki_der) {
+                    return Some(candidate.private_key_bytes.clone());
+                }
             }
         }
-        Some(self.private_key_bytes.clone())
+        // A candidate with no derivable SPKI (a raw 32-byte key) cannot be
+        // compared against the record, so it is offered unconditionally, as
+        // the single-key lookup always did.
+        self.candidates.iter().find(|candidate| candidate.private_key_spki_der.is_none()).map(|candidate| candidate.private_key_bytes.clone())
     }
 }
 
@@ -512,15 +532,42 @@ pub(crate) fn load_recipient_private_key_lookup(path: &Path) -> Result<TzapRecip
 }
 
 pub(crate) fn load_recipient_private_key_lookup_from_bytes(bytes: &[u8], description: &str) -> Result<TzapRecipientPrivateKeyLookup, TzapError> {
+    load_recipient_private_key_lookup_from_bytes_list(std::slice::from_ref(&bytes.to_vec()), description)
+}
+
+/// Plural form of [`load_recipient_private_key_lookup_from_bytes`] for a
+/// device holding several recipient private keys at once (design §9.4): the
+/// resulting lookup tries every candidate's SPKI against each record.
+///
+/// # Errors
+///
+/// Returns [`TzapError`] when `key_bytes_list` is empty or any entry cannot be
+/// parsed as a recipient private key.
+pub(crate) fn load_recipient_private_key_lookup_from_bytes_list(
+    key_bytes_list: &[Vec<u8>],
+    description: &str,
+) -> Result<TzapRecipientPrivateKeyLookup, TzapError> {
+    if key_bytes_list.is_empty() {
+        return Err(TzapError::KeyWrap(format!("no recipient private key candidates supplied for {description}")));
+    }
+    let candidates = key_bytes_list
+        .iter()
+        .enumerate()
+        .map(|(index, bytes)| parse_recipient_private_key_candidate(bytes, &format!("{description} #{index}")))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(TzapRecipientPrivateKeyLookup { candidates })
+}
+
+fn parse_recipient_private_key_candidate(bytes: &[u8], description: &str) -> Result<RecipientPrivateKeyCandidate, TzapError> {
     if bytes.len() == 32 {
-        return Ok(TzapRecipientPrivateKeyLookup { private_key_bytes: bytes.to_vec(), private_key_spki_der: None });
+        return Ok(RecipientPrivateKeyCandidate { private_key_bytes: bytes.to_vec(), private_key_spki_der: None });
     }
     let private_key = if bytes.starts_with(b"-----BEGIN") { PKey::private_key_from_pem(bytes) } else { PKey::private_key_from_der(bytes) }
         .map_err(|source| TzapError::KeyWrap(format!("failed to parse recipient private key {description}: {source}")))?;
     let private_key_bytes =
         private_key.private_key_to_der().map_err(|source| TzapError::KeyWrap(format!("failed to normalize recipient private key {description}: {source}")))?;
     let private_key_spki_der = private_key.public_key_to_der().ok();
-    Ok(TzapRecipientPrivateKeyLookup { private_key_bytes, private_key_spki_der })
+    Ok(RecipientPrivateKeyCandidate { private_key_bytes, private_key_spki_der })
 }
 
 #[derive(Debug, Default)]
@@ -832,6 +879,23 @@ pub fn test_tzap_with_recipient_key_bytes_filter_and_x509_trust(
     x509_trust: Option<&TzapX509TrustOptions>,
 ) -> Result<TzapTestReport, TzapError> {
     let opened = open_tzap_archive_with_key_options(archive, None, None, Some(recipient_private_key_bytes))?;
+    test_opened_tzap_archive(&opened, selector, x509_trust)
+}
+
+/// Plural form of [`test_tzap_with_recipient_key_bytes_filter_and_x509_trust`]
+/// for a device holding several recipient private keys at once (design §9.4).
+///
+/// # Errors
+///
+/// Returns [`TzapError`] when the archive cannot be opened, verified, or when
+/// requested X.509 `RootAuth` verification fails.
+pub(crate) fn test_tzap_with_recipient_key_bytes_list_filter_and_x509_trust(
+    archive: impl AsRef<Path>,
+    recipient_private_key_bytes_list: &[Vec<u8>],
+    selector: impl Fn(&str) -> bool,
+    x509_trust: Option<&TzapX509TrustOptions>,
+) -> Result<TzapTestReport, TzapError> {
+    let opened = open_tzap_archive_with_key_options_multi(archive, None, None, Some(recipient_private_key_bytes_list))?;
     test_opened_tzap_archive(&opened, selector, x509_trust)
 }
 

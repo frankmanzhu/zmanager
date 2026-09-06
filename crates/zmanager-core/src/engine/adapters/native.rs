@@ -1981,7 +1981,7 @@ impl NativeReadAdapter for TzapListAdapter {
     fn list(&self, archive: &NativeReadContext) -> Result<ArchiveListing, ArchiveError> {
         let primary_path = archive.primary_path();
         let listing = match (archive.options().recipient_key_bytes(), archive.options().recipient_key_path()) {
-            (Some(recipient_key_bytes), _) => tzap::list_tzap_index_with_recipient_key_bytes(primary_path, recipient_key_bytes),
+            (Some(recipient_key_bytes), _) => tzap::list_tzap_index_with_recipient_key_bytes_list(primary_path, recipient_key_bytes),
             (None, Some(recipient_key)) => tzap::list_tzap_index_with_recipient_key(primary_path, recipient_key),
             (None, None) => tzap::list_tzap_index_with_optional_password(primary_path, archive.options().password.as_deref()),
         }
@@ -2040,7 +2040,7 @@ impl NativeReadAdapter for TzapListAdapter {
         let recipient_key_bytes = test_options.recipient_key_bytes.as_deref().or_else(|| archive.options().recipient_key_bytes());
         let recipient_key = test_options.recipient_key.as_deref().or(archive.options().recipient_key_path());
         let report = if let Some(recipient_key_bytes) = recipient_key_bytes {
-            tzap::test_tzap_with_recipient_key_bytes_filter_and_x509_trust(
+            tzap::test_tzap_with_recipient_key_bytes_list_filter_and_x509_trust(
                 path,
                 recipient_key_bytes,
                 |entry_path| test_options.selects(entry_path),
@@ -2073,7 +2073,7 @@ impl NativeReadAdapter for TzapListAdapter {
     fn extract<'a>(&self, archive: &NativeReadContext, options: &'a mut ExtractOptions<'a>) -> Result<ExtractReport, ArchiveError> {
         let path = archive.primary_path();
         let key = if let Some(recipient_key_bytes) = options.recipient_key_bytes.as_deref() {
-            tzap::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
+            tzap::TzapExtractKeySource::RecipientKeyBytesList(recipient_key_bytes)
         } else if let Some(recipient_key) = options.recipient_key.as_deref() {
             tzap::TzapExtractKeySource::RecipientKeyPath(recipient_key)
         } else if let Some(password) = options.tzap_password.as_deref() {
@@ -2121,7 +2121,7 @@ impl NativeReadAdapter for TzapListAdapter {
             });
         }
         let key = if let Some(recipient_key_bytes) = archive.options().recipient_key_bytes() {
-            tzap::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
+            tzap::TzapExtractKeySource::RecipientKeyBytesList(recipient_key_bytes)
         } else if let Some(recipient_key) = archive.options().recipient_key_path() {
             tzap::TzapExtractKeySource::RecipientKeyPath(recipient_key)
         } else {
@@ -2146,7 +2146,7 @@ impl NativeReadAdapter for TzapListAdapter {
         let path = archive.primary_path();
         let selector = archive.selected_entry_selector(entry_id)?;
         let key = if let Some(recipient_key_bytes) = archive.options().recipient_key_bytes() {
-            tzap::TzapExtractKeySource::RecipientKeyBytes(recipient_key_bytes)
+            tzap::TzapExtractKeySource::RecipientKeyBytesList(recipient_key_bytes)
         } else if let Some(recipient_key) = archive.options().recipient_key_path() {
             tzap::TzapExtractKeySource::RecipientKeyPath(recipient_key)
         } else {

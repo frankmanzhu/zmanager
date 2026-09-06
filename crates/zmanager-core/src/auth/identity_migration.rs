@@ -294,6 +294,7 @@ fn build_catalog_from_legacy(
                 missing_status_caveat: contact.missing_status_caveat,
                 contact_card_payload: contact.contact_card_payload.clone(),
                 accepted_at_unix_seconds: contact.accepted_at_unix_seconds,
+                local_alias: contact.local_alias.clone(),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -599,6 +600,7 @@ pub fn load_inventory_from_catalog(
             missing_status_caveat: contact.missing_status_caveat,
             contact_card_payload: contact.contact_card_payload.clone(),
             accepted_at_unix_seconds: contact.accepted_at_unix_seconds,
+            local_alias: contact.local_alias.clone(),
         });
     }
 

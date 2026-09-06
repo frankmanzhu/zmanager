@@ -53,6 +53,8 @@ mod temp_names;
 mod test_support;
 mod tzap;
 pub(crate) mod wildcard;
+#[doc(hidden)]
+mod x509_fixture;
 mod zip_split;
 
 // Offline identity, catalog, signing, and verification remain part of the
@@ -115,6 +117,12 @@ pub mod backend_test_support {
     }
     pub mod jobs {
         pub use crate::jobs::ProgressCoalescer;
+    }
+    /// Real, signature-valid X.509 certificate chains for exercising
+    /// signature/chain verification (contact cards, document envelopes, ...)
+    /// from a sibling crate's own test harness.
+    pub mod x509_factory {
+        pub use crate::x509_fixture::*;
     }
 }
 

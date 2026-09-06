@@ -4,7 +4,7 @@
 use super::{TzapError, io_error};
 use crate::tzap::write::placeholder_master_key;
 use crate::tzap::x509::{
-    RecipientWrapOpenStats, load_recipient_private_key_lookup, load_recipient_private_key_lookup_from_bytes, recipient_wrap_candidates_for_record,
+    RecipientWrapOpenStats, load_recipient_private_key_lookup, load_recipient_private_key_lookup_from_bytes_list, recipient_wrap_candidates_for_record,
     recipient_wrap_open_error,
 };
 use std::fs::{self, File};
@@ -253,6 +253,20 @@ pub(crate) fn open_tzap_archive_with_key_options(
     recipient_private_key: Option<&Path>,
     recipient_private_key_bytes: Option<&[u8]>,
 ) -> Result<OpenedArchive, TzapError> {
+    let bytes_list = recipient_private_key_bytes.map(|bytes| vec![bytes.to_vec()]);
+    open_tzap_archive_with_key_options_multi(archive, password, recipient_private_key, bytes_list.as_deref())
+}
+
+/// Plural form of [`open_tzap_archive_with_key_options`] for a device holding
+/// several recipient private keys at once (design §9.4): every candidate's
+/// SPKI is tried against each keywrap record, so an archive addressed to any
+/// held key -- active or retired -- opens.
+pub(crate) fn open_tzap_archive_with_key_options_multi(
+    archive: impl AsRef<Path>,
+    password: Option<&str>,
+    recipient_private_key: Option<&Path>,
+    recipient_private_key_bytes_list: Option<&[Vec<u8>]>,
+) -> Result<OpenedArchive, TzapError> {
     let archive_path = archive.as_ref();
     let volume_paths = discover_tzap_input_volume_paths(archive_path);
     let first_volume = volume_paths.first().ok_or_else(|| io_error(archive_path, io::ErrorKind::NotFound, "no TZAP input volumes found"))?;
@@ -263,12 +277,12 @@ pub(crate) fn open_tzap_archive_with_key_options(
         if password.is_some() {
             return Err(TzapError::Format(FormatError::KeyMaterialMismatch));
         }
-        if recipient_private_key.is_none() && recipient_private_key_bytes.is_none() {
+        if recipient_private_key.is_none() && recipient_private_key_bytes_list.is_none() {
             return Err(TzapError::RecipientKeyRequired);
         }
-        let lookup = match (recipient_private_key, recipient_private_key_bytes) {
+        let lookup = match (recipient_private_key, recipient_private_key_bytes_list) {
             (Some(path), None) => load_recipient_private_key_lookup(path)?,
-            (None, Some(bytes)) => load_recipient_private_key_lookup_from_bytes(bytes, "in-memory recipient key")?,
+            (None, Some(bytes_list)) => load_recipient_private_key_lookup_from_bytes_list(bytes_list, "in-memory recipient key")?,
             _ => return Err(TzapError::Format(FormatError::KeyMaterialMismatch)),
         };
         let mut stats = RecipientWrapOpenStats::default();
@@ -279,7 +293,7 @@ pub(crate) fn open_tzap_archive_with_key_options(
         )
         .map_err(|source| recipient_wrap_open_error(source, &stats));
     }
-    if recipient_private_key.is_some() || recipient_private_key_bytes.is_some() {
+    if recipient_private_key.is_some() || recipient_private_key_bytes_list.is_some() {
         return Err(TzapError::Format(FormatError::KeyMaterialMismatch));
     }
     let master_key = match (&kdf_params, password) {

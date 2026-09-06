@@ -25,7 +25,7 @@ pub use extract::{
 pub use listing::{
     TzapEntryKind, TzapListing, list_tzap_with_optional_password, list_tzap_with_password, list_tzap_with_recipient_key, list_tzap_with_recipient_key_bytes,
 };
-pub(crate) use listing::{list_tzap_index_with_optional_password, list_tzap_index_with_recipient_key, list_tzap_index_with_recipient_key_bytes};
+pub(crate) use listing::{list_tzap_index_with_optional_password, list_tzap_index_with_recipient_key, list_tzap_index_with_recipient_key_bytes_list};
 pub(crate) use open::discover_tzap_input_volume_paths;
 pub use open::is_tzap_archive_path;
 pub use open::{TzapPublicMetadataSummary, TzapPublicVolumeSummary, has_existing_tzap_input_volume, summarize_tzap_public_metadata};
@@ -34,6 +34,7 @@ pub use verification::{
     TzapArchiveVerificationOutcome, verify_tzap_archive_public_no_key, verify_tzap_archive_public_no_key_with_signer_predicate,
 };
 pub use write::{TzapCreateOptions, TzapKeySource, create_tzap_from_manifest_with_context, tzap_bootstrap_sidecar_path};
+pub(crate) use x509::test_tzap_with_recipient_key_bytes_list_filter_and_x509_trust;
 pub use x509::{
     TzapTestReport, TzapX509SignerInspection, TzapX509SigningOptions, TzapX509TrustAnchor, TzapX509TrustOptions, TzapX509VerificationReport,
     inspect_tzap_x509_public_no_key_signer, inspect_tzap_x509_signer, test_tzap_with_optional_password_filter_and_x509_trust, test_tzap_with_password_filter,

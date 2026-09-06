@@ -283,6 +283,12 @@ pub struct TzapContactRecord {
     pub missing_status_caveat: bool,
     pub contact_card_payload: Value,
     pub accepted_at_unix_seconds: u64,
+    /// Display name chosen by the importer, distinct from the card's own
+    /// `display_name`/`device_label` (chosen by the sender). Display
+    /// metadata only -- never signed, never fed back into verification.
+    /// `None` for a contact the importer has not renamed, and absent from
+    /// catalogs written before this field existed.
+    pub local_alias: Option<String>,
 }
 
 impl TzapContactRecord {
@@ -653,6 +659,7 @@ fn contact_from_json(value: &Value) -> Result<TzapContactRecord, TzapLocalIdenti
         missing_status_caveat,
         contact_card_payload: required_field(object, "contact_card_payload")?.clone(),
         accepted_at_unix_seconds: required_u64(object, "accepted_at_unix_seconds")?,
+        local_alias: optional_string(object, "local_alias")?,
     })
 }
 
@@ -1063,6 +1070,7 @@ mod tests {
                     "recipient_public_key": URL_SAFE_NO_PAD.encode(recipient_key.public_key_spki_der.clone()),
                 }),
                 accepted_at_unix_seconds: 130,
+                local_alias: Some("Ada -- work phone".to_owned()),
             }],
         }
     }

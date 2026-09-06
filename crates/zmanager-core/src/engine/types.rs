@@ -47,10 +47,14 @@ pub struct OpenOptions {
     pub password: Option<String>,
     /// Optional private key used to unwrap recipient-encrypted TZAP archives.
     pub recipient_key: Option<PathBuf>,
-    /// Optional in-memory private key used to unwrap recipient-encrypted TZAP
-    /// archives, for callers that hold key material only in memory (for
-    /// example a platform-sealed secret store) and must not write it to disk.
-    pub recipient_key_bytes: Option<Vec<u8>>,
+    /// Optional in-memory private key candidates used to unwrap
+    /// recipient-encrypted TZAP archives, for callers that hold key material
+    /// only in memory (for example a platform-sealed secret store) and must
+    /// not write it to disk. A device that has rotated its recipient key
+    /// holds several candidates at once -- its active key plus any retired
+    /// ones -- and the first whose SPKI matches the archive's keywrap record
+    /// wins.
+    pub recipient_key_bytes: Option<Vec<Vec<u8>>>,
     /// Bounds applied to the owned source before adapter dispatch.
     pub limits: OpenLimits,
 }
@@ -62,9 +66,10 @@ impl OpenOptions {
         self.recipient_key.as_deref()
     }
 
-    /// Returns the optional in-memory recipient key bytes as a borrowed slice.
+    /// Returns the optional in-memory recipient key candidate bytes as a
+    /// borrowed slice.
     #[must_use]
-    pub fn recipient_key_bytes(&self) -> Option<&[u8]> {
+    pub fn recipient_key_bytes(&self) -> Option<&[Vec<u8>]> {
         self.recipient_key_bytes.as_deref()
     }
 }
@@ -219,8 +224,9 @@ pub struct TestOptions {
     pub selected_paths: Vec<String>,
     /// Optional recipient key used by encrypted TZAP archives.
     pub recipient_key: Option<PathBuf>,
-    /// Optional in-memory recipient key used by encrypted TZAP archives.
-    pub recipient_key_bytes: Option<Vec<u8>>,
+    /// Optional in-memory recipient key candidates used by encrypted TZAP
+    /// archives (see [`OpenOptions::recipient_key_bytes`]).
+    pub recipient_key_bytes: Option<Vec<Vec<u8>>>,
     /// Optional X.509 trust policy for TZAP root-auth verification.
     pub tzap_x509_trust: Option<TzapX509TrustOptions>,
     /// Cooperative cancellation flag checked before and during test work.
@@ -274,8 +280,9 @@ pub struct ExtractOptions<'a> {
     pub policy: ExtractionPolicy,
     /// Optional private key used by recipient-encrypted formats.
     pub recipient_key: Option<PathBuf>,
-    /// Optional in-memory private key used by recipient-encrypted formats.
-    pub recipient_key_bytes: Option<Vec<u8>>,
+    /// Optional in-memory private key candidates used by recipient-encrypted
+    /// formats (see [`OpenOptions::recipient_key_bytes`]).
+    pub recipient_key_bytes: Option<Vec<Vec<u8>>>,
     /// Optional TZAP metadata restoration policy for full extraction.
     pub tzap_restore_options: Option<TzapRestoreOptions>,
     /// Optional password for TZAP extraction, independent of the archive open password.

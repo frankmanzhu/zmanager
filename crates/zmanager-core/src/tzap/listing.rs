@@ -3,7 +3,9 @@
 
 use super::TzapError;
 use crate::tzap::metadata::metadata_diagnostic_labels;
-use crate::tzap::open::{open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_recipient_key};
+use crate::tzap::open::{
+    open_tzap_archive, open_tzap_archive_with_key_options, open_tzap_archive_with_key_options_multi, open_tzap_archive_with_recipient_key,
+};
 use std::path::Path;
 use tzap_core::format::KdfAlgo;
 use tzap_core::reader::{ArchiveEntry, ArchiveIndexEntry};
@@ -190,8 +192,13 @@ pub fn list_tzap_with_recipient_key_bytes(archive: impl AsRef<Path>, recipient_p
     list_opened_tzap_archive(&opened, true)
 }
 
-pub(crate) fn list_tzap_index_with_recipient_key_bytes(archive: impl AsRef<Path>, recipient_private_key_bytes: &[u8]) -> Result<TzapIndexListing, TzapError> {
-    let opened = open_tzap_archive_with_key_options(archive, None, None, Some(recipient_private_key_bytes))?;
+/// Lists recipient-wrapped `.tzap` archive index entries for a device holding
+/// several recipient private keys at once (design §9.4).
+pub(crate) fn list_tzap_index_with_recipient_key_bytes_list(
+    archive: impl AsRef<Path>,
+    recipient_private_key_bytes_list: &[Vec<u8>],
+) -> Result<TzapIndexListing, TzapError> {
+    let opened = open_tzap_archive_with_key_options_multi(archive, None, None, Some(recipient_private_key_bytes_list))?;
     let indexed = opened.list_index_entries()?;
     Ok(map_index_entries(indexed, opened.observed_archive_bytes(), true, opened.crypto_header.kdf_algo))
 }

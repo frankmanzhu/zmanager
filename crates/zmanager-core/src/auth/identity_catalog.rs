@@ -228,6 +228,9 @@ pub struct TzapPublicContactRecord {
     pub missing_status_caveat: bool,
     pub contact_card_payload: Value,
     pub accepted_at_unix_seconds: u64,
+    /// See [`crate::local_identity_store::TzapContactRecord::local_alias`].
+    #[serde(default)]
+    pub local_alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]

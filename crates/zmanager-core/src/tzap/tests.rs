@@ -990,13 +990,13 @@ fn recipient_wrapped_tzap_opens_lists_tests_and_extracts_with_in_memory_key_byte
     let (_wrong_cert, wrong_key) = test_p256_recipient_cert("ZManager Wrong Recipient");
     let wrong_bytes = wrong_key.private_key_to_pem_pkcs8().unwrap();
     let open_err = engine
-        .open(ArchiveSource::from_path_autodetect(&archive), OpenOptions { recipient_key_bytes: Some(wrong_bytes), ..Default::default() })
+        .open(ArchiveSource::from_path_autodetect(&archive), OpenOptions { recipient_key_bytes: Some(vec![wrong_bytes]), ..Default::default() })
         .and_then(|mut handle| handle.list());
     assert!(open_err.is_err(), "the wrong recipient key must not open a recipient-wrapped archive");
 
     // The matching key, supplied only as in-memory bytes, opens and lists it.
     let mut handle = engine
-        .open(ArchiveSource::from_path_autodetect(&archive), OpenOptions { recipient_key_bytes: Some(recipient_key_bytes.clone()), ..Default::default() })
+        .open(ArchiveSource::from_path_autodetect(&archive), OpenOptions { recipient_key_bytes: Some(vec![recipient_key_bytes.clone()]), ..Default::default() })
         .unwrap();
     let listing = handle.list().unwrap();
     assert_eq!(listing.entries.len(), 1);
@@ -1012,6 +1012,74 @@ fn recipient_wrapped_tzap_opens_lists_tests_and_extracts_with_in_memory_key_byte
     let report = handle.extract(&mut extract_options).unwrap();
     assert_eq!(report.written_entries, 1);
     assert_eq!(fs::read(destination.join("payload.txt")).unwrap(), b"sealed payload");
+}
+
+/// A device that has rotated its recipient key holds several private-key
+/// candidates at once (design §9.4): the retired key that encrypted an old
+/// archive, and the active key it now advertises. Opening must pick whichever
+/// candidate's SPKI matches the archive's keywrap record, regardless of
+/// position in the candidate list, and a lookup with no matching candidate
+/// must fail rather than silently succeed with the wrong key.
+#[test]
+fn recipient_wrapped_tzap_opens_with_a_non_active_key_from_a_multi_key_candidate_list() {
+    use crate::engine::{ArchiveSource, OpenOptions};
+
+    let temp = TestDir::new("tzap_multi_key_candidates");
+    let source = temp.path("payload.txt");
+    let archive = temp.path("sealed.tzap");
+    fs::write(&source, b"sealed payload").unwrap();
+
+    let (_retired_cert, retired_key) = test_p256_recipient_cert("ZManager Retired Recipient");
+    let (_active_cert, active_key) = test_p256_recipient_cert("ZManager Active Recipient");
+    let (_unrelated_cert, unrelated_key) = test_p256_recipient_cert("ZManager Unrelated Recipient");
+    let retired_key_bytes = retired_key.private_key_to_pem_pkcs8().unwrap();
+    let active_key_bytes = active_key.private_key_to_pem_pkcs8().unwrap();
+    let unrelated_key_bytes = unrelated_key.private_key_to_pem_pkcs8().unwrap();
+
+    // The archive is addressed to the retired key only, as an old archive
+    // encrypted before a key rotation would be.
+    let manifest = single_file_manifest(&temp, source, 14);
+    let options = TzapCreateOptions {
+        key_source: TzapKeySource::RecipientPublicKeys(vec![retired_key.public_key_to_der().unwrap()]),
+        level: 1,
+        preserve_metadata: true,
+        replace_existing: false,
+        volume_size: None,
+        volume_count: None,
+        recovery_percentage: 0,
+        volume_loss_tolerance: 0,
+        x509_signing: None,
+        emit_bootstrap_sidecar: false,
+    };
+    let token = CancellationToken::new();
+    let mut events = |_| {};
+    let mut context = JobContext::new(&token, &mut events);
+    create_tzap_from_manifest_with_context(&manifest, &archive, &options, &mut context).unwrap();
+
+    let engine = crate::engine::create_default_engine().unwrap();
+
+    // The device now holds the active key first and the retired key second;
+    // the record only matches the retired key, so it must still be found.
+    let mut handle = engine
+        .open(
+            ArchiveSource::from_path_autodetect(&archive),
+            OpenOptions { recipient_key_bytes: Some(vec![active_key_bytes.clone(), retired_key_bytes.clone()]), ..Default::default() },
+        )
+        .unwrap();
+    let listing = handle.list().unwrap();
+    assert_eq!(listing.entries.len(), 1);
+    assert_eq!(listing.entries[0].path, "payload.txt");
+
+    // A candidate list holding none of the archive's matching keys reports
+    // the same "no matching private key" outcome as the single-key path,
+    // rather than a misleading error.
+    let open_err = engine
+        .open(
+            ArchiveSource::from_path_autodetect(&archive),
+            OpenOptions { recipient_key_bytes: Some(vec![active_key_bytes, unrelated_key_bytes]), ..Default::default() },
+        )
+        .and_then(|mut handle| handle.list());
+    assert!(open_err.is_err(), "a candidate list with no matching key must not open a recipient-wrapped archive");
 }
 
 #[test]

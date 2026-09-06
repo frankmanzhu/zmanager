@@ -85,8 +85,9 @@ pub struct BrowserListOptions<'a> {
     pub password: Option<&'a str>,
     /// Optional private key for recipient-encrypted TZAP metadata.
     pub recipient_key: Option<&'a Path>,
-    /// Optional in-memory private key for recipient-encrypted TZAP metadata.
-    pub recipient_key_bytes: Option<&'a [u8]>,
+    /// Optional in-memory private key candidates for recipient-encrypted TZAP
+    /// metadata (see [`crate::engine::OpenOptions::recipient_key_bytes`]).
+    pub recipient_key_bytes: Option<&'a [Vec<u8>]>,
 }
 
 /// Report for selected-entry extraction.
