@@ -368,9 +368,12 @@ pub fn apply_contact_snapshot(
     let mut report = TzapContactSnapshotApplyReport::default();
 
     // 1. Process tombstones: remove local contacts whose accepted_at is older
-    //    than the tombstone.
+    //    than the tombstone. Seed from this device's own tombstones too, so a
+    //    restore doesn't forget a removal the remote snapshot doesn't (yet)
+    //    carry, and so the merged set can be written back to the inventory
+    //    below for the next `build_contact_snapshot` to see.
     let mut tombstone_map = BTreeMap::<String, u64>::new();
-    for t in &snapshot.removed {
+    for t in inventory.removed_contacts.iter().chain(snapshot.removed.iter()) {
         if now_unix_seconds.saturating_sub(t.removed_at) <= TOMBSTONE_RETENTION_SECONDS {
             tombstone_map
                 .entry(t.contact_id.clone())
@@ -459,6 +462,14 @@ pub fn apply_contact_snapshot(
             }
         }
     }
+
+    // 3. Persist the merged tombstone set so a later build_contact_snapshot on
+    //    this device (§8.3) re-uploads removals learned from this restore too,
+    //    not only ones made locally.
+    inventory.removed_contacts = tombstone_map
+        .into_iter()
+        .map(|(contact_id, removed_at)| TzapContactTombstone { contact_id, removed_at })
+        .collect();
 
     store.save_inventory(account_key, inventory)?;
     Ok(report)
@@ -718,6 +729,65 @@ mod tests {
 
         let updated_inv = store.load_inventory(account_key).unwrap();
         assert!(updated_inv.contacts.is_empty());
+    }
+
+    #[test]
+    fn local_removal_tombstone_survives_snapshot_round_trip_and_is_not_resurrected() {
+        // Device A removes a contact locally (recording a tombstone in its own
+        // inventory, as mobile-core's remove_contact will do), then uploads a
+        // snapshot. Device B has a stale copy of the same contact from before
+        // the removal and hasn't synced since. Merging A's and B's snapshots
+        // and applying the result to B must drop the contact, not resurrect
+        // it -- and the tombstone must persist into B's own inventory so a
+        // later snapshot built from B still carries it (design §8.3, §8.4).
+        let contact_id = "c-shared".to_owned();
+        let live_contact = |accepted_at: u64| TzapContactRecord {
+            contact_id: contact_id.clone(),
+            display_name: "Shared Contact".to_owned(),
+            signing_certificate_sha256: format!("sha256:{}", "a".repeat(64)),
+            recipient_public_key_fingerprint: format!("sha256:{}", "b".repeat(64)),
+            trust_anchor_type: crate::trust::TzapTrustAnchorType::OfficialTzap,
+            verification_state: crate::trust::TzapVerificationState::CryptographicallyIntactOffline,
+            missing_status_caveat: false,
+            contact_card_payload: json!({"payload": {"recipient_key_fingerprint": contact_id}}),
+            accepted_at_unix_seconds: accepted_at,
+            local_alias: None,
+            card: None,
+        };
+
+        // Device A: accepted at t=1000, removed locally at t=2000.
+        let mut inv_a = TzapLocalIdentityInventory::empty();
+        inv_a.contacts.push(live_contact(1_000));
+        inv_a.removed_contacts.push(TzapContactTombstone { contact_id: contact_id.clone(), removed_at: 2_000 });
+        let snapshot_a = build_contact_snapshot(&inv_a, &inv_a.removed_contacts, 2_500).unwrap();
+        assert!(snapshot_a.contacts.is_empty(), "build_contact_snapshot must not export a tombstoned contact");
+        assert_eq!(snapshot_a.removed.len(), 1);
+
+        // Device B: still holds the pre-removal acceptance, hasn't synced.
+        let mut store_b = InMemoryTzapLocalIdentityStore::new();
+        let account_key = crate::local_identity_store::DEFAULT_IDENTITY_INVENTORY_ACCOUNT;
+        let mut inv_b = TzapLocalIdentityInventory::empty();
+        inv_b.contacts.push(live_contact(1_000));
+        store_b.save_inventory(account_key, inv_b.clone()).unwrap();
+        let snapshot_b = build_contact_snapshot(&inv_b, &inv_b.removed_contacts, 2_500).unwrap();
+        assert_eq!(snapshot_b.contacts.len(), 1, "device B's own snapshot still carries the stale contact");
+
+        let merged = merge_contact_snapshots(&snapshot_a, &snapshot_b, 2_500).unwrap();
+        assert!(merged.contacts.is_empty(), "tombstone (t=2000) beats the older acceptance (t=1000)");
+        assert_eq!(merged.removed.len(), 1);
+
+        let fixture = crate::contact_card::tests::ContactFixture::new();
+        let import_options = fixture.import_options();
+        let report = apply_contact_snapshot(&mut store_b, account_key, &merged, &import_options, 2_600).unwrap();
+        assert_eq!(report.removed_contact_ids, vec![contact_id.clone()]);
+
+        let updated_inv_b = store_b.load_inventory(account_key).unwrap();
+        assert!(updated_inv_b.contacts.is_empty(), "the contact must not be resurrected on device B");
+        assert_eq!(
+            updated_inv_b.removed_contacts.iter().map(|t| t.contact_id.as_str()).collect::<Vec<_>>(),
+            vec![contact_id.as_str()],
+            "the tombstone must persist into B's inventory for the next snapshot build"
+        );
     }
 
     #[test]

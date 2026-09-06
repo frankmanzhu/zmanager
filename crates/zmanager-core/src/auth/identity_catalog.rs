@@ -6,6 +6,7 @@
 
 pub use crate::identity_migration::{FileTzapSecretMaterialStore, load_inventory_from_catalog, store_inventory_as_catalog};
 pub use crate::identity_migration::{PendingMutation, TzapLegacyMigrationReport, migrate_legacy_inventory};
+use crate::contact_snapshot::TzapContactTombstone;
 use crate::local_identity_store::{TzapLocalIdentityStoreError, TzapSignDeviceRouting};
 use crate::secrets::SecretBytes;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -263,6 +264,9 @@ pub struct TzapIdentityCatalog {
     pub signing_identities: Vec<TzapPublicSigningIdentityRecord>,
     pub recipient_keys: Vec<TzapPublicRecipientKeyRecord>,
     pub contacts: Vec<TzapPublicContactRecord>,
+    /// See [`crate::local_identity_store::TzapLocalIdentityInventory::removed_contacts`].
+    #[serde(default)]
+    pub removed_contacts: Vec<TzapContactTombstone>,
     pub status_cache: Vec<TzapPublicStatusCacheRecord>,
     pub emergency_blocklist: TzapPublicEmergencyBlocklist,
     pub pending_mutations: Vec<PendingMutation>,
@@ -279,6 +283,7 @@ impl TzapIdentityCatalog {
             signing_identities: Vec::new(),
             recipient_keys: Vec::new(),
             contacts: Vec::new(),
+            removed_contacts: Vec::new(),
             status_cache: Vec::new(),
             emergency_blocklist: TzapPublicEmergencyBlocklist::default(),
             pending_mutations: Vec::new(),

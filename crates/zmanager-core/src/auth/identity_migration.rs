@@ -299,6 +299,7 @@ fn build_catalog_from_legacy(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    catalog.removed_contacts = inventory.removed_contacts.clone();
     catalog.status_cache = inventory
         .certificate_status_cache
         .iter()
@@ -605,6 +606,8 @@ pub fn load_inventory_from_catalog(
             card: contact.card.clone(),
         });
     }
+
+    inventory.removed_contacts = catalog.removed_contacts.clone();
 
     for record in &catalog.status_cache {
         inventory.certificate_status_cache.push(TzapCertificateStatusCacheRecord {

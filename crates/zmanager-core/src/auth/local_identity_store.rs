@@ -1,5 +1,6 @@
 //! Local TZAP identity inventory and storage abstraction.
 
+use crate::contact_snapshot::TzapContactTombstone;
 use crate::secrets::SecretBytes;
 use crate::trust::{self, TzapCertificatePublicMetadata, TzapCertificateStatus, is_valid_public_device_id, is_valid_public_signer_id};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -22,6 +23,12 @@ pub struct TzapLocalIdentityInventory {
     pub certificate_status_cache: Vec<TzapCertificateStatusCacheRecord>,
     pub emergency_blocklist: TzapEmergencyBlocklistState,
     pub contacts: Vec<TzapContactRecord>,
+    /// Tombstones for contacts removed on this device (design §8.3, §8.4).
+    /// Read by `contact_snapshot::build_contact_snapshot` and merged into by
+    /// `contact_snapshot::apply_contact_snapshot` so a removal survives a
+    /// backup/restore round trip instead of being resurrected by a union
+    /// merge. Absent on inventories written before this field existed.
+    pub removed_contacts: Vec<TzapContactTombstone>,
 }
 
 impl TzapLocalIdentityInventory {
@@ -34,6 +41,7 @@ impl TzapLocalIdentityInventory {
             certificate_status_cache: Vec::new(),
             emergency_blocklist: TzapEmergencyBlocklistState::default(),
             contacts: Vec::new(),
+            removed_contacts: Vec::new(),
         }
     }
 
@@ -545,6 +553,10 @@ fn inventory_from_json(value: &Value) -> Result<TzapLocalIdentityInventory, Tzap
         certificate_status_cache: required_array(object, "certificate_status_cache")?.iter().map(status_cache_from_json).collect::<Result<Vec<_>, _>>()?,
         emergency_blocklist: emergency_blocklist_from_json(required_field(object, "emergency_blocklist")?)?,
         contacts: required_array(object, "contacts")?.iter().map(contact_from_json).collect::<Result<Vec<_>, _>>()?,
+        // This legacy raw-file format predates tombstones entirely (read only
+        // for the one-time migration to the catalog format), so there is
+        // nothing to parse.
+        removed_contacts: Vec::new(),
     };
     inventory.validate()?;
     Ok(inventory)
@@ -809,6 +821,7 @@ mod tests {
             certificate_status_cache: Vec::new(),
             emergency_blocklist: TzapEmergencyBlocklistState::default(),
             contacts: Vec::new(),
+            removed_contacts: Vec::new(),
         };
 
         store.save_inventory(DEFAULT_IDENTITY_INVENTORY_ACCOUNT, inventory).unwrap();
@@ -1077,6 +1090,7 @@ mod tests {
                 local_alias: Some("Ada -- work phone".to_owned()),
                 card: None,
             }],
+            removed_contacts: Vec::new(),
         }
     }
 
