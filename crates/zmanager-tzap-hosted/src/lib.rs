@@ -35,6 +35,8 @@ pub(crate) mod crl;
 pub mod enrollment_client;
 #[path = "auth/http_client.rs"]
 pub(crate) mod http_client;
+#[path = "auth/intermediate_client.rs"]
+pub mod intermediate_client;
 #[cfg(feature = "keyring")]
 #[path = "auth/keyring_store.rs"]
 pub mod keyring_store;

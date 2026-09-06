@@ -557,6 +557,7 @@ impl PersonalHarness {
             custom_trust_root_sha256: vec![self.chain.root_sha256.clone()],
             custom_trust_root_certificates_der: vec![self.chain.root_der.clone()],
             certificate_profile_options: TzapCertificateProfileOptions::default(),
+            intermediate_resolver: None,
         }
     }
 

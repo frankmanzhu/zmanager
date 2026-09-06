@@ -11,6 +11,7 @@ use sha2::{Digest as _, Sha256};
 
 mod certificate_profile;
 mod identifiers;
+pub mod intermediate_cache;
 #[cfg(test)]
 mod tests;
 
@@ -19,6 +20,10 @@ pub(crate) use certificate_profile::{ORG_INTERMEDIATE_PATH_LEN, PLATFORM_LEAF_ON
 pub use certificate_profile::{
     TzapCertificateProfileError, TzapCertificateProfileOptions, TzapCertificateProfileValidation, TzapCertificatePublicMetadata, TzapOfficialRootPinKind,
     public_intermediate_chain_der, validate_custom_tzap_certificate_chain_der, validate_official_tzap_certificate_chain_der,
+};
+pub use intermediate_cache::{
+    TzapIntermediateCache, TzapIntermediateCacheError, TzapIntermediateResolveError, TzapIntermediateResolver, extract_authority_key_identifier,
+    extract_subject_key_identifier,
 };
 pub(crate) use identifiers::candidate_chains;
 pub use identifiers::{

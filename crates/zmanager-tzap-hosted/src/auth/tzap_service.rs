@@ -1157,6 +1157,19 @@ pub fn tzap_contact_import_json(request_json: &str) -> String {
         let context = TzapFfiContext::from_request(&request)?;
         let card = request.get("contact_card").cloned().ok_or_else(|| "missing or invalid field: contact_card".to_owned())?;
         let (custom_trust_root_sha256, custom_trust_root_certificates_der) = custom_trust_roots_from_request(&request)?;
+        let intermediate_cache = trust::TzapIntermediateCache::new(context.state_dir.join("intermediates"));
+        let service_base_url = request_string(&request, "service_base_url")?;
+        #[cfg(feature = "reqwest-transport")]
+        let intermediate_resolver = crate::intermediate_client::TzapOnlineIntermediateResolver::with_reqwest(
+            intermediate_cache,
+            service_base_url,
+        );
+        #[cfg(not(feature = "reqwest-transport"))]
+        let intermediate_resolver = {
+            let _ = &service_base_url;
+            intermediate_cache
+        };
+
         let options = crate::contact_card::TzapContactCardImportOptions {
             verifier_time_unix_seconds: request_i64(&request, "verifier_time_unix_seconds")?
                 .unwrap_or_else(|| i64::try_from(current_unix_seconds()).unwrap_or(i64::MAX)),
@@ -1165,6 +1178,7 @@ pub fn tzap_contact_import_json(request_json: &str) -> String {
             custom_trust_root_sha256,
             custom_trust_root_certificates_der,
             certificate_profile_options: trust::TzapCertificateProfileOptions::default(),
+            intermediate_resolver: Some(&intermediate_resolver),
         };
         let mut store = new_identity_store(&context.state_dir, &context.account_key)?;
         let accepted_at = request

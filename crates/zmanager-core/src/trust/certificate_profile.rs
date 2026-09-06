@@ -762,7 +762,7 @@ fn extension_oid_matches(extension: &x509_parser::extensions::X509Extension<'_>,
     oid_value_bytes(oid).is_some_and(|target| extension.oid.as_bytes() == target.as_slice()) || extension.oid.to_id_string() == oid
 }
 
-fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
+pub(crate) fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
     certificate.iter_extensions().find_map(|extension| {
         if let ParsedExtension::AuthorityKeyIdentifier(aki) = extension.parsed_extension() {
             aki.key_identifier.as_ref().map(|identifier| identifier.0.to_vec())
@@ -772,7 +772,7 @@ fn authority_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>
     })
 }
 
-fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
+pub(crate) fn subject_key_identifier(certificate: &X509Certificate<'_>) -> Option<Vec<u8>> {
     certificate.iter_extensions().find_map(|extension| {
         if let ParsedExtension::SubjectKeyIdentifier(identifier) = extension.parsed_extension() { Some(identifier.0.to_vec()) } else { None }
     })

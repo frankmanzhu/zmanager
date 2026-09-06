@@ -30,7 +30,7 @@ pub struct TzapContactCardExportRequest {
     pub compact: bool,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TzapContactCardImportOptions<'a> {
     pub verifier_time_unix_seconds: i64,
     pub official_root_pins: &'a TzapRootPinSet,
@@ -38,6 +38,7 @@ pub struct TzapContactCardImportOptions<'a> {
     pub custom_trust_root_sha256: Vec<String>,
     pub custom_trust_root_certificates_der: Vec<Vec<u8>>,
     pub certificate_profile_options: TzapCertificateProfileOptions,
+    pub intermediate_resolver: Option<&'a (dyn trust::TzapIntermediateResolver + 'a)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -70,6 +71,7 @@ pub enum TzapContactCardError {
     Crypto(String),
     CertificateChain(String),
     AcceptanceRequired,
+    IntermediateCacheMiss { issuer_key_identifier: String, reason: String },
 }
 
 impl fmt::Display for TzapContactCardError {
@@ -90,6 +92,9 @@ impl fmt::Display for TzapContactCardError {
             }
             Self::AcceptanceRequired => {
                 write!(f, "contact-card import requires explicit acceptance")
+            }
+            Self::IntermediateCacheMiss { issuer_key_identifier, reason } => {
+                write!(f, "intermediate certificate for issuer '{issuer_key_identifier}' is missing: {reason}")
             }
         }
     }
@@ -183,10 +188,40 @@ pub fn verify_tzap_contact_card_with_missing_status_caveat(
 
     let signature = decode_base64url(&json_string(object, "signature")?, "signature")?;
     let leaf_der = decode_base64url(&json_string(payload_object, "signing_certificate_der")?, "signing_certificate_der")?;
-    let intermediate_chain_der = match payload_object.get("intermediate_chain_der") {
+    let mut intermediate_chain_der = match payload_object.get("intermediate_chain_der") {
         Some(value) => decode_der_array(value)?,
         None => Vec::new(),
     };
+    #[allow(clippy::collapsible_if)]
+    if intermediate_chain_der.is_empty() {
+        if let Some(leaf_aki) = trust::extract_authority_key_identifier(&leaf_der) {
+            let aki_b64 = URL_SAFE_NO_PAD.encode(&leaf_aki);
+            if let Some(resolver) = options.intermediate_resolver {
+                match resolver.resolve_intermediate(&leaf_aki) {
+                    Ok(Some(intermediate_der)) => {
+                        intermediate_chain_der.push(intermediate_der);
+                    }
+                    Ok(None) => {
+                        return Err(TzapContactCardError::IntermediateCacheMiss {
+                            issuer_key_identifier: aki_b64,
+                            reason: "intermediate certificate not found in cache or online".to_owned(),
+                        });
+                    }
+                    Err(error) => {
+                        return Err(TzapContactCardError::IntermediateCacheMiss {
+                            issuer_key_identifier: aki_b64,
+                            reason: error.to_string(),
+                        });
+                    }
+                }
+            } else {
+                return Err(TzapContactCardError::IntermediateCacheMiss {
+                    issuer_key_identifier: aki_b64,
+                    reason: "no intermediate resolver configured".to_owned(),
+                });
+            }
+        }
+    }
     let chain_der = contact_chain_der(&leaf_der, &intermediate_chain_der);
     let validation = validate_contact_card_chain(&chain_der, options)?;
     let signing_certificate_sha256 = trust::certificate_sha256_identifier_for_der(&leaf_der);
@@ -538,12 +573,46 @@ mod tests {
         assert!(verify_tzap_contact_card(&tampered_signature, &options).is_err());
     }
 
+    #[test]
+    fn contact_card_compact_card_verifies_with_intermediate_cache() {
+        let fixture = ContactFixture::new();
+        let source_store = fixture.store();
+        let mut compact_request = fixture.export_request();
+        compact_request.compact = true;
+        let compact_card = export_tzap_contact_card(&source_store, &compact_request).unwrap();
+
+        // 1. Without intermediate resolver: fails with IntermediateCacheMiss
+        let options_no_resolver = fixture.import_options();
+        let err = verify_tzap_contact_card(&compact_card, &options_no_resolver).unwrap_err();
+        match err {
+            TzapContactCardError::IntermediateCacheMiss { issuer_key_identifier, reason } => {
+                assert_eq!(issuer_key_identifier, fixture.certificate.issuer_key_identifier);
+                assert!(reason.contains("no intermediate resolver configured"));
+            }
+            other => panic!("expected IntermediateCacheMiss, got: {other:?}"),
+        }
+
+        // 2. With intermediate cache populated with the platform intermediate
+        let temp_dir = std::env::temp_dir().join(format!("tzap-contact-cache-{}", rand::random::<u64>()));
+        let cache = trust::TzapIntermediateCache::new(&temp_dir);
+        cache.store(&fixture.platform_der).unwrap();
+
+        let mut options_with_cache = fixture.import_options();
+        options_with_cache.intermediate_resolver = Some(&cache);
+
+        let verified = verify_tzap_contact_card(&compact_card, &options_with_cache).unwrap();
+        assert_eq!(verified.display_name, "Ada Lovelace");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
     struct ContactFixture {
         signing_key: TzapDeviceSigningKeyRecord,
         recipient_key: TzapRecipientEncryptionKeyRecord,
         certificate: TzapEnrolledCertificateRecord,
         root_sha256: String,
         root_der: Vec<u8>,
+        platform_der: Vec<u8>,
     }
 
     impl ContactFixture {
@@ -575,7 +644,7 @@ mod tests {
                     issuer_key_identifier: chain.issuer_key_identifier,
                     serial_number: chain.serial_number,
                     leaf_certificate_der: chain.leaf_der,
-                    intermediate_chain_der: vec![chain.platform_der, chain.root_der.clone()],
+                    intermediate_chain_der: vec![chain.platform_der.clone(), chain.root_der.clone()],
                     not_before_unix_seconds: 900,
                     not_after_unix_seconds: 2_000,
                     renewal_grace_period_days: None,
@@ -588,6 +657,7 @@ mod tests {
                 },
                 root_sha256: chain.root_sha256,
                 root_der: chain.root_der,
+                platform_der: chain.platform_der,
             }
         }
 
@@ -622,6 +692,7 @@ mod tests {
                 custom_trust_root_sha256: vec![self.root_sha256.clone()],
                 custom_trust_root_certificates_der: vec![self.root_der.clone()],
                 certificate_profile_options: TzapCertificateProfileOptions::default(),
+                intermediate_resolver: None,
             }
         }
     }
