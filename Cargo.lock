@@ -6326,6 +6326,7 @@ dependencies = [
  "ad1-core",
  "adler2",
  "aff4",
+ "argon2",
  "backhand",
  "base64",
  "brotli",

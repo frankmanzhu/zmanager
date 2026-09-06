@@ -82,6 +82,8 @@ pub mod identity_migration;
 pub mod jcs;
 #[path = "auth/json_util.rs"]
 pub(crate) mod json_util;
+#[path = "auth/key_backup.rs"]
+pub mod key_backup;
 #[path = "auth/local_identity_store.rs"]
 pub mod local_identity_store;
 #[path = "auth/p256_signature.rs"]
