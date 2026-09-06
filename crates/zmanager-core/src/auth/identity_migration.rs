@@ -607,7 +607,7 @@ pub fn load_inventory_from_catalog(
         });
     }
 
-    inventory.removed_contacts = catalog.removed_contacts.clone();
+    inventory.removed_contacts.clone_from(&catalog.removed_contacts);
 
     for record in &catalog.status_cache {
         inventory.certificate_status_cache.push(TzapCertificateStatusCacheRecord {

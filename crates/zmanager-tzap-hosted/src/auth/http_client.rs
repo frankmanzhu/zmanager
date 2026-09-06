@@ -32,6 +32,7 @@ pub(crate) fn send_json_request_with_options<T: TzapAuthHttpTransport>(
 
 /// Same as [`send_json_request_with_options`], but attaches extra request
 /// headers (design need: `If-Match` on the backup PUT endpoints).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn send_json_request_with_headers<T: TzapAuthHttpTransport>(
     transport: &T,
     method: TzapAuthHttpMethod,
