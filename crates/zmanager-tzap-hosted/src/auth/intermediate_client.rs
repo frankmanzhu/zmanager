@@ -10,9 +10,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::Value;
 use zmanager_core::trust::{TzapIntermediateCache, TzapIntermediateResolveError, TzapIntermediateResolver};
 
-use crate::auth_client::{
-    TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpTransport, TzapAuthRequestOptions, TzapBearerToken,
-};
+use crate::auth_client::{TzapAuthError, TzapAuthHttpMethod, TzapAuthHttpRequest, TzapAuthHttpTransport, TzapAuthRequestOptions, TzapBearerToken};
 use crate::http_client::{require_success, send_json_request};
 
 /// Resolver that checks the local `TzapIntermediateCache` and fetches from
@@ -26,10 +24,7 @@ pub struct TzapOnlineIntermediateResolver<T> {
 
 impl<T> fmt::Debug for TzapOnlineIntermediateResolver<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TzapOnlineIntermediateResolver")
-            .field("cache", &self.cache)
-            .field("service_base_url", &self.service_base_url)
-            .finish_non_exhaustive()
+        f.debug_struct("TzapOnlineIntermediateResolver").field("cache", &self.cache).field("service_base_url", &self.service_base_url).finish_non_exhaustive()
     }
 }
 
@@ -63,47 +58,26 @@ impl<T: TzapAuthHttpTransport + Send + Sync + 'static> TzapIntermediateResolver 
 
         // 2. If no service URL configured, report offline miss immediately
         let Some(service_url) = self.service_base_url.as_deref().filter(|url| !url.trim().is_empty()) else {
-            return Err(TzapIntermediateResolveError::OfflineMiss {
-                issuer_key_identifier: aki_b64,
-                reason: "no service URL configured".to_owned(),
-            });
+            return Err(TzapIntermediateResolveError::OfflineMiss { issuer_key_identifier: aki_b64, reason: "no service URL configured".to_owned() });
         };
 
         // 3. Fetch intermediate summaries list from GET /v1/trust/intermediates
-        let response = send_json_request(
-            &self.transport,
-            TzapAuthHttpMethod::Get,
-            service_url,
-            "/v1/trust/intermediates",
-            None::<TzapBearerToken>,
-            None,
-        )
-        .map_err(|error| TzapIntermediateResolveError::OfflineMiss {
-            issuer_key_identifier: aki_b64.clone(),
-            reason: error.to_string(),
-        })?;
+        let response = send_json_request(&self.transport, TzapAuthHttpMethod::Get, service_url, "/v1/trust/intermediates", None::<TzapBearerToken>, None)
+            .map_err(|error| TzapIntermediateResolveError::OfflineMiss { issuer_key_identifier: aki_b64.clone(), reason: error.to_string() })?;
 
         let response = require_success(response, |status_code, _| TzapAuthError::HttpStatus { status_code })
-            .map_err(|error| TzapIntermediateResolveError::OfflineMiss {
-                issuer_key_identifier: aki_b64.clone(),
-                reason: error.to_string(),
-            })?;
+            .map_err(|error| TzapIntermediateResolveError::OfflineMiss { issuer_key_identifier: aki_b64.clone(), reason: error.to_string() })?;
 
-        let summaries: Value = serde_json::from_slice(&response.body).map_err(|error| {
-            TzapIntermediateResolveError::Transport(format!("invalid intermediate summaries JSON: {error}"))
-        })?;
+        let summaries: Value = serde_json::from_slice(&response.body)
+            .map_err(|error| TzapIntermediateResolveError::Transport(format!("invalid intermediate summaries JSON: {error}")))?;
 
-        let summaries_array = summaries.as_array().ok_or_else(|| {
-            TzapIntermediateResolveError::Transport("server returned non-array intermediates".to_owned())
-        })?;
+        let summaries_array =
+            summaries.as_array().ok_or_else(|| TzapIntermediateResolveError::Transport("server returned non-array intermediates".to_owned()))?;
 
         // Find summary with matching keyIdentifier (Subject Key Identifier)
-        let matching_summary = summaries_array.iter().find(|item| {
-            item.get("keyIdentifier")
-                .or_else(|| item.get("key_identifier"))
-                .and_then(Value::as_str)
-                .is_some_and(|kid| kid == aki_b64)
-        });
+        let matching_summary = summaries_array
+            .iter()
+            .find(|item| item.get("keyIdentifier").or_else(|| item.get("key_identifier")).and_then(Value::as_str).is_some_and(|kid| kid == aki_b64));
 
         let Some(summary) = matching_summary else {
             return Ok(None);
@@ -136,35 +110,27 @@ impl<T: TzapAuthHttpTransport + Send + Sync + 'static> TzapIntermediateResolver 
             bearer_token: None,
             body: None,
             options: TzapAuthRequestOptions::default(),
+            headers: Vec::new(),
         };
 
-        let pem_response = self.transport.send(&request).map_err(|error| TzapIntermediateResolveError::OfflineMiss {
-            issuer_key_identifier: aki_b64.clone(),
-            reason: error.to_string(),
-        })?;
+        let pem_response = self
+            .transport
+            .send(&request)
+            .map_err(|error| TzapIntermediateResolveError::OfflineMiss { issuer_key_identifier: aki_b64.clone(), reason: error.to_string() })?;
 
         let pem_response = require_success(pem_response, |status_code, _| TzapAuthError::HttpStatus { status_code })
-            .map_err(|error| TzapIntermediateResolveError::OfflineMiss {
-                issuer_key_identifier: aki_b64.clone(),
-                reason: error.to_string(),
-            })?;
+            .map_err(|error| TzapIntermediateResolveError::OfflineMiss { issuer_key_identifier: aki_b64.clone(), reason: error.to_string() })?;
 
         // Convert PEM to DER
-        let pem_str = std::str::from_utf8(&pem_response.body).map_err(|error| {
-            TzapIntermediateResolveError::InvalidCertificate(format!("PEM is not valid UTF-8: {error}"))
-        })?;
+        let pem_str = std::str::from_utf8(&pem_response.body)
+            .map_err(|error| TzapIntermediateResolveError::InvalidCertificate(format!("PEM is not valid UTF-8: {error}")))?;
 
-        let x509 = openssl::x509::X509::from_pem(pem_str.as_bytes()).map_err(|error| {
-            TzapIntermediateResolveError::InvalidCertificate(format!("failed to parse certificate PEM: {error}"))
-        })?;
-        let der = x509.to_der().map_err(|error| {
-            TzapIntermediateResolveError::InvalidCertificate(format!("failed to encode certificate DER: {error}"))
-        })?;
+        let x509 = openssl::x509::X509::from_pem(pem_str.as_bytes())
+            .map_err(|error| TzapIntermediateResolveError::InvalidCertificate(format!("failed to parse certificate PEM: {error}")))?;
+        let der = x509.to_der().map_err(|error| TzapIntermediateResolveError::InvalidCertificate(format!("failed to encode certificate DER: {error}")))?;
 
         // Save to cache
-        self.cache.store(&der).map_err(|error| {
-            TzapIntermediateResolveError::Storage(format!("failed to store certificate in cache: {error}"))
-        })?;
+        self.cache.store(&der).map_err(|error| TzapIntermediateResolveError::Storage(format!("failed to store certificate in cache: {error}")))?;
 
         Ok(Some(der))
     }
@@ -173,8 +139,8 @@ impl<T: TzapAuthHttpTransport + Send + Sync + 'static> TzapIntermediateResolver 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use crate::auth_client::TzapAuthHttpResponse;
+    use std::sync::Mutex;
     use zmanager_core::backend_test_support::x509_factory::{intermediate_certificate, p256_private_key, root_certificate};
 
     #[derive(Default)]
@@ -188,10 +154,7 @@ mod tests {
         F: Fn(&TzapAuthHttpRequest) -> Result<TzapAuthHttpResponse, TzapAuthError> + Send + Sync,
     {
         fn new(handler: F) -> Self {
-            Self {
-                requests: Mutex::new(Vec::new()),
-                handler,
-            }
+            Self { requests: Mutex::new(Vec::new()), handler }
         }
     }
 
@@ -229,15 +192,9 @@ mod tests {
         let intermediate_pem_clone = intermediate_pem.clone();
         let mock_transport = MockTransport::new(move |request: &TzapAuthHttpRequest| {
             if request.url.ends_with("/v1/trust/intermediates") {
-                Ok(TzapAuthHttpResponse {
-                    status_code: 200,
-                    body: serde_json::to_vec(&summaries_json).unwrap(),
-                })
+                Ok(TzapAuthHttpResponse { status_code: 200, body: serde_json::to_vec(&summaries_json).unwrap(), headers: Vec::new() })
             } else if request.url.contains("/pem") {
-                Ok(TzapAuthHttpResponse {
-                    status_code: 200,
-                    body: intermediate_pem_clone.clone(),
-                })
+                Ok(TzapAuthHttpResponse { status_code: 200, body: intermediate_pem_clone.clone(), headers: Vec::new() })
             } else {
                 Err(TzapAuthError::HttpStatus { status_code: 404 })
             }
@@ -261,9 +218,7 @@ mod tests {
         let temp_dir = std::env::temp_dir().join(format!("tzap-online-resolver-offline-{}", rand::random::<u64>()));
         let cache = TzapIntermediateCache::new(&temp_dir);
 
-        let mock_transport = MockTransport::new(|_: &TzapAuthHttpRequest| {
-            Err(TzapAuthError::Transport { message: "Connection refused".to_owned() })
-        });
+        let mock_transport = MockTransport::new(|_: &TzapAuthHttpRequest| Err(TzapAuthError::Transport { message: "Connection refused".to_owned() }));
 
         let resolver = TzapOnlineIntermediateResolver::new(cache, Some("https://staging.tzap.org".to_owned()), mock_transport);
 

@@ -910,7 +910,7 @@ mod tests {
     fn certificate_listing_and_lookup_use_typed_paths() {
         let fixture = EnrollmentFixture::new(None, None);
         let transport = FakeEnrollmentTransport::new(vec![
-            TzapAuthHttpResponse { status_code: 200, body: json!({"certificates": [certificate_json(None)]}).to_string().into_bytes() },
+            TzapAuthHttpResponse { status_code: 200, body: json!({"certificates": [certificate_json(None)]}).to_string().into_bytes(), headers: Vec::new() },
             certificate_response(None),
         ]);
         let client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
@@ -994,6 +994,7 @@ mod tests {
             })
             .to_string()
             .into_bytes(),
+            headers: Vec::new(),
         }
     }
 
@@ -1022,11 +1023,16 @@ mod tests {
             })
             .to_string()
             .into_bytes(),
+            headers: Vec::new(),
         }
     }
 
     fn certificate_response(intermediate_chain_der: Option<Vec<Vec<u8>>>) -> TzapAuthHttpResponse {
-        TzapAuthHttpResponse { status_code: 200, body: json!({"certificate": certificate_json(intermediate_chain_der)}).to_string().into_bytes() }
+        TzapAuthHttpResponse {
+            status_code: 200,
+            body: json!({"certificate": certificate_json(intermediate_chain_der)}).to_string().into_bytes(),
+            headers: Vec::new(),
+        }
     }
 
     fn local_staging_certificate_response() -> TzapAuthHttpResponse {
@@ -1048,6 +1054,7 @@ mod tests {
             })
             .to_string()
             .into_bytes(),
+            headers: Vec::new(),
         }
     }
 
@@ -1083,6 +1090,7 @@ mod tests {
             })
             .to_string()
             .into_bytes(),
+            headers: Vec::new(),
         }
     }
 

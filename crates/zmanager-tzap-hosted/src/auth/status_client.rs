@@ -1074,7 +1074,7 @@ mod tests {
     #[test]
     fn crl_download_decodes_pem_endpoint_to_der() {
         let issuer_sha256 = trust::format_issuer_sha256(&[0x11; 32]);
-        let transport = FakeStatusTransport::new(vec![TzapAuthHttpResponse { status_code: 200, body: TEST_CRL_PEM.as_bytes().to_vec() }]);
+        let transport = FakeStatusTransport::new(vec![TzapAuthHttpResponse { status_code: 200, body: TEST_CRL_PEM.as_bytes().to_vec(), headers: Vec::new() }]);
         let client = TzapStatusClient::new("https://sign.example/", &transport);
 
         let crl_der = client.crl_der(&issuer_sha256).unwrap();
@@ -1102,7 +1102,7 @@ mod tests {
     }
 
     fn json_response(body: &serde_json::Value) -> TzapAuthHttpResponse {
-        TzapAuthHttpResponse { status_code: 200, body: serde_json::to_vec(body).unwrap() }
+        TzapAuthHttpResponse { status_code: 200, body: serde_json::to_vec(body).unwrap(), headers: Vec::new() }
     }
 
     const TEST_CRL_PEM: &str = "-----BEGIN X509 CRL-----\nMIIBajBUAgEBMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBlRlc3RDQRcNMjYw\nNjI2MDQwOTQ1WhcNMjYwNjI3MDQwOTQ1WqAPMA0wCwYDVR0UBAQCAhAAMA0GCSqG\nSIb3DQEBCwUAA4IBAQBvjtd1d23B5m454FBHAuBiy7Q+BnXBDEK5txSMSe30g9Zt\nm+1/WhHsqMp1biNSyQhVQYwLsJoWimzqcgR4CygJyFaVM3gT1QpN4yFxxs6tmEyi\nAgDD+ngO6GtY+ouzRpsnsrd5g9PTPbchGjjDjbwjCwcqcWY6n7cxMwJc0OBxj6BU\nYaz++TmBFD9a7p3HOL2SJWfSaT4JACRofsmGfiSQa6xBum91/NbVYDtDly8sp8si\n1d4lPYtpBr3r+PKMKEilx+vHOo0kUIOcKQkJx85revQeZhQXRJfPphMn+iJkp8QQ\n6lNu5AzDf/eH7pjDm8htQOlZil25T3BXhEMzc/ts\n-----END X509 CRL-----\n";

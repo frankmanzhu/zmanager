@@ -27,7 +27,22 @@ pub(crate) fn send_json_request_with_options<T: TzapAuthHttpTransport>(
     body: Option<Value>,
     options: TzapAuthRequestOptions,
 ) -> Result<TzapAuthHttpResponse, TzapAuthError> {
-    let request = TzapAuthHttpRequest { method, url: format!("{}{}", trim_trailing_slash(base_url), path), bearer_token, body, options };
+    send_json_request_with_headers(transport, method, base_url, path, bearer_token, body, Vec::new(), options)
+}
+
+/// Same as [`send_json_request_with_options`], but attaches extra request
+/// headers (design need: `If-Match` on the backup PUT endpoints).
+pub(crate) fn send_json_request_with_headers<T: TzapAuthHttpTransport>(
+    transport: &T,
+    method: TzapAuthHttpMethod,
+    base_url: &str,
+    path: &str,
+    bearer_token: Option<TzapBearerToken>,
+    body: Option<Value>,
+    headers: Vec<(String, String)>,
+    options: TzapAuthRequestOptions,
+) -> Result<TzapAuthHttpResponse, TzapAuthError> {
+    let request = TzapAuthHttpRequest { method, url: format!("{}{}", trim_trailing_slash(base_url), path), bearer_token, body, options, headers };
     let mut attempts = 0_u8;
     loop {
         if request.options.cancellation.as_ref().is_some_and(TzapAuthCancellation::is_cancelled) {

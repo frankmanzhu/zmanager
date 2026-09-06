@@ -25,11 +25,16 @@ impl TzapAuthHttpTransport for ReqwestTransport {
         let mut builder = match request.method {
             TzapAuthHttpMethod::Get => client.get(&request.url),
             TzapAuthHttpMethod::Post => client.post(&request.url),
+            TzapAuthHttpMethod::Put => client.put(&request.url),
+            TzapAuthHttpMethod::Delete => client.delete(&request.url),
         }
         .header(reqwest::header::ACCEPT, "application/json");
 
         if let Some(token) = &request.bearer_token {
             builder = builder.bearer_auth(token.expose());
+        }
+        for (name, value) in &request.headers {
+            builder = builder.header(name.as_str(), value.as_str());
         }
         if let Some(body) = &request.body {
             builder = builder.json(body);
@@ -37,8 +42,10 @@ impl TzapAuthHttpTransport for ReqwestTransport {
 
         let response = builder.send().map_err(|error| TzapAuthError::Transport { message: error.to_string() })?;
         let status_code = response.status().as_u16();
+        let headers =
+            response.headers().iter().filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str().to_owned(), value.to_owned()))).collect();
         let body = response.bytes().map_err(|error| TzapAuthError::Transport { message: error.to_string() })?.to_vec();
-        Ok(TzapAuthHttpResponse { status_code, body })
+        Ok(TzapAuthHttpResponse { status_code, body, headers })
     }
 }
 
@@ -73,6 +80,7 @@ pub fn fetch_trust_root_pem(service_base_url: &str) -> Result<String, String> {
         bearer_token: None,
         body: None,
         options: crate::auth_client::TzapAuthRequestOptions::default(),
+        headers: Vec::new(),
     };
     let pem_response = ReqwestTransport.send(&request).map_err(|error| error.to_string())?;
     let pem_response = require_success(pem_response, |status_code, _| TzapAuthError::HttpStatus { status_code }).map_err(|error| error.to_string())?;

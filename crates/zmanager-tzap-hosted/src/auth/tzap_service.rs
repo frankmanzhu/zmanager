@@ -1160,10 +1160,7 @@ pub fn tzap_contact_import_json(request_json: &str) -> String {
         let intermediate_cache = trust::TzapIntermediateCache::new(context.state_dir.join("intermediates"));
         let service_base_url = request_string(&request, "service_base_url")?;
         #[cfg(feature = "reqwest-transport")]
-        let intermediate_resolver = crate::intermediate_client::TzapOnlineIntermediateResolver::with_reqwest(
-            intermediate_cache,
-            service_base_url,
-        );
+        let intermediate_resolver = crate::intermediate_client::TzapOnlineIntermediateResolver::with_reqwest(intermediate_cache, service_base_url);
         #[cfg(not(feature = "reqwest-transport"))]
         let intermediate_resolver = {
             let _ = &service_base_url;

@@ -1,5 +1,6 @@
 //! Shared JSON field extraction helpers for hosted TZAP clients.
 
+use crate::backup_client::TzapBackupError;
 use crate::certificate_lifecycle::TzapCertificateLifecycleError;
 use crate::contact_card::TzapContactCardError;
 use crate::enrollment_client::TzapEnrollmentError;
@@ -36,6 +37,12 @@ impl JsonFieldError for TzapLocalIdentityStoreError {
 }
 
 impl JsonFieldError for TzapContactCardError {
+    fn invalid_field(field: &'static str) -> Self {
+        Self::InvalidField { field }
+    }
+}
+
+impl JsonFieldError for TzapBackupError {
     fn invalid_field(field: &'static str) -> Self {
         Self::InvalidField { field }
     }

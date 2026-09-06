@@ -27,6 +27,8 @@ pub(crate) fn write_atomic_secret_file(path: &std::path::Path, bytes: &[u8]) -> 
 
 #[path = "auth/auth_client.rs"]
 pub mod auth_client;
+#[path = "auth/backup_client.rs"]
+pub mod backup_client;
 #[path = "auth/certificate_lifecycle.rs"]
 pub mod certificate_lifecycle;
 #[path = "auth/crl.rs"]

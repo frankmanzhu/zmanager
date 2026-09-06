@@ -377,6 +377,8 @@ impl TzapAuthRelayCompletion {
 pub enum TzapAuthHttpMethod {
     Get,
     Post,
+    Put,
+    Delete,
 }
 
 /// Cooperative cancellation shared by a hosted request and its caller.
@@ -449,12 +451,19 @@ pub struct TzapAuthHttpRequest {
     pub bearer_token: Option<TzapBearerToken>,
     pub body: Option<Value>,
     pub options: TzapAuthRequestOptions,
+    /// Extra request headers beyond `Authorization`/`Accept`/`Content-Type`
+    /// (design need: `If-Match` on the backup PUT endpoints). Header names
+    /// are sent verbatim.
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TzapAuthHttpResponse {
     pub status_code: u16,
     pub body: Vec<u8>,
+    /// Response headers, lower-cased names (design need: reading back the
+    /// `ETag` version cert-root-server's backup endpoints return).
+    pub headers: Vec<(String, String)>,
 }
 
 pub trait TzapAuthHttpTransport {
@@ -1060,6 +1069,7 @@ mod tests {
                     "selected_org_id": "org_123"
                 }"#
                 .to_vec(),
+                headers: Vec::new(),
             },
             last_request: std::cell::RefCell::new(None),
         };
@@ -1161,7 +1171,7 @@ mod tests {
                 return Err(TzapAuthError::Transport { message: "offline".to_owned() });
             }
             if self.attempts.get() <= self.fail_count {
-                return Ok(TzapAuthHttpResponse { status_code: 500, body: Vec::new() });
+                return Ok(TzapAuthHttpResponse { status_code: 500, body: Vec::new(), headers: Vec::new() });
             }
             Ok(self.response.clone())
         }
@@ -1187,6 +1197,7 @@ mod tests {
                     "selected_org_id": "org_123"
                 }"#
                 .to_vec(),
+                headers: Vec::new(),
             },
             attempts: std::cell::Cell::new(0),
             fail_count: 2, // Fails twice, succeeds on third attempt
@@ -1209,7 +1220,7 @@ mod tests {
             login_session_id: Some("login_session_123".to_owned()),
         };
         let transport = RetryFakeTransport {
-            response: TzapAuthHttpResponse { status_code: 200, body: Vec::new() },
+            response: TzapAuthHttpResponse { status_code: 200, body: Vec::new(), headers: Vec::new() },
             attempts: std::cell::Cell::new(0),
             fail_count: 0,
             is_offline: true, // Always fails with transport error
@@ -1225,7 +1236,7 @@ mod tests {
         let cancellation = TzapAuthCancellation::new();
         cancellation.cancel();
         let transport = RetryFakeTransport {
-            response: TzapAuthHttpResponse { status_code: 200, body: Vec::new() },
+            response: TzapAuthHttpResponse { status_code: 200, body: Vec::new(), headers: Vec::new() },
             attempts: std::cell::Cell::new(0),
             fail_count: 0,
             is_offline: false,

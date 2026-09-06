@@ -717,7 +717,7 @@ mod tests {
             let fixture = LifecycleFixture::new();
             let transport = FakeLifecycleTransport::new(vec![
                 renewal_challenge_response(&fixture, None),
-                TzapAuthHttpResponse { status_code: 200, body: json!({"status": status}).to_string().into_bytes() },
+                TzapAuthHttpResponse { status_code: 200, body: json!({"status": status}).to_string().into_bytes(), headers: Vec::new() },
             ]);
             let client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
             let mut store = fixture.store_with_certificate(TzapSignDeviceRouting::Personal);
@@ -800,8 +800,8 @@ mod tests {
     fn personal_revocation_and_retirement_keep_pending_sync_incomplete() {
         let fixture = LifecycleFixture::new();
         let transport = FakeLifecycleTransport::new(vec![
-            TzapAuthHttpResponse { status_code: 200, body: json!({"result": "already_revoked"}).to_string().into_bytes() },
-            TzapAuthHttpResponse { status_code: 202, body: json!({"result": "revocation_pending_sync"}).to_string().into_bytes() },
+            TzapAuthHttpResponse { status_code: 200, body: json!({"result": "already_revoked"}).to_string().into_bytes(), headers: Vec::new() },
+            TzapAuthHttpResponse { status_code: 202, body: json!({"result": "revocation_pending_sync"}).to_string().into_bytes(), headers: Vec::new() },
         ]);
         let client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
         let mut store = fixture.store_with_certificate(TzapSignDeviceRouting::Personal);
@@ -818,29 +818,40 @@ mod tests {
     fn revocation_completion_requires_a_result_field() {
         // A 2xx with an unrelated body (e.g. an error JSON) must not count as
         // completion.
-        let error =
-            revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: json!({"error": "internal_error"}).to_string().into_bytes() }).unwrap_err();
+        let error = revocation_completion(&TzapAuthHttpResponse {
+            status_code: 200,
+            body: json!({"error": "internal_error"}).to_string().into_bytes(),
+            headers: Vec::new(),
+        })
+        .unwrap_err();
         assert!(matches!(error, TzapCertificateLifecycleError::InvalidField { field: "result" }));
 
         // Non-JSON bodies are rejected too.
-        assert!(revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: b"not json".to_vec() }).is_err());
+        assert!(revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: b"not json".to_vec(), headers: Vec::new() }).is_err());
 
         // The pending marker stays incomplete and a known completion stays
         // complete.
-        let pending =
-            revocation_completion(&TzapAuthHttpResponse { status_code: 202, body: json!({"result": "revocation_pending_sync"}).to_string().into_bytes() })
-                .unwrap();
+        let pending = revocation_completion(&TzapAuthHttpResponse {
+            status_code: 202,
+            body: json!({"result": "revocation_pending_sync"}).to_string().into_bytes(),
+            headers: Vec::new(),
+        })
+        .unwrap();
         assert_eq!(pending, TzapRetirementCompletion::Incomplete);
-        let complete =
-            revocation_completion(&TzapAuthHttpResponse { status_code: 200, body: json!({"result": "already_revoked"}).to_string().into_bytes() }).unwrap();
+        let complete = revocation_completion(&TzapAuthHttpResponse {
+            status_code: 200,
+            body: json!({"result": "already_revoked"}).to_string().into_bytes(),
+            headers: Vec::new(),
+        })
+        .unwrap();
         assert_eq!(complete, TzapRetirementCompletion::Complete);
     }
 
     #[test]
     fn organization_retirement_uses_login_routes_and_keeps_404_and_linkage_pending_incomplete() {
         for response in [
-            TzapAuthHttpResponse { status_code: 404, body: b"{}".to_vec() },
-            TzapAuthHttpResponse { status_code: 409, body: json!({"error": "device_linkage_pending"}).to_string().into_bytes() },
+            TzapAuthHttpResponse { status_code: 404, body: b"{}".to_vec(), headers: Vec::new() },
+            TzapAuthHttpResponse { status_code: 409, body: json!({"error": "device_linkage_pending"}).to_string().into_bytes(), headers: Vec::new() },
         ] {
             let fixture = LifecycleFixture::new();
             let transport = FakeLifecycleTransport::new(vec![response]);
@@ -862,7 +873,7 @@ mod tests {
     #[test]
     fn organization_retirement_percent_encodes_route_identifiers() {
         let fixture = LifecycleFixture::new();
-        let transport = FakeLifecycleTransport::new(vec![TzapAuthHttpResponse { status_code: 200, body: b"{}".to_vec() }]);
+        let transport = FakeLifecycleTransport::new(vec![TzapAuthHttpResponse { status_code: 200, body: b"{}".to_vec(), headers: Vec::new() }]);
         let client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
         let route = TzapOrganizationDeviceRetirement {
             org_id: "org/../admin".to_owned(),
@@ -955,8 +966,16 @@ mod tests {
         // and AcceptingLifecycleValidator accepts any chain, so only the
         // challenge response's own self-consistency (payload echo) matters.
         let transport = FakeLifecycleTransport::new(vec![
-            TzapAuthHttpResponse { status_code: 200, body: json!({"challenge_id": "challenge_1", "challenge_payload": Value::Null}).to_string().into_bytes() },
-            TzapAuthHttpResponse { status_code: 200, body: json!({"certificate": enrollment_certificate_json()}).to_string().into_bytes() },
+            TzapAuthHttpResponse {
+                status_code: 200,
+                body: json!({"challenge_id": "challenge_1", "challenge_payload": Value::Null}).to_string().into_bytes(),
+                headers: Vec::new(),
+            },
+            TzapAuthHttpResponse {
+                status_code: 200,
+                body: json!({"certificate": enrollment_certificate_json()}).to_string().into_bytes(),
+                headers: Vec::new(),
+            },
         ]);
         let enrollment_client = TzapEnrollmentClient::new("https://sign.tzap.org", &transport);
         let lifecycle_client = TzapCertificateLifecycleClient::new("https://sign.tzap.org", "https://login.tzap.org", &transport);
@@ -1100,6 +1119,7 @@ mod tests {
             })
             .to_string()
             .into_bytes(),
+            headers: Vec::new(),
         }
     }
 
@@ -1121,6 +1141,7 @@ mod tests {
             }})
             .to_string()
             .into_bytes(),
+            headers: Vec::new(),
         }
     }
 

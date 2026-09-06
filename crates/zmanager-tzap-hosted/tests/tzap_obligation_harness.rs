@@ -974,7 +974,7 @@ fn json_response(value: Value) -> TzapAuthHttpResponse {
 }
 
 fn json_response_with_code(status_code: u16, value: &Value) -> TzapAuthHttpResponse {
-    TzapAuthHttpResponse { status_code, body: serde_json::to_vec(&value).unwrap() }
+    TzapAuthHttpResponse { status_code, body: serde_json::to_vec(&value).unwrap(), headers: Vec::new() }
 }
 
 #[derive(Clone)]
