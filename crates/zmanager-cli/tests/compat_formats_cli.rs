@@ -1585,7 +1585,7 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
     let ntfs_vhd = archive_temp.path("project-ntfs.vhd");
     let ntfs_build = Command::new(&docker)
         .arg("run")
-        .args(["--privileged", "-v"])
+        .args(["--rm", "--privileged", "-v"])
         .arg(format!("{}:/work", work.display()))
         .args(["ubuntu:24.04", "bash", "-c"])
         .arg("set -e; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq ntfs-3g >/dev/null 2>&1; dd if=/dev/zero of=/work/ntfs.img bs=1M count=64 status=none; LOOP=$(losetup -f); losetup $LOOP /work/ntfs.img; mkntfs -F -L ZCOMPAT $LOOP >/dev/null 2>&1; mkdir -p /mnt/ntfs && mount -t ntfs-3g $LOOP /mnt/ntfs; cp -a /work/project /mnt/ntfs/; sync; umount /mnt/ntfs; losetup -d $LOOP")
@@ -1611,7 +1611,7 @@ fn competitor_virtual_disk_formats_extract_with_zm() {
     let udf_image = work.join("project.udf");
     let udf_build = Command::new(&docker)
         .arg("run")
-        .args(["--privileged", "-v"])
+        .args(["--rm", "--privileged", "-v"])
         .arg(format!("{}:/work", work.display()))
         .args(["ubuntu:24.04", "bash", "-c"])
         .arg("set -e; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null 2>&1; apt-get install -y -qq udftools >/dev/null 2>&1; dd if=/dev/zero of=/work/project.udf bs=1M count=16 status=none; mkudffs --media-type=hd --udfrev=0x0201 /work/project.udf >/dev/null 2>&1; LOOP=$(losetup -f); losetup $LOOP /work/project.udf; mkdir -p /mnt/udf && mount -t udf $LOOP /mnt/udf; cp -a /work/project /mnt/udf/; sync; umount /mnt/udf; losetup -d $LOOP")
