@@ -485,7 +485,7 @@ const fn kdf_algorithm_label(algorithm: KdfAlgo) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::is_tzap_archive_path;
+    use super::{archive_directory, is_tzap_archive_path};
     use std::path::Path;
 
     #[test]
@@ -502,5 +502,50 @@ mod tests {
     #[test]
     fn unicode_non_tzap_name_is_safe_to_classify() {
         assert!(!is_tzap_archive_path(Path::new("游戏存档管理器.zip")));
+    }
+
+    /// Regression test for a silent sibling-volume discovery failure: a bare
+    /// relative file name (no directory component, e.g. invoking the CLI
+    /// from inside the archive's own directory) has `Path::parent() ==
+    /// Some("")`, not `None`. `unwrap_or_else` only substitutes "." on
+    /// `None`, so this used to pass an empty path straight through to
+    /// `read_dir`, which fails with `NotFound` and was silently treated as
+    /// "no sibling volumes found" instead of "every volume is present".
+    #[test]
+    fn archive_directory_normalizes_bare_relative_file_name_to_current_dir() {
+        assert_eq!(archive_directory(Path::new("archive.vol000.tzap")), Path::new("."));
+        assert_eq!(archive_directory(Path::new("./archive.vol000.tzap")), Path::new("."));
+        assert_eq!(archive_directory(Path::new("subdir/archive.vol000.tzap")), Path::new("subdir"));
+        assert_eq!(archive_directory(Path::new("/abs/subdir/archive.vol000.tzap")), Path::new("/abs/subdir"));
+    }
+
+    #[test]
+    fn discover_tzap_sibling_volume_paths_finds_bare_relative_siblings() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = format!("zm_bare_sibling_{unique}");
+        let vol0_name = format!("{base}.vol000.tzap");
+        let vol1_name = format!("{base}.vol001.tzap");
+        let vol0 = std::path::PathBuf::from(&vol0_name);
+        let vol1 = std::path::PathBuf::from(&vol1_name);
+        let _ = std::fs::remove_file(&vol0);
+        let _ = std::fs::remove_file(&vol1);
+        std::fs::write(&vol0, b"vol0").unwrap();
+        std::fs::write(&vol1, b"vol1").unwrap();
+
+        struct Cleanup(Vec<std::path::PathBuf>);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for p in &self.0 {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
+        let _guard = Cleanup(vec![vol0.clone(), vol1.clone()]);
+
+        let discovered = super::discover_tzap_sibling_volume_paths(Path::new(&vol0_name));
+        assert!(discovered.is_some(), "failed to discover bare sibling volumes");
+        let volumes = discovered.unwrap();
+        assert_eq!(volumes, vec![std::path::PathBuf::from(".").join(&vol0_name), std::path::PathBuf::from(".").join(&vol1_name)]);
     }
 }

@@ -388,4 +388,35 @@ mod tests {
         std::fs::remove_file(primary).unwrap();
         std::fs::remove_file(sibling).unwrap();
     }
+
+    #[test]
+    fn discover_split_zip_volumes_normalizes_bare_relative_path() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = format!("zm_bare_split_zip_{unique}");
+        let z01_name = format!("{base}.z01");
+        let zip_name = format!("{base}.zip");
+        let z01 = std::path::PathBuf::from(&z01_name);
+        let zip = std::path::PathBuf::from(&zip_name);
+        let _ = std::fs::remove_file(&z01);
+        let _ = std::fs::remove_file(&zip);
+        std::fs::write(&z01, b"part1").unwrap();
+        std::fs::write(&zip, b"part2").unwrap();
+
+        struct Cleanup(Vec<std::path::PathBuf>);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for p in &self.0 {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
+        let _guard = Cleanup(vec![z01.clone(), zip.clone()]);
+
+        let discovered = super::discover_split_zip_volumes(std::path::Path::new(&z01_name));
+        assert!(discovered.is_some(), "failed to discover split zip with bare relative path");
+        let volumes = discovered.unwrap();
+        assert_eq!(volumes.len(), 2);
+        assert_eq!(volumes[0], std::path::PathBuf::from(".").join(&z01_name));
+        assert_eq!(volumes[1], std::path::PathBuf::from(".").join(&zip_name));
+    }
 }

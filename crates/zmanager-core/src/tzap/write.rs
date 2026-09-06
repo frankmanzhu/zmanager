@@ -742,11 +742,11 @@ pub fn tzap_bootstrap_sidecar_path(destination: &Path) -> PathBuf {
 
 /// Commits the tzap-core bootstrap sidecar next to the destination archive.
 ///
-/// tzap-core's writer emits a bootstrap sidecar for every single-volume
-/// archive (`stripe_width == 1`), which is the only shape zmanager creates
-/// (`create_tzap_from_manifest_with_context` always uses `stripe_width: 1`).
-/// The blob carries the manifest footer and index-root block records consumed
-/// by tzap-core's `open_seekable_archive_with_bootstrap_sidecar` recovery API,
+/// tzap-core's writer emits a bootstrap sidecar only for single-volume
+/// archives (`stripe_width == 1`); `create_tzap_from_manifest_with_context`
+/// requests that unless `options.volume_count` asks for more. The blob
+/// carries the manifest footer and index-root block records consumed by
+/// tzap-core's `open_seekable_archive_with_bootstrap_sidecar` recovery API,
 /// so discarding it would permanently lose the archive's bootstrap material.
 fn commit_bootstrap_sidecar(destination: &Path, bytes: &[u8], replace_existing: bool) -> Result<(), TzapError> {
     let sidecar_path = tzap_bootstrap_sidecar_path(destination);
@@ -803,10 +803,12 @@ impl ArchiveWriteSink for TzapArchiveFileSink {
     }
 
     fn write_bootstrap_sidecar(&mut self, bytes: &[u8]) -> Result<(), ArchiveWriteError> {
-        // tzap-core emits a bootstrap sidecar for every single-volume archive
-        // (`stripe_width == 1`), which is the only shape zmanager writes, so
-        // these bytes are always produced. They are buffered and committed
-        // beside the destination archive in `commit()`.
+        // tzap-core only calls this for single-volume archives
+        // (`stripe_width == 1`); a `volume_count`-striped multi-volume
+        // archive never reaches it, and `commit()` treats an unset sidecar
+        // as "nothing to write" rather than an invariant violation. Bytes
+        // received here are buffered and committed beside the destination
+        // archive in `commit()`.
         check_tzap_write_cancelled(&self.cancellation_token)?;
         self.bootstrap_sidecar = Some(bytes.to_vec());
         Ok(())
