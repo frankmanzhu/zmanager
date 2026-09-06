@@ -1141,6 +1141,7 @@ pub fn tzap_contact_export_json(request_json: &str) -> String {
             device_label: request_string(&request, "device_label")?.unwrap_or_else(|| "ZManager".to_owned()),
             created_at_unix_seconds: request_u64(&request, "created_at_unix_seconds")?.unwrap_or_else(current_unix_seconds),
             expires_at_unix_seconds: request_u64(&request, "expires_at_unix_seconds")?,
+            compact: request.get("compact").and_then(Value::as_bool).unwrap_or(false),
         };
         let card = crate::contact_card::export_tzap_contact_card(&store, &export_request).map_err(|error| error.to_string())?;
         Ok(json!({

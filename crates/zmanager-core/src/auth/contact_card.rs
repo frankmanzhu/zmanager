@@ -27,6 +27,7 @@ pub struct TzapContactCardExportRequest {
     pub device_label: String,
     pub created_at_unix_seconds: u64,
     pub expires_at_unix_seconds: Option<u64>,
+    pub compact: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -182,7 +183,10 @@ pub fn verify_tzap_contact_card_with_missing_status_caveat(
 
     let signature = decode_base64url(&json_string(object, "signature")?, "signature")?;
     let leaf_der = decode_base64url(&json_string(payload_object, "signing_certificate_der")?, "signing_certificate_der")?;
-    let intermediate_chain_der = decode_der_array(json_field(payload_object, "intermediate_chain_der")?)?;
+    let intermediate_chain_der = match payload_object.get("intermediate_chain_der") {
+        Some(value) => decode_der_array(value)?,
+        None => Vec::new(),
+    };
     let chain_der = contact_chain_der(&leaf_der, &intermediate_chain_der);
     let validation = validate_contact_card_chain(&chain_der, options)?;
     let signing_certificate_sha256 = trust::certificate_sha256_identifier_for_der(&leaf_der);
@@ -323,7 +327,7 @@ fn contact_card_payload(
     recipient_key: &TzapRecipientEncryptionKeyRecord,
     certificate: &TzapEnrolledCertificateRecord,
 ) -> Value {
-    json!({
+    let mut payload = json!({
         "contact_card_version": CONTACT_CARD_PAYLOAD_VERSION,
         "recipient_key_algorithm": recipient_key.algorithm,
         "recipient_public_key": URL_SAFE_NO_PAD.encode(&recipient_key.public_key_der),
@@ -334,10 +338,6 @@ fn contact_card_payload(
         "expires_at_unix_seconds": request.expires_at_unix_seconds,
         "signing_certificate_sha256": certificate.certificate_sha256,
         "signing_certificate_der": URL_SAFE_NO_PAD.encode(&certificate.leaf_certificate_der),
-        "intermediate_chain_der": trust::public_intermediate_chain_der(&certificate.intermediate_chain_der)
-            .iter()
-            .map(|der| URL_SAFE_NO_PAD.encode(der))
-            .collect::<Vec<_>>(),
         "signing_public_metadata": {
             "version": certificate.public_metadata.version,
             "public_signer_id": certificate.public_metadata.public_signer_id,
@@ -346,7 +346,16 @@ fn contact_card_payload(
             "assurance_level": certificate.public_metadata.assurance_level.as_str(),
             "policy_oid": certificate.public_metadata.policy_oid,
         },
-    })
+    });
+    if !request.compact {
+        payload["intermediate_chain_der"] = json!(
+            trust::public_intermediate_chain_der(&certificate.intermediate_chain_der)
+                .iter()
+                .map(|der| URL_SAFE_NO_PAD.encode(der))
+                .collect::<Vec<_>>()
+        );
+    }
+    payload
 }
 
 fn sign_contact_card_payload(
@@ -491,6 +500,25 @@ mod tests {
     }
 
     #[test]
+    fn contact_card_compact_export_omits_intermediate_chain_der() {
+        let fixture = ContactFixture::new();
+        let source_store = fixture.store();
+        let default_request = fixture.export_request();
+        let default_card = export_tzap_contact_card(&source_store, &default_request).unwrap();
+        assert!(default_card["payload"].get("intermediate_chain_der").is_some());
+
+        let mut compact_request = fixture.export_request();
+        compact_request.compact = true;
+        let compact_card = export_tzap_contact_card(&source_store, &compact_request).unwrap();
+        assert!(compact_card["payload"].get("intermediate_chain_der").is_none());
+
+        // Compact export should be substantially smaller
+        let default_json = serde_json::to_string(&default_card).unwrap();
+        let compact_json = serde_json::to_string(&compact_card).unwrap();
+        assert!(compact_json.len() < default_json.len(), "compact {compact_json} should be smaller than default {default_json}");
+    }
+
+    #[test]
     fn contact_card_rejects_tampered_payload_certificate_and_signature() {
         let fixture = ContactFixture::new();
         let source_store = fixture.store();
@@ -582,6 +610,7 @@ mod tests {
                 device_label: "MacBook".to_owned(),
                 created_at_unix_seconds: 1_000,
                 expires_at_unix_seconds: None,
+                compact: false,
             }
         }
 

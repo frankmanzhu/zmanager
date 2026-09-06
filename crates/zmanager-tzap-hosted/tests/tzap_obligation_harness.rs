@@ -545,6 +545,7 @@ impl PersonalHarness {
             device_label: "Harness Mac".to_owned(),
             created_at_unix_seconds: FIXED_NOW,
             expires_at_unix_seconds: None,
+            compact: false,
         }
     }
 
