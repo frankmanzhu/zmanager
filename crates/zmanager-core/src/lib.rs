@@ -64,6 +64,8 @@ mod zip_split;
 // grouping, while their ownership is explicit at the crate root.
 #[path = "auth/contact_card.rs"]
 pub mod contact_card;
+#[path = "auth/contact_snapshot.rs"]
+pub mod contact_snapshot;
 #[path = "auth/device_identity.rs"]
 pub mod device_identity;
 #[path = "auth/document_envelope.rs"]

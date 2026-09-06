@@ -289,6 +289,9 @@ pub struct TzapContactRecord {
     /// `None` for a contact the importer has not renamed, and absent from
     /// catalogs written before this field existed.
     pub local_alias: Option<String>,
+    /// Original signed contact card container, retained for snapshot export
+    /// and re-verification (design §8.3). `None` on legacy records.
+    pub card: Option<Value>,
 }
 
 impl TzapContactRecord {
@@ -660,6 +663,7 @@ fn contact_from_json(value: &Value) -> Result<TzapContactRecord, TzapLocalIdenti
         contact_card_payload: required_field(object, "contact_card_payload")?.clone(),
         accepted_at_unix_seconds: required_u64(object, "accepted_at_unix_seconds")?,
         local_alias: optional_string(object, "local_alias")?,
+        card: object.get("card").cloned(),
     })
 }
 
@@ -1071,6 +1075,7 @@ mod tests {
                 }),
                 accepted_at_unix_seconds: 130,
                 local_alias: Some("Ada -- work phone".to_owned()),
+                card: None,
             }],
         }
     }

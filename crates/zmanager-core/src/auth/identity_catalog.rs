@@ -231,6 +231,9 @@ pub struct TzapPublicContactRecord {
     /// See [`crate::local_identity_store::TzapContactRecord::local_alias`].
     #[serde(default)]
     pub local_alias: Option<String>,
+    /// See [`crate::local_identity_store::TzapContactRecord::card`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]

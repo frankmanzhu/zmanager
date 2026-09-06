@@ -299,6 +299,7 @@ pub fn import_tzap_contact_card(
         // Display metadata only, set by the importer afterward -- import
         // itself never invents or carries one over (design §4).
         local_alias: None,
+        card: Some(card.clone()),
     };
     inventory.contacts.retain(|existing| existing.contact_id != contact.contact_id);
     inventory.contacts.push(contact.clone());
@@ -488,7 +489,7 @@ fn decode_base64url(value: &str, field: &'static str) -> Result<Vec<u8>, TzapCon
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{
         TzapContactCardError, TzapContactCardExportRequest, TzapContactCardImportOptions, export_tzap_contact_card, import_tzap_contact_card,
         verify_tzap_contact_card,
@@ -606,17 +607,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
-    struct ContactFixture {
-        signing_key: TzapDeviceSigningKeyRecord,
-        recipient_key: TzapRecipientEncryptionKeyRecord,
-        certificate: TzapEnrolledCertificateRecord,
-        root_sha256: String,
-        root_der: Vec<u8>,
-        platform_der: Vec<u8>,
+    pub(crate) struct ContactFixture {
+        pub(crate) signing_key: TzapDeviceSigningKeyRecord,
+        pub(crate) recipient_key: TzapRecipientEncryptionKeyRecord,
+        pub(crate) certificate: TzapEnrolledCertificateRecord,
+        pub(crate) root_sha256: String,
+        pub(crate) root_der: Vec<u8>,
+        pub(crate) platform_der: Vec<u8>,
     }
 
     impl ContactFixture {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let signing_material = generate_device_signing_key_and_csr(&TzapDeviceCsrOptions::default()).unwrap();
             let recipient_material = generate_recipient_encryption_key().unwrap();
             let chain = certificate_fixture(&PKey::private_key_from_der(signing_material.private_key_der.expose_secret()).unwrap());
@@ -661,7 +662,7 @@ mod tests {
             }
         }
 
-        fn store(&self) -> InMemoryTzapLocalIdentityStore {
+        pub(crate) fn store(&self) -> InMemoryTzapLocalIdentityStore {
             let mut inventory = TzapLocalIdentityInventory::empty();
             inventory.device_signing_keys.push(self.signing_key.clone());
             inventory.recipient_encryption_keys.push(self.recipient_key.clone());
@@ -671,7 +672,7 @@ mod tests {
             store
         }
 
-        fn export_request(&self) -> TzapContactCardExportRequest {
+        pub(crate) fn export_request(&self) -> TzapContactCardExportRequest {
             TzapContactCardExportRequest {
                 account_key: DEFAULT_IDENTITY_INVENTORY_ACCOUNT.to_owned(),
                 recipient_key_id: self.recipient_key.key_id.clone(),
@@ -684,7 +685,7 @@ mod tests {
             }
         }
 
-        fn import_options(&self) -> TzapContactCardImportOptions<'_> {
+        pub(crate) fn import_options(&self) -> TzapContactCardImportOptions<'_> {
             TzapContactCardImportOptions {
                 verifier_time_unix_seconds: now_unix_seconds(),
                 official_root_pins: &TzapRootPinSet { current: &[], planned_successors: &[] },
